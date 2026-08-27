@@ -1685,7 +1685,8 @@ func multiModelVersionSummary() resultsummary.VersionSummary {
 		ProblemTests: []resultsummary.TestStats{
 			{
 				SuiteID:    "happy-path",
-				TestID:     "test-beta",
+				TestName:   "test-beta",
+				NumericID:  2,
 				BestRate:   1.0,
 				BestCombo:  "claude-sonnet-4.6/claude-code",
 				WorstRate:  0.5,
@@ -1797,4 +1798,214 @@ func corruptGeneratedBlock(document, blockName, corruptText string) string {
 	closeIdx += afterOpen
 
 	return document[:afterOpen] + "\n" + corruptText + "\n" + document[closeIdx:]
+}
+
+// ---- T5.1: Numeric ID tracking in resultsummary ----
+//
+// NOTE: Several tests below reference TestStats.NumericID and TestStats.TestName,
+// which do not yet exist in contracts.go (the struct currently has TestID string).
+// These tests FAIL TO COMPILE until Stage 5 implementation renames TestID to
+// TestName and adds NumericID. That compile failure is the expected TDD RED state.
+//
+// TestGenerate_SameNumericID_DifferentTestNames_TrackedAsSingleTest does compile
+// with the current code but FAILS at runtime: the current string-key testKey
+// treats "original-name" and "renamed-test" as two separate tests, so no
+// problem-test entry with spread > 0 is produced.
+
+// TestTestStats_NumericIDAndTestNameFields verifies that TestStats carries both
+// a stable numeric identity (NumericID) and a human-readable display name
+// (TestName). This test FAILS TO COMPILE until contracts.go renames TestID to
+// TestName and adds NumericID.
+func TestTestStats_NumericIDAndTestNameFields(t *testing.T) {
+	s := resultsummary.TestStats{
+		SuiteID:    "suite-alpha",
+		TestName:   "my-display-name",
+		NumericID:  42,
+		BestRate:   1.0,
+		BestCombo:  "claude-sonnet-4.6/claude-code",
+		WorstRate:  0.5,
+		WorstCombo: "gpt-4o/open-code",
+		Spread:     0.5,
+	}
+	if s.NumericID != 42 {
+		t.Errorf("NumericID = %d, want 42", s.NumericID)
+	}
+	if s.TestName != "my-display-name" {
+		t.Errorf("TestName = %q, want %q", s.TestName, "my-display-name")
+	}
+}
+
+// TestGenerate_SameNumericID_DifferentTestNames_TrackedAsSingleTest verifies
+// that when two harness reports cover the same test (same numeric test_id) but
+// use different test names (simulating a rename), the summary generator treats
+// them as a single test for cross-combination spread analysis.
+//
+// With the current string-key testKey, "original-name" and "renamed-test" are
+// two separate keys, each with only one combo — spread is never computed and no
+// problem-test entry is produced. This test FAILS at runtime in TDD RED.
+//
+// With the numeric-ID testKey, both combos belong to one entry (numeric ID 42);
+// the spread is computed (1.0 - 0.5 = 0.5 > 0) and the test appears in the
+// problem-areas section. This test PASSES after implementation.
+func TestGenerate_SameNumericID_DifferentTestNames_TrackedAsSingleTest(t *testing.T) {
+	fs := newFakeFS()
+	// Harness A: test_name="original-name", test_id=42, 100% pass rate.
+	seedReport(fs, "/TestResults", "v1.0.0", "suite-rename", "claude-code",
+		"claude-sonnet-4.6", "20260820T100000",
+		loadFixture(t, "rename_report_harness_a.json"))
+	// Harness B: test_name="renamed-test", test_id=42 (same numeric ID), 50% pass rate.
+	seedReport(fs, "/TestResults", "v1.0.0", "suite-rename", "open-code",
+		"gpt-4o", "20260820T110000",
+		loadFixture(t, "rename_report_harness_b.json"))
+
+	req := resultsummary.SummaryRequest{TestResultsRoot: "/TestResults"}
+	_, err := resultsummary.Generate(fs, req)
+	if err != nil {
+		t.Fatalf("Generate returned unexpected error: %v", err)
+	}
+
+	content := readWrittenFile(t, fs, "/TestResults/v1.0.0/summary.md")
+
+	blockStart := strings.Index(content, "<!-- generated:problem-areas -->")
+	blockEnd := strings.Index(content, "<!-- /generated:problem-areas -->")
+	if blockStart < 0 || blockEnd < 0 || blockEnd <= blockStart {
+		t.Fatal("generated:problem-areas block not found in rendered output")
+	}
+
+	blockContent := content[blockStart:blockEnd]
+	// The problem-areas block must contain an entry for numeric ID 42. The
+	// implementation may display the original name, the renamed name, or both —
+	// either is acceptable as long as an entry appears. With the old string-key
+	// implementation neither name appears because no entry is generated.
+	if !strings.Contains(blockContent, "original-name") && !strings.Contains(blockContent, "renamed-test") {
+		t.Error("problem-areas block must contain a test entry for numeric ID 42 " +
+			"(showing the original or renamed test name); " +
+			"ensure testKey uses numeric ID rather than string name so renamed tests are recognized as the same test")
+	}
+}
+
+// TestRenderVersionSummary_ProblemTest_ShowsTestName verifies that the
+// problem-areas section renders the human-readable TestName for readability.
+// This test FAILS TO COMPILE until contracts.go renames TestID to TestName
+// and adds NumericID.
+func TestRenderVersionSummary_ProblemTest_ShowsTestName(t *testing.T) {
+	vs := resultsummary.VersionSummary{
+		Version:     "v1.0.0",
+		ReportCount: 2,
+		Suites:      []string{"suite-alpha"},
+		Models:      []string{"claude-sonnet-4.6", "gpt-4o"},
+		Harnesses:   []string{"claude-code", "open-code"},
+		TotalTests:  2,
+		ByModel: map[string]map[string]resultsummary.HarnessModelStats{
+			"claude-sonnet-4.6": {
+				"claude-code": {Harness: "claude-code", Model: "claude-sonnet-4.6",
+					TestCount: 1, PassCount: 1, PassRate: 1.0},
+			},
+			"gpt-4o": {
+				"open-code": {Harness: "open-code", Model: "gpt-4o",
+					TestCount: 1, PassCount: 0, PassRate: 0.0},
+			},
+		},
+		BySuite: map[string]map[string]map[string]resultsummary.HarnessModelStats{
+			"suite-alpha": {
+				"claude-sonnet-4.6": {
+					"claude-code": {Harness: "claude-code", Model: "claude-sonnet-4.6",
+						TestCount: 1, PassCount: 1, PassRate: 1.0},
+				},
+				"gpt-4o": {
+					"open-code": {Harness: "open-code", Model: "gpt-4o",
+						TestCount: 1, PassCount: 0, PassRate: 0.0},
+				},
+			},
+		},
+		ProblemTests: []resultsummary.TestStats{
+			{
+				SuiteID:    "suite-alpha",
+				TestName:   "human-readable-test-name",
+				NumericID:  99,
+				BestRate:   1.0,
+				BestCombo:  "claude-sonnet-4.6/claude-code",
+				WorstRate:  0.0,
+				WorstCombo: "gpt-4o/open-code",
+				Spread:     1.0,
+			},
+		},
+	}
+
+	output := resultsummary.RenderVersionSummary(vs)
+
+	blockStart := strings.Index(output, "<!-- generated:problem-areas -->")
+	blockEnd := strings.Index(output, "<!-- /generated:problem-areas -->")
+	if blockStart < 0 || blockEnd < 0 || blockEnd <= blockStart {
+		t.Fatal("generated:problem-areas block not found in rendered output")
+	}
+
+	blockContent := output[blockStart:blockEnd]
+	if !strings.Contains(blockContent, "human-readable-test-name") {
+		t.Errorf("problem-areas block must show TestName 'human-readable-test-name' for readability;\nblock content:\n%s", blockContent)
+	}
+}
+
+// TestRenderVersionSummary_ProblemTest_NumericIDAppearsInOutput verifies that
+// the problem-areas section includes the numeric test ID alongside the name,
+// so that cross-rename traceability is visible in the rendered Markdown.
+// This test FAILS TO COMPILE until contracts.go renames TestID to TestName
+// and adds NumericID.
+func TestRenderVersionSummary_ProblemTest_NumericIDAppearsInOutput(t *testing.T) {
+	vs := resultsummary.VersionSummary{
+		Version:     "v1.0.0",
+		ReportCount: 2,
+		Suites:      []string{"suite-alpha"},
+		Models:      []string{"claude-sonnet-4.6", "gpt-4o"},
+		Harnesses:   []string{"claude-code", "open-code"},
+		TotalTests:  2,
+		ByModel: map[string]map[string]resultsummary.HarnessModelStats{
+			"claude-sonnet-4.6": {
+				"claude-code": {Harness: "claude-code", Model: "claude-sonnet-4.6",
+					TestCount: 1, PassCount: 1, PassRate: 1.0},
+			},
+			"gpt-4o": {
+				"open-code": {Harness: "open-code", Model: "gpt-4o",
+					TestCount: 1, PassCount: 0, PassRate: 0.0},
+			},
+		},
+		BySuite: map[string]map[string]map[string]resultsummary.HarnessModelStats{
+			"suite-alpha": {
+				"claude-sonnet-4.6": {
+					"claude-code": {Harness: "claude-code", Model: "claude-sonnet-4.6",
+						TestCount: 1, PassCount: 1, PassRate: 1.0},
+				},
+				"gpt-4o": {
+					"open-code": {Harness: "open-code", Model: "gpt-4o",
+						TestCount: 1, PassCount: 0, PassRate: 0.0},
+				},
+			},
+		},
+		ProblemTests: []resultsummary.TestStats{
+			{
+				SuiteID:    "suite-alpha",
+				TestName:   "tracked-test",
+				NumericID:  7331,
+				BestRate:   1.0,
+				BestCombo:  "claude-sonnet-4.6/claude-code",
+				WorstRate:  0.0,
+				WorstCombo: "gpt-4o/open-code",
+				Spread:     1.0,
+			},
+		},
+	}
+
+	output := resultsummary.RenderVersionSummary(vs)
+
+	blockStart := strings.Index(output, "<!-- generated:problem-areas -->")
+	blockEnd := strings.Index(output, "<!-- /generated:problem-areas -->")
+	if blockStart < 0 || blockEnd < 0 || blockEnd <= blockStart {
+		t.Fatal("generated:problem-areas block not found in rendered output")
+	}
+
+	blockContent := output[blockStart:blockEnd]
+	// The numeric ID 7331 must appear so that readers can trace the test across renames.
+	if !strings.Contains(blockContent, "7331") {
+		t.Errorf("problem-areas block must show NumericID 7331 for cross-rename traceability;\nblock content:\n%s", blockContent)
+	}
 }

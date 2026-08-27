@@ -359,7 +359,7 @@ handling in the orchestrator's routing logic.
 
 ## 5. Data Available in Report JSON
 
-For reference, these fields in the existing report schema feed the storage and summary system:
+For reference, these fields in the report schema feed the storage and summary system:
 
 **Report level (one per file):**
 - `suite_id` — which suite was run
@@ -369,11 +369,16 @@ For reference, these fields in the existing report schema feed the storage and s
 - `catalog_folder` — which agent catalog was used
 
 **Per-test aggregate:**
-- `test_id`, `description`, `layer`
+- `test_name` — the test definition's `name` field (human-readable display name; this field was named `test_id` and carried a string value in the schema before the versioning and stable-ID change)
+- `test_id` — the test definition's stable numeric identity (integer; this field was added alongside the `test_name` rename and now carries the numeric `id` from the test definition)
+- `description`, `layer`
 - `verdict`, `counted`, `passed`, `pass_rate`, `required_pass_rate`
 - `total_cost`, `infrastructure_failure`
 
 **Per-run:**
+- `run.test_name` — the test definition's `name` (in the run key; the key field was named `test_id` before the rename)
+- `test_version` — the test definition's `version` at the time the run was executed (new field; enables staleness detection in the summary generator)
+- `test_id` — the test definition's numeric `id` (new per-run field; integer)
 - `harness_id` — which harness adapter produced this run
 - `subject_model` — model the orchestrator ran on
 - `stub_model` — model used for stub responses (if applicable)
@@ -382,11 +387,21 @@ For reference, these fields in the existing report schema feed the storage and s
 - `verdict`, `reasons`, `assertions`, `conditions`
 - `termination_reason`
 
-All fields needed for storage filing and summary generation already exist in the report schema. No schema changes required.
+**Schema changes made (additive):** The string `test_id` field in per-test and per-run JSON was renamed to `test_name`. A new integer `test_id` field was added at per-test and per-run levels, carrying the stable numeric identity from the test definition. A new `test_version` field was added at the per-run level. These changes are additive at the wire level — old consumers reading `test_id` as a string will encounter an integer instead.
 
 ---
 
 ## 6. Open Questions
+
+### 6.0 Staleness Detection
+
+The `resultsummary` package can flag stored results that were collected against an older version of a test definition. When the summary generator reads a stored report, it compares each run's `test_version` against the current test definition's `version` field (read from the `.test.yaml` file at summary time).
+
+If the stored `test_version` is lower than the current definition's `version`, the run's results are marked stale in the summary output — for example, a note in the per-test table such as "(results from v1; current definition is v2)". Stale results are not rejected or excluded from aggregation; they are included with a visual marker so the reader can assess relevance.
+
+This detection is informational only. The summary generator does not refuse to generate summaries for stale results, and stale results do not affect verdict aggregation. The reader decides whether old results are still meaningful given what changed.
+
+**Implementation note:** The `resultsummary` package (`internal/resultsummary`) is implemented and reads stored results from the `resultstore` package. The `TestStats` struct carries `TestName` (display name) and `NumericID` (stable identity) for cross-rename tracking. When a test is renamed (`name` changes) but its numeric `id` is unchanged, the summary generator can match historical results to the current definition by numeric ID.
 
 ### 6.1 Multiple Models in One Report
 

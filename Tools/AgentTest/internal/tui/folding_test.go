@@ -38,7 +38,7 @@ func TestFold_SuiteStarted_SetsTotalTests(t *testing.T) {
 }
 
 func TestFold_TestStarted_SetsRunning(t *testing.T) {
-	run := domain.RunKey{RunID: "20260807T120000Z-0001", TestID: "test-a", RunNumber: 2}
+	run := domain.RunKey{RunID: "20260807T120000Z-0001", TestName: "test-a", RunNumber: 2}
 	m := newFoldModel()
 	m = safeFold(t, m, domain.ProgressEvent{Kind: domain.ProgressSuiteStarted, TotalTests: 1, TotalRuns: 1})
 	m = safeFold(t, m, domain.ProgressEvent{
@@ -54,14 +54,14 @@ func TestFold_TestStarted_SetsRunning(t *testing.T) {
 		t.Fatalf("Running() has %d entries, want 1 after ProgressTestStarted", len(running))
 	}
 	rp := running[0]
-	if rp.Key.TestID != "test-a" || rp.Key.RunNumber != 2 || rp.Repetitions != 5 {
+	if rp.Key.TestName != "test-a" || rp.Key.RunNumber != 2 || rp.Repetitions != 5 {
 		t.Errorf("Running()[0] = {TestID:%q RunNumber:%d Repetitions:%d}, want {TestID:%q RunNumber:2 Repetitions:5}",
-			rp.Key.TestID, rp.Key.RunNumber, rp.Repetitions, "test-a")
+			rp.Key.TestName, rp.Key.RunNumber, rp.Repetitions, "test-a")
 	}
 }
 
 func TestFold_Invocation_IncrementsObservedCount(t *testing.T) {
-	run := domain.RunKey{RunID: "20260807T120000Z-0001", TestID: "test-a", RunNumber: 1}
+	run := domain.RunKey{RunID: "20260807T120000Z-0001", TestName: "test-a", RunNumber: 1}
 	m := newFoldModel()
 	m = safeFold(t, m, domain.ProgressEvent{Kind: domain.ProgressSuiteStarted, TotalTests: 1, TotalRuns: 1})
 	m = safeFold(t, m, domain.ProgressEvent{Kind: domain.ProgressTestStarted, TestID: "test-a", Repetition: 1, Repetitions: 1, Run: run})
@@ -149,8 +149,8 @@ func TestFold_SuiteFinished_SetsCountsAndCost(t *testing.T) {
 // repetition of how many" as folded state; this is the transition from one
 // repetition to the next, not a single isolated reading.
 func TestFold_MultiRepetition_TransitionsToNextRepetition(t *testing.T) {
-	runA1 := domain.RunKey{RunID: "20260807T120000Z-0001", TestID: "test-a", RunNumber: 1}
-	runA2 := domain.RunKey{RunID: "20260807T120000Z-0002", TestID: "test-a", RunNumber: 2}
+	runA1 := domain.RunKey{RunID: "20260807T120000Z-0001", TestName: "test-a", RunNumber: 1}
+	runA2 := domain.RunKey{RunID: "20260807T120000Z-0002", TestName: "test-a", RunNumber: 2}
 	m := newFoldModel()
 	m = safeFold(t, m, domain.ProgressEvent{Kind: domain.ProgressSuiteStarted, TotalTests: 1, TotalRuns: 5})
 	m = safeFold(t, m, domain.ProgressEvent{
@@ -181,9 +181,9 @@ func TestFold_MultiRepetition_TransitionsToNextRepetition(t *testing.T) {
 		t.Fatalf("Running() has %d entries, want 1 after the repetition-2 ProgressTestStarted", len(running))
 	}
 	rp := running[0]
-	if rp.Key.TestID != "test-a" || rp.Key.RunNumber != 2 || rp.Repetitions != 5 {
+	if rp.Key.TestName != "test-a" || rp.Key.RunNumber != 2 || rp.Repetitions != 5 {
 		t.Errorf("Running()[0] = {TestID:%q RunNumber:%d Repetitions:%d}, want {TestID:%q RunNumber:2 Repetitions:5} — repetition 2 must replace the stale repetition 1 reading",
-			rp.Key.TestID, rp.Key.RunNumber, rp.Repetitions, "test-a")
+			rp.Key.TestName, rp.Key.RunNumber, rp.Repetitions, "test-a")
 	}
 }
 
@@ -197,8 +197,8 @@ func TestFold_MultiRepetition_TransitionsToNextRepetition(t *testing.T) {
 // the second test starts reports only the second test's count — not the
 // first test's count, and not the sum of both.
 func TestFold_ObservedInvocations_ScopedToCurrentTest(t *testing.T) {
-	runA := domain.RunKey{RunID: "20260807T120000Z-0001", TestID: "test-a", RunNumber: 1}
-	runB := domain.RunKey{RunID: "20260807T120000Z-0002", TestID: "test-b", RunNumber: 1}
+	runA := domain.RunKey{RunID: "20260807T120000Z-0001", TestName: "test-a", RunNumber: 1}
+	runB := domain.RunKey{RunID: "20260807T120000Z-0002", TestName: "test-b", RunNumber: 1}
 	m := newFoldModel()
 	m = safeFold(t, m, domain.ProgressEvent{Kind: domain.ProgressSuiteStarted, TotalTests: 2, TotalRuns: 2})
 
@@ -255,7 +255,7 @@ func TestFold_ObservedInvocations_ScopedToCurrentTest(t *testing.T) {
 // the place an invocation event goes missing.
 func TestFold_BurstOfInvocations_NoneDropped(t *testing.T) {
 	const burst = 500
-	run := domain.RunKey{RunID: "20260807T120000Z-0001", TestID: "test-a", RunNumber: 1}
+	run := domain.RunKey{RunID: "20260807T120000Z-0001", TestName: "test-a", RunNumber: 1}
 
 	m := newFoldModel()
 	m = safeFold(t, m, domain.ProgressEvent{Kind: domain.ProgressSuiteStarted, TotalTests: 1, TotalRuns: 1})
@@ -350,7 +350,7 @@ func TestFold_SuiteFinishedMidTest_UnmatchedStartDoesNotDropPriorVerdicts(t *tes
 	if len(finished) != 1 {
 		t.Fatalf("Finished() has %d entries, want 1 — test-a's verdict must survive test-b's unmatched start", len(finished))
 	}
-	if finished[0].Key.TestID != "test-a" || finished[0].Verdict != domain.VerdictPass {
+	if finished[0].Key.TestName != "test-a" || finished[0].Verdict != domain.VerdictPass {
 		t.Errorf("Finished()[0] = %+v, want test-a with verdict %q", finished[0], domain.VerdictPass)
 	}
 }

@@ -5,11 +5,13 @@
   "finished_at": "2026-08-07T12:05:00Z",
   "tests": [
     {
-      "test_id": "always-loses-its-lock",
+      "test_name": "always-loses-its-lock",
+      "test_id": 0,
       "description": "every repetition is excluded for state integrity",
       "layer": "subagent",
       "aggregate": {
-        "test_id": "always-loses-its-lock",
+        "test_name": "always-loses-its-lock",
+        "test_id": 0,
         "verdict": "FAIL",
         "reasons": ["INFRASTRUCTURE"],
         "counted": 0,
@@ -21,13 +23,13 @@
         "total_cost": { "total_usd": 0, "attribution": "attributed", "detail": "" },
         "exclusions": [
           {
-            "key": { "run_id": "run-001", "test_id": "always-loses-its-lock", "run_number": 1 },
+            "key": { "run_id": "run-001", "test_name": "always-loses-its-lock", "run_number": 1 },
             "reason": "state_integrity",
             "termination_reason": "",
             "detail": "lock was reclaimed; one or more state updates may have been lost"
           },
           {
-            "key": { "run_id": "run-001", "test_id": "always-loses-its-lock", "run_number": 2 },
+            "key": { "run_id": "run-001", "test_name": "always-loses-its-lock", "run_number": 2 },
             "reason": "state_integrity",
             "termination_reason": "",
             "detail": "lock was reclaimed; one or more state updates may have been lost"
@@ -36,7 +38,7 @@
       },
       "runs": [
         {
-          "run": { "run_id": "run-001", "test_id": "always-loses-its-lock", "run_number": 1 },
+          "run": { "run_id": "run-001", "test_name": "always-loses-its-lock", "run_number": 1 },
           "verdict": "FAIL",
           "reasons": ["STATE_INTEGRITY"],
           "assertions": [],
@@ -48,10 +50,12 @@
           "subject_model": "unknown",
           "stub_model": "unknown",
           "harness_id": "unknown",
-          "termination_reason": "unknown"
+          "termination_reason": "unknown",
+          "test_version": 0,
+          "test_id": 0
         },
         {
-          "run": { "run_id": "run-001", "test_id": "always-loses-its-lock", "run_number": 2 },
+          "run": { "run_id": "run-001", "test_name": "always-loses-its-lock", "run_number": 2 },
           "verdict": "FAIL",
           "reasons": ["STATE_INTEGRITY"],
           "assertions": [],
@@ -63,7 +67,9 @@
           "subject_model": "unknown",
           "stub_model": "unknown",
           "harness_id": "unknown",
-          "termination_reason": "unknown"
+          "termination_reason": "unknown",
+          "test_version": 0,
+          "test_id": 0
         }
       ]
     }

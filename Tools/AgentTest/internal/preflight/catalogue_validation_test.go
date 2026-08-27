@@ -49,11 +49,18 @@ const registryCatalogueTests = `{
 // agent key and no stub_agents — the catalogue path.
 const definitionCataloguePathOnly = `
 schema_version: 1
-id: subject-test
+name: subject-test
+id: 1
+version: 1
+changelog:
+  - version: 1
+    date: "2026-01-01"
+    changes: "Initial."
 layer: orchestrator
 subject:
   identity: orchestrator
   agent: orchestrator
+  infrastructure_agents: []
 stub_registry: subject.stubs.json
 `
 
@@ -61,11 +68,18 @@ stub_registry: subject.stubs.json
 // and stub_agents — the conflicted path that preflight must reject.
 const definitionConflictedPaths = `
 schema_version: 1
-id: subject-test
+name: subject-test
+id: 1
+version: 1
+changelog:
+  - version: 1
+    date: "2026-01-01"
+    changes: "Initial."
 layer: orchestrator
 subject:
   identity: orchestrator
   agent: orchestrator
+  infrastructure_agents: []
 stub_registry: subject.stubs.json
 stub_agents:
   - identity:
@@ -78,10 +92,17 @@ stub_agents:
 // the stub-agents path, identical to what earlier stages tested.
 const definitionStubAgentsOnly = `
 schema_version: 1
-id: subject-test
+name: subject-test
+id: 1
+version: 1
+changelog:
+  - version: 1
+    date: "2026-01-01"
+    changes: "Initial."
 layer: orchestrator
 subject:
   identity: orchestrator
+  infrastructure_agents: []
 stub_registry: subject.stubs.json
 stub_agents:
   - identity:

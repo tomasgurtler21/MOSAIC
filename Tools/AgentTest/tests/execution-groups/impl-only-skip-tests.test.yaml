@@ -1,5 +1,11 @@
 schema_version: 1
-id: impl-only-skip-tests
+name: impl-only-skip-tests
+id: 51
+version: 1
+changelog:
+  - version: 1
+    date: "2026-01-01"
+    changes: "Initial."
 description: >
   Scenario E-2. Stage 1 has Approach = Implementation-Only in Plan.md. The
   orchestrator must skip test-writer-tdd and tests-review-tdd entirely and

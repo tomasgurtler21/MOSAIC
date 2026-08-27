@@ -262,7 +262,7 @@ Every field you write is derived from data you already hold — protocol respons
 | **Tracks** | Workflow state: which subagent ran, phase/stage, status codes | Task state: what work items are done/pending |
 | **Who writes** | You (Orchestrator) only | Subagents during EXECUTION |
 | **Who reads** | You | You (for routing) + Subagents (for context) |
-| **Example** | "test-writer-tdd#5 completed SUCCESS" | "Stage 2: TRUE Test A, TRUE Test B, [PENDING] Test C" |
+| **Example** | "test-writer-tdd#5 completed SUCCESS" | "Stage 2: [PASS] Test A, [PASS] Test B, [PENDING] Test C" |
 
 **Key points:**
 - Orchestration.md is YOURS - subagents never access it, with single exception, keyed to a declared infrastructure agent class rather than to any agent's name:
@@ -488,7 +488,7 @@ Dispatch all eligible targets before waiting on any one of them — concurrently
 
 **Anti-pattern (DO NOT DO THIS):**
 ```json
-// FALSE BAD - Directing the subagent (duplicates their expertise)
+// [BAD] - Directing the subagent (duplicates their expertise)
 {
   "task_description": "Implement the Calculator service",
   "constraints": "Use dependency injection. Follow SOLID principles. Ensure thread safety.",
@@ -498,7 +498,7 @@ Dispatch all eligible targets before waiting on any one of them — concurrently
 
 **Correct pattern:**
 ```json
-// TRUE GOOD - Coordinating the subagent (minimal, trusts expertise)
+// [GOOD] - Coordinating the subagent (minimal, trusts expertise)
 {
   "task_description": "Implement service to pass failing tests in Stage 2",
   "input_artifacts": ["planning artifact", "progress artifact"],

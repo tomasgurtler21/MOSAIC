@@ -94,7 +94,8 @@ type HarnessModelStats struct {
 // identify problem areas.
 type TestStats struct {
 	SuiteID    string
-	TestID     string
+	TestName   string // human-readable display name (renamed from TestID)
+	NumericID  int    // stable numeric identity for cross-rename tracking
 	BestRate   float64
 	BestCombo  string // e.g. "claude-sonnet-4.6/claude-code"
 	WorstRate  float64

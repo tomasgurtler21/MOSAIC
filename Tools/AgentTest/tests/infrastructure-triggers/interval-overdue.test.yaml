@@ -1,5 +1,11 @@
 schema_version: 1
-id: interval-overdue
+name: interval-overdue
+id: 59
+version: 1
+changelog:
+  - version: 1
+    date: "2026-01-01"
+    changes: "Initial."
 description: >
   I-2 (overdue): INVOCATION_INTERVAL trigger fires when obviously past
   threshold. Seeded with global_sequence=9 and interval=3, the condition

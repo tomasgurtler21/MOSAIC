@@ -51,7 +51,8 @@ type Result struct {
 
 // TestReport is one test's aggregate outcome plus its per-repetition detail.
 type TestReport struct {
-	TestID      string
+	TestName    string // human-readable display name of the test
+	NumericID   int    // Stable numeric identity, sourced from Definition.NumericID.
 	Description string
 	Layer       domain.TestLayer
 	Aggregate   domain.AggregateResult
@@ -104,6 +105,16 @@ type RunReport struct {
 	// "turn_limit", "spawn_failed". Empty only when disposition was not
 	// recorded, which both renderings show as "unknown" rather than blank.
 	TerminationReason string
+
+	// TestVersion is the content version of the test definition this run
+	// exercised, sourced from domain.TestResult.Version and copied by suite.go.
+	// Zero means the value was not recorded.
+	TestVersion int
+
+	// NumericID is the stable numeric identity of the test definition this run
+	// exercised, sourced from domain.TestResult.NumericID and copied by suite.go.
+	// Zero means the value was not recorded.
+	NumericID int
 }
 
 // SubjectFailure is what a subject that exited non-zero told us. Zero-valued

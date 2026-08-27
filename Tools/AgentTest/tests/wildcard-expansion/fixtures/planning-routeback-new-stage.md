@@ -36,7 +36,7 @@ current_state:
 | 14 | implementation-tdd#14 | EXECUTION | Implementation.2 | SUCCESS | 2026-01-15T11:45:00Z | Implemented per-item diagnostics. | Stage-2/Plan.md, ContractsDesign.md, Stage-2/PlanProgress.md | - |
 | 15 | implementation-review#15 | EXECUTION | Implementation.2 | SUCCESS | 2026-01-15T11:50:00Z | Implementation review passed. | Stage-2/Plan.md, ContractsDesign.md, Stage-2/PlanProgress.md | - |
 | 16 | test-runner#16 | REVIEW | - | COMPLETED_NEEDS_ACTION | 2026-01-15T12:00:00Z | Tests reveal edge case: verbose flag not respected in batch mode. New stage needed. | - | - |
-| 17 | planner-tdd-soft#17 | PLANNING | - | SUCCESS | 2026-01-15T12:15:00Z | Added Stage 3 for batch mode verbose flag fix. | Research.md, Requirements.md | - |
+| 17 | planner-tdd-soft#17 | PLANNING | - | SUCCESS | 2026-01-15T12:15:00Z | Added Stage 3 for batch mode verbose flag fix. | Research.md, Requirements.md, TestResults.md | - |
 </ExecutionLog>
 
 <Artifacts type="core">

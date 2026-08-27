@@ -1256,8 +1256,8 @@ func (m Model) resultTests() []report.TestReport {
 	tests := make([]report.TestReport, 0, len(m.finished))
 	for _, run := range m.finished {
 		tests = append(tests, report.TestReport{
-			TestID: run.Key.TestID,
-			Runs:   []report.RunReport{run},
+			TestName: run.Key.TestName,
+			Runs:     []report.RunReport{run},
 		})
 	}
 	return tests
@@ -1432,8 +1432,8 @@ func (m Model) Fold(ev domain.ProgressEvent) Model {
 		// case), falling back to ev.TestID / ev.Repetition for legacy event
 		// shapes that do not carry a Run field.
 		key := ev.Run
-		if key.TestID == "" {
-			key = domain.RunKey{TestID: ev.TestID, RunNumber: ev.Repetition}
+		if key.TestName == "" {
+			key = domain.RunKey{TestName: ev.TestID, RunNumber: ev.Repetition}
 		}
 		m.finished = append(m.finished, report.RunReport{
 			Key:      key,

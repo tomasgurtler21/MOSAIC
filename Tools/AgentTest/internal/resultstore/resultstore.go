@@ -165,7 +165,8 @@ type ReportWire struct {
 
 // TestReportWire is the minimal wire shape for one test entry.
 type TestReportWire struct {
-	TestID      string          `json:"test_id"`
+	TestName    string          `json:"test_name"` // human-readable display name (renamed from string test_id)
+	TestID      int             `json:"test_id"`   // stable numeric identity
 	Description string          `json:"description"`
 	Layer       string          `json:"layer"`
 	Aggregate   AggregateWire   `json:"aggregate"`
@@ -192,6 +193,7 @@ type RunReportWire struct {
 	Cost              CostWire        `json:"cost"`
 	TerminationReason string          `json:"termination_reason"`
 	Conditions        []ConditionWire `json:"conditions"`
+	TestVersion       int             `json:"test_version"` // content version; zero until wire field is populated
 }
 
 // CostWire is the minimal wire shape for cost data.

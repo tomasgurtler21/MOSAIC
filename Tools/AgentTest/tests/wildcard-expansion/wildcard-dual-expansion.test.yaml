@@ -1,5 +1,11 @@
 schema_version: 1
-id: wildcard-dual-expansion
+name: wildcard-dual-expansion
+id: 77
+version: 1
+changelog:
+  - version: 1
+    date: "2026-01-01"
+    changes: "Initial."
 description: >
   Scenario W-2. The workflow table specifies both Stage-*/Plan.md AND
   Stage-*/PlanProgress.md in plan-review's Input column. The orchestrator

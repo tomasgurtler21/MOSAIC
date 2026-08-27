@@ -1,5 +1,11 @@
 schema_version: 1
-id: contracts-routeback-quality-gate
+name: contracts-routeback-quality-gate
+id: 66
+version: 1
+changelog:
+  - version: 1
+    date: "2026-01-01"
+    changes: "Initial."
 description: >
   Scenario R-3. implementation-review returns COMPLETED_NEEDS_ACTION with
   a contracts interface mismatch. The workflow On Findings target routes
@@ -73,6 +79,7 @@ assertions:
         - Orchestration-{run_id}/Requirements.md
       optional_input_artifacts:
         - Orchestration-{run_id}/Plan.md
+        - Orchestration-{run_id}/ContractsDesign.md
         - Orchestration-{run_id}/Stage-1/Plan.md
         - Orchestration-{run_id}/Stage-2/Plan.md
         - Orchestration-{run_id}/Stage-2/implementation-review.md

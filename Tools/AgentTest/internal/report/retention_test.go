@@ -28,17 +28,17 @@ import (
 func retainedPathResult(path string) report.Result {
 	return report.Build("retention-suite", time.Time{}, time.Time{}, []report.TestReport{
 		{
-			TestID: "unspawnable-subject",
+			TestName: "unspawnable-subject",
 			Layer:  domain.LayerOrchestrator,
 			Aggregate: domain.AggregateResult{
-				TestID:                "unspawnable-subject",
+				TestName:                "unspawnable-subject",
 				Verdict:               domain.VerdictFail,
 				Reasons:               []domain.FailureReason{domain.ReasonInfrastructure},
 				InfrastructureFailure: true,
 			},
 			Runs: []report.RunReport{
 				{
-					Key:                 domain.RunKey{RunID: "unspawnable-subject-1", TestID: "unspawnable-subject", RunNumber: 1},
+					Key:                 domain.RunKey{RunID: "unspawnable-subject-1", TestName: "unspawnable-subject", RunNumber: 1},
 					Verdict:             domain.VerdictFail,
 					Reasons:             []domain.FailureReason{domain.ReasonInfrastructure},
 					RetainedSandboxPath: path,

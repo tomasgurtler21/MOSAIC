@@ -1,5 +1,11 @@
 schema_version: 1
-id: tests-only-skip-impl
+name: tests-only-skip-impl
+id: 52
+version: 1
+changelog:
+  - version: 1
+    date: "2026-01-01"
+    changes: "Initial."
 description: >
   Scenario E-4. Stage 1 has Approach = Tests-Only in Plan.md. The
   orchestrator must dispatch test-writer-tdd as the first EXECUTION agent

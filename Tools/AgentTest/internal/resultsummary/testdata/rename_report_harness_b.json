@@ -1,0 +1,49 @@
+{
+  "schema_version": "1",
+  "suite_id": "suite-rename",
+  "started_at": "2026-08-20T11:00:00Z",
+  "finished_at": "2026-08-20T11:02:00Z",
+  "tests": [
+    {
+      "test_name": "renamed-test",
+      "test_id": 42,
+      "description": "The same test (numeric ID 42), now known by a different name after a rename",
+      "layer": "orchestrator",
+      "aggregate": {
+        "verdict": "partial",
+        "counted": 2,
+        "passed": 1,
+        "pass_rate": 0.5,
+        "infrastructure_failure": false,
+        "total_cost": { "total_usd": 0.02, "attribution": "direct" }
+      },
+      "runs": [
+        {
+          "subject_version": "v1.0.0",
+          "subject_model": "github-copilot/gpt-4o",
+          "harness_id": "open-code",
+          "verdict": "pass",
+          "duration_ms": 1500,
+          "cost": { "total_usd": 0.01, "attribution": "direct" },
+          "termination_reason": "completed",
+          "conditions": [],
+          "test_version": 2
+        },
+        {
+          "subject_version": "v1.0.0",
+          "subject_model": "github-copilot/gpt-4o",
+          "harness_id": "open-code",
+          "verdict": "fail",
+          "duration_ms": 1600,
+          "cost": { "total_usd": 0.01, "attribution": "direct" },
+          "termination_reason": "completed",
+          "conditions": [],
+          "test_version": 2
+        }
+      ]
+    }
+  ],
+  "counts": { "pass": 1, "fail": 1 },
+  "total_cost": { "total_usd": 0.02, "attribution": "direct" },
+  "infrastructure_failures": 0
+}

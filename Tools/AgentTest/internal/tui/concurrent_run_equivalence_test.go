@@ -35,8 +35,8 @@ import (
 // simultaneously, so both frontends must handle overlapping start/finish
 // events without one run's events corrupting the other's.
 func concurrentRunSeq() []domain.ProgressEvent {
-	runA := domain.RunKey{RunID: "20260807T120000Z-0001", TestID: "test-a", RunNumber: 1}
-	runB := domain.RunKey{RunID: "20260807T120000Z-0002", TestID: "test-b", RunNumber: 1}
+	runA := domain.RunKey{RunID: "20260807T120000Z-0001", TestName: "test-a", RunNumber: 1}
+	runB := domain.RunKey{RunID: "20260807T120000Z-0002", TestName: "test-b", RunNumber: 1}
 
 	return []domain.ProgressEvent{
 		{Kind: domain.ProgressSuiteStarted, SuiteID: "concurrent-suite", TotalTests: 2, TotalRuns: 2},
@@ -172,8 +172,8 @@ func TestEquivalence_ConcurrentRunSequence_TUIFoldRecordsAllFinishedRuns(t *test
 //
 // RED-phase: Running() stub returns nil (empty), so len == 0 ≠ 2.
 func TestEquivalence_ConcurrentRunSequence_SharedCoreRunningSetConsistentWithCLI(t *testing.T) {
-	runA := domain.RunKey{RunID: "20260807T120000Z-0001", TestID: "test-a", RunNumber: 1}
-	runB := domain.RunKey{RunID: "20260807T120000Z-0002", TestID: "test-b", RunNumber: 1}
+	runA := domain.RunKey{RunID: "20260807T120000Z-0001", TestName: "test-a", RunNumber: 1}
+	runB := domain.RunKey{RunID: "20260807T120000Z-0002", TestName: "test-b", RunNumber: 1}
 
 	midSeq := []domain.ProgressEvent{
 		{Kind: domain.ProgressSuiteStarted, SuiteID: "concurrent-suite", TotalTests: 2, TotalRuns: 2},

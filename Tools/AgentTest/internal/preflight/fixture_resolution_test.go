@@ -53,7 +53,13 @@ func multiRootFactory(sharedRoot string) fixtures.ResolverFactory {
 // whatever the test is adding.
 const minimalDefinitionBody = `
 schema_version: 1
-id: my-test
+name: my-test
+id: 1
+version: 1
+changelog:
+  - version: 1
+    date: "2026-01-01"
+    changes: "Initial."
 layer: orchestrator
 subject:
   identity: orchestrator
@@ -88,7 +94,13 @@ tests:
 `,
 		"my-test.test.yaml": `
 schema_version: 1
-id: my-test
+name: my-test
+id: 1
+version: 1
+changelog:
+  - version: 1
+    date: "2026-01-01"
+    changes: "Initial."
 layer: orchestrator
 subject:
   identity: orchestrator
@@ -140,7 +152,13 @@ tests:
 		// discriminating assertion in this test.
 		"my-test.test.yaml": `
 schema_version: 1
-id: my-test
+name: my-test
+id: 1
+version: 1
+changelog:
+  - version: 1
+    date: "2026-01-01"
+    changes: "Initial."
 layer: orchestrator
 subject:
   identity: orchestrator
@@ -204,7 +222,13 @@ tests:
 `,
 		"my-test.test.yaml": `
 schema_version: 1
-id: my-test
+name: my-test
+id: 1
+version: 1
+changelog:
+  - version: 1
+    date: "2026-01-01"
+    changes: "Initial."
 layer: orchestrator
 subject:
   identity: orchestrator
@@ -269,7 +293,13 @@ tests:
 `,
 		"my-test.test.yaml": `
 schema_version: 1
-id: my-test
+name: my-test
+id: 1
+version: 1
+changelog:
+  - version: 1
+    date: "2026-01-01"
+    changes: "Initial."
 layer: orchestrator
 subject:
   identity: orchestrator
@@ -333,7 +363,13 @@ tests:
 `,
 		"ref-check.test.yaml": `
 schema_version: 1
-id: ref-check
+name: ref-check
+id: 1
+version: 1
+changelog:
+  - version: 1
+    date: "2026-01-01"
+    changes: "Initial."
 layer: orchestrator
 subject:
   identity: orchestrator
@@ -396,7 +432,13 @@ tests:
 `,
 		"my-test.test.yaml": `
 schema_version: 1
-id: my-test
+name: my-test
+id: 1
+version: 1
+changelog:
+  - version: 1
+    date: "2026-01-01"
+    changes: "Initial."
 layer: orchestrator
 subject:
   identity: orchestrator

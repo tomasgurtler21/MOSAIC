@@ -37,7 +37,13 @@ import (
 // should contribute nil to the merge.
 const echoFidelityBaseDefinition = `
 schema_version: 1
-id: echo-merge-test
+name: echo-merge-test
+id: 1
+version: 1
+changelog:
+  - version: 1
+    date: "2026-01-01"
+    changes: "Initial."
 layer: orchestrator
 subject:
   identity: orchestrator
@@ -59,7 +65,13 @@ assertions:
 // definition with echo_fidelity: advisory at the definition level.
 const echoFidelityAdvisoryDefinition = `
 schema_version: 1
-id: echo-merge-test
+name: echo-merge-test
+id: 1
+version: 1
+changelog:
+  - version: 1
+    date: "2026-01-01"
+    changes: "Initial."
 layer: orchestrator
 echo_fidelity: advisory
 subject:

@@ -193,10 +193,10 @@ func failingReport() authoring.Report {
 func passingResult(suiteID string) report.Result {
 	return report.Build(suiteID, time.Time{}, time.Time{}, []report.TestReport{
 		{
-			TestID: "happy-path",
+			TestName: "happy-path",
 			Layer:  domain.LayerOrchestrator,
 			Aggregate: domain.AggregateResult{
-				TestID:   "happy-path",
+				TestName:   "happy-path",
 				Verdict:  domain.VerdictPass,
 				Counted:  1,
 				Passed:   1,
@@ -208,7 +208,7 @@ func passingResult(suiteID string) report.Result {
 			},
 			Runs: []report.RunReport{
 				{
-					Key:     domain.RunKey{RunID: "happy-path-1", TestID: "happy-path", RunNumber: 1},
+					Key:     domain.RunKey{RunID: "happy-path-1", TestName: "happy-path", RunNumber: 1},
 					Verdict: domain.VerdictPass,
 					Cost:    domain.CostReport{TotalUSD: 0.42, Attribution: domain.AttributionAttributed},
 				},
@@ -222,10 +222,10 @@ func passingResult(suiteID string) report.Result {
 func failedTestResult(suiteID string) report.Result {
 	return report.Build(suiteID, time.Time{}, time.Time{}, []report.TestReport{
 		{
-			TestID: "regression",
+			TestName: "regression",
 			Layer:  domain.LayerOrchestrator,
 			Aggregate: domain.AggregateResult{
-				TestID:   "regression",
+				TestName:   "regression",
 				Verdict:  domain.VerdictFail,
 				Reasons:  []domain.FailureReason{domain.ReasonAssertion},
 				Counted:  1,
@@ -234,7 +234,7 @@ func failedTestResult(suiteID string) report.Result {
 			},
 			Runs: []report.RunReport{
 				{
-					Key:     domain.RunKey{RunID: "regression-1", TestID: "regression", RunNumber: 1},
+					Key:     domain.RunKey{RunID: "regression-1", TestName: "regression", RunNumber: 1},
 					Verdict: domain.VerdictFail,
 					Reasons: []domain.FailureReason{domain.ReasonAssertion},
 					Assertions: []domain.AssertionResult{
@@ -257,10 +257,10 @@ func failedTestResult(suiteID string) report.Result {
 func infrastructureFaultResult(suiteID string) report.Result {
 	return report.Build(suiteID, time.Time{}, time.Time{}, []report.TestReport{
 		{
-			TestID: "flaky-infra",
+			TestName: "flaky-infra",
 			Layer:  domain.LayerOrchestrator,
 			Aggregate: domain.AggregateResult{
-				TestID:                "flaky-infra",
+				TestName:                "flaky-infra",
 				Verdict:               domain.VerdictFail,
 				Reasons:               []domain.FailureReason{domain.ReasonStateIntegrity},
 				Counted:               0,
@@ -269,7 +269,7 @@ func infrastructureFaultResult(suiteID string) report.Result {
 			},
 			Runs: []report.RunReport{
 				{
-					Key:     domain.RunKey{RunID: "flaky-infra-1", TestID: "flaky-infra", RunNumber: 1},
+					Key:     domain.RunKey{RunID: "flaky-infra-1", TestName: "flaky-infra", RunNumber: 1},
 					Verdict: domain.VerdictFail,
 					Reasons: []domain.FailureReason{domain.ReasonStateIntegrity},
 				},
@@ -286,10 +286,10 @@ func infrastructureFaultResult(suiteID string) report.Result {
 func infrastructureFaultResultFromRunnerError(suiteID string) report.Result {
 	return report.Build(suiteID, time.Time{}, time.Time{}, []report.TestReport{
 		{
-			TestID: "unspawnable-subject",
+			TestName: "unspawnable-subject",
 			Layer:  domain.LayerOrchestrator,
 			Aggregate: domain.AggregateResult{
-				TestID:                "unspawnable-subject",
+				TestName:                "unspawnable-subject",
 				Verdict:               domain.VerdictFail,
 				Reasons:               []domain.FailureReason{domain.ReasonInfrastructure},
 				Counted:               1,
@@ -298,7 +298,7 @@ func infrastructureFaultResultFromRunnerError(suiteID string) report.Result {
 			},
 			Runs: []report.RunReport{
 				{
-					Key:     domain.RunKey{RunID: "unspawnable-subject-1", TestID: "unspawnable-subject", RunNumber: 1},
+					Key:     domain.RunKey{RunID: "unspawnable-subject-1", TestName: "unspawnable-subject", RunNumber: 1},
 					Verdict: domain.VerdictFail,
 					Reasons: []domain.FailureReason{domain.ReasonInfrastructure},
 					Conditions: []domain.RunCondition{

@@ -1,5 +1,11 @@
 schema_version: 1
-id: gated-checkpoint-disabled
+name: gated-checkpoint-disabled
+id: 58
+version: 1
+changelog:
+  - version: 1
+    date: "2026-01-01"
+    changes: "Initial."
 description: >
   I-4: Gated infrastructure agent not dispatched when its switch is off.
   checkpoint-manager-git declares STAGE_END, but checkpoints: disabled.

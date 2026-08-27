@@ -27,7 +27,7 @@ const neverStartedCause = "Authentication error: not logged in. Run `claude logi
 // evaluate.Evaluate will produce for a DispositionSpawnFailed result.
 func neverStartedRunReport() report.RunReport {
 	return report.RunReport{
-		Key:     domain.RunKey{RunID: "never-started-1", TestID: "subject-never-started", RunNumber: 1},
+		Key:     domain.RunKey{RunID: "never-started-1", TestName: "subject-never-started", RunNumber: 1},
 		Verdict: domain.VerdictFail,
 		Reasons: []domain.FailureReason{domain.ReasonInfrastructure},
 		Conditions: []domain.RunCondition{
@@ -49,10 +49,10 @@ func neverStartedResult() report.Result {
 	run := neverStartedRunReport()
 	return report.Build("never-started-suite", fixtureStarted(), fixtureFinished(), []report.TestReport{
 		{
-			TestID: "subject-never-started",
+			TestName: "subject-never-started",
 			Layer:  domain.LayerOrchestrator,
 			Aggregate: domain.AggregateResult{
-				TestID:  "subject-never-started",
+				TestName:  "subject-never-started",
 				Verdict: domain.VerdictFail,
 				Reasons: []domain.FailureReason{domain.ReasonInfrastructure},
 				Counted: 1,
@@ -67,17 +67,17 @@ func neverStartedResult() report.Result {
 func genuineAssertionFailureResult() report.Result {
 	return report.Build("genuine-failure-suite", fixtureStarted(), fixtureFinished(), []report.TestReport{
 		{
-			TestID: "genuine-failure",
+			TestName: "genuine-failure",
 			Layer:  domain.LayerOrchestrator,
 			Aggregate: domain.AggregateResult{
-				TestID:  "genuine-failure",
+				TestName:  "genuine-failure",
 				Verdict: domain.VerdictFail,
 				Reasons: []domain.FailureReason{domain.ReasonAssertion},
 				Counted: 1,
 			},
 			Runs: []report.RunReport{
 				{
-					Key:     domain.RunKey{RunID: "genuine-failure-1", TestID: "genuine-failure", RunNumber: 1},
+					Key:     domain.RunKey{RunID: "genuine-failure-1", TestName: "genuine-failure", RunNumber: 1},
 					Verdict: domain.VerdictFail,
 					Reasons: []domain.FailureReason{domain.ReasonAssertion},
 					Assertions: []domain.AssertionResult{

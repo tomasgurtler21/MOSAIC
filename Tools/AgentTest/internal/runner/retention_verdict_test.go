@@ -167,7 +167,7 @@ func TestRetention_OnFailure_MixedVerdicts_OnlyFailingAttemptSandboxSurvives(t *
 	passingReq := runner.Request{
 		Key: domain.RunKey{
 			RunID:     "run-mixed-rep1",
-			TestID:    "mixed-verdict-test",
+			TestName:    "mixed-verdict-test",
 			RunNumber: 1,
 		},
 		Test:      newRequest("mixed-verdict-test").Test,
@@ -186,7 +186,7 @@ func TestRetention_OnFailure_MixedVerdicts_OnlyFailingAttemptSandboxSurvives(t *
 	failingReq := runner.Request{
 		Key: domain.RunKey{
 			RunID:     "run-mixed-rep2",
-			TestID:    "mixed-verdict-test",
+			TestName:    "mixed-verdict-test",
 			RunNumber: 2,
 		},
 		Test:      newRequest("mixed-verdict-test").Test,

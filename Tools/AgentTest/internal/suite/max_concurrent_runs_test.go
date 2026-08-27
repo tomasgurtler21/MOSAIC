@@ -166,8 +166,8 @@ func TestSuite_MaxConcurrentRunsOne_ReproducesSequentialBehaviour(t *testing.T) 
 	}
 	wantOrder := []string{"first", "second", "third"}
 	for i, want := range wantOrder {
-		if calls[i].TestID != want {
-			t.Errorf("call %d with MaxConcurrentRuns=1: test %q, want %q (D6: bound of 1 must reproduce sequential ordering)", i, calls[i].TestID, want)
+		if calls[i].TestName != want {
+			t.Errorf("call %d with MaxConcurrentRuns=1: test %q, want %q (D6: bound of 1 must reproduce sequential ordering)", i, calls[i].TestName, want)
 		}
 	}
 }

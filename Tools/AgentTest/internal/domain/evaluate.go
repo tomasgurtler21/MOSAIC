@@ -170,6 +170,18 @@ type TestResult struct {
 	// report layer can render it without re-consulting RunEvidence. Empty means
 	// no disposition was recorded; the renderings show it as "unknown".
 	TerminationReason string
+
+	// Version is the content version of the test definition this run exercised,
+	// carried through from RunEvidence.Definition.Version by evaluate.Evaluate
+	// at both return sites. Zero means the definition was constructed without a
+	// version (e.g. in a test helper that predates versioning).
+	Version int
+
+	// NumericID is the stable numeric identity of the test definition this run
+	// exercised, carried through from RunEvidence.Definition.NumericID by
+	// evaluate.Evaluate at both return sites. Zero means the definition was
+	// constructed without a numeric ID.
+	NumericID int
 }
 
 // AssertionOutcome is the per-assertion result of evaluating one class.
@@ -286,10 +298,11 @@ type RepetitionPolicy struct {
 // AggregateResult combines the results of a test's repetitions against its
 // declared pass rate.
 type AggregateResult struct {
-	TestID  string
-	Verdict Verdict
-	Reasons []FailureReason
-	Runs    []TestResult
+	TestName  string // human-readable display name of the test
+	NumericID int    // Stable numeric identity, populated from the first TestResult's NumericID.
+	Verdict   Verdict
+	Reasons   []FailureReason
+	Runs      []TestResult
 
 	// Counted excludes runs excluded for state integrity: the aggregate
 	// must measure the subject, not the tool.

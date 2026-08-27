@@ -1,5 +1,11 @@
 schema_version: 1
-id: lock-compromised
+name: lock-compromised
+id: 46
+version: 1
+changelog:
+  - version: 1
+    date: "2026-01-01"
+    changes: "Initial."
 description: >
   The scripted subject dispatches one collaborator that would otherwise
   complete normally, but the sandbox's run-state lock is compromised before

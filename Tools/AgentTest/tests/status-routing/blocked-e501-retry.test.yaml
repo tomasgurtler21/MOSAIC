@@ -1,5 +1,11 @@
 schema_version: 1
-id: blocked-e501-retry
+name: blocked-e501-retry
+id: 69
+version: 1
+changelog:
+  - version: 1
+    date: "2026-01-01"
+    changes: "Initial."
 description: >
   Scenario S-4. implementation-tdd returns BLOCKED with error_code E501
   (TOOL_UNAVAILABLE). The orchestrator must apply Tier 1 auto-retry —

@@ -390,11 +390,11 @@ func TestScheduler_ReportOrdering_ByTestAndRepetitionNumber(t *testing.T) {
 	}
 
 	// Test reports must follow plan order.
-	if result.Tests[0].TestID != "alpha" {
-		t.Errorf("Tests[0].TestID = %q, want %q; test reports must follow plan order", result.Tests[0].TestID, "alpha")
+	if result.Tests[0].TestName != "alpha" {
+		t.Errorf("Tests[0].TestID = %q, want %q; test reports must follow plan order", result.Tests[0].TestName, "alpha")
 	}
-	if result.Tests[1].TestID != "beta" {
-		t.Errorf("Tests[1].TestID = %q, want %q; test reports must follow plan order", result.Tests[1].TestID, "beta")
+	if result.Tests[1].TestName != "beta" {
+		t.Errorf("Tests[1].TestID = %q, want %q; test reports must follow plan order", result.Tests[1].TestName, "beta")
 	}
 
 	// alpha: 3 runs in repetition order 1, 2, 3.

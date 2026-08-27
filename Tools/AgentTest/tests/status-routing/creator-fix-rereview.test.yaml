@@ -1,5 +1,11 @@
 schema_version: 1
-id: creator-fix-rereview
+name: creator-fix-rereview
+id: 72
+version: 1
+changelog:
+  - version: 1
+    date: "2026-01-01"
+    changes: "Initial."
 description: >
   Scenario G-2. Execution log shows planner SUCCESS, plan-review
   COMPLETED_NEEDS_ACTION, planner SUCCESS (fix). The orchestrator must route

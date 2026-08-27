@@ -27,16 +27,16 @@ import (
 func subjectFailureResult(subject report.SubjectFailure) report.Result {
 	return report.Build("subject-failure-suite", time.Time{}, time.Time{}, []report.TestReport{
 		{
-			TestID: "subject-exits-nonzero",
+			TestName: "subject-exits-nonzero",
 			Layer:  domain.LayerOrchestrator,
 			Aggregate: domain.AggregateResult{
-				TestID:  "subject-exits-nonzero",
+				TestName:  "subject-exits-nonzero",
 				Verdict: domain.VerdictFail,
 				Reasons: []domain.FailureReason{domain.ReasonInfrastructure},
 			},
 			Runs: []report.RunReport{
 				{
-					Key:     domain.RunKey{RunID: "subject-exits-nonzero-1", TestID: "subject-exits-nonzero", RunNumber: 1},
+					Key:     domain.RunKey{RunID: "subject-exits-nonzero-1", TestName: "subject-exits-nonzero", RunNumber: 1},
 					Verdict: domain.VerdictFail,
 					Reasons: []domain.FailureReason{domain.ReasonInfrastructure},
 					Subject: subject,

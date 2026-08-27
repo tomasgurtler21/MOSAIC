@@ -142,11 +142,18 @@ const validRegistryForDeployTests = `{
 // using the new harness-neutral agent key form.
 const definitionWithSubjectAgent = `
 schema_version: 1
-id: subject-test
+name: subject-test
+id: 1
+version: 1
+changelog:
+  - version: 1
+    date: "2026-01-01"
+    changes: "Initial."
 layer: orchestrator
 subject:
   identity: orchestrator
   agent: orchestrator
+  infrastructure_agents: []
 stub_registry: subject.stubs.json
 `
 
@@ -154,10 +161,17 @@ stub_registry: subject.stubs.json
 // but omits subject.agent entirely — the missing-subject-agent case.
 const definitionWithoutSubjectAgent = `
 schema_version: 1
-id: subject-test
+name: subject-test
+id: 1
+version: 1
+changelog:
+  - version: 1
+    date: "2026-01-01"
+    changes: "Initial."
 layer: orchestrator
 subject:
   identity: orchestrator
+  infrastructure_agents: []
 stub_registry: subject.stubs.json
 `
 
@@ -165,11 +179,18 @@ stub_registry: subject.stubs.json
 // agent and a workflow id that is not in the catalogue.
 const definitionWithBadWorkflows = `
 schema_version: 1
-id: subject-test
+name: subject-test
+id: 1
+version: 1
+changelog:
+  - version: 1
+    date: "2026-01-01"
+    changes: "Initial."
 layer: orchestrator
 subject:
   identity: orchestrator
   agent: orchestrator
+  infrastructure_agents: []
   workflows: [nonexistent-workflow]
 stub_registry: subject.stubs.json
 `
@@ -379,11 +400,18 @@ func TestValidate_StubDefinitionSourcePathMissing_ReportsMissingStubDefinition(t
 		"suite.suite.yaml": validSuiteWithOneTest,
 		"subject.test.yaml": `
 schema_version: 1
-id: subject-test
+name: subject-test
+id: 1
+version: 1
+changelog:
+  - version: 1
+    date: "2026-01-01"
+    changes: "Initial."
 layer: orchestrator
 subject:
   identity: orchestrator
   agent: orchestrator
+  infrastructure_agents: []
 stub_registry: subject.stubs.json
 stub_agents:
   - identity:
@@ -420,10 +448,17 @@ func TestValidate_StubDefinitionRenderFails_ReportsUnrenderableStubDefinition(t 
 		"suite.suite.yaml": validSuiteWithOneTest,
 		"subject.test.yaml": `
 schema_version: 1
-id: subject-test
+name: subject-test
+id: 1
+version: 1
+changelog:
+  - version: 1
+    date: "2026-01-01"
+    changes: "Initial."
 layer: orchestrator
 subject:
   identity: orchestrator
+  infrastructure_agents: []
 stub_registry: subject.stubs.json
 stub_agents:
   - identity:
@@ -543,10 +578,17 @@ func TestValidate_MultipleDeclarationErrors_AllReportedInOnePass(t *testing.T) {
 		"suite.suite.yaml": validSuiteWithOneTest,
 		"subject.test.yaml": `
 schema_version: 1
-id: subject-test
+name: subject-test
+id: 1
+version: 1
+changelog:
+  - version: 1
+    date: "2026-01-01"
+    changes: "Initial."
 layer: orchestrator
 subject:
   identity: orchestrator
+  infrastructure_agents: []
 stub_registry: subject.stubs.json
 stub_agents:
   - identity:
@@ -666,11 +708,18 @@ func TestValidate_StubRegistryCollaboratorWithoutStubAgentsEntry_ReportsUndeclar
 		"suite.suite.yaml": validSuiteWithOneTest,
 		"subject.test.yaml": `
 schema_version: 1
-id: subject-test
+name: subject-test
+id: 1
+version: 1
+changelog:
+  - version: 1
+    date: "2026-01-01"
+    changes: "Initial."
 layer: orchestrator
 subject:
   identity: orchestrator
   agent: orchestrator
+  infrastructure_agents: []
 stub_registry: subject.stubs.json
 `,
 		// stub registry references codebase-research, but stub_agents is absent
@@ -703,7 +752,13 @@ stub_registry: subject.stubs.json
 func TestValidate_CataloguePathCheckSubjectDeploy_CarriesInfrastructureAgentIDs(t *testing.T) {
 	const definitionWithInfraAgents = `
 schema_version: 1
-id: subject-test
+name: subject-test
+id: 1
+version: 1
+changelog:
+  - version: 1
+    date: "2026-01-01"
+    changes: "Initial."
 layer: orchestrator
 subject:
   identity: orchestrator
@@ -780,11 +835,18 @@ var _ = os.Stat
 // forbidden when subject.agent and a deploy tool are both present.
 const definitionWithCatalogueKeyNoStubAgents = `
 schema_version: 1
-id: subject-test
+name: subject-test
+id: 1
+version: 1
+changelog:
+  - version: 1
+    date: "2026-01-01"
+    changes: "Initial."
 layer: orchestrator
 subject:
   identity: orchestrator
   agent: orchestrator
+  infrastructure_agents: []
 stub_registry: subject.stubs.json
 `
 
@@ -794,10 +856,17 @@ stub_registry: subject.stubs.json
 // below assert only on undeclared-stub-agent.
 const definitionWithNoSubjectAgent = `
 schema_version: 1
-id: subject-test
+name: subject-test
+id: 1
+version: 1
+changelog:
+  - version: 1
+    date: "2026-01-01"
+    changes: "Initial."
 layer: orchestrator
 subject:
   identity: orchestrator
+  infrastructure_agents: []
 stub_registry: subject.stubs.json
 `
 

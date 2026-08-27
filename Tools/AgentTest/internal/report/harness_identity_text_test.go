@@ -153,11 +153,11 @@ func fixtureResultWithHarnessID(harnessID string) report.Result {
 		FinishedAt:    fixtureFinished(),
 		Tests: []report.TestReport{
 			{
-				TestID:      "harness-identity-test",
+				TestName:      "harness-identity-test",
 				Description: "harness identity appears in the report",
 				Layer:       domain.LayerSubagent,
 				Aggregate: domain.AggregateResult{
-					TestID:   "harness-identity-test",
+					TestName:   "harness-identity-test",
 					Verdict:  domain.VerdictPass,
 					Counted:  1,
 					Passed:   1,
@@ -169,7 +169,7 @@ func fixtureResultWithHarnessID(harnessID string) report.Result {
 				},
 				Runs: []report.RunReport{
 					{
-						Key:       domain.RunKey{RunID: "run-001", TestID: "harness-identity-test", RunNumber: 1},
+						Key:       domain.RunKey{RunID: "run-001", TestName: "harness-identity-test", RunNumber: 1},
 						Verdict:   domain.VerdictPass,
 						Duration:  1 * time.Second,
 						HarnessID: harnessID,

@@ -33,8 +33,11 @@ func Aggregate(results []domain.TestResult, policy domain.RepetitionPolicy) doma
 	infrastructureReason := false
 
 	for _, r := range results {
-		if out.TestID == "" {
-			out.TestID = r.Key.TestID
+		if out.TestName == "" {
+			out.TestName = r.Key.TestName
+		}
+		if out.NumericID == 0 {
+			out.NumericID = r.NumericID
 		}
 
 		reason := ExclusionOf(r)

@@ -1,5 +1,11 @@
 schema_version: 1
-id: stage-end-checkpoint
+name: stage-end-checkpoint
+id: 64
+version: 1
+changelog:
+  - version: 1
+    date: "2026-01-01"
+    changes: "Initial."
 description: >
   I-1: STAGE_END trigger fires checkpoint agent at stage boundary. After
   implementation-review completes stage 1, checkpoint-stage-end-only must be

@@ -5,7 +5,8 @@
   "finished_at": "2026-08-22T10:15:00Z",
   "tests": [
     {
-      "test_id": "test-epsilon",
+      "test_name": "test-epsilon",
+      "test_id": 5,
       "description": "Test epsilon with unavailable cost attribution",
       "layer": "orchestrator",
       "aggregate": {
@@ -25,7 +26,8 @@
           "duration_ms": 5000,
           "cost": { "total_usd": 0.0, "attribution": "unavailable" },
           "termination_reason": "completed",
-          "conditions": []
+          "conditions": [],
+          "test_version": 1
         }
       ]
     }

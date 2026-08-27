@@ -129,10 +129,10 @@ func newHarness(t *testing.T) *harness {
 // about on top.
 func newRequest(testID string) runner.Request {
 	return runner.Request{
-		Key: domain.RunKey{RunID: "run-" + testID, TestID: testID, RunNumber: 1},
+		Key: domain.RunKey{RunID: "run-" + testID, TestName: testID, RunNumber: 1},
 		Test: preflight.ResolvedTest{
 			Definition: domain.TestDefinition{
-				ID:    testID,
+				Name:  testID,
 				Layer: domain.LayerSubagent,
 				Subject: domain.SubjectUnderTest{
 					Identity:       "researcher",

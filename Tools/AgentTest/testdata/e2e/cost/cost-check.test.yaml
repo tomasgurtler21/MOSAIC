@@ -1,5 +1,11 @@
 schema_version: 1
-id: cost-check
+name: cost-check
+id: 12
+version: 1
+changelog:
+  - version: 1
+    date: "2026-01-01"
+    changes: "Initial."
 description: >
   One collaborator dispatched normally; the assertion suite deliberately
   declares nothing beyond the collaborator's own artifact, so the run's

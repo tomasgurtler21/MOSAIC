@@ -50,7 +50,7 @@ func cutoffEvidence(n int, ids ...domain.CollaboratorIdentity) domain.RunEvidenc
 	// RunEventEarlyExitTriggered appears after the Nth end record.
 	ev.Records = append(ev.Records, domain.LogRecord{
 		Kind:      domain.RecordRun,
-		TestID:    ev.Key.TestID,
+		TestID:    ev.Key.TestName,
 		RunNumber: ev.Key.RunNumber,
 		Timestamp: start.Add(time.Duration(n*2) * time.Second),
 		Event:     domain.RunEventEarlyExitTriggered,

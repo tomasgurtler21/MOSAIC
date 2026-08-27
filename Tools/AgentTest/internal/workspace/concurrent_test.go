@@ -37,7 +37,7 @@ func TestCreate_SafeUnderSimultaneousCallsForDistinctKeys(t *testing.T) {
 			defer wg.Done()
 			key := domain.RunKey{
 				RunID:     fmt.Sprintf("20260807T120000Z-%04x", i),
-				TestID:    fmt.Sprintf("concurrent-test-%03d", i),
+				TestName:    fmt.Sprintf("concurrent-test-%03d", i),
 				RunNumber: 1,
 			}
 			sb, err := mgr.Create(key)
@@ -82,7 +82,7 @@ func TestCreate_SimultaneousCallsForSameKey_ExactlyOneSucceeds(t *testing.T) {
 	mgr := workspace.NewManager(t.TempDir(), newFakeClock())
 	key := domain.RunKey{
 		RunID:     "20260807T120000Z-abcd",
-		TestID:    "race-test",
+		TestName:    "race-test",
 		RunNumber: 1,
 	}
 
@@ -145,7 +145,7 @@ func TestCreate_RefusesNonEmptyDirectory_UnderConcurrentLoad(t *testing.T) {
 	firstMgr := workspace.NewManager(root, newFakeClock())
 	key := domain.RunKey{
 		RunID:     "20260807T120000Z-ff00",
-		TestID:    "nonempty-test",
+		TestName:    "nonempty-test",
 		RunNumber: 1,
 	}
 	if _, err := firstMgr.Create(key); err != nil {

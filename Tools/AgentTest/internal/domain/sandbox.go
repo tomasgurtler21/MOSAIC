@@ -5,8 +5,8 @@ import "path/filepath"
 // RunKey names one attempt of one test.
 type RunKey struct {
 	RunID     string // the run identity the driver authors before spawning
-	TestID    string
-	RunNumber int // 1-based repetition
+	TestName  string // the human-readable display name of the test
+	RunNumber int    // 1-based repetition
 }
 
 // Sandbox is the isolated tree for one run attempt.

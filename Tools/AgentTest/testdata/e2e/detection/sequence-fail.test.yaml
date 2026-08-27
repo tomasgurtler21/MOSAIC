@@ -1,5 +1,11 @@
 schema_version: 1
-id: sequence-fail
+name: sequence-fail
+id: 25
+version: 1
+changelog:
+  - version: 1
+    date: "2026-01-01"
+    changes: "Initial."
 description: >
   The declared sequence names helper before greeter, the reverse of what actually happened, so the invocation_sequence assertion must fail by name.
 layer: subagent

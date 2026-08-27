@@ -18,7 +18,13 @@ func TestParseTestDefinition_EchoFidelity_Advisory_Parsed(t *testing.T) {
 		Path: "d.test.yaml",
 		Data: []byte(`
 schema_version: 1
-id: d
+name: d
+id: 1
+version: 1
+changelog:
+  - version: 1
+    date: "2026-01-01"
+    changes: "Initial."
 layer: subagent
 echo_fidelity: advisory
 subject:
@@ -47,7 +53,13 @@ func TestParseTestDefinition_EchoFidelity_Required_Parsed(t *testing.T) {
 		Path: "d.test.yaml",
 		Data: []byte(`
 schema_version: 1
-id: d
+name: d
+id: 1
+version: 1
+changelog:
+  - version: 1
+    date: "2026-01-01"
+    changes: "Initial."
 layer: subagent
 echo_fidelity: required
 subject:
@@ -76,7 +88,13 @@ func TestParseTestDefinition_EchoFidelity_Absent_IsNil(t *testing.T) {
 		Path: "d.test.yaml",
 		Data: []byte(`
 schema_version: 1
-id: d
+name: d
+id: 1
+version: 1
+changelog:
+  - version: 1
+    date: "2026-01-01"
+    changes: "Initial."
 layer: subagent
 subject:
   identity: researcher
@@ -104,12 +122,19 @@ func TestParseTestDefinition_EchoFidelity_NotRejectedByUnknownFieldCheck(t *test
 		Path: "d.test.yaml",
 		Data: []byte(`
 schema_version: 1
-id: d
+name: d
+id: 1
+version: 1
+changelog:
+  - version: 1
+    date: "2026-01-01"
+    changes: "Initial."
 layer: subagent
 echo_fidelity: advisory
 subject:
   identity: researcher
   agent: researcher
+  infrastructure_agents: []
   invocation_kind: subagent
 `),
 	}
@@ -277,12 +302,19 @@ func TestParseTestDefinition_EchoFidelity_InvalidValue_StoredAsLiteral(t *testin
 		Path: "d.test.yaml",
 		Data: []byte(`
 schema_version: 1
-id: d
+name: d
+id: 1
+version: 1
+changelog:
+  - version: 1
+    date: "2026-01-01"
+    changes: "Initial."
 layer: subagent
 echo_fidelity: typo-value
 subject:
   identity: researcher
   agent: researcher
+  infrastructure_agents: []
   invocation_kind: subagent
 `),
 	}

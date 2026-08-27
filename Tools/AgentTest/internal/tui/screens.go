@@ -179,7 +179,7 @@ func (m Model) viewProgress() string {
 	if len(running) > 0 {
 		for _, rp := range running {
 			lines = append(lines, tuicommon.Truncate(
-				fmt.Sprintf("Running: %s (repetition %d/%d)", rp.Key.TestID, rp.Key.RunNumber, rp.Repetitions), width))
+				fmt.Sprintf("Running: %s (repetition %d/%d)", rp.Key.TestName, rp.Key.RunNumber, rp.Repetitions), width))
 			inv := m.ObservedInvocations(rp.Key)
 			if inv > 0 {
 				lines = append(lines, fmt.Sprintf("Invocations observed: %d", inv))
@@ -234,7 +234,7 @@ func (m Model) viewResults() string {
 		if i > 0 {
 			b.WriteString("\n")
 		}
-		b.WriteString(tuicommon.Truncate(fmt.Sprintf("%s%-8s %s", prefix, verdict, t.TestID), width))
+		b.WriteString(tuicommon.Truncate(fmt.Sprintf("%s%-8s %s", prefix, verdict, t.TestName), width))
 	}
 
 	body := b.String()
@@ -297,7 +297,7 @@ func (m Model) viewDetail() string {
 	// formatting because they are short and one line per field keeps the layout
 	// readable.
 	logicalLines := []string{
-		tuicommon.Wrap("Test: "+test.TestID, width),
+		tuicommon.Wrap("Test: "+test.TestName, width),
 		fmt.Sprintf("Verdict: %s", run.Verdict),
 		tuicommon.Wrap("Outcome: "+strings.Join(classNames, ", "), width),
 		fmt.Sprintf("Duration: %s", run.Duration),

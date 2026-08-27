@@ -1,5 +1,11 @@
 schema_version: 1
-id: reply-recovery-stubbed
+name: reply-recovery-stubbed
+id: 41
+version: 1
+changelog:
+  - version: 1
+    date: "2026-01-01"
+    changes: "Initial."
 description: >
   A reply-recovery run with stop_after_invocations: 2 where both dispatches have
   registered stubs. The cutoff must fire at the completion event of the second

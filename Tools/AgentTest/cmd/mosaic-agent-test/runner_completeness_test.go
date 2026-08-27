@@ -94,10 +94,10 @@ func realAdapterRunnerDeps(t *testing.T, adapter domain.HarnessAdapter, interpre
 // provision and spawn a plan for.
 func minimalRunnerRequest(testID string) runner.Request {
 	return runner.Request{
-		Key: domain.RunKey{RunID: "run-" + testID, TestID: testID, RunNumber: 1},
+		Key: domain.RunKey{RunID: "run-" + testID, TestName: testID, RunNumber: 1},
 		Test: preflight.ResolvedTest{
 			Definition: domain.TestDefinition{
-				ID:    testID,
+				Name:  testID,
 				Layer: domain.LayerSubagent,
 				Subject: domain.SubjectUnderTest{
 					Identity:       "researcher",

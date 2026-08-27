@@ -1,5 +1,11 @@
 schema_version: 1
-id: execution-log-all-status-fail
+name: execution-log-all-status-fail
+id: 17
+version: 1
+changelog:
+  - version: 1
+    date: "2026-01-01"
+    changes: "Initial."
 description: >
   Every seeded execution-log row's status is SUCCESS, not the declared FAILURE, so execution_log.all_status must fail by name. agent_ids is left undeclared so this test isolates all_status as the only evaluated subfield.
 layer: subagent

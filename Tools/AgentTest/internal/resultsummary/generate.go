@@ -206,11 +206,16 @@ type testComboRate struct {
 func buildVersionSummary(version string, reports []resultstore.ParsedReport) VersionSummary {
 	type comboKey struct{ model, harness string }
 	type suiteComboKey struct{ suite, model, harness string }
-	type testKey struct{ suite, test string }
+	type testKey struct {
+		suite     string
+		numericID int
+	}
 
 	byCombo := make(map[comboKey]*statsAccumulator)
 	bySuiteCombo := make(map[suiteComboKey]*statsAccumulator)
 	testCombos := make(map[testKey][]testComboRate)
+	// testNames tracks the first-seen display name for each numeric-ID-keyed test.
+	testNames := make(map[testKey]string)
 
 	suiteSet := make(map[string]bool)
 	modelSet := make(map[string]bool)
@@ -241,7 +246,12 @@ func buildVersionSummary(version string, reports []resultstore.ParsedReport) Ver
 
 		for _, t := range raw.Tests {
 			totalTests += t.Aggregate.Counted
+			// Key by numeric test ID so that renamed tests (same numeric ID,
+			// different string name) are still recognized as the same test.
 			tk := testKey{suite, t.TestID}
+			if _, seen := testNames[tk]; !seen {
+				testNames[tk] = t.TestName
+			}
 			var rate float64
 			if t.Aggregate.Counted > 0 {
 				rate = float64(t.Aggregate.Passed) / float64(t.Aggregate.Counted)
@@ -281,7 +291,7 @@ func buildVersionSummary(version string, reports []resultstore.ParsedReport) Ver
 		if sortedTestKeys[i].suite != sortedTestKeys[j].suite {
 			return sortedTestKeys[i].suite < sortedTestKeys[j].suite
 		}
-		return sortedTestKeys[i].test < sortedTestKeys[j].test
+		return sortedTestKeys[i].numericID < sortedTestKeys[j].numericID
 	})
 
 	var problemTests []TestStats
@@ -313,7 +323,8 @@ func buildVersionSummary(version string, reports []resultstore.ParsedReport) Ver
 		}
 		problemTests = append(problemTests, TestStats{
 			SuiteID:    tk.suite,
-			TestID:     tk.test,
+			TestName:   testNames[tk],
+			NumericID:  tk.numericID,
 			BestRate:   best.rate,
 			BestCombo:  best.model + "/" + best.harness,
 			WorstRate:  worst.rate,

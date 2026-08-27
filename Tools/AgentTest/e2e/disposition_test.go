@@ -106,7 +106,7 @@ func TestDisposition_DeclaredTimeoutElapses_ReportsDistinctTimeoutVerdict(t *tes
 		t.Fatalf("RunScenario: exit code = %d, want cli.ExitTestsFailed (%d)\nstdout: %s\nstderr: %s",
 			out.ExitCode, cli.ExitTestsFailed, out.Stdout, out.Stderr)
 	}
-	if len(out.Result.Tests) != 1 || out.Result.Tests[0].TestID != "never-finishes" {
+	if len(out.Result.Tests) != 1 || out.Result.Tests[0].TestName != "never-finishes" {
 		t.Fatalf("Result.Tests = %+v, want exactly one test named %q\nstdout: %s", out.Result.Tests, "never-finishes", out.Stdout)
 	}
 	if len(out.Result.Tests[0].Runs) != 1 {
@@ -185,7 +185,7 @@ func TestDisposition_ReplyRecoveryCutoff_ReportsEarlyExitWithExactCount(t *testi
 	// invocation records exist.
 	var stubbedRun *wireRunReportDoc
 	for _, tst := range out.Result.Tests {
-		if tst.TestID == "reply-recovery-stubbed" {
+		if tst.TestName == "reply-recovery-stubbed" {
 			if len(tst.Runs) > 0 {
 				r := tst.Runs[0]
 				stubbedRun = &r
@@ -268,7 +268,7 @@ func TestDisposition_ReplyRecoveryCutoff_UnmatchedNthDispatch_StillCutsOff(t *te
 
 	var unmatchedRun *wireRunReportDoc
 	for _, tst := range out.Result.Tests {
-		if tst.TestID == "reply-recovery-unmatched" {
+		if tst.TestName == "reply-recovery-unmatched" {
 			if len(tst.Runs) > 0 {
 				r := tst.Runs[0]
 				unmatchedRun = &r
@@ -351,7 +351,7 @@ func TestDisposition_CompromisedLock_ExcludedFromPassRateAggregation(t *testing.
 
 	out := RunScenario(t, sc)
 
-	if len(out.Result.Tests) != 1 || out.Result.Tests[0].TestID != "lock-compromised" {
+	if len(out.Result.Tests) != 1 || out.Result.Tests[0].TestName != "lock-compromised" {
 		t.Fatalf("Result.Tests = %+v, want exactly one test named %q\nstdout: %s", out.Result.Tests, "lock-compromised", out.Stdout)
 	}
 	agg := out.Result.Tests[0].Aggregate
@@ -408,7 +408,7 @@ func TestDisposition_CompromisedLock_RetryRecovers(t *testing.T) {
 
 	out := RunScenario(t, sc)
 
-	if len(out.Result.Tests) != 1 || out.Result.Tests[0].TestID != "lock-compromised-once" {
+	if len(out.Result.Tests) != 1 || out.Result.Tests[0].TestName != "lock-compromised-once" {
 		t.Fatalf("Result.Tests = %+v, want exactly one test named %q\nstdout: %s", out.Result.Tests, "lock-compromised-once", out.Stdout)
 	}
 	agg := out.Result.Tests[0].Aggregate

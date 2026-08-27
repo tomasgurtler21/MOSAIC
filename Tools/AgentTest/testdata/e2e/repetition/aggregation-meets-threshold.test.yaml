@@ -1,5 +1,11 @@
 schema_version: 1
-id: aggregation-meets-threshold
+name: aggregation-meets-threshold
+id: 40
+version: 1
+changelog:
+  - version: 1
+    date: "2026-01-01"
+    changes: "Initial."
 description: >
   Two repetitions, one passing and one failing (the second skips dispatching
   the collaborator entirely). The declared pass rate (0.5) is exactly what

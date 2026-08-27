@@ -130,7 +130,7 @@ func TestFormatEvent_CostNeverPrintsCurrencyForUnattributed(t *testing.T) {
 func scriptedSequence() []domain.ProgressEvent {
 	run := domain.RunKey{
 		RunID:     "20260807T120000Z-0001",
-		TestID:    "happy-path",
+		TestName:  "happy-path",
 		RunNumber: 1,
 	}
 	return []domain.ProgressEvent{
@@ -175,7 +175,7 @@ func scriptedSequence() []domain.ProgressEvent {
 func TestFormatEvent_AttributedGrammar(t *testing.T) {
 	run := domain.RunKey{
 		RunID:     "20260807T120000Z-0001",
-		TestID:    "happy-path",
+		TestName:  "happy-path",
 		RunNumber: 1,
 	}
 	tests := []struct {
@@ -259,8 +259,8 @@ func TestFormatEvent_AttributedGrammar(t *testing.T) {
 // stream. This is the readability property the run attribution prefix exists
 // to provide.
 func TestFormatEvent_InterleavedRunLines(t *testing.T) {
-	runA := domain.RunKey{RunID: "20260807T120000Z-0001", TestID: "test-a", RunNumber: 1}
-	runB := domain.RunKey{RunID: "20260807T120000Z-0002", TestID: "test-b", RunNumber: 1}
+	runA := domain.RunKey{RunID: "20260807T120000Z-0001", TestName: "test-a", RunNumber: 1}
+	runB := domain.RunKey{RunID: "20260807T120000Z-0002", TestName: "test-b", RunNumber: 1}
 
 	events := []domain.ProgressEvent{
 		{Kind: domain.ProgressTestStarted, TestID: "test-a", Repetition: 1, Repetitions: 1, Run: runA},

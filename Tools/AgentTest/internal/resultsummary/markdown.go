@@ -257,12 +257,12 @@ func renderProblemAreasSection(sb *strings.Builder, v VersionSummary) {
 		return
 	}
 
-	sb.WriteString("| Suite | Test | Best Rate | Best Combo | Worst Rate | Worst Combo | Spread |\n")
-	sb.WriteString("|-------|------|-----------|------------|------------|-------------|--------|\n")
+	sb.WriteString("| Suite | ID | Test | Best Rate | Best Combo | Worst Rate | Worst Combo | Spread |\n")
+	sb.WriteString("|-------|----|------|-----------|------------|------------|-------------|--------|\n")
 
 	for _, pt := range v.ProblemTests {
-		sb.WriteString(fmt.Sprintf("| %s | %s | %s | %s | %s | %s | %s |\n",
-			pt.SuiteID, pt.TestID,
+		sb.WriteString(fmt.Sprintf("| %s | %d | %s | %s | %s | %s | %s | %s |\n",
+			pt.SuiteID, pt.NumericID, pt.TestName,
 			formatPassRate(pt.BestRate), pt.BestCombo,
 			formatPassRate(pt.WorstRate), pt.WorstCombo,
 			formatPassRate(pt.Spread),

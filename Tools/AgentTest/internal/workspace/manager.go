@@ -98,7 +98,7 @@ func NewManager(rootDir string, clock domain.Clock) Manager {
 }
 
 func (m *manager) sandboxFor(key domain.RunKey) domain.Sandbox {
-	name := fmt.Sprintf("%s-%s-%d", sanitizeComponent(key.RunID), sanitizeComponent(key.TestID), key.RunNumber)
+	name := fmt.Sprintf("%s-%s-%d", sanitizeComponent(key.RunID), sanitizeComponent(key.TestName), key.RunNumber)
 	root := filepath.Join(m.rootDir, name)
 	return domain.Sandbox{
 		Key:        key,

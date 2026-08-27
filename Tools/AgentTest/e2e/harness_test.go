@@ -110,7 +110,7 @@ type Scenario struct {
 	SkipInvokeOnRuns []int
 
 	// SkipInvokeForTestIDs, when non-empty, are test ids (matching
-	// domain.RunKey.TestID) for which the stand-in treats every Invoke turn
+	// domain.RunKey.TestName) for which the stand-in treats every Invoke turn
 	// as a no-op — see standin_test.go's standinScript.SkipInvokeForTestIDs.
 	// Lets a suite's several tests share one Scenario.Script while one of
 	// them dispatches no collaborator at all.
@@ -176,7 +176,8 @@ type wireResultDoc struct {
 }
 
 type wireTestReportDoc struct {
-	TestID    string             `json:"test_id"`
+	TestName  string             `json:"test_name"`
+	TestID    int                `json:"test_id"`
 	Aggregate wireAggregateDoc   `json:"aggregate"`
 	Runs      []wireRunReportDoc `json:"runs"`
 }
@@ -189,8 +190,8 @@ type wireAggregateDoc struct {
 }
 
 type wireRunKeyDoc struct {
-	RunID  string `json:"run_id"`
-	TestID string `json:"test_id"`
+	RunID    string `json:"run_id"`
+	TestName string `json:"test_name"`
 }
 
 type wireRunReportDoc struct {

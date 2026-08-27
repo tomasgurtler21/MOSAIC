@@ -1,5 +1,11 @@
 schema_version: 1
-id: capability-exceeded-escalate
+name: capability-exceeded-escalate
+id: 71
+version: 1
+changelog:
+  - version: 1
+    date: "2026-01-01"
+    changes: "Initial."
 description: >
   Scenario S-6. implementation-tdd returned CAPABILITY_EXCEEDED. The
   orchestrator must escalate to the human — produce a message and exit

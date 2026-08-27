@@ -196,6 +196,10 @@ func Validate(in Input) (Plan, authoring.Report) {
 
 	suiteDir := filepath.Dir(in.SuitePath)
 
+	// seenNumericIDs accumulates numeric definition IDs across all parsed
+	// definitions in this run to detect cross-file duplicates.
+	seenNumericIDs := make(map[int]string)
+
 	for i, entry := range suite.Entries {
 		defPath := filepath.Join(suiteDir, filepath.FromSlash(entry.Path))
 		defData, err := os.ReadFile(defPath)
@@ -213,6 +217,22 @@ func Validate(in Input) (Plan, authoring.Report) {
 		def, defReport := authoring.ParseTestDefinition(authoring.Source{Path: defPath, Data: defData})
 		report.Merge(defReport)
 		defDir := filepath.Dir(defPath)
+
+		// Cross-definition duplicate numeric ID check. A zero NumericID means
+		// parsing failed or validation already rejected it; skip the check to
+		// avoid double-reporting a definition whose ID is already broken.
+		if def.NumericID > 0 {
+			if firstPath, dup := seenNumericIDs[def.NumericID]; dup {
+				report.Add(authoring.Diagnostic{
+					Severity: authoring.SeverityError,
+					Code:     "duplicate-numeric-id",
+					Path:     defPath,
+					Message:  fmt.Sprintf("duplicate numeric id %d: also used by %q", def.NumericID, firstPath),
+				})
+			} else {
+				seenNumericIDs[def.NumericID] = defPath
+			}
+		}
 
 		var registry domain.StubRegistry
 		var regPath string
@@ -243,13 +263,13 @@ func Validate(in Input) (Plan, authoring.Report) {
 				report.Merge(regReport)
 				haveRegistry = true
 
-				if registry.TestID != "" && registry.TestID != def.ID {
+				if registry.TestID != "" && registry.TestID != def.Name {
 					report.Add(authoring.Diagnostic{
 						Severity: authoring.SeverityError,
 						Code:     "test-id-mismatch",
 						Path:     regPath,
 						Pointer:  "test_id",
-						Message:  fmt.Sprintf("stub registry test_id %q does not match test definition id %q", registry.TestID, def.ID),
+						Message:  fmt.Sprintf("stub registry test_id %q does not match test definition name %q", registry.TestID, def.Name),
 					})
 				}
 			}
@@ -360,7 +380,7 @@ func addEnvironmentDiagnostics(report *authoring.Report, env domain.EnvironmentR
 	}
 }
 
-// filterByTestIDs restricts tests to those whose Definition.ID is named in
+// filterByTestIDs restricts tests to those whose Definition.Name is named in
 // ids, preserving order. An empty ids leaves tests untouched: every test
 // runs unless a subset was explicitly declared. Cross-file validation above
 // still covers every entry regardless of this filter, so an authoring error
@@ -375,7 +395,7 @@ func filterByTestIDs(tests []ResolvedTest, ids []string) []ResolvedTest {
 	}
 	filtered := make([]ResolvedTest, 0, len(tests))
 	for _, t := range tests {
-		if wanted[t.Definition.ID] {
+		if wanted[t.Definition.Name] {
 			filtered = append(filtered, t)
 		}
 	}

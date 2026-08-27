@@ -5,11 +5,13 @@
   "finished_at": "2026-08-07T12:05:00Z",
   "tests": [
     {
-      "test_id": "checkout-happy-path",
+      "test_name": "checkout-happy-path",
+      "test_id": 0,
       "description": "a valid cart checks out",
       "layer": "subagent",
       "aggregate": {
-        "test_id": "checkout-happy-path",
+        "test_name": "checkout-happy-path",
+        "test_id": 0,
         "verdict": "PASS",
         "reasons": [],
         "counted": 1,
@@ -23,7 +25,7 @@
       },
       "runs": [
         {
-          "run": { "run_id": "run-001", "test_id": "checkout-happy-path", "run_number": 1 },
+          "run": { "run_id": "run-001", "test_name": "checkout-happy-path", "run_number": 1 },
           "verdict": "PASS",
           "reasons": [],
           "assertions": [],
@@ -35,16 +37,20 @@
           "subject_model": "unknown",
           "stub_model": "unknown",
           "harness_id": "unknown",
-          "termination_reason": "unknown"
+          "termination_reason": "unknown",
+          "test_version": 0,
+          "test_id": 0
         }
       ]
     },
     {
-      "test_id": "checkout-rejects-invalid-cart",
+      "test_name": "checkout-rejects-invalid-cart",
+      "test_id": 0,
       "description": "an empty cart is rejected rather than completed",
       "layer": "subagent",
       "aggregate": {
-        "test_id": "checkout-rejects-invalid-cart",
+        "test_name": "checkout-rejects-invalid-cart",
+        "test_id": 0,
         "verdict": "FAIL",
         "reasons": ["ASSERTION"],
         "counted": 1,
@@ -58,7 +64,7 @@
       },
       "runs": [
         {
-          "run": { "run_id": "run-001", "test_id": "checkout-rejects-invalid-cart", "run_number": 1 },
+          "run": { "run_id": "run-001", "test_name": "checkout-rejects-invalid-cart", "run_number": 1 },
           "verdict": "FAIL",
           "reasons": ["ASSERTION"],
           "assertions": [
@@ -79,16 +85,20 @@
           "subject_model": "unknown",
           "stub_model": "unknown",
           "harness_id": "unknown",
-          "termination_reason": "unknown"
+          "termination_reason": "unknown",
+          "test_version": 0,
+          "test_id": 0
         }
       ]
     },
     {
-      "test_id": "checkout-times-out",
+      "test_name": "checkout-times-out",
+      "test_id": 0,
       "description": "the subject exceeds its declared timeout",
       "layer": "subagent",
       "aggregate": {
-        "test_id": "checkout-times-out",
+        "test_name": "checkout-times-out",
+        "test_id": 0,
         "verdict": "TIMEOUT",
         "reasons": ["TIMEOUT"],
         "counted": 1,
@@ -102,7 +112,7 @@
       },
       "runs": [
         {
-          "run": { "run_id": "run-001", "test_id": "checkout-times-out", "run_number": 1 },
+          "run": { "run_id": "run-001", "test_name": "checkout-times-out", "run_number": 1 },
           "verdict": "TIMEOUT",
           "reasons": ["TIMEOUT"],
           "assertions": [],
@@ -114,16 +124,20 @@
           "subject_model": "unknown",
           "stub_model": "unknown",
           "harness_id": "unknown",
-          "termination_reason": "unknown"
+          "termination_reason": "unknown",
+          "test_version": 0,
+          "test_id": 0
         }
       ]
     },
     {
-      "test_id": "checkout-state-integrity-fault",
+      "test_name": "checkout-state-integrity-fault",
+      "test_id": 0,
       "description": "a lock reclaim recurs and ends the test as an infrastructure failure",
       "layer": "subagent",
       "aggregate": {
-        "test_id": "checkout-state-integrity-fault",
+        "test_name": "checkout-state-integrity-fault",
+        "test_id": 0,
         "verdict": "FAIL",
         "reasons": ["INFRASTRUCTURE"],
         "counted": 0,
@@ -135,7 +149,7 @@
         "total_cost": { "total_usd": 0, "attribution": "attributed", "detail": "" },
         "exclusions": [
           {
-            "key": { "run_id": "run-001", "test_id": "checkout-state-integrity-fault", "run_number": 1 },
+            "key": { "run_id": "run-001", "test_name": "checkout-state-integrity-fault", "run_number": 1 },
             "reason": "state_integrity",
             "termination_reason": "",
             "detail": "lock was reclaimed; one or more state updates may have been lost"
@@ -144,7 +158,7 @@
       },
       "runs": [
         {
-          "run": { "run_id": "run-001", "test_id": "checkout-state-integrity-fault", "run_number": 1 },
+          "run": { "run_id": "run-001", "test_name": "checkout-state-integrity-fault", "run_number": 1 },
           "verdict": "FAIL",
           "reasons": ["STATE_INTEGRITY"],
           "assertions": [],
@@ -156,16 +170,20 @@
           "subject_model": "unknown",
           "stub_model": "unknown",
           "harness_id": "unknown",
-          "termination_reason": "unknown"
+          "termination_reason": "unknown",
+          "test_version": 0,
+          "test_id": 0
         }
       ]
     },
     {
-      "test_id": "checkout-cost-unattributed",
+      "test_name": "checkout-cost-unattributed",
+      "test_id": 0,
       "description": "the subject passes but its cost could not be attributed",
       "layer": "subagent",
       "aggregate": {
-        "test_id": "checkout-cost-unattributed",
+        "test_name": "checkout-cost-unattributed",
+        "test_id": 0,
         "verdict": "PASS",
         "reasons": [],
         "counted": 1,
@@ -179,7 +197,7 @@
       },
       "runs": [
         {
-          "run": { "run_id": "run-001", "test_id": "checkout-cost-unattributed", "run_number": 1 },
+          "run": { "run_id": "run-001", "test_name": "checkout-cost-unattributed", "run_number": 1 },
           "verdict": "PASS",
           "reasons": [],
           "assertions": [],
@@ -193,7 +211,9 @@
           "subject_model": "unknown",
           "stub_model": "unknown",
           "harness_id": "unknown",
-          "termination_reason": "unknown"
+          "termination_reason": "unknown",
+          "test_version": 0,
+          "test_id": 0
         }
       ]
     }

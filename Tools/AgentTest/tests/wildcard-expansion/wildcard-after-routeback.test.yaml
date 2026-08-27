@@ -1,5 +1,11 @@
 schema_version: 1
-id: wildcard-after-routeback
+name: wildcard-after-routeback
+id: 76
+version: 1
+changelog:
+  - version: 1
+    date: "2026-01-01"
+    changes: "Initial."
 description: >
   Scenario W-3. After a route-back to planner that added Stage-3, the
   orchestrator dispatches plan-review. Wildcard expansion of Stage-*/Plan.md
@@ -78,5 +84,6 @@ assertions:
         - Orchestration-{run_id}/Stage-1/PlanProgress.md
         - Orchestration-{run_id}/Stage-2/PlanProgress.md
         - Orchestration-{run_id}/Stage-3/PlanProgress.md
+        - Orchestration-{run_id}/TestResults.md
       required_output_artifacts:
         - Orchestration-{run_id}/plan-review.md

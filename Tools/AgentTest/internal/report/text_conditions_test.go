@@ -26,17 +26,17 @@ func TestRenderText_SurfacesRunConditionKindAndDetail(t *testing.T) {
 		FinishedAt:    fixtureFinished(),
 		Tests: []report.TestReport{
 			{
-				TestID: "unterminated-invocation",
+				TestName: "unterminated-invocation",
 				Layer:  domain.LayerSubagent,
 				Aggregate: domain.AggregateResult{
-					TestID:  "unterminated-invocation",
+					TestName:  "unterminated-invocation",
 					Verdict: domain.VerdictPass,
 					Counted: 1,
 					Passed:  1,
 				},
 				Runs: []report.RunReport{
 					{
-						Key:     domain.RunKey{RunID: "run-001", TestID: "unterminated-invocation", RunNumber: 1},
+						Key:     domain.RunKey{RunID: "run-001", TestName: "unterminated-invocation", RunNumber: 1},
 						Verdict: domain.VerdictPass,
 						Conditions: []domain.RunCondition{
 							{Kind: domain.ConditionUnterminatedInterval, Detail: "invocation seq 3 has no matching end record"},
@@ -72,7 +72,7 @@ func TestRenderText_SurfacesRunConditionKindAndDetail(t *testing.T) {
 func TestRenderText_DegradedExtractionFailureDistinctFromAssertionMismatch(t *testing.T) {
 	// Arrange
 	ordinaryMismatch := report.RunReport{
-		Key:     domain.RunKey{RunID: "run-001", TestID: "ordinary-mismatch", RunNumber: 1},
+		Key:     domain.RunKey{RunID: "run-001", TestName: "ordinary-mismatch", RunNumber: 1},
 		Verdict: domain.VerdictFail,
 		Reasons: []domain.FailureReason{domain.ReasonAssertion},
 		Assertions: []domain.AssertionResult{
@@ -88,7 +88,7 @@ func TestRenderText_DegradedExtractionFailureDistinctFromAssertionMismatch(t *te
 		Duration: time.Second,
 	}
 	degradedExtraction := report.RunReport{
-		Key:     domain.RunKey{RunID: "run-002", TestID: "degraded-extraction", RunNumber: 1},
+		Key:     domain.RunKey{RunID: "run-002", TestName: "degraded-extraction", RunNumber: 1},
 		Verdict: domain.VerdictFail,
 		Reasons: []domain.FailureReason{domain.ReasonAssertion},
 		Assertions: []domain.AssertionResult{
@@ -113,15 +113,15 @@ func TestRenderText_DegradedExtractionFailureDistinctFromAssertionMismatch(t *te
 		FinishedAt:    fixtureFinished(),
 		Tests: []report.TestReport{
 			{
-				TestID:    "ordinary-mismatch",
+				TestName:    "ordinary-mismatch",
 				Layer:     domain.LayerSubagent,
-				Aggregate: domain.AggregateResult{TestID: "ordinary-mismatch", Verdict: domain.VerdictFail, Reasons: []domain.FailureReason{domain.ReasonAssertion}, Counted: 1},
+				Aggregate: domain.AggregateResult{TestName: "ordinary-mismatch", Verdict: domain.VerdictFail, Reasons: []domain.FailureReason{domain.ReasonAssertion}, Counted: 1},
 				Runs:      []report.RunReport{ordinaryMismatch},
 			},
 			{
-				TestID:    "degraded-extraction",
+				TestName:    "degraded-extraction",
 				Layer:     domain.LayerSubagent,
-				Aggregate: domain.AggregateResult{TestID: "degraded-extraction", Verdict: domain.VerdictFail, Reasons: []domain.FailureReason{domain.ReasonAssertion}, Counted: 1},
+				Aggregate: domain.AggregateResult{TestName: "degraded-extraction", Verdict: domain.VerdictFail, Reasons: []domain.FailureReason{domain.ReasonAssertion}, Counted: 1},
 				Runs:      []report.RunReport{degradedExtraction},
 			},
 		},
@@ -154,7 +154,7 @@ func TestRenderText_DegradedExtractionFailureDistinctFromAssertionMismatch(t *te
 }
 
 // splitAtTestSections carves out of out the portion belonging to each named
-// test's line-group, from its own "TestID:" header up to (but not
+// test's line-group, from its own "TestName:" header up to (but not
 // including) the next one. Both ids must appear in out.
 func splitAtTestSections(t *testing.T, out, firstID, secondID string) (first, second string) {
 	t.Helper()

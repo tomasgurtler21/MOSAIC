@@ -1,5 +1,11 @@
 schema_version: 1
-id: findings-route-back
+name: findings-route-back
+id: 73
+version: 1
+changelog:
+  - version: 1
+    date: "2026-01-01"
+    changes: "Initial."
 description: >
   Scenarios S-1 + G-1. plan-review returns COMPLETED_NEEDS_ACTION. The
   orchestrator must route back to planner-tdd-soft (On Findings target), not

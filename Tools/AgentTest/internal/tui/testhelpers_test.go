@@ -395,7 +395,7 @@ func (s scriptedSuite) events() []domain.ProgressEvent {
 		}
 		run := domain.RunKey{
 			RunID:     runID,
-			TestID:    tc.testID,
+			TestName:  tc.testID,
 			RunNumber: 1,
 		}
 		out = append(out, domain.ProgressEvent{

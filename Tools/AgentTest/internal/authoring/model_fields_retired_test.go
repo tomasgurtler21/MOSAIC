@@ -22,7 +22,13 @@ func TestParseTestDefinition_SubjectModelField_RejectedAsUnknownField(t *testing
 		Path: "d.test.yaml",
 		Data: []byte(`
 schema_version: 1
-id: d
+name: d
+id: 1
+version: 1
+changelog:
+  - version: 1
+    date: "2026-01-01"
+    changes: "Initial."
 layer: orchestrator
 subject:
   identity: orchestrator
@@ -54,7 +60,13 @@ func TestParseTestDefinition_SubjectModelField_DiagnosticNamesOffendingField(t *
 		Path: "d.test.yaml",
 		Data: []byte(`
 schema_version: 1
-id: d
+name: d
+id: 1
+version: 1
+changelog:
+  - version: 1
+    date: "2026-01-01"
+    changes: "Initial."
 layer: orchestrator
 subject:
   identity: orchestrator
@@ -86,7 +98,13 @@ func TestParseTestDefinition_SubjectStubModelField_RejectedAsUnknownField(t *tes
 		Path: "d.test.yaml",
 		Data: []byte(`
 schema_version: 1
-id: d
+name: d
+id: 1
+version: 1
+changelog:
+  - version: 1
+    date: "2026-01-01"
+    changes: "Initial."
 layer: orchestrator
 subject:
   identity: orchestrator
@@ -117,7 +135,13 @@ func TestParseTestDefinition_SubjectStubModelField_DiagnosticNamesOffendingField
 		Path: "d.test.yaml",
 		Data: []byte(`
 schema_version: 1
-id: d
+name: d
+id: 1
+version: 1
+changelog:
+  - version: 1
+    date: "2026-01-01"
+    changes: "Initial."
 layer: orchestrator
 subject:
   identity: orchestrator
@@ -148,7 +172,13 @@ func TestParseTestDefinition_BothModelFields_EachRejectedAsUnknownField(t *testi
 		Path: "d.test.yaml",
 		Data: []byte(`
 schema_version: 1
-id: d
+name: d
+id: 1
+version: 1
+changelog:
+  - version: 1
+    date: "2026-01-01"
+    changes: "Initial."
 layer: orchestrator
 subject:
   identity: orchestrator
@@ -198,7 +228,13 @@ func TestParseTestDefinition_NeitherModelField_ValidatesCleanly(t *testing.T) {
 		Path: "d.test.yaml",
 		Data: []byte(`
 schema_version: 1
-id: d
+name: d
+id: 1
+version: 1
+changelog:
+  - version: 1
+    date: "2026-01-01"
+    changes: "Initial."
 layer: orchestrator
 subject:
   identity: orchestrator
@@ -231,7 +267,13 @@ func TestParseTestDefinition_NeitherModelField_YieldsRunnablePlan(t *testing.T) 
 		Path: "d.test.yaml",
 		Data: []byte(`
 schema_version: 1
-id: minimal-no-model
+name: minimal-no-model
+id: 1
+version: 1
+changelog:
+  - version: 1
+    date: "2026-01-01"
+    changes: "Initial."
 layer: orchestrator
 subject:
   identity: orchestrator
@@ -251,9 +293,9 @@ assertions:
 	if report.HasErrors() {
 		t.Fatalf("unexpected errors: %v", report.Diagnostics)
 	}
-	if def.ID != "minimal-no-model" {
-		t.Errorf("def.ID = %q, want %q; a definition without model fields must parse to a complete record",
-			def.ID, "minimal-no-model")
+	if def.Name != "minimal-no-model" {
+		t.Errorf("def.Name = %q, want %q; a definition without model fields must parse to a complete record",
+			def.Name, "minimal-no-model")
 	}
 	if def.Subject.Identity != "orchestrator" {
 		t.Errorf("def.Subject.Identity = %q, want %q",

@@ -1,5 +1,11 @@
 schema_version: 1
-id: single-decision
+name: single-decision
+id: 29
+version: 1
+changelog:
+  - version: 1
+    date: "2026-01-01"
+    changes: "Initial."
 description: >
   The scripted subject dispatches one collaborator that completes normally,
   then a second whose pre-invocation call arrives after the declared

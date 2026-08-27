@@ -30,11 +30,18 @@ func TestParseTestDefinition_SubjectAgent_ParsesIntoCatalogAgentKey(t *testing.T
 		Path: "d.test.yaml",
 		Data: []byte(`
 schema_version: 1
-id: d
+name: d
+id: 1
+version: 1
+changelog:
+  - version: 1
+    date: "2026-01-01"
+    changes: "Initial."
 layer: orchestrator
 subject:
   identity: orchestrator
   agent: orchestrator
+  infrastructure_agents: []
   opening_message: "Build the thing."
   invocation_kind: orchestrator
 stub_registry: stubs/d.stubs.json
@@ -59,11 +66,18 @@ func TestParseTestDefinition_SubjectAgentWithWorkflows_DefinitionPathNotAuthored
 		Path: "d.test.yaml",
 		Data: []byte(`
 schema_version: 1
-id: d
+name: d
+id: 1
+version: 1
+changelog:
+  - version: 1
+    date: "2026-01-01"
+    changes: "Initial."
 layer: orchestrator
 subject:
   identity: orchestrator
   agent: orchestrator
+  infrastructure_agents: []
   workflows: [tdd-soft]
 stub_registry: stubs/d.stubs.json
 `),
@@ -89,11 +103,18 @@ func TestParseTestDefinition_SubjectWorkflowsPinned_ParsesIntoSlice(t *testing.T
 		Path: "d.test.yaml",
 		Data: []byte(`
 schema_version: 1
-id: d
+name: d
+id: 1
+version: 1
+changelog:
+  - version: 1
+    date: "2026-01-01"
+    changes: "Initial."
 layer: orchestrator
 subject:
   identity: orchestrator
   agent: orchestrator
+  infrastructure_agents: []
   workflows: [tdd-soft, tdd-hard]
 stub_registry: stubs/d.stubs.json
 `),
@@ -122,11 +143,18 @@ func TestParseTestDefinition_SubjectWorkflowsAbsent_IsNil(t *testing.T) {
 		Path: "d.test.yaml",
 		Data: []byte(`
 schema_version: 1
-id: d
+name: d
+id: 1
+version: 1
+changelog:
+  - version: 1
+    date: "2026-01-01"
+    changes: "Initial."
 layer: orchestrator
 subject:
   identity: orchestrator
   agent: orchestrator
+  infrastructure_agents: []
 stub_registry: stubs/d.stubs.json
 `),
 	}
@@ -149,11 +177,18 @@ func TestParseTestDefinition_SubjectWorkflowsExplicitlyEmpty_IsNonNilSlice(t *te
 		Path: "d.test.yaml",
 		Data: []byte(`
 schema_version: 1
-id: d
+name: d
+id: 1
+version: 1
+changelog:
+  - version: 1
+    date: "2026-01-01"
+    changes: "Initial."
 layer: orchestrator
 subject:
   identity: orchestrator
   agent: orchestrator
+  infrastructure_agents: []
   workflows: []
 stub_registry: stubs/d.stubs.json
 `),
@@ -179,11 +214,18 @@ func TestParseTestDefinition_StubAgents_ParseIntoDefinition(t *testing.T) {
 		Path: "d.test.yaml",
 		Data: []byte(`
 schema_version: 1
-id: d
+name: d
+id: 1
+version: 1
+changelog:
+  - version: 1
+    date: "2026-01-01"
+    changes: "Initial."
 layer: orchestrator
 subject:
   identity: orchestrator
   agent: orchestrator
+  infrastructure_agents: []
 stub_registry: stubs/d.stubs.json
 stub_agents:
   - identity:
@@ -233,11 +275,18 @@ func TestParseTestDefinition_StubAgentEmptyAgentIdentity_ParsesAsPlainToolCall(t
 		Path: "d.test.yaml",
 		Data: []byte(`
 schema_version: 1
-id: d
+name: d
+id: 1
+version: 1
+changelog:
+  - version: 1
+    date: "2026-01-01"
+    changes: "Initial."
 layer: orchestrator
 subject:
   identity: orchestrator
   agent: orchestrator
+  infrastructure_agents: []
 stub_registry: stubs/d.stubs.json
 stub_agents:
   - identity:
@@ -277,11 +326,18 @@ func TestParseTestDefinition_StubAgentsAbsent_IsNil(t *testing.T) {
 		Path: "d.test.yaml",
 		Data: []byte(`
 schema_version: 1
-id: d
+name: d
+id: 1
+version: 1
+changelog:
+  - version: 1
+    date: "2026-01-01"
+    changes: "Initial."
 layer: orchestrator
 subject:
   identity: orchestrator
   agent: orchestrator
+  infrastructure_agents: []
 stub_registry: stubs/d.stubs.json
 `),
 	}
@@ -304,7 +360,13 @@ func TestParseTestDefinition_SubjectDefinitionKey_RejectedAsRemovedKey(t *testin
 		Path: "d.test.yaml",
 		Data: []byte(`
 schema_version: 1
-id: d
+name: d
+id: 1
+version: 1
+changelog:
+  - version: 1
+    date: "2026-01-01"
+    changes: "Initial."
 layer: orchestrator
 subject:
   identity: orchestrator
@@ -335,7 +397,13 @@ func TestParseTestDefinition_SubjectDefinitionKey_DiagnosticHasCorrectPointer(t 
 		Path: "d.test.yaml",
 		Data: []byte(`
 schema_version: 1
-id: d
+name: d
+id: 1
+version: 1
+changelog:
+  - version: 1
+    date: "2026-01-01"
+    changes: "Initial."
 layer: orchestrator
 subject:
   identity: orchestrator
@@ -374,7 +442,13 @@ func TestParseTestDefinition_SubjectInfrastructureAgentsPopulated_ParsesIntoSlic
 		Path: "d.test.yaml",
 		Data: []byte(`
 schema_version: 1
-id: d
+name: d
+id: 1
+version: 1
+changelog:
+  - version: 1
+    date: "2026-01-01"
+    changes: "Initial."
 layer: orchestrator
 subject:
   identity: orchestrator
@@ -408,7 +482,13 @@ func TestParseTestDefinition_SubjectInfrastructureAgentsExplicitlyEmpty_IsNonNil
 		Path: "d.test.yaml",
 		Data: []byte(`
 schema_version: 1
-id: d
+name: d
+id: 1
+version: 1
+changelog:
+  - version: 1
+    date: "2026-01-01"
+    changes: "Initial."
 layer: orchestrator
 subject:
   identity: orchestrator
@@ -439,7 +519,13 @@ func TestParseTestDefinition_SubjectInfrastructureAgentsAbsent_ProducesMissingRe
 		Path: "d.test.yaml",
 		Data: []byte(`
 schema_version: 1
-id: d
+name: d
+id: 1
+version: 1
+changelog:
+  - version: 1
+    date: "2026-01-01"
+    changes: "Initial."
 layer: orchestrator
 subject:
   identity: orchestrator
@@ -471,7 +557,13 @@ func TestParseTestDefinition_SubjectInfrastructureAgents_AcceptedAsKnownField(t 
 		Path: "d.test.yaml",
 		Data: []byte(`
 schema_version: 1
-id: d
+name: d
+id: 1
+version: 1
+changelog:
+  - version: 1
+    date: "2026-01-01"
+    changes: "Initial."
 layer: orchestrator
 subject:
   identity: orchestrator
@@ -500,7 +592,13 @@ func TestParseTestDefinition_SubjectDefinitionKey_DiagnosticNamesReplacement(t *
 		Path: "d.test.yaml",
 		Data: []byte(`
 schema_version: 1
-id: d
+name: d
+id: 1
+version: 1
+changelog:
+  - version: 1
+    date: "2026-01-01"
+    changes: "Initial."
 layer: orchestrator
 subject:
   identity: orchestrator

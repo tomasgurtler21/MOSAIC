@@ -181,25 +181,25 @@ func TestSpeedup_VerdictsAndOrderingIdenticalAtAnyBound(t *testing.T) {
 		seqTest := outSeq.Result.Tests[i]
 		parTest := outPar.Result.Tests[i]
 
-		if seqTest.TestID != parTest.TestID {
-			t.Errorf("Tests[%d]: TestID sequential=%q parallel=%q; "+
+		if seqTest.TestName != parTest.TestName {
+			t.Errorf("Tests[%d]: TestName sequential=%q parallel=%q; "+
 				"report ordering must follow plan order at any bound",
-				i, seqTest.TestID, parTest.TestID)
+				i, seqTest.TestName, parTest.TestName)
 		}
 		if seqTest.Aggregate.Verdict != parTest.Aggregate.Verdict {
 			t.Errorf("Tests[%d] (%s) aggregate verdict: sequential=%q parallel(bound=%d)=%q; "+
 				"must be identical at any bound",
-				i, seqTest.TestID, seqTest.Aggregate.Verdict, speedupBound, parTest.Aggregate.Verdict)
+				i, seqTest.TestName, seqTest.Aggregate.Verdict, speedupBound, parTest.Aggregate.Verdict)
 		}
 		if seqTest.Aggregate.Counted != parTest.Aggregate.Counted {
 			t.Errorf("Tests[%d] (%s) aggregate counted: sequential=%d parallel(bound=%d)=%d; "+
 				"the concurrent scheduler must not drop or duplicate repetitions",
-				i, seqTest.TestID, seqTest.Aggregate.Counted, speedupBound, parTest.Aggregate.Counted)
+				i, seqTest.TestName, seqTest.Aggregate.Counted, speedupBound, parTest.Aggregate.Counted)
 		}
 		if len(seqTest.Runs) != len(parTest.Runs) {
 			t.Errorf("Tests[%d] (%s) run report count: sequential=%d parallel(bound=%d)=%d; "+
 				"all repetitions must appear in the result at any bound",
-				i, seqTest.TestID, len(seqTest.Runs), speedupBound, len(parTest.Runs))
+				i, seqTest.TestName, len(seqTest.Runs), speedupBound, len(parTest.Runs))
 		}
 	}
 }
@@ -227,7 +227,7 @@ func TestSpeedup_EvidenceNotCorruptedOrMixedAcrossRuns(t *testing.T) {
 			speedupBound, out.ExitCode, cli.ExitSuccess, out.Stdout, out.Stderr)
 	}
 
-	seen := map[string]string{} // run ID → "testID[i]" for duplicate reporting
+	seen := map[string]string{} // run ID → "testName[i]" for duplicate reporting
 	totalRunReports := 0
 
 	for _, tr := range out.Result.Tests {
@@ -237,7 +237,7 @@ func TestSpeedup_EvidenceNotCorruptedOrMixedAcrossRuns(t *testing.T) {
 			// Each run must have a non-empty run identity.
 			if run.Run.RunID == "" {
 				t.Errorf("test %q run[%d]: RunID is empty; every run must have a non-empty run identity",
-					tr.TestID, i)
+					tr.TestName, i)
 				continue
 			}
 
@@ -246,17 +246,17 @@ func TestSpeedup_EvidenceNotCorruptedOrMixedAcrossRuns(t *testing.T) {
 			if prior, dup := seen[run.Run.RunID]; dup {
 				t.Errorf("test %q run[%d]: RunID %q duplicates the one from %s — "+
 					"concurrent runs must receive distinct identities",
-					tr.TestID, i, run.Run.RunID, prior)
+					tr.TestName, i, run.Run.RunID, prior)
 			} else {
-				seen[run.Run.RunID] = tr.TestID
+				seen[run.Run.RunID] = tr.TestName
 			}
 
-			// Each run's embedded TestID must match the test that produced it;
+			// Each run's embedded TestName must match the test that produced it;
 			// a mismatch indicates evidence was routed to the wrong test entry.
-			if run.Run.TestID != tr.TestID {
-				t.Errorf("test %q run[%d] (RunID %q): embedded TestID = %q, want %q — "+
+			if run.Run.TestName != tr.TestName {
+				t.Errorf("test %q run[%d] (RunID %q): embedded TestName = %q, want %q — "+
 					"run evidence is attributed to the wrong test",
-					tr.TestID, i, run.Run.RunID, run.Run.TestID, tr.TestID)
+					tr.TestName, i, run.Run.RunID, run.Run.TestName, tr.TestName)
 			}
 
 			// Each run must earn a passing verdict; a wrong verdict indicates
@@ -265,7 +265,7 @@ func TestSpeedup_EvidenceNotCorruptedOrMixedAcrossRuns(t *testing.T) {
 			if run.Verdict != string(domain.VerdictPass) {
 				t.Errorf("test %q run[%d] (RunID %q): verdict = %q, want %q — "+
 					"a non-passing verdict in an otherwise-clean suite suggests evidence corruption",
-					tr.TestID, i, run.Run.RunID, run.Verdict, domain.VerdictPass)
+					tr.TestName, i, run.Run.RunID, run.Verdict, domain.VerdictPass)
 			}
 		}
 	}

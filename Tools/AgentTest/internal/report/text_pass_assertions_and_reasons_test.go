@@ -36,17 +36,17 @@ func TestRenderText_PassingAssertion_ShowsExpectedAndActual(t *testing.T) {
 		FinishedAt:    fixtureFinished(),
 		Tests: []report.TestReport{
 			{
-				TestID: "happy-path",
+				TestName: "happy-path",
 				Layer:  domain.LayerSubagent,
 				Aggregate: domain.AggregateResult{
-					TestID:  "happy-path",
+					TestName:  "happy-path",
 					Verdict: domain.VerdictPass,
 					Counted: 1,
 					Passed:  1,
 				},
 				Runs: []report.RunReport{
 					{
-						Key:     domain.RunKey{RunID: "run-001", TestID: "happy-path", RunNumber: 1},
+						Key:     domain.RunKey{RunID: "run-001", TestName: "happy-path", RunNumber: 1},
 						Verdict: domain.VerdictPass,
 						Assertions: []domain.AssertionResult{
 							{
@@ -85,17 +85,17 @@ func TestRenderText_PassingAssertion_ShowsTarget(t *testing.T) {
 		FinishedAt:    fixtureFinished(),
 		Tests: []report.TestReport{
 			{
-				TestID: "with-target",
+				TestName: "with-target",
 				Layer:  domain.LayerSubagent,
 				Aggregate: domain.AggregateResult{
-					TestID:  "with-target",
+					TestName:  "with-target",
 					Verdict: domain.VerdictPass,
 					Counted: 1,
 					Passed:  1,
 				},
 				Runs: []report.RunReport{
 					{
-						Key:     domain.RunKey{RunID: "run-001", TestID: "with-target", RunNumber: 1},
+						Key:     domain.RunKey{RunID: "run-001", TestName: "with-target", RunNumber: 1},
 						Verdict: domain.VerdictPass,
 						Assertions: []domain.AssertionResult{
 							{
@@ -135,17 +135,17 @@ func TestRenderText_PassingAssertion_ShowsDetail(t *testing.T) {
 		FinishedAt:    fixtureFinished(),
 		Tests: []report.TestReport{
 			{
-				TestID: "detail-bearing-pass",
+				TestName: "detail-bearing-pass",
 				Layer:  domain.LayerSubagent,
 				Aggregate: domain.AggregateResult{
-					TestID:  "detail-bearing-pass",
+					TestName:  "detail-bearing-pass",
 					Verdict: domain.VerdictPass,
 					Counted: 1,
 					Passed:  1,
 				},
 				Runs: []report.RunReport{
 					{
-						Key:     domain.RunKey{RunID: "run-001", TestID: "detail-bearing-pass", RunNumber: 1},
+						Key:     domain.RunKey{RunID: "run-001", TestName: "detail-bearing-pass", RunNumber: 1},
 						Verdict: domain.VerdictPass,
 						Assertions: []domain.AssertionResult{
 							{
@@ -181,7 +181,7 @@ func TestRenderText_PassingAssertion_ShowsDetail(t *testing.T) {
 // must not produce identical output lines.
 func TestRenderText_PassingAssertion_DistinctFromFailingAssertion(t *testing.T) {
 	passing := report.RunReport{
-		Key:     domain.RunKey{RunID: "run-001", TestID: "passing-test", RunNumber: 1},
+		Key:     domain.RunKey{RunID: "run-001", TestName: "passing-test", RunNumber: 1},
 		Verdict: domain.VerdictPass,
 		Assertions: []domain.AssertionResult{
 			{
@@ -194,7 +194,7 @@ func TestRenderText_PassingAssertion_DistinctFromFailingAssertion(t *testing.T) 
 		Duration: time.Second,
 	}
 	failing := report.RunReport{
-		Key:     domain.RunKey{RunID: "run-001", TestID: "failing-test", RunNumber: 1},
+		Key:     domain.RunKey{RunID: "run-001", TestName: "failing-test", RunNumber: 1},
 		Verdict: domain.VerdictFail,
 		Reasons: []domain.FailureReason{domain.ReasonAssertion},
 		Assertions: []domain.AssertionResult{
@@ -214,15 +214,15 @@ func TestRenderText_PassingAssertion_DistinctFromFailingAssertion(t *testing.T) 
 		FinishedAt:    fixtureFinished(),
 		Tests: []report.TestReport{
 			{
-				TestID:    "passing-test",
+				TestName:    "passing-test",
 				Layer:     domain.LayerSubagent,
-				Aggregate: domain.AggregateResult{TestID: "passing-test", Verdict: domain.VerdictPass, Counted: 1, Passed: 1},
+				Aggregate: domain.AggregateResult{TestName: "passing-test", Verdict: domain.VerdictPass, Counted: 1, Passed: 1},
 				Runs:      []report.RunReport{passing},
 			},
 			{
-				TestID:    "failing-test",
+				TestName:    "failing-test",
 				Layer:     domain.LayerSubagent,
-				Aggregate: domain.AggregateResult{TestID: "failing-test", Verdict: domain.VerdictFail, Reasons: []domain.FailureReason{domain.ReasonAssertion}, Counted: 1},
+				Aggregate: domain.AggregateResult{TestName: "failing-test", Verdict: domain.VerdictFail, Reasons: []domain.FailureReason{domain.ReasonAssertion}, Counted: 1},
 				Runs:      []report.RunReport{failing},
 			},
 		},
@@ -259,17 +259,17 @@ func TestRenderText_PassingAssertion_WithNoAssertions_Unaffected(t *testing.T) {
 		FinishedAt:    fixtureFinished(),
 		Tests: []report.TestReport{
 			{
-				TestID: "no-assertions",
+				TestName: "no-assertions",
 				Layer:  domain.LayerSubagent,
 				Aggregate: domain.AggregateResult{
-					TestID:  "no-assertions",
+					TestName:  "no-assertions",
 					Verdict: domain.VerdictPass,
 					Counted: 1,
 					Passed:  1,
 				},
 				Runs: []report.RunReport{
 					{
-						Key:      domain.RunKey{RunID: "run-001", TestID: "no-assertions", RunNumber: 1},
+						Key:      domain.RunKey{RunID: "run-001", TestName: "no-assertions", RunNumber: 1},
 						Verdict:  domain.VerdictPass,
 						Duration: time.Second,
 					},
@@ -313,17 +313,17 @@ func TestRenderText_Reasons_RenderedWhenPresent(t *testing.T) {
 		FinishedAt:    fixtureFinished(),
 		Tests: []report.TestReport{
 			{
-				TestID: "assertion-failure",
+				TestName: "assertion-failure",
 				Layer:  domain.LayerSubagent,
 				Aggregate: domain.AggregateResult{
-					TestID:  "assertion-failure",
+					TestName:  "assertion-failure",
 					Verdict: domain.VerdictFail,
 					Reasons: []domain.FailureReason{domain.ReasonAssertion},
 					Counted: 1,
 				},
 				Runs: []report.RunReport{
 					{
-						Key:     domain.RunKey{RunID: "run-001", TestID: "assertion-failure", RunNumber: 1},
+						Key:     domain.RunKey{RunID: "run-001", TestName: "assertion-failure", RunNumber: 1},
 						Verdict: domain.VerdictFail,
 						Reasons: []domain.FailureReason{domain.ReasonAssertion},
 						Assertions: []domain.AssertionResult{
@@ -363,17 +363,17 @@ func TestRenderText_Reasons_MultipleReasonsAllRendered(t *testing.T) {
 		FinishedAt:    fixtureFinished(),
 		Tests: []report.TestReport{
 			{
-				TestID: "multi-reason-failure",
+				TestName: "multi-reason-failure",
 				Layer:  domain.LayerSubagent,
 				Aggregate: domain.AggregateResult{
-					TestID:  "multi-reason-failure",
+					TestName:  "multi-reason-failure",
 					Verdict: domain.VerdictFail,
 					Reasons: []domain.FailureReason{domain.ReasonAssertion, domain.ReasonEchoMismatch},
 					Counted: 1,
 				},
 				Runs: []report.RunReport{
 					{
-						Key:     domain.RunKey{RunID: "run-001", TestID: "multi-reason-failure", RunNumber: 1},
+						Key:     domain.RunKey{RunID: "run-001", TestName: "multi-reason-failure", RunNumber: 1},
 						Verdict: domain.VerdictFail,
 						Reasons: []domain.FailureReason{domain.ReasonAssertion, domain.ReasonEchoMismatch},
 						Duration: time.Second,
@@ -406,17 +406,17 @@ func TestRenderText_Reasons_AbsentWhenNone(t *testing.T) {
 		FinishedAt:    fixtureFinished(),
 		Tests: []report.TestReport{
 			{
-				TestID: "passing-no-reasons",
+				TestName: "passing-no-reasons",
 				Layer:  domain.LayerSubagent,
 				Aggregate: domain.AggregateResult{
-					TestID:  "passing-no-reasons",
+					TestName:  "passing-no-reasons",
 					Verdict: domain.VerdictPass,
 					Counted: 1,
 					Passed:  1,
 				},
 				Runs: []report.RunReport{
 					{
-						Key:      domain.RunKey{RunID: "run-001", TestID: "passing-no-reasons", RunNumber: 1},
+						Key:      domain.RunKey{RunID: "run-001", TestName: "passing-no-reasons", RunNumber: 1},
 						Verdict:  domain.VerdictPass,
 						Duration: time.Second,
 					},
@@ -452,17 +452,17 @@ func TestRenderText_Reasons_DistinctFromConditions(t *testing.T) {
 		FinishedAt:    fixtureFinished(),
 		Tests: []report.TestReport{
 			{
-				TestID: "run-with-both",
+				TestName: "run-with-both",
 				Layer:  domain.LayerSubagent,
 				Aggregate: domain.AggregateResult{
-					TestID:  "run-with-both",
+					TestName:  "run-with-both",
 					Verdict: domain.VerdictFail,
 					Reasons: []domain.FailureReason{domain.ReasonAssertion},
 					Counted: 1,
 				},
 				Runs: []report.RunReport{
 					{
-						Key:     domain.RunKey{RunID: "run-001", TestID: "run-with-both", RunNumber: 1},
+						Key:     domain.RunKey{RunID: "run-001", TestName: "run-with-both", RunNumber: 1},
 						Verdict: domain.VerdictFail,
 						Reasons: []domain.FailureReason{domain.ReasonAssertion},
 						Conditions: []domain.RunCondition{

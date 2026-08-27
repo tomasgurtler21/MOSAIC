@@ -1,5 +1,11 @@
 schema_version: 1
-id: artifact-not-created-fail
+name: artifact-not-created-fail
+id: 15
+version: 1
+changelog:
+  - version: 1
+    date: "2026-01-01"
+    changes: "Initial."
 description: >
   greeting.txt really is created, so asserting its absence must fail by name.
 layer: subagent

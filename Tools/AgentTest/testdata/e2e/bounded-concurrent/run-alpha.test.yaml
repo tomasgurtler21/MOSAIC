@@ -1,5 +1,11 @@
 schema_version: 1
-id: run-alpha
+name: run-alpha
+id: 10
+version: 1
+changelog:
+  - version: 1
+    date: "2026-01-01"
+    changes: "Initial."
 description: >
   First test in the bounded-concurrent scenario. Two repetitions, one
   collaborator ("worker") dispatched per repetition and substituted directly.

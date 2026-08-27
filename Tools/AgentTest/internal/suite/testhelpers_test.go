@@ -107,7 +107,7 @@ func (r *scriptedRunner) Run(ctx context.Context, key domain.RunKey, t preflight
 	r.mu.Lock()
 	r.calls = append(r.calls, key)
 
-	rk := repKey{testID: t.Definition.ID, runNumber: key.RunNumber}
+	rk := repKey{testID: t.Definition.Name, runNumber: key.RunNumber}
 
 	var next scriptedOutcome
 	haveScripted := false
@@ -123,14 +123,14 @@ func (r *scriptedRunner) Run(ctx context.Context, key domain.RunKey, t preflight
 		r.repSeen[rk] = true
 		maxPerRep := 1 + suite.StateIntegrityRetries
 
-		globalQ := r.script[t.Definition.ID]
+		globalQ := r.script[t.Definition.Name]
 		var alloc []scriptedOutcome
 		if len(globalQ) >= maxPerRep {
 			alloc = globalQ[:maxPerRep]
-			r.script[t.Definition.ID] = globalQ[maxPerRep:]
+			r.script[t.Definition.Name] = globalQ[maxPerRep:]
 		} else {
 			alloc = globalQ
-			r.script[t.Definition.ID] = nil
+			r.script[t.Definition.Name] = nil
 		}
 
 		if len(alloc) > 0 {
@@ -188,7 +188,7 @@ func (r *scriptedRunner) allCalls() []domain.RunKey {
 func (r *scriptedRunner) callsFor(testID string) []domain.RunKey {
 	var out []domain.RunKey
 	for _, k := range r.allCalls() {
-		if k.TestID == testID {
+		if k.TestName == testID {
 			out = append(out, k)
 		}
 	}
@@ -263,7 +263,7 @@ func resolvedTest(id string, repetitions int, passRate float64) preflight.Resolv
 	reps := repetitions
 	rate := passRate
 	return preflight.ResolvedTest{
-		Definition: domain.TestDefinition{ID: id, Layer: domain.LayerSubagent},
+		Definition: domain.TestDefinition{Name: id, Layer: domain.LayerSubagent},
 		Settings:   domain.RunSettings{Repetitions: &reps, PassRate: &rate},
 	}
 }

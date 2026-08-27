@@ -1,5 +1,11 @@
 schema_version: 1
-id: execution-log-fail
+name: execution-log-fail
+id: 18
+version: 1
+changelog:
+  - version: 1
+    date: "2026-01-01"
+    changes: "Initial."
 description: >
   The declared agent ids name a row that was never recorded, so execution_log.agent_ids must fail by name.
 layer: subagent

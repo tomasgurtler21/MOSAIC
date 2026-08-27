@@ -1,5 +1,11 @@
 schema_version: 1
-id: blocked-e101-retry
+name: blocked-e101-retry
+id: 68
+version: 1
+changelog:
+  - version: 1
+    date: "2026-01-01"
+    changes: "Initial."
 description: >
   Scenario S-3. implementation-tdd returns BLOCKED with error_code E101
   (INPUT_NOT_FOUND). The orchestrator must apply Tier 1 auto-retry —

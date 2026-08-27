@@ -31,7 +31,8 @@ type wireResult struct {
 }
 
 type wireTestReport struct {
-	TestID      string          `json:"test_id"`
+	TestName    string          `json:"test_name"` // human-readable display name (renamed from test_id string)
+	TestID      int             `json:"test_id"`   // stable numeric identity
 	Description string          `json:"description"`
 	Layer       string          `json:"layer"`
 	Aggregate   wireAggregate   `json:"aggregate"`
@@ -39,7 +40,8 @@ type wireTestReport struct {
 }
 
 type wireAggregate struct {
-	TestID                string            `json:"test_id"`
+	TestName              string            `json:"test_name"` // human-readable display name (renamed from test_id string)
+	TestID                int               `json:"test_id"`   // stable numeric identity
 	Verdict               string            `json:"verdict"`
 	Reasons               []string          `json:"reasons"`
 	Counted               int               `json:"counted"`
@@ -99,6 +101,14 @@ type wireRunReport struct {
 	// TerminationReason names why this run ended. Always present; the literal
 	// "unknown" when no disposition was recorded.
 	TerminationReason string `json:"termination_reason"`
+
+	// TestVersion is the content version of the test definition this run
+	// exercised. Zero means the value was not recorded.
+	TestVersion int `json:"test_version"`
+
+	// TestID (numeric) is the stable numeric identity of the test definition
+	// this run exercised. Zero means the value was not recorded.
+	TestID int `json:"test_id"`
 }
 
 // wireSubjectFailure is what a subject that exited non-zero told us.
@@ -112,7 +122,7 @@ type wireSubjectFailure struct {
 
 type wireRunKey struct {
 	RunID     string `json:"run_id"`
-	TestID    string `json:"test_id"`
+	TestName  string `json:"test_name"` // human-readable display name (renamed from test_id string)
 	RunNumber int    `json:"run_number"`
 }
 
@@ -173,7 +183,8 @@ func toWireTestReport(t TestReport) wireTestReport {
 		runs = append(runs, toWireRunReport(run))
 	}
 	return wireTestReport{
-		TestID:      t.TestID,
+		TestName:    t.TestName,
+		TestID:      t.NumericID,
 		Description: t.Description,
 		Layer:       string(t.Layer),
 		Aggregate:   toWireAggregate(t.Aggregate),
@@ -187,7 +198,7 @@ func toWireAggregate(a domain.AggregateResult) wireAggregate {
 		exclusions = append(exclusions, wireExcludedRun{
 			Key: wireRunKey{
 				RunID:     e.Key.RunID,
-				TestID:    e.Key.TestID,
+				TestName:  e.Key.TestName,
 				RunNumber: e.Key.RunNumber,
 			},
 			Reason:            string(e.Reason),
@@ -196,7 +207,8 @@ func toWireAggregate(a domain.AggregateResult) wireAggregate {
 		})
 	}
 	return wireAggregate{
-		TestID:                a.TestID,
+		TestName:              a.TestName,
+		TestID:                a.NumericID,
 		Verdict:               string(a.Verdict),
 		Reasons:               reasonStrings(a.Reasons),
 		Counted:               a.Counted,
@@ -223,7 +235,7 @@ func toWireRunReport(r RunReport) wireRunReport {
 	return wireRunReport{
 		Run: wireRunKey{
 			RunID:     r.Key.RunID,
-			TestID:    r.Key.TestID,
+			TestName:  r.Key.TestName,
 			RunNumber: r.Key.RunNumber,
 		},
 		Verdict:             string(r.Verdict),
@@ -240,6 +252,8 @@ func toWireRunReport(r RunReport) wireRunReport {
 		StubModel:           subjectVersionOrUnknown(r.StubModel),
 		HarnessID:           subjectVersionOrUnknown(r.HarnessID),
 		TerminationReason:   subjectVersionOrUnknown(r.TerminationReason),
+		TestVersion:         r.TestVersion,
+		TestID:              r.NumericID,
 	}
 }
 

@@ -1,5 +1,11 @@
 schema_version: 1
-id: ref-check
+name: ref-check
+id: 65
+version: 1
+changelog:
+  - version: 1
+    date: "2026-01-01"
+    changes: "Initial."
 description: >
   Verifies that bare-filename refs resolve against the fixtures/ subdirectory
   of the test definition's own directory. The referenced files exist only

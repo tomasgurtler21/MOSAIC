@@ -63,9 +63,9 @@ func TestBuild_CatalogFolder_DoesNotAffectOtherFields(t *testing.T) {
 	const suiteID = "checkout-suite"
 	tests := []report.TestReport{
 		{
-			TestID: "test-1",
+			TestName: "test-1",
 			Aggregate: domain.AggregateResult{
-				TestID:  "test-1",
+				TestName:  "test-1",
 				Verdict: domain.VerdictPass,
 				Counted: 1,
 				Passed:  1,
@@ -76,7 +76,7 @@ func TestBuild_CatalogFolder_DoesNotAffectOtherFields(t *testing.T) {
 				},
 			},
 			Runs: []report.RunReport{{
-				Key:     domain.RunKey{RunID: "run-001", TestID: "test-1", RunNumber: 1},
+				Key:     domain.RunKey{RunID: "run-001", TestName: "test-1", RunNumber: 1},
 				Verdict: domain.VerdictPass,
 				Cost:    domain.CostReport{TotalUSD: 0.05, Attribution: domain.AttributionAttributed},
 			}},

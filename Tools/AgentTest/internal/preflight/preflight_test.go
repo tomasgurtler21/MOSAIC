@@ -50,7 +50,13 @@ tests:
 
 const validDefinition = `
 schema_version: 1
-id: happy-path
+name: happy-path
+id: 1
+version: 1
+changelog:
+  - version: 1
+    date: "2026-01-01"
+    changes: "Initial version."
 layer: orchestrator
 subject:
   identity: orchestrator
@@ -170,11 +176,18 @@ func TestValidate_TestDefinitionReferencesMissingStubRegistry_ReportsError(t *te
 		"s.suite.yaml": validSuite,
 		"happy-path.test.yaml": `
 schema_version: 1
-id: happy-path
+name: happy-path
+id: 1
+version: 1
+changelog:
+  - version: 1
+    date: "2026-01-01"
+    changes: "Initial."
 layer: orchestrator
 subject:
   identity: orchestrator
   agent: orchestrator
+  infrastructure_agents: []
 stub_registry: does-not-exist.stubs.json
 `,
 	})
@@ -198,11 +211,18 @@ func TestValidate_AssertionNamesCollaboratorAbsentFromRegistry_ReportsError(t *t
 		"s.suite.yaml": validSuite,
 		"happy-path.test.yaml": `
 schema_version: 1
-id: happy-path
+name: happy-path
+id: 1
+version: 1
+changelog:
+  - version: 1
+    date: "2026-01-01"
+    changes: "Initial."
 layer: orchestrator
 subject:
   identity: orchestrator
   agent: orchestrator
+  infrastructure_agents: []
 stub_registry: happy-path.stubs.json
 assertions:
   task_messages:
@@ -231,11 +251,18 @@ func TestValidate_UnresolvableRef_ReportsError(t *testing.T) {
 		"s.suite.yaml": validSuite,
 		"happy-path.test.yaml": `
 schema_version: 1
-id: happy-path
+name: happy-path
+id: 1
+version: 1
+changelog:
+  - version: 1
+    date: "2026-01-01"
+    changes: "Initial."
 layer: orchestrator
 subject:
   identity: orchestrator
   agent: orchestrator
+  infrastructure_agents: []
 stub_registry: happy-path.stubs.json
 seed_files:
   - path: Orchestration-{run_id}/Orchestration.md
@@ -263,11 +290,18 @@ func TestValidate_ParallelGroupNamesInvocationNeverInSequence_ReportsError(t *te
 		"s.suite.yaml": validSuite,
 		"happy-path.test.yaml": `
 schema_version: 1
-id: happy-path
+name: happy-path
+id: 1
+version: 1
+changelog:
+  - version: 1
+    date: "2026-01-01"
+    changes: "Initial."
 layer: orchestrator
 subject:
   identity: orchestrator
   agent: orchestrator
+  infrastructure_agents: []
 stub_registry: happy-path.stubs.json
 parallel_groups:
   - name: research-fanout
@@ -342,11 +376,18 @@ func TestValidate_SettingsOutOfLegalRange_ReportsError(t *testing.T) {
 			name: "negative repetitions",
 			definition: `
 schema_version: 1
-id: happy-path
+name: happy-path
+id: 1
+version: 1
+changelog:
+  - version: 1
+    date: "2026-01-01"
+    changes: "Initial."
 layer: orchestrator
 subject:
   identity: orchestrator
   agent: orchestrator
+  infrastructure_agents: []
 stub_registry: happy-path.stubs.json
 repetitions: -1
 `,
@@ -355,11 +396,18 @@ repetitions: -1
 			name: "pass_rate above 1.0",
 			definition: `
 schema_version: 1
-id: happy-path
+name: happy-path
+id: 1
+version: 1
+changelog:
+  - version: 1
+    date: "2026-01-01"
+    changes: "Initial."
 layer: orchestrator
 subject:
   identity: orchestrator
   agent: orchestrator
+  infrastructure_agents: []
 stub_registry: happy-path.stubs.json
 pass_rate: 1.5
 `,
@@ -368,11 +416,18 @@ pass_rate: 1.5
 			name: "negative timeout",
 			definition: `
 schema_version: 1
-id: happy-path
+name: happy-path
+id: 1
+version: 1
+changelog:
+  - version: 1
+    date: "2026-01-01"
+    changes: "Initial."
 layer: orchestrator
 subject:
   identity: orchestrator
   agent: orchestrator
+  infrastructure_agents: []
 stub_registry: happy-path.stubs.json
 timeout: -15m
 `,
@@ -381,11 +436,18 @@ timeout: -15m
 			name: "negative turn_limit",
 			definition: `
 schema_version: 1
-id: happy-path
+name: happy-path
+id: 1
+version: 1
+changelog:
+  - version: 1
+    date: "2026-01-01"
+    changes: "Initial."
 layer: orchestrator
 subject:
   identity: orchestrator
   agent: orchestrator
+  infrastructure_agents: []
 stub_registry: happy-path.stubs.json
 turn_limit: -1
 `,
@@ -440,11 +502,18 @@ tests:
 `,
 		"happy-path.test.yaml": `
 schema_version: 1
-id: happy-path
+name: happy-path
+id: 1
+version: 1
+changelog:
+  - version: 1
+    date: "2026-01-01"
+    changes: "Initial."
 layer: orchestrator
 subject:
   identity: orchestrator
   agent: orchestrator
+  infrastructure_agents: []
 stub_registry: does-not-exist.stubs.json
 seed_files:
   - path: Orchestration-{run_id}/Orchestration.md
@@ -537,11 +606,18 @@ func TestValidate_DeterministicOrdering_TiesBrokenByLineAndPointer(t *testing.T)
 		"s.suite.yaml": validSuite,
 		"happy-path.test.yaml": `
 schema_version: 1
-id: happy-path
+name: happy-path
+id: 1
+version: 1
+changelog:
+  - version: 1
+    date: "2026-01-01"
+    changes: "Initial."
 layer: orchestrator
 subject:
   identity: orchestrator
   agent: orchestrator
+  infrastructure_agents: []
 stub_registry: happy-path.stubs.json
 seed_files:
   - path: Orchestration-{run_id}/First.md

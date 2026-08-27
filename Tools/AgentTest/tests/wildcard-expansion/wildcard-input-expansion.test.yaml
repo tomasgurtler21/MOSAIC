@@ -1,5 +1,11 @@
 schema_version: 1
-id: wildcard-input-expansion
+name: wildcard-input-expansion
+id: 78
+version: 1
+changelog:
+  - version: 1
+    date: "2026-01-01"
+    changes: "Initial."
 description: >
   Scenario W-1. The workflow table specifies Stage-*/Plan.md in the Input
   column for contracts-designer. The orchestrator must expand the wildcard
@@ -66,5 +72,8 @@ assertions:
         - Orchestration-{run_id}/Plan.md
         - Orchestration-{run_id}/Stage-1/Plan.md
         - Orchestration-{run_id}/Stage-2/Plan.md
+      optional_input_artifacts:
+        - Orchestration-{run_id}/Stage-1/PlanProgress.md
+        - Orchestration-{run_id}/Stage-2/PlanProgress.md
       required_output_artifacts:
         - Orchestration-{run_id}/ContractsDesign.md

@@ -1,5 +1,11 @@
 schema_version: 1
-id: multiple-triggers-same-boundary
+name: multiple-triggers-same-boundary
+id: 61
+version: 1
+changelog:
+  - version: 1
+    date: "2026-01-01"
+    changes: "Initial."
 description: >
   I-3: Multiple infrastructure agents fire on the same stage boundary.
   Both checkpoint-stage-end-only and commit-manager-git declare STAGE_END.

@@ -138,8 +138,8 @@ func TestBuildEvidence_MapsSnapshotSettlingsAndCostIntoRunEvidence(t *testing.T)
 
 	evidence := runner.BuildEvidence(req, snap, cost, dur)
 
-	if evidence.Definition.ID != req.Test.Definition.ID {
-		t.Errorf("evidence.Definition.ID = %q, want %q", evidence.Definition.ID, req.Test.Definition.ID)
+	if evidence.Definition.Name != req.Test.Definition.Name {
+		t.Errorf("evidence.Definition.Name = %q, want %q", evidence.Definition.Name, req.Test.Definition.Name)
 	}
 	if len(evidence.SnapshotFiles) != 2 {
 		t.Errorf("evidence.SnapshotFiles = %v, want the snapshot's file listing", evidence.SnapshotFiles)

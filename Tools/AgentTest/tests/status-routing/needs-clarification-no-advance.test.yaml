@@ -1,5 +1,11 @@
 schema_version: 1
-id: needs-clarification-no-advance
+name: needs-clarification-no-advance
+id: 74
+version: 1
+changelog:
+  - version: 1
+    date: "2026-01-01"
+    changes: "Initial."
 description: >
   Scenario S-5. implementation-tdd returned NEEDS_CLARIFICATION during
   EXECUTION — plan is ambiguous. The orchestrator must route back to

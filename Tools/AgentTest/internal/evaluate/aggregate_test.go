@@ -15,14 +15,14 @@ import (
 
 func passResult(n int) domain.TestResult {
 	return domain.TestResult{
-		Key:     domain.RunKey{RunID: "run-1", TestID: "example", RunNumber: n},
+		Key:     domain.RunKey{RunID: "run-1", TestName: "example", RunNumber: n},
 		Verdict: domain.VerdictPass,
 	}
 }
 
 func failResult(n int) domain.TestResult {
 	return domain.TestResult{
-		Key:     domain.RunKey{RunID: "run-1", TestID: "example", RunNumber: n},
+		Key:     domain.RunKey{RunID: "run-1", TestName: "example", RunNumber: n},
 		Verdict: domain.VerdictFail,
 		Reasons: []domain.FailureReason{domain.ReasonAssertion},
 	}
@@ -30,7 +30,7 @@ func failResult(n int) domain.TestResult {
 
 func stateIntegrityResult(n int) domain.TestResult {
 	return domain.TestResult{
-		Key:     domain.RunKey{RunID: "run-1", TestID: "example", RunNumber: n},
+		Key:     domain.RunKey{RunID: "run-1", TestName: "example", RunNumber: n},
 		Verdict: domain.VerdictFail,
 		Reasons: []domain.FailureReason{domain.ReasonStateIntegrity},
 	}
@@ -49,7 +49,7 @@ func passResultWithCost(n int, usd float64) domain.TestResult {
 // occurrence, not a recurrence, is what Aggregate must act on.
 func infrastructureResult(n int) domain.TestResult {
 	return domain.TestResult{
-		Key:     domain.RunKey{RunID: "run-1", TestID: "example", RunNumber: n},
+		Key:     domain.RunKey{RunID: "run-1", TestName: "example", RunNumber: n},
 		Verdict: domain.VerdictFail,
 		Reasons: []domain.FailureReason{domain.ReasonInfrastructure},
 		Conditions: []domain.RunCondition{

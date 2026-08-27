@@ -1,5 +1,11 @@
 schema_version: 1
-id: effect-timing
+name: effect-timing
+id: 43
+version: 1
+changelog:
+  - version: 1
+    date: "2026-01-01"
+    changes: "Initial."
 description: >
   The one collaborator's declared side effect (effect.txt) exists by the
   time the run finishes; the accompanying end-to-end test also probes for it

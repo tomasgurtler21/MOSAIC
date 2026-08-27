@@ -26,7 +26,7 @@ import (
 // class, for detail-view rendering tests.
 func fixtureRunReport(testID string, class report.OutcomeClass) report.RunReport {
 	base := report.RunReport{
-		Key:      domain.RunKey{TestID: testID, RunNumber: 1},
+		Key:      domain.RunKey{TestName: testID, RunNumber: 1},
 		Duration: 3 * time.Second,
 		Cost:     domain.CostReport{TotalUSD: 0.15, Attribution: domain.AttributionAttributed},
 	}
@@ -70,8 +70,8 @@ func modelWithFinishedResult(t *testing.T, run report.RunReport) Model {
 	t.Helper()
 
 	testReport := report.TestReport{
-		TestID: run.Key.TestID,
-		Runs:   []report.RunReport{run},
+		TestName: run.Key.TestName,
+		Runs:     []report.RunReport{run},
 	}
 	result := report.Build("suite-under-test", time.Now(), time.Now(), []report.TestReport{testReport}, "")
 

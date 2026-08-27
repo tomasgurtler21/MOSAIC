@@ -67,7 +67,7 @@ func writeTestLine(w io.Writer, t TestReport) error {
 	requiredPct := fmt.Sprintf("%.0f%%", t.Aggregate.RequiredPassRate*100)
 	stats := fmt.Sprintf("%d/%d passed (%s, required %s)",
 		t.Aggregate.Passed, t.Aggregate.Counted, achievedPct, requiredPct)
-	line := fmt.Sprintf("%s: %s %s", t.TestID, t.Aggregate.Verdict, stats)
+	line := fmt.Sprintf("%s: %s %s", t.TestName, t.Aggregate.Verdict, stats)
 	if classes := testClasses(t); len(classes) > 0 {
 		names := make([]string, len(classes))
 		for i, c := range classes {

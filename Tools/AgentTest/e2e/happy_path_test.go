@@ -45,7 +45,7 @@ func TestHappyPath_SubstitutedInvocation_PassesEndToEnd(t *testing.T) {
 	if out.Result.InfrastructureFailures != 0 {
 		t.Errorf("Result.InfrastructureFailures = %d, want 0\nstdout: %s", out.Result.InfrastructureFailures, out.Stdout)
 	}
-	if len(out.Result.Tests) != 1 || out.Result.Tests[0].TestID != "greet" {
+	if len(out.Result.Tests) != 1 || out.Result.Tests[0].TestName != "greet" {
 		t.Fatalf("Result.Tests = %+v, want exactly one test named %q", out.Result.Tests, "greet")
 	}
 	if agg := out.Result.Tests[0].Aggregate.Verdict; agg != string(domain.VerdictPass) {

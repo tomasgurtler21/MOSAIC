@@ -1,5 +1,11 @@
 schema_version: 1
-id: restore-class-exclusion
+name: restore-class-exclusion
+id: 63
+version: 1
+changelog:
+  - version: 1
+    date: "2026-01-01"
+    changes: "Initial."
 description: >
   I-6: Restore-class agents never fire automatically. restore-stage-end
   declares STAGE_END trigger and is restore class. After implementation-review

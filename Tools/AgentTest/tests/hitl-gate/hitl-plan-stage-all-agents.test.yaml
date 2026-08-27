@@ -1,5 +1,11 @@
 schema_version: 1
-id: hitl-plan-stage-all-agents
+name: hitl-plan-stage-all-agents
+id: 55
+version: 1
+changelog:
+  - version: 1
+    date: "2026-01-01"
+    changes: "Initial."
 description: >
   Scenario H-3. Plan stage table marks stage 1 with HITL=Yes. The first
   agent (test-writer-tdd) already completed. The orchestrator must dispatch

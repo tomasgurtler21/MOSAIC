@@ -1,5 +1,11 @@
 schema_version: 1
-id: impl-first-reorder
+name: impl-first-reorder
+id: 50
+version: 1
+changelog:
+  - version: 1
+    date: "2026-01-01"
+    changes: "Initial."
 description: >
   Scenario E-3. Stage 1 has Approach = Implementation-First in Plan.md. The
   orchestrator must dispatch implementation-tdd as the first EXECUTION agent,

@@ -34,7 +34,7 @@ import (
 // path.
 func spawnFailedResult(n int) domain.TestResult {
 	return domain.TestResult{
-		Key:     domain.RunKey{RunID: "run-1", TestID: "example", RunNumber: n},
+		Key:     domain.RunKey{RunID: "run-1", TestName: "example", RunNumber: n},
 		Verdict: domain.VerdictFail,
 		Reasons: []domain.FailureReason{domain.ReasonInfrastructure},
 		SubjectResult: domain.SubjectResult{
@@ -108,7 +108,7 @@ func TestExclusionOf_AssertionFailResult_ReturnsEmptyReason(t *testing.T) {
 // and the two are never double-counted.
 func TestExclusionOf_StateIntegrityTakesPrecedenceOverSpawnFailed(t *testing.T) {
 	combined := domain.TestResult{
-		Key:     domain.RunKey{RunID: "run-1", TestID: "example", RunNumber: 1},
+		Key:     domain.RunKey{RunID: "run-1", TestName: "example", RunNumber: 1},
 		Verdict: domain.VerdictFail,
 		Reasons: []domain.FailureReason{domain.ReasonStateIntegrity, domain.ReasonInfrastructure},
 		SubjectResult: domain.SubjectResult{
@@ -446,7 +446,7 @@ func TestAggregate_Exclusions_StateIntegrityCarriesReason(t *testing.T) {
 // excluded run's Key is carried through, so the report can identify which run
 // was excluded without requiring a sandbox inspection.
 func TestAggregate_Exclusions_PreservesRunKeyForIdentification(t *testing.T) {
-	key := domain.RunKey{RunID: "20260807T120000Z-0001", TestID: "my-test", RunNumber: 2}
+	key := domain.RunKey{RunID: "20260807T120000Z-0001", TestName: "my-test", RunNumber: 2}
 	sf := spawnFailedResult(2)
 	sf.Key = key
 
@@ -465,9 +465,9 @@ func TestAggregate_Exclusions_PreservesRunKeyForIdentification(t *testing.T) {
 // appears first in the slice.
 func TestAggregate_Exclusions_OrderedByAttempt(t *testing.T) {
 	first := spawnFailedResult(1)
-	first.Key = domain.RunKey{RunID: "run-first", TestID: "example", RunNumber: 1}
+	first.Key = domain.RunKey{RunID: "run-first", TestName: "example", RunNumber: 1}
 	second := stateIntegrityResult(2)
-	second.Key = domain.RunKey{RunID: "run-second", TestID: "example", RunNumber: 2}
+	second.Key = domain.RunKey{RunID: "run-second", TestName: "example", RunNumber: 2}
 
 	got := evaluate.Aggregate([]domain.TestResult{first, second}, domain.RepetitionPolicy{Repetitions: 2, PassRate: 0.5})
 

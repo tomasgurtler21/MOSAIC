@@ -1,5 +1,11 @@
 schema_version: 1
-id: final-state-pass
+name: final-state-pass
+id: 22
+version: 1
+changelog:
+  - version: 1
+    date: "2026-01-01"
+    changes: "Initial."
 description: >
   The seeded orchestration document's phase and last_status match what is declared.
 layer: subagent

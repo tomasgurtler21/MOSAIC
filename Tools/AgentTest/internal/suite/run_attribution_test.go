@@ -38,8 +38,8 @@ func TestSuiteRun_TestStartedCarriesRunIdentity(t *testing.T) {
 		if ev.Run.RunID == "" {
 			t.Errorf("ProgressTestStarted.Run.RunID is empty; per-run events must carry a non-empty run identity so they are attributable under concurrent runs")
 		}
-		if ev.Run.TestID != "test-a" {
-			t.Errorf("ProgressTestStarted.Run.TestID = %q, want %q; the Run field must identify which test this event belongs to", ev.Run.TestID, "test-a")
+		if ev.Run.TestName != "test-a" {
+			t.Errorf("ProgressTestStarted.Run.TestID = %q, want %q; the Run field must identify which test this event belongs to", ev.Run.TestName, "test-a")
 		}
 		if ev.Run.RunNumber < 1 {
 			t.Errorf("ProgressTestStarted.Run.RunNumber = %d, want >= 1; run numbers are 1-based", ev.Run.RunNumber)
@@ -79,8 +79,8 @@ func TestSuiteRun_InvocationCarriesRunIdentity(t *testing.T) {
 		if ev.Run.RunID == "" {
 			t.Errorf("ProgressInvocation.Run.RunID is empty; per-run events must carry a non-empty run identity so they are attributable under concurrent runs")
 		}
-		if ev.Run.TestID != "test-a" {
-			t.Errorf("ProgressInvocation.Run.TestID = %q, want %q", ev.Run.TestID, "test-a")
+		if ev.Run.TestName != "test-a" {
+			t.Errorf("ProgressInvocation.Run.TestID = %q, want %q", ev.Run.TestName, "test-a")
 		}
 	}
 	if !found {
@@ -111,8 +111,8 @@ func TestSuiteRun_TestFinishedCarriesRunIdentity(t *testing.T) {
 		if ev.Run.RunID == "" {
 			t.Errorf("ProgressTestFinished.Run.RunID is empty; per-run events must carry a non-empty run identity")
 		}
-		if ev.Run.TestID != "test-a" {
-			t.Errorf("ProgressTestFinished.Run.TestID = %q, want %q", ev.Run.TestID, "test-a")
+		if ev.Run.TestName != "test-a" {
+			t.Errorf("ProgressTestFinished.Run.TestID = %q, want %q", ev.Run.TestName, "test-a")
 		}
 	}
 	if !found {
@@ -250,7 +250,7 @@ func TestSuiteRun_MultipleTestsCarryDistinctRunIdentities(t *testing.T) {
 	runIDByTest := map[string]string{}
 	for _, ev := range sink.all() {
 		if ev.Kind == domain.ProgressTestStarted {
-			runIDByTest[ev.Run.TestID] = ev.Run.RunID
+			runIDByTest[ev.Run.TestName] = ev.Run.RunID
 		}
 	}
 

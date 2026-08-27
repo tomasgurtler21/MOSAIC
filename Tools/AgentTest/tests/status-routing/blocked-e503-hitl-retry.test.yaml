@@ -1,5 +1,11 @@
 schema_version: 1
-id: blocked-e503-hitl-retry
+name: blocked-e503-hitl-retry
+id: 70
+version: 1
+changelog:
+  - version: 1
+    date: "2026-01-01"
+    changes: "Initial."
 description: >
   Scenario S-7. requirements-refinement dispatched with human_in_the_loop:
   true returns BLOCKED with E503 (USER_CONTACT_UNAVAILABLE). The orchestrator

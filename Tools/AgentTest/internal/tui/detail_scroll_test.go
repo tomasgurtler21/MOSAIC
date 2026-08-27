@@ -35,7 +35,7 @@ func manyAssertionRun(testID string, n int) report.RunReport {
 		}
 	}
 	return report.RunReport{
-		Key:        domain.RunKey{TestID: testID, RunNumber: 1},
+		Key:        domain.RunKey{TestName: testID, RunNumber: 1},
 		Verdict:    domain.VerdictFail,
 		Duration:   time.Second,
 		Cost:       domain.CostReport{Attribution: domain.AttributionAttributed},
@@ -51,7 +51,7 @@ func modelAtDetailScreenWithManyAssertions(t *testing.T, termWidth, termHeight i
 	const testID = "test-scroll-target"
 	run := manyAssertionRun(testID, 15) // 15 failed assertions → ~20 lines in the detail view
 	testReport := report.TestReport{
-		TestID: testID,
+		TestName: testID,
 		Runs:   []report.RunReport{run},
 	}
 	result := report.Build("suite-under-test", time.Now(), time.Now(), []report.TestReport{testReport}, "")
@@ -162,14 +162,14 @@ func TestDetailScroll_CanReachLastLine(t *testing.T) {
 		Detail:  "LAST-LINE-SENTINEL",
 	}
 	run := report.RunReport{
-		Key:        domain.RunKey{TestID: testID, RunNumber: 1},
+		Key:        domain.RunKey{TestName: testID, RunNumber: 1},
 		Verdict:    domain.VerdictFail,
 		Duration:   time.Second,
 		Cost:       domain.CostReport{Attribution: domain.AttributionAttributed},
 		Assertions: assertions,
 	}
 	result := report.Build("suite-under-test", time.Now(), time.Now(),
-		[]report.TestReport{{TestID: testID, Runs: []report.RunReport{run}}}, "")
+		[]report.TestReport{{TestName: testID, Runs: []report.RunReport{run}}}, "")
 	runner := newFakeSuiteRunner().withResult(result)
 	m := NewModel(newFixtureOptions([]string{"suite.yaml"}, runner))
 	m, _ = safeUpdate(t, m, tea.WindowSizeMsg{Width: termWidth, Height: termHeight})
@@ -314,7 +314,7 @@ func TestDetailScroll_PositionResetsOnSelectionChange(t *testing.T) {
 	// Build a result with two tests, both with many assertions.
 	makeTest := func(id string) report.TestReport {
 		run := manyAssertionRun(id, 15)
-		return report.TestReport{TestID: id, Runs: []report.RunReport{run}}
+		return report.TestReport{TestName: id, Runs: []report.RunReport{run}}
 	}
 	result := report.Build("suite-under-test", time.Now(), time.Now(), []report.TestReport{makeTest("test-alpha"), makeTest("test-beta")}, "")
 	runner := newFakeSuiteRunner().withResult(result)

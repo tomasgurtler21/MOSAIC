@@ -84,7 +84,7 @@ func TestBoundedConcurrentSuite_PerTestVerdictsIdenticalAtBound1AndBound4(t *tes
 	byID := func(out Outcome) map[string]wireTestReportDoc {
 		m := make(map[string]wireTestReportDoc)
 		for _, tr := range out.Result.Tests {
-			m[tr.TestID] = tr
+			m[tr.TestName] = tr
 		}
 		return m
 	}
@@ -133,23 +133,23 @@ func TestBoundedConcurrentSuite_TestOrderPreservedAtBound4(t *testing.T) {
 	}
 
 	// Plan order: run-alpha listed first in the suite file, run-beta second.
-	if out.Result.Tests[0].TestID != "run-alpha" {
-		t.Errorf("Tests[0].TestID = %q, want %q; test reports must follow plan order regardless of completion order",
-			out.Result.Tests[0].TestID, "run-alpha")
+	if out.Result.Tests[0].TestName != "run-alpha" {
+		t.Errorf("Tests[0].TestName = %q, want %q; test reports must follow plan order regardless of completion order",
+			out.Result.Tests[0].TestName, "run-alpha")
 	}
-	if out.Result.Tests[1].TestID != "run-beta" {
-		t.Errorf("Tests[1].TestID = %q, want %q; test reports must follow plan order regardless of completion order",
-			out.Result.Tests[1].TestID, "run-beta")
+	if out.Result.Tests[1].TestName != "run-beta" {
+		t.Errorf("Tests[1].TestName = %q, want %q; test reports must follow plan order regardless of completion order",
+			out.Result.Tests[1].TestName, "run-beta")
 	}
 
 	// Each test declares 2 repetitions; both run reports must appear.
 	for _, tr := range out.Result.Tests {
 		if len(tr.Runs) != 2 {
-			t.Errorf("test %q: got %d run reports, want 2 (one per repetition)", tr.TestID, len(tr.Runs))
+			t.Errorf("test %q: got %d run reports, want 2 (one per repetition)", tr.TestName, len(tr.Runs))
 		}
 		for i, run := range tr.Runs {
 			if run.Run.RunID == "" {
-				t.Errorf("test %q run[%d]: RunID is empty; every run must have a non-empty run identity", tr.TestID, i)
+				t.Errorf("test %q run[%d]: RunID is empty; every run must have a non-empty run identity", tr.TestName, i)
 			}
 		}
 	}

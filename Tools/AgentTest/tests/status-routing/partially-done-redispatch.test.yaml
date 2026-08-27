@@ -1,5 +1,11 @@
 schema_version: 1
-id: partially-done-redispatch
+name: partially-done-redispatch
+id: 75
+version: 1
+changelog:
+  - version: 1
+    date: "2026-01-01"
+    changes: "Initial."
 description: >
   Scenario S-2. implementation-tdd returns PARTIALLY_DONE during EXECUTION
   stage 1. The orchestrator must re-dispatch the same agent type (successor

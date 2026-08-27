@@ -1,5 +1,11 @@
 schema_version: 1
-id: reply-recovery-unmatched
+name: reply-recovery-unmatched
+id: 42
+version: 1
+changelog:
+  - version: 1
+    date: "2026-01-01"
+    changes: "Initial."
 description: >
   A reply-recovery run with stop_after_invocations: 2 where the Nth (second)
   dispatch matches no registered stub and the unmatched policy is passthrough.

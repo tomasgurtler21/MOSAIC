@@ -1,5 +1,11 @@
 schema_version: 1
-id: sequence-pass
+name: sequence-pass
+id: 26
+version: 1
+changelog:
+  - version: 1
+    date: "2026-01-01"
+    changes: "Initial."
 description: >
   The observed invocation sequence (greeter then helper) matches the declared exact sequence.
 layer: subagent

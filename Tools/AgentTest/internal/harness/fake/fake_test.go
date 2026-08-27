@@ -57,7 +57,7 @@ var researcherID = domain.CollaboratorIdentity{ToolName: domain.DispatchToolName
 func fakeSandbox(t *testing.T, dir string) domain.Sandbox {
 	t.Helper()
 	return domain.Sandbox{
-		Key:        domain.RunKey{RunID: "fake-run", TestID: "fake-test", RunNumber: 1},
+		Key:        domain.RunKey{RunID: "fake-run", TestName: "fake-test", RunNumber: 1},
 		Root:       dir,
 		SubjectDir: dir + "/subject",
 		ControlDir: dir + "/control",
@@ -280,7 +280,7 @@ func TestProvisionDeprovision_RemovesEverythingItInstalled(t *testing.T) {
 	a := fake.New(fake.Options{})
 
 	sandbox := domain.Sandbox{
-		Key:        domain.RunKey{RunID: "fake-run", TestID: "fake-test", RunNumber: 1},
+		Key:        domain.RunKey{RunID: "fake-run", TestName: "fake-test", RunNumber: 1},
 		Root:       dir,
 		SubjectDir: dir + "/subject",
 		ControlDir: dir + "/control",

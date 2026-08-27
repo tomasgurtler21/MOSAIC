@@ -47,8 +47,8 @@ func TestSuiteRun_ExecutesTestsInDeclaredOrder(t *testing.T) {
 		t.Fatalf("got %d test reports, want %d", len(result.Tests), len(wantOrder))
 	}
 	for i, want := range wantOrder {
-		if result.Tests[i].TestID != want {
-			t.Errorf("result.Tests[%d].TestID = %q, want %q", i, result.Tests[i].TestID, want)
+		if result.Tests[i].TestName != want {
+			t.Errorf("result.Tests[%d].TestID = %q, want %q", i, result.Tests[i].TestName, want)
 		}
 	}
 }
@@ -125,7 +125,7 @@ func TestSuiteRun_AggregatesViaVerdictEngine(t *testing.T) {
 
 	var results []domain.TestResult
 	for i, ev := range []domain.RunEvidence{passingEvidence(), passingEvidence(), failingEvidence()} {
-		ev.Key = domain.RunKey{TestID: "test-a", RunNumber: i + 1}
+		ev.Key = domain.RunKey{TestName: "test-a", RunNumber: i + 1}
 		results = append(results, evaluate.Evaluate(ev))
 	}
 	want := evaluate.Aggregate(results, domain.RepetitionPolicy{Repetitions: 3, PassRate: 1.0})
@@ -247,8 +247,8 @@ func TestSuiteRun_ReturnsCompletedResultsOnCancellation(t *testing.T) {
 	if len(result.Tests) < 1 {
 		t.Fatalf("got %d test reports on a cancelled run, want at least 1: the already-completed test-a result must not be discarded", len(result.Tests))
 	}
-	if result.Tests[0].TestID != "test-a" {
-		t.Errorf("result.Tests[0].TestID = %q, want %q: the completed test's own report must be returned, not a placeholder", result.Tests[0].TestID, "test-a")
+	if result.Tests[0].TestName != "test-a" {
+		t.Errorf("result.Tests[0].TestName = %q, want %q: the completed test's own report must be returned, not a placeholder", result.Tests[0].TestName, "test-a")
 	}
 }
 

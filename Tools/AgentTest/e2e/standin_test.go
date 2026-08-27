@@ -142,7 +142,7 @@ type standinScript struct {
 	// every repetition of one test) still produce different observable
 	// outcomes across repetitions, without a second divergent script.
 	SkipInvokeOnRuns []int `json:"skip_invoke_on_runs,omitempty"`
-	// SkipInvokeForTestIDs names test ids (matching domain.RunKey.TestID,
+	// SkipInvokeForTestIDs names test ids (matching domain.RunKey.TestName,
 	// read back via readTestIdentity) on which runStandin treats every
 	// Invoke turn in the script as a no-op, the same way SkipInvokeOnRuns
 	// does for a run number. This is what lets one suite's several tests

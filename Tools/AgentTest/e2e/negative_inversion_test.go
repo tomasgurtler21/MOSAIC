@@ -88,7 +88,7 @@ func assertSingleTestVerdict(t *testing.T, out Outcome, wantTestID string, wantV
 		t.Fatalf("RunScenario: exit code = %d, want %d\nstdout: %s\nstderr: %s",
 			out.ExitCode, wantExit, out.Stdout, out.Stderr)
 	}
-	if len(out.Result.Tests) != 1 || out.Result.Tests[0].TestID != wantTestID {
+	if len(out.Result.Tests) != 1 || out.Result.Tests[0].TestName != wantTestID {
 		t.Fatalf("Result.Tests = %+v, want exactly one test named %q\nstdout: %s", out.Result.Tests, wantTestID, out.Stdout)
 	}
 	if agg := out.Result.Tests[0].Aggregate.Verdict; agg != string(wantVerdict) {

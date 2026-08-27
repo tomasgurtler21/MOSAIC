@@ -62,12 +62,28 @@ func EffectiveEchoFidelity(settings RunSettings) string {
 	return EchoFidelityRequired
 }
 
+// ChangelogEntry is one entry in a test definition's changelog, recording
+// when and why the definition's content version was bumped.
+type ChangelogEntry struct {
+	// Version is the content version this entry describes. The most recent
+	// entry's Version must match the top-level Version field.
+	Version int
+	// Date records when the change was made (string, not parsed; format is
+	// the author's choice).
+	Date string
+	// Changes is a human-readable description of what changed.
+	Changes string
+}
+
 // TestDefinition is the authored document (`*.test.yaml`) describing one
 // test: the subject to exercise, the stub registry to intercept against, and
 // the assertions its run must satisfy.
 type TestDefinition struct {
 	SchemaVersion int
-	ID            string
+	Name          string // The human-readable display name (YAML key: name).
+	NumericID     int    // Stable numeric identity, positive, unique across all definitions (YAML key: id).
+	Version       int    // Content version, starts at 1, incremented manually by authors.
+	Changelog     []ChangelogEntry // Version history; must contain an entry matching Version.
 	Description   string
 	Layer         TestLayer
 	// Negative inverts assertion outcomes. It never inverts echo fidelity or

@@ -152,7 +152,11 @@ To test whether an orchestrator handles a specific routing condition correctly:
 
 4. **A stub registry** (`tests/<suite>/<test>.stubs.json`) — declares what each collaborator returns when intercepted. This is where the routing condition is created.
 
-5. **A test definition** (`tests/<suite>/<test>.test.yaml`) — ties everything together: names the subject, the workflow(s), the stub registry, seed files, and assertions.
+5. **A test definition** (`tests/<suite>/<test>.test.yaml`) — ties everything together: names the subject, the workflow(s), the stub registry, seed files, and assertions. Each test definition carries four identity and versioning fields:
+   - `name` (string) — the human-readable display name, also what the stub registry's `test_id` field must match
+   - `id` (integer) — a stable numeric identity, unique across all test definitions in the repository, never reused even if the test is renamed or deleted
+   - `version` (integer) — the content version, starting at `1` and incremented by the author when assertions, stubs, fixtures, or seed files change
+   - `changelog` (list) — version history entries recording when and why `version` was bumped; must contain an entry matching the current `version`
 
 6. **A suite file** (`tests/<suite>/<suite>.suite.yaml`) — groups test definitions with shared defaults (timeout, repetitions, pass rate).
 
@@ -230,6 +234,22 @@ Available assertion classes, all evaluated from the evidence snapshot:
 | `task_messages` | Content assertions on individual task invocation messages |
 
 Plus **echo fidelity** — evaluated unconditionally on every run, never declared, never invertible. Every stubbed collaborator's observed response must match the declared stub response exactly.
+
+### 4.4 Report Fields for Test Identity and Versioning
+
+The report JSON emitted after a suite run carries the test identity and versioning fields through all levels:
+
+**Per-test aggregate (one entry per test definition in the suite):**
+- `test_name` — the test definition's `name` field (human-readable display name; renamed from `test_id` in prior schema versions)
+- `test_id` — the test definition's numeric `id` (stable numeric identity)
+- `description`, `layer` — unchanged
+
+**Per-run (one entry per repetition of a test):**
+- `run.test_name` — the test definition's `name` (in the run key)
+- `test_version` — the test definition's `version` at the time the run was executed
+- `test_id` (integer) — the test definition's numeric `id`
+
+These fields feed the results storage and summary system. The numeric `test_id` allows the summary generator to track a test across renames (when `test_name` changes but `test_id` stays the same). The `test_version` allows the summary generator to flag stored results that were collected against an older version of a test's assertions.
 
 ---
 

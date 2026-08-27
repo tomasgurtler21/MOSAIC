@@ -1,5 +1,11 @@
 schema_version: 1
-id: speedup-subject
+name: speedup-subject
+id: 44
+version: 1
+changelog:
+  - version: 1
+    date: "2026-01-01"
+    changes: "Initial."
 description: >
   One test with several repetitions so concurrent execution of the suite
   produces a measurable wall-clock improvement over sequential execution. The

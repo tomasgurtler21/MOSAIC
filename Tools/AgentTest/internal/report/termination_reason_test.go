@@ -36,11 +36,11 @@ func fixtureRunWithTerminationReason(reason string) report.Result {
 		FinishedAt:    fixtureFinished(),
 		Tests: []report.TestReport{
 			{
-				TestID:      "termination-test",
+				TestName:      "termination-test",
 				Description: "a run with a known termination reason",
 				Layer:       domain.LayerSubagent,
 				Aggregate: domain.AggregateResult{
-					TestID:   "termination-test",
+					TestName:   "termination-test",
 					Verdict:  domain.VerdictPass,
 					Counted:  1,
 					Passed:   1,
@@ -51,7 +51,7 @@ func fixtureRunWithTerminationReason(reason string) report.Result {
 				},
 				Runs: []report.RunReport{
 					{
-						Key:               domain.RunKey{RunID: "run-001", TestID: "termination-test", RunNumber: 1},
+						Key:               domain.RunKey{RunID: "run-001", TestName: "termination-test", RunNumber: 1},
 						Verdict:           domain.VerdictPass,
 						Duration:          2 * time.Second,
 						Cost:              domain.CostReport{Attribution: domain.AttributionAttributed},
@@ -374,10 +374,10 @@ func TestRenderJSON_CutoffRun_CarriesDurationUnchanged(t *testing.T) {
 		FinishedAt:    fixtureFinished(),
 		Tests: []report.TestReport{
 			{
-				TestID: "cutoff-test",
+				TestName: "cutoff-test",
 				Layer:  domain.LayerSubagent,
 				Aggregate: domain.AggregateResult{
-					TestID:    "cutoff-test",
+					TestName:    "cutoff-test",
 					Verdict:   domain.VerdictPass,
 					Counted:   1,
 					Passed:    1,
@@ -386,7 +386,7 @@ func TestRenderJSON_CutoffRun_CarriesDurationUnchanged(t *testing.T) {
 				},
 				Runs: []report.RunReport{
 					{
-						Key:               domain.RunKey{RunID: "cutoff-001", TestID: "cutoff-test", RunNumber: 1},
+						Key:               domain.RunKey{RunID: "cutoff-001", TestName: "cutoff-test", RunNumber: 1},
 						Verdict:           domain.VerdictPass,
 						Duration:          time.Duration(wantMS) * time.Millisecond,
 						Cost:              domain.CostReport{TotalUSD: 0.03, Attribution: domain.AttributionAttributed},
@@ -435,10 +435,10 @@ func TestRenderJSON_CutoffRun_CarriesCostUnchanged(t *testing.T) {
 		FinishedAt:    fixtureFinished(),
 		Tests: []report.TestReport{
 			{
-				TestID: "cutoff-cost-test",
+				TestName: "cutoff-cost-test",
 				Layer:  domain.LayerSubagent,
 				Aggregate: domain.AggregateResult{
-					TestID:    "cutoff-cost-test",
+					TestName:    "cutoff-cost-test",
 					Verdict:   domain.VerdictPass,
 					Counted:   1,
 					Passed:    1,
@@ -447,7 +447,7 @@ func TestRenderJSON_CutoffRun_CarriesCostUnchanged(t *testing.T) {
 				},
 				Runs: []report.RunReport{
 					{
-						Key:               domain.RunKey{RunID: "cutoff-cost-001", TestID: "cutoff-cost-test", RunNumber: 1},
+						Key:               domain.RunKey{RunID: "cutoff-cost-001", TestName: "cutoff-cost-test", RunNumber: 1},
 						Verdict:           domain.VerdictPass,
 						Duration:          3500 * time.Millisecond,
 						Cost:              domain.CostReport{TotalUSD: wantCostUSD, Attribution: domain.AttributionAttributed},

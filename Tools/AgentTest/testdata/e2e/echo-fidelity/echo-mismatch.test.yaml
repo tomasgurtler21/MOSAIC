@@ -1,5 +1,11 @@
 schema_version: 1
-id: echo-mismatch
+name: echo-mismatch
+id: 30
+version: 1
+changelog:
+  - version: 1
+    date: "2026-01-01"
+    changes: "Initial."
 description: >
   The scripted subject dispatches one collaborator on the rewrite-prompt
   path (no direct substitution). The collaborator's scripted reply differs

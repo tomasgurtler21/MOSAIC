@@ -1,5 +1,11 @@
 schema_version: 1
-id: one-dispatch
+name: one-dispatch
+id: 53
+version: 1
+changelog:
+  - version: 1
+    date: "2026-01-01"
+    changes: "Initial."
 description: >
   First real-harness AgentTest run. The real production orchestrator is
   deployed from the test catalogue and driven by the real brownfield-tdd

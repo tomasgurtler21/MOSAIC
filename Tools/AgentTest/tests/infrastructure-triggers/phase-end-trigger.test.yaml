@@ -1,5 +1,11 @@
 schema_version: 1
-id: phase-end-trigger
+name: phase-end-trigger
+id: 62
+version: 1
+changelog:
+  - version: 1
+    date: "2026-01-01"
+    changes: "Initial."
 description: >
   I-5: PHASE_END trigger fires infrastructure agent at phase transition.
   After requirements-review completes RESEARCH (routing changes phase to

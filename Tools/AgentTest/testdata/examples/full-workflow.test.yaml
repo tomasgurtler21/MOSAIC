@@ -1,5 +1,11 @@
 schema_version: 1
-id: full-workflow
+name: full-workflow
+id: 1
+version: 1
+changelog:
+  - version: 1
+    date: "2026-01-01"
+    changes: "Initial reference example."
 description: >
   Reference example of a full-workflow orchestrator-layer test: it exercises
   every declared concept a test definition carries — a parallel-invocation

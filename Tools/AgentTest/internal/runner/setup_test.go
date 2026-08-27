@@ -28,7 +28,7 @@ func TestRun_SetupWritesActiveRegistryAndParallelGroupsDocuments(t *testing.T) {
 	h := newHarness(t)
 	req := newRequest("setup-content")
 	req.Test.Registry = domain.StubRegistry{
-		TestID: req.Test.Definition.ID,
+		TestID: req.Test.Definition.Name,
 		Stubs: []domain.Stub{
 			{Match: domain.StubMatch{Identity: domain.CollaboratorIdentity{ToolName: "Task", AgentIdentity: "researcher"}, Invocation: 1}},
 		},
@@ -43,8 +43,8 @@ func TestRun_SetupWritesActiveRegistryAndParallelGroupsDocuments(t *testing.T) {
 		reg, err := interceptor.LoadRegistry(sb.ControlDir)
 		if err != nil {
 			t.Errorf("LoadRegistry returned unexpected error: %v", err)
-		} else if reg.TestID != req.Test.Definition.ID {
-			t.Errorf("active registry TestID = %q, want %q", reg.TestID, req.Test.Definition.ID)
+		} else if reg.TestID != req.Test.Definition.Name {
+			t.Errorf("active registry TestID = %q, want %q", reg.TestID, req.Test.Definition.Name)
 		}
 
 		groups, err := interceptor.LoadGroups(sb.ControlDir)
@@ -108,8 +108,8 @@ func TestRun_SetupInitializesRunStateWithTheDeclaredLimits(t *testing.T) {
 		if state.TurnLimit != 5 {
 			t.Errorf("state.TurnLimit = %d, want 5", state.TurnLimit)
 		}
-		if state.TestID != req.Test.Definition.ID {
-			t.Errorf("state.TestID = %q, want %q", state.TestID, req.Test.Definition.ID)
+		if state.TestID != req.Test.Definition.Name {
+			t.Errorf("state.TestID = %q, want %q", state.TestID, req.Test.Definition.Name)
 		}
 		if state.RunNumber != req.Key.RunNumber {
 			t.Errorf("state.RunNumber = %d, want %d", state.RunNumber, req.Key.RunNumber)

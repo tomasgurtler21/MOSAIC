@@ -152,7 +152,7 @@ func TestDetection_EveryAssertionClass_NamesItsOwnOutcome(t *testing.T) {
 
 	byID := map[string]wireTestReportDoc{}
 	for _, tr := range out.Result.Tests {
-		byID[tr.TestID] = tr
+		byID[tr.TestName] = tr
 	}
 	wantTestIDs := map[string]bool{}
 	for _, c := range cases {

@@ -40,7 +40,13 @@ tests:
 
 const testADefinition = `
 schema_version: 1
-id: test-a
+name: test-a
+id: 1
+version: 1
+changelog:
+  - version: 1
+    date: "2026-01-01"
+    changes: "Initial."
 layer: orchestrator
 subject:
   identity: orchestrator
@@ -60,7 +66,13 @@ assertions:
 
 const testBDefinition = `
 schema_version: 1
-id: test-b
+name: test-b
+id: 2
+version: 1
+changelog:
+  - version: 1
+    date: "2026-01-01"
+    changes: "Initial."
 layer: orchestrator
 subject:
   identity: orchestrator

@@ -49,6 +49,8 @@ func Evaluate(ev domain.RunEvidence) domain.TestResult {
 			StubModel:           ev.StubModel,
 			HarnessID:           ev.HarnessID,
 			TerminationReason:   string(ev.SubjectResult.Disposition),
+			Version:             ev.Definition.Version,
+			NumericID:           ev.Definition.NumericID,
 		}
 	}
 
@@ -125,6 +127,8 @@ func Evaluate(ev domain.RunEvidence) domain.TestResult {
 		StubModel:           ev.StubModel,
 		HarnessID:           ev.HarnessID,
 		TerminationReason:   string(ev.SubjectResult.Disposition),
+		Version:             ev.Definition.Version,
+		NumericID:           ev.Definition.NumericID,
 	}
 }
 

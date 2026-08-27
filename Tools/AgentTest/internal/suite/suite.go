@@ -330,6 +330,8 @@ func (s *Suite) Run(ctx context.Context, p preflight.Plan) (report.Result, error
 					StubModel:           final.StubModel,
 					HarnessID:           final.HarnessID,
 					TerminationReason:   final.TerminationReason,
+					TestVersion:         final.Version,
+					NumericID:           final.NumericID,
 					Subject: report.SubjectFailure{
 						ExitCode:  final.SubjectResult.ExitCode,
 						Stderr:    final.SubjectResult.Stderr,
@@ -340,7 +342,7 @@ func (s *Suite) Run(ctx context.Context, p preflight.Plan) (report.Result, error
 				emitSafe(sink, domain.ProgressEvent{
 					Kind:             domain.ProgressTestFinished,
 					At:               clock.Now(),
-					TestID:           slot.rt.Definition.ID,
+					TestID:           slot.rt.Definition.Name,
 					Repetition:       item.rep,
 					Repetitions:      slot.repetitions,
 					Verdict:          final.Verdict,
@@ -379,7 +381,8 @@ func (s *Suite) Run(ctx context.Context, p preflight.Plan) (report.Result, error
 			PassRate:    slot.passRate,
 		})
 		testReports[i] = report.TestReport{
-			TestID:      slot.rt.Definition.ID,
+			TestName:    slot.rt.Definition.Name,
+			NumericID:   agg.NumericID,
 			Description: slot.rt.Definition.Description,
 			Layer:       slot.rt.Definition.Layer,
 			Aggregate:   agg,
@@ -422,7 +425,7 @@ func (s *Suite) runRepetition(ctx context.Context, rt preflight.ResolvedTest, re
 	var final domain.TestResult
 
 	for attempt := 0; attempt <= StateIntegrityRetries; attempt++ {
-		key := domain.RunKey{RunID: s.runID(rt.Definition.ID, rep, attempt), TestID: rt.Definition.ID, RunNumber: rep}
+		key := domain.RunKey{RunID: s.runID(rt.Definition.Name, rep, attempt), TestName: rt.Definition.Name, RunNumber: rep}
 
 		// Emit ProgressTestStarted for the first attempt only. The key is
 		// already in scope so the event carries the same run identity the
@@ -431,7 +434,7 @@ func (s *Suite) runRepetition(ctx context.Context, rt preflight.ResolvedTest, re
 			emitSafe(sink, domain.ProgressEvent{
 				Kind:        domain.ProgressTestStarted,
 				At:          clock.Now(),
-				TestID:      rt.Definition.ID,
+				TestID:      rt.Definition.Name,
 				Repetition:  rep,
 				Repetitions: repetitions,
 				Run:         key,
@@ -510,8 +513,8 @@ func (s *Suite) executeWork(ctx context.Context, item workItem, slot *testSlot, 
 	defer func() {
 		if r := recover(); r != nil {
 			key := domain.RunKey{
-				RunID:     s.runID(slot.rt.Definition.ID, item.rep, 0),
-				TestID:    slot.rt.Definition.ID,
+				RunID:     s.runID(slot.rt.Definition.Name, item.rep, 0),
+				TestName:  slot.rt.Definition.Name,
 				RunNumber: item.rep,
 			}
 			final = domain.TestResult{

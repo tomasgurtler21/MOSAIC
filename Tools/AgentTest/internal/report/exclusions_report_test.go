@@ -31,7 +31,7 @@ import (
 // run, so the exclusions field has content to verify against.
 func fixtureResultWithSpawnFailedExclusion() report.Result {
 	excl := domain.ExcludedRun{
-		Key:               domain.RunKey{RunID: "run-001", TestID: "my-test", RunNumber: 1},
+		Key:               domain.RunKey{RunID: "run-001", TestName: "my-test", RunNumber: 1},
 		Reason:            domain.ExclusionSpawnFailed,
 		TerminationReason: string(domain.DispositionSpawnFailed),
 		Detail:            "harness process exited non-zero: exit status 1",
@@ -43,11 +43,11 @@ func fixtureResultWithSpawnFailedExclusion() report.Result {
 		FinishedAt:    fixtureFinished(),
 		Tests: []report.TestReport{
 			{
-				TestID:      "my-test",
+				TestName:      "my-test",
 				Description: "spawn-failure retry and exclusion",
 				Layer:       domain.LayerSubagent,
 				Aggregate: domain.AggregateResult{
-					TestID:   "my-test",
+					TestName:   "my-test",
 					Verdict:  domain.VerdictPass,
 					Counted:  1,
 					Passed:   1,
@@ -60,7 +60,7 @@ func fixtureResultWithSpawnFailedExclusion() report.Result {
 				},
 				Runs: []report.RunReport{
 					{
-						Key:      domain.RunKey{RunID: "run-002", TestID: "my-test", RunNumber: 2},
+						Key:      domain.RunKey{RunID: "run-002", TestName: "my-test", RunNumber: 2},
 						Verdict:  domain.VerdictPass,
 						Duration: 2 * time.Second,
 						Cost: domain.CostReport{
@@ -84,11 +84,11 @@ func fixtureResultWithNoExclusions() report.Result {
 		FinishedAt:    fixtureFinished(),
 		Tests: []report.TestReport{
 			{
-				TestID:      "clean-test",
+				TestName:      "clean-test",
 				Description: "all runs counted",
 				Layer:       domain.LayerSubagent,
 				Aggregate: domain.AggregateResult{
-					TestID:     "clean-test",
+					TestName:     "clean-test",
 					Verdict:    domain.VerdictPass,
 					Counted:    1,
 					Passed:     1,
@@ -101,7 +101,7 @@ func fixtureResultWithNoExclusions() report.Result {
 				},
 				Runs: []report.RunReport{
 					{
-						Key:     domain.RunKey{RunID: "run-001", TestID: "clean-test", RunNumber: 1},
+						Key:     domain.RunKey{RunID: "run-001", TestName: "clean-test", RunNumber: 1},
 						Verdict: domain.VerdictPass,
 						Duration: time.Second,
 						Cost: domain.CostReport{

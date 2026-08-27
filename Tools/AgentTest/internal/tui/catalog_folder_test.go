@@ -255,9 +255,9 @@ func modelWithCatalogFolderResult(t *testing.T, catalog string) Model {
 		CatalogFolder: catalog, // new field — compile error until implementation adds it
 		Tests: []report.TestReport{
 			{
-				TestID: "catalog-test",
+				TestName: "catalog-test",
 				Aggregate: domain.AggregateResult{
-					TestID:  "catalog-test",
+					TestName:  "catalog-test",
 					Verdict: domain.VerdictPass,
 					Counted: 1,
 					Passed:  1,
@@ -265,7 +265,7 @@ func modelWithCatalogFolderResult(t *testing.T, catalog string) Model {
 					TotalCost: domain.CostReport{Attribution: domain.AttributionAttributed},
 				},
 				Runs: []report.RunReport{{
-					Key:     domain.RunKey{TestID: "catalog-test", RunNumber: 1},
+					Key:     domain.RunKey{TestName: "catalog-test", RunNumber: 1},
 					Verdict: domain.VerdictPass,
 					Cost:    domain.CostReport{Attribution: domain.AttributionAttributed},
 				}},

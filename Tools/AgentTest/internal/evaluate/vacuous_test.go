@@ -31,7 +31,7 @@ import (
 func vacuousDeclaredDefinition() domain.TestDefinition {
 	return domain.TestDefinition{
 		SchemaVersion: 1,
-		ID:            "example",
+		Name:          "example",
 		Layer:         domain.LayerSubagent,
 		Assertions: domain.Assertions{
 			ArtifactCreated: []string{},
@@ -95,7 +95,7 @@ func TestEvaluate_NoAssertionsDeclaredAndNoEvidence_StillPasses(t *testing.T) {
 	ev := domain.RunEvidence{
 		Definition: domain.TestDefinition{
 			SchemaVersion: 1,
-			ID:            "example",
+			Name:          "example",
 			Layer:         domain.LayerSubagent,
 			// Assertions is left entirely zero-valued: nothing declared.
 		},

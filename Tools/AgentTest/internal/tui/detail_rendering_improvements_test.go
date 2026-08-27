@@ -33,7 +33,7 @@ import (
 func TestDetail_RetainedSandboxPath_ShownWhenPresent(t *testing.T) {
 	const sandboxPath = "/tmp/agent-test-sandbox/run-001"
 	run := report.RunReport{
-		Key:                 domain.RunKey{TestID: "sandbox-test", RunNumber: 1},
+		Key:                 domain.RunKey{TestName: "sandbox-test", RunNumber: 1},
 		Verdict:             domain.VerdictFail,
 		Reasons:             []domain.FailureReason{domain.ReasonAssertion},
 		RetainedSandboxPath: sandboxPath,
@@ -64,7 +64,7 @@ func TestDetail_RetainedSandboxPath_ShownWhenPresent(t *testing.T) {
 // negative is unambiguous.
 func TestDetail_RetainedSandboxPath_ExplicitAbsenceWhenEmpty(t *testing.T) {
 	run := report.RunReport{
-		Key:                 domain.RunKey{TestID: "no-sandbox-test", RunNumber: 1},
+		Key:                 domain.RunKey{TestName: "no-sandbox-test", RunNumber: 1},
 		Verdict:             domain.VerdictPass,
 		RetainedSandboxPath: "", // no sandbox retained
 		Duration:            time.Second,
@@ -88,7 +88,7 @@ func TestDetail_RetainedSandboxPath_ExplicitAbsenceWhenEmpty(t *testing.T) {
 // surfaces.
 func TestDetail_FailingAssertion_ShowsAllDiagnosticFields(t *testing.T) {
 	run := report.RunReport{
-		Key:     domain.RunKey{TestID: "diagnostic-fields-test", RunNumber: 1},
+		Key:     domain.RunKey{TestName: "diagnostic-fields-test", RunNumber: 1},
 		Verdict: domain.VerdictFail,
 		Reasons: []domain.FailureReason{domain.ReasonAssertion},
 		Assertions: []domain.AssertionResult{
@@ -129,7 +129,7 @@ func TestDetail_FailingAssertion_ShowsAllDiagnosticFields(t *testing.T) {
 // fields are invisible.
 func TestDetail_PassingAssertion_ShowsDiagnosticFields(t *testing.T) {
 	run := report.RunReport{
-		Key:     domain.RunKey{TestID: "pass-fields-test", RunNumber: 1},
+		Key:     domain.RunKey{TestName: "pass-fields-test", RunNumber: 1},
 		Verdict: domain.VerdictPass,
 		Assertions: []domain.AssertionResult{
 			{
@@ -160,7 +160,7 @@ func TestDetail_PassingAssertion_ShowsDiagnosticFields(t *testing.T) {
 func TestDetail_PassingAssertion_WithTarget_ShowsTarget(t *testing.T) {
 	const artifactPath = "Orchestration/output.md"
 	run := report.RunReport{
-		Key:     domain.RunKey{TestID: "pass-target-test", RunNumber: 1},
+		Key:     domain.RunKey{TestName: "pass-target-test", RunNumber: 1},
 		Verdict: domain.VerdictPass,
 		Assertions: []domain.AssertionResult{
 			{
@@ -187,7 +187,7 @@ func TestDetail_PassingAssertion_WithTarget_ShowsTarget(t *testing.T) {
 // fields from both, not only from the failed ones.
 func TestDetail_MixedAssertions_BothPassAndFailShown(t *testing.T) {
 	run := report.RunReport{
-		Key:     domain.RunKey{TestID: "mixed-assertions-test", RunNumber: 1},
+		Key:     domain.RunKey{TestName: "mixed-assertions-test", RunNumber: 1},
 		Verdict: domain.VerdictFail,
 		Reasons: []domain.FailureReason{domain.ReasonAssertion},
 		Assertions: []domain.AssertionResult{
@@ -230,7 +230,7 @@ func TestDetail_MixedAssertions_BothPassAndFailShown(t *testing.T) {
 // run.Reasons at all.
 func TestDetail_Reasons_ShownWhenPresent(t *testing.T) {
 	run := report.RunReport{
-		Key:     domain.RunKey{TestID: "reasons-test", RunNumber: 1},
+		Key:     domain.RunKey{TestName: "reasons-test", RunNumber: 1},
 		Verdict: domain.VerdictFail,
 		Reasons: []domain.FailureReason{domain.ReasonAssertion},
 		Assertions: []domain.AssertionResult{
@@ -257,7 +257,7 @@ func TestDetail_Reasons_ShownWhenPresent(t *testing.T) {
 // multiple Reasons, all of them appear on the detail screen.
 func TestDetail_Reasons_MultipleReasonsAllShown(t *testing.T) {
 	run := report.RunReport{
-		Key:      domain.RunKey{TestID: "multi-reasons-test", RunNumber: 1},
+		Key:      domain.RunKey{TestName: "multi-reasons-test", RunNumber: 1},
 		Verdict:  domain.VerdictFail,
 		Reasons:  []domain.FailureReason{domain.ReasonAssertion, domain.ReasonEchoMismatch},
 		Duration: 2 * time.Second,
@@ -277,7 +277,7 @@ func TestDetail_Reasons_MultipleReasonsAllShown(t *testing.T) {
 // Reasons does not show spurious reason entries on the detail screen.
 func TestDetail_Reasons_AbsentWhenNone(t *testing.T) {
 	run := report.RunReport{
-		Key:      domain.RunKey{TestID: "pass-no-reasons", RunNumber: 1},
+		Key:      domain.RunKey{TestName: "pass-no-reasons", RunNumber: 1},
 		Verdict:  domain.VerdictPass,
 		Duration: time.Second,
 		Cost:     domain.CostReport{TotalUSD: 0.01, Attribution: domain.AttributionAttributed},
@@ -304,7 +304,7 @@ func TestDetail_Reasons_AbsentWhenNone(t *testing.T) {
 // run.Conditions.
 func TestDetail_Conditions_ShownWhenPresent(t *testing.T) {
 	run := report.RunReport{
-		Key:     domain.RunKey{TestID: "conditions-test", RunNumber: 1},
+		Key:     domain.RunKey{TestName: "conditions-test", RunNumber: 1},
 		Verdict: domain.VerdictPass,
 		Conditions: []domain.RunCondition{
 			{Kind: domain.ConditionCostUnattributed, Detail: "log root missing for this run"},
@@ -327,7 +327,7 @@ func TestDetail_Conditions_ShownWhenPresent(t *testing.T) {
 // carries multiple Conditions, all of them appear on the detail screen.
 func TestDetail_Conditions_MultipleConditionsAllShown(t *testing.T) {
 	run := report.RunReport{
-		Key:     domain.RunKey{TestID: "multi-conditions-test", RunNumber: 1},
+		Key:     domain.RunKey{TestName: "multi-conditions-test", RunNumber: 1},
 		Verdict: domain.VerdictPass,
 		Conditions: []domain.RunCondition{
 			{Kind: domain.ConditionCostUnattributed, Detail: "log root missing"},
@@ -353,7 +353,7 @@ func TestDetail_Conditions_MultipleConditionsAllShown(t *testing.T) {
 // Conditions does not show spurious condition entries on the detail screen.
 func TestDetail_Conditions_AbsentWhenNone(t *testing.T) {
 	run := report.RunReport{
-		Key:      domain.RunKey{TestID: "pass-no-conditions", RunNumber: 1},
+		Key:      domain.RunKey{TestName: "pass-no-conditions", RunNumber: 1},
 		Verdict:  domain.VerdictPass,
 		Duration: time.Second,
 		Cost:     domain.CostReport{TotalUSD: 0.01, Attribution: domain.AttributionAttributed},
@@ -385,7 +385,7 @@ func TestDetail_Conditions_AbsentWhenNone(t *testing.T) {
 func TestDetail_AllNewFields_ShownTogether(t *testing.T) {
 	const sandboxPath = "/tmp/agent-test-sandbox/combined-run"
 	run := report.RunReport{
-		Key:                 domain.RunKey{TestID: "all-fields-test", RunNumber: 1},
+		Key:                 domain.RunKey{TestName: "all-fields-test", RunNumber: 1},
 		Verdict:             domain.VerdictFail,
 		Reasons:             []domain.FailureReason{domain.ReasonAssertion},
 		RetainedSandboxPath: sandboxPath,

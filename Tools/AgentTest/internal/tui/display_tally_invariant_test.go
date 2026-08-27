@@ -39,9 +39,9 @@ import (
 // RED-phase: Tally() stub returns {0,0,0} and Counts() stub returns nil, so
 // the assertions fail until the real implementation is provided.
 func TestDisplayTallyInvariant_SharedCore_TallyFinishedMatchesReportTotal(t *testing.T) {
-	runA := domain.RunKey{RunID: "20260807T120000Z-0001", TestID: "test-a", RunNumber: 1}
-	runB := domain.RunKey{RunID: "20260807T120000Z-0002", TestID: "test-b", RunNumber: 1}
-	runC := domain.RunKey{RunID: "20260807T120000Z-0003", TestID: "test-c", RunNumber: 1}
+	runA := domain.RunKey{RunID: "20260807T120000Z-0001", TestName: "test-a", RunNumber: 1}
+	runB := domain.RunKey{RunID: "20260807T120000Z-0002", TestName: "test-b", RunNumber: 1}
+	runC := domain.RunKey{RunID: "20260807T120000Z-0003", TestName: "test-c", RunNumber: 1}
 
 	reportCounts := map[domain.Verdict]int{
 		domain.VerdictPass: 2,

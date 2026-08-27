@@ -1,5 +1,11 @@
 schema_version: 1
-id: interval-precise-boundary
+name: interval-precise-boundary
+id: 60
+version: 1
+changelog:
+  - version: 1
+    date: "2026-01-01"
+    changes: "Initial."
 description: >
   I-2 (precise): INVOCATION_INTERVAL trigger fires exactly at threshold.
   With interval=10 and global_sequence=9, the next workflow invocation

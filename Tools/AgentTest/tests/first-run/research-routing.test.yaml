@@ -1,5 +1,11 @@
 schema_version: 1
-id: research-routing
+name: research-routing
+id: 54
+version: 1
+changelog:
+  - version: 1
+    date: "2026-01-01"
+    changes: "Initial."
 description: >
   Brownfield-tdd RESEARCH phase: codebase-research dispatched first, returns
   SUCCESS, orchestrator advances to requirements-refinement. Asserts the exact

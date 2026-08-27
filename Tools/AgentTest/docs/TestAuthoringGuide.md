@@ -134,7 +134,13 @@ The simplest useful test — one dispatch, one assertion. Uses the `brownfield-t
 
 ```yaml
 schema_version: 1
-id: research-dispatch
+name: research-dispatch
+id: 1
+version: 1
+changelog:
+  - version: 1
+    date: "2026-01-01"
+    changes: "Initial version"
 description: >
   Orchestrator dispatches codebase-research as the first workflow step in brownfield-tdd.
 layer: orchestrator
@@ -213,7 +219,16 @@ This test exercises the RESEARCH and PLANNING phases — five agents dispatched 
 
 ```yaml
 schema_version: 1
-id: research-planning-happy-path
+name: research-planning-happy-path
+id: 2
+version: 2
+changelog:
+  - version: 1
+    date: "2026-01-01"
+    changes: "Initial version covering RESEARCH phase only"
+  - version: 2
+    date: "2026-06-01"
+    changes: "Extended to cover PLANNING phase; added planner-tdd-soft and plan-review assertions"
 description: >
   Brownfield-tdd RESEARCH + PLANNING phases: codebase-research -> requirements-refinement
   -> requirements-review -> planner-tdd-soft -> plan-review, all returning SUCCESS.
@@ -278,7 +293,10 @@ assertions:
 | Field | Required | Type | Notes |
 |-------|----------|------|-------|
 | `schema_version` | No | int | Always `1` |
-| `id` | Yes | string | Unique test identifier |
+| `name` | Yes | string | Human-readable display name for the test. This is what the stub registry's `test_id` field must match |
+| `id` | Yes | int | Stable numeric identity, positive, unique across all test definitions in the repository. Never changes even if `name` changes |
+| `version` | Yes | int | Content version. Start at `1`; increment when assertions, stubs, fixtures, or seed files change |
+| `changelog` | Yes | list | Version history. Must contain at least one entry whose `version` field matches the top-level `version` field |
 | `description` | No | string | Human-readable description |
 | `layer` | Yes | string | `orchestrator` or `subagent` |
 | `negative` | No | bool | Default `false`. When `true`, assertion outcomes are inverted (except echo fidelity) |
@@ -343,6 +361,40 @@ assertions:
 When `negative: true`, every assertion's pass/fail outcome is **inverted after evaluation** — a test that would normally fail now passes, and vice versa. This is for testing that the orchestrator does *not* do something under specific conditions.
 
 Exception: **echo fidelity** is never inverted. A negative test cannot "expect" the tool's own echo mechanism to be broken.
+
+### Versioning Discipline
+
+Every test definition has a `version` (content version) and a `changelog` (version history). These track what changed in the test itself, independent of the test tool or schema format.
+
+**`version` vs `schema_version`:**
+- `schema_version` is the format version — always `1`, incremented only when the test definition schema changes. You do not control this.
+- `version` is the content version — starts at `1`, incremented by you when the test's assertions, stubs, fixtures, or seed files change.
+
+**When to bump `version`:**
+
+Bump `version` and add a changelog entry when you modify any of these:
+- Assertions (adding, removing, or changing `invocation_sequence`, `task_messages`, `final_state`, etc.)
+- The stub registry file referenced by the test
+- Fixture files referenced by `seed_files` or stub side effects
+- Seed file paths or content
+
+Do not bump `version` for cosmetic edits (whitespace, comment changes, description rewording) that do not affect what the test asserts.
+
+**Changelog format:**
+
+Each `changelog` entry has three fields:
+```yaml
+changelog:
+  - version: 2
+    date: "2026-06-15"
+    changes: "Added task_messages assertion for the plan-review invocation"
+```
+
+At least one entry must have a `version` that matches the top-level `version` field. Additional entries document prior versions. Keep entries in descending version order (newest first) by convention.
+
+**Why versioning matters:**
+
+The test results storage system records `test_version` alongside each run's results. When you bump a test's version after changing its assertions, stored results from the old version are flagged as potentially stale by the summary generator — they were measured against a different set of assertions. This lets you distinguish "this test was always passing" from "this test passed before we made it stricter."
 
 ---
 
@@ -464,7 +516,7 @@ A complete stub registry for the brownfield-tdd RESEARCH+PLANNING happy-path tes
 | Field | Required | Type | Notes |
 |-------|----------|------|-------|
 | `schema_version` | No | int | Always `1` |
-| `test_id` | Yes | string | Must match the test definition's `id` |
+| `test_id` | Yes | string | Must match the test definition's `name` field (the human-readable display name, not the numeric `id`) |
 | `on_unmatched` | Yes | string | `"halt"`, `"passthrough"`, or `"generic-response"` |
 | `generic_response` | Conditional | object | Required when `on_unmatched` is `"generic-response"` |
 | `stubs` | Yes | array | The stub entries |
@@ -1106,13 +1158,29 @@ current_state:
 </WorkflowNotes>
 ```
 
+### 5b. Assign a Numeric ID
+
+Before writing the test definition, check the repository for the highest numeric `id` already in use across all `.test.yaml` files and use the next available integer. Numeric IDs must be unique across the entire repository, not just within your suite.
+
+```bash
+grep -r "^id:" Tools/AgentTest/tests/ --include="*.test.yaml"
+```
+
+Pick the next unused integer. Once assigned, never reuse a numeric ID even if the test is deleted — numeric IDs are stable identifiers for the results storage system.
+
 ### 6. Write the Test Definition
 
 Create `my-routing-tests/findings-reroute.test.yaml`:
 
 ```yaml
 schema_version: 1
-id: findings-reroute
+name: findings-reroute
+id: 25
+version: 1
+changelog:
+  - version: 1
+    date: "2026-01-15"
+    changes: "Initial version"
 description: >
   COMPLETED_NEEDS_ACTION from requirements-review should route back to
   requirements-refinement per the On Findings column, not forward to
@@ -1397,7 +1465,11 @@ The parser validates thoroughly and reports every problem it finds (it does not 
 
 | Code | Meaning | Fix |
 |------|---------|-----|
-| `missing-required-field` | A required field like `id` or `test_id` is absent | Add the field |
+| `missing-required-field` | A required field is absent. For test definitions: `name` (display name), `id` (numeric), `version`, or `changelog`. For stub registries: `test_id`. For suites: `id` | Add the missing field |
+| `non-positive-id` | The numeric `id` field is zero or negative | Set `id` to a positive integer unique across all test definitions in the repository |
+| `non-positive-version` | The `version` field is zero or negative | Set `version` to a positive integer; new tests start at `1` |
+| `missing-changelog-match` | No `changelog` entry has a `version` that matches the top-level `version` | Add a changelog entry whose `version` field matches the top-level `version` |
+| `duplicate-numeric-id` | Two test definitions in the same suite run share the same numeric `id` | Each test definition must have a unique numeric `id` across the entire repository |
 | `unknown-field` | A top-level key is not recognized | Check for typos. The format is strict — only documented fields are allowed |
 | `malformed-document` | YAML/JSON parse failure | Fix syntax |
 | `malformed-field` | A field value is wrong type/format (e.g. `timeout: "not-a-duration"`) | Fix the value |

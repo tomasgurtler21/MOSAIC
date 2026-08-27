@@ -4,6 +4,8 @@ package authoring
 // domain.TestDefinition.
 
 import (
+	"fmt"
+
 	goyaml "github.com/goccy/go-yaml"
 
 	"mosaic-agent-test/internal/domain"
@@ -11,10 +13,13 @@ import (
 
 var definitionKnownFields = map[string]bool{
 	"schema_version":         true,
-	"id":                     true,
+	"id":                     true, // retained: now the numeric identity field
+	"name":                   true, // new: human-readable display name
 	"description":            true,
 	"layer":                  true,
 	"negative":               true,
+	"version":                true, // new: content version
+	"changelog":              true, // new: version history
 	"subject":                true,
 	"stub_registry":          true,
 	"stub_agents":            true,
@@ -196,15 +201,24 @@ func (w *wireAssertions) toDomain() domain.Assertions {
 	return a
 }
 
-type wireDefinition struct {
-	SchemaVersion int    `yaml:"schema_version"`
-	ID            string `yaml:"id"`
-	Description   string `yaml:"description"`
-	Layer         string `yaml:"layer"`
-	Negative      bool   `yaml:"negative"`
+type wireChangelogEntry struct {
+	Version int    `yaml:"version"`
+	Date    string `yaml:"date"`
+	Changes string `yaml:"changes"`
+}
 
-	Subject      wireSubject    `yaml:"subject"`
-	StubRegistry string         `yaml:"stub_registry"`
+type wireDefinition struct {
+	SchemaVersion int                  `yaml:"schema_version"`
+	Name          string               `yaml:"name"`
+	NumericID     *int                 `yaml:"id"`
+	Description   string               `yaml:"description"`
+	Layer         string               `yaml:"layer"`
+	Negative      bool                 `yaml:"negative"`
+	Version       *int                 `yaml:"version"`
+	Changelog     []wireChangelogEntry `yaml:"changelog"`
+
+	Subject      wireSubject     `yaml:"subject"`
+	StubRegistry string          `yaml:"stub_registry"`
 	StubAgents   []wireStubAgent `yaml:"stub_agents"`
 
 	WireSettings `yaml:",inline"`
@@ -240,8 +254,50 @@ func ParseTestDefinition(src Source) (domain.TestDefinition, Report) {
 		return domain.TestDefinition{}, report
 	}
 
-	if wire.ID == "" {
+	if wire.Name == "" {
+		report.Add(missingRequiredField(src, "name"))
+	}
+	if wire.NumericID == nil {
 		report.Add(missingRequiredField(src, "id"))
+	} else if *wire.NumericID <= 0 {
+		report.Add(Diagnostic{
+			Severity: SeverityError,
+			Code:     "non-positive-id",
+			Path:     src.Path,
+			Pointer:  "id",
+			Message:  fmt.Sprintf("id must be a positive integer, got %d", *wire.NumericID),
+		})
+	}
+	if wire.Version == nil {
+		report.Add(missingRequiredField(src, "version"))
+	} else if *wire.Version <= 0 {
+		report.Add(Diagnostic{
+			Severity: SeverityError,
+			Code:     "non-positive-version",
+			Path:     src.Path,
+			Pointer:  "version",
+			Message:  fmt.Sprintf("version must be a positive integer, got %d", *wire.Version),
+		})
+	}
+	if len(wire.Changelog) == 0 {
+		report.Add(missingRequiredField(src, "changelog"))
+	} else if wire.Version != nil && *wire.Version > 0 {
+		found := false
+		for _, entry := range wire.Changelog {
+			if entry.Version == *wire.Version {
+				found = true
+				break
+			}
+		}
+		if !found {
+			report.Add(Diagnostic{
+				Severity: SeverityError,
+				Code:     "missing-changelog-match",
+				Path:     src.Path,
+				Pointer:  "changelog",
+				Message:  fmt.Sprintf("changelog has no entry matching top-level version %d", *wire.Version),
+			})
+		}
 	}
 
 	if wire.Subject.InfrastructureAgents == nil {
@@ -250,7 +306,7 @@ func ParseTestDefinition(src Source) (domain.TestDefinition, Report) {
 
 	def := domain.TestDefinition{
 		SchemaVersion: wire.SchemaVersion,
-		ID:            wire.ID,
+		Name:          wire.Name,
 		Description:   wire.Description,
 		Layer:         domain.TestLayer(wire.Layer),
 		Negative:      wire.Negative,
@@ -266,6 +322,20 @@ func ParseTestDefinition(src Source) (domain.TestDefinition, Report) {
 		StubRegistryPath: wire.StubRegistry,
 		Settings:         wire.WireSettings.toDomain(src, "timeout", &report),
 		SourcePath:       src.Path,
+	}
+
+	if wire.NumericID != nil {
+		def.NumericID = *wire.NumericID
+	}
+	if wire.Version != nil {
+		def.Version = *wire.Version
+	}
+	for _, ce := range wire.Changelog {
+		def.Changelog = append(def.Changelog, domain.ChangelogEntry{
+			Version: ce.Version,
+			Date:    ce.Date,
+			Changes: ce.Changes,
+		})
 	}
 
 	for _, sf := range wire.SeedFiles {

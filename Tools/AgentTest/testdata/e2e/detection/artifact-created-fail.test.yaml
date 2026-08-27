@@ -1,5 +1,11 @@
 schema_version: 1
-id: artifact-created-fail
+name: artifact-created-fail
+id: 13
+version: 1
+changelog:
+  - version: 1
+    date: "2026-01-01"
+    changes: "Initial."
 description: >
   A file that is never created is declared as required, so artifact_created must fail by name.
 layer: subagent

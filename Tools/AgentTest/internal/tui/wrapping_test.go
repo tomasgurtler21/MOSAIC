@@ -187,7 +187,7 @@ func TestWrapping_TestDetail_LongAssertionShownInFull(t *testing.T) {
 	const longDetail = "this is a very long failed-assertion detail string that exceeds forty characters: SENTINEL"
 
 	run := report.RunReport{
-		Key:      domain.RunKey{TestID: "test-wrap-detail", RunNumber: 1},
+		Key:      domain.RunKey{TestName: "test-wrap-detail", RunNumber: 1},
 		Verdict:  domain.VerdictFail,
 		Duration: time.Second,
 		Cost:     domain.CostReport{Attribution: domain.AttributionAttributed},
@@ -197,7 +197,7 @@ func TestWrapping_TestDetail_LongAssertionShownInFull(t *testing.T) {
 		}},
 	}
 	testReport := report.TestReport{
-		TestID: "test-wrap-detail",
+		TestName: "test-wrap-detail",
 		Runs:   []report.RunReport{run},
 	}
 	result := report.Build("suite-under-test", time.Now(), time.Now(), []report.TestReport{testReport}, "")

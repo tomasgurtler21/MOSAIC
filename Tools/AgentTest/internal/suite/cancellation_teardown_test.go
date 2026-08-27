@@ -246,7 +246,7 @@ func newPartialCompletionRunner(fastID string, slowExpected int, onFastComplete 
 }
 
 func (r *partialCompletionRunner) Run(ctx context.Context, key domain.RunKey, t preflight.ResolvedTest, eval domain.AttemptEvaluator) (domain.TestResult, error) {
-	if key.TestID == r.fastID {
+	if key.TestName == r.fastID {
 		// Complete immediately, then signal.
 		ev := passingEvidence()
 		ev.Key = key
@@ -336,7 +336,7 @@ func (r *gatedSiblingRunner) Run(ctx context.Context, key domain.RunKey, t prefl
 	r.inFlight--
 	r.mu.Unlock()
 
-	if key.TestID == r.panicTestID {
+	if key.TestName == r.panicTestID {
 		// Simulate what runner.Run returns after recovering a panic:
 		// an error with no eval call. The suite must record an
 		// infrastructure failure for this run.
@@ -640,7 +640,7 @@ func TestCancellation_CompletedResultsReturned_SuiteIsNotAFailure(t *testing.T) 
 	// a result before cancellation hit.
 	byID := make(map[string]report.TestReport)
 	for _, tr := range sr.result.Tests {
-		byID[tr.TestID] = tr
+		byID[tr.TestName] = tr
 	}
 
 	fastReport, ok := byID["fast-test"]
@@ -778,7 +778,7 @@ func TestCancellation_PanickingAttempt_SiblingAttemptsUnaffected(t *testing.T) {
 	// All three tests must appear in the result.
 	byID := make(map[string]report.TestReport)
 	for _, tr := range result.Tests {
-		byID[tr.TestID] = tr
+		byID[tr.TestName] = tr
 	}
 
 	for _, id := range []string{"sibling-a", "sibling-b", "panic-sim-test"} {
@@ -912,7 +912,7 @@ func runPanicSchedulerScenario(t *testing.T) {
 
 	byID := make(map[string]report.TestReport)
 	for _, tr := range result.Tests {
-		byID[tr.TestID] = tr
+		byID[tr.TestName] = tr
 	}
 
 	for _, id := range []string{"sibling-x", "sibling-y"} {
@@ -935,8 +935,8 @@ type literalPanicRunner struct {
 }
 
 func (r *literalPanicRunner) Run(ctx context.Context, key domain.RunKey, t preflight.ResolvedTest, eval domain.AttemptEvaluator) (domain.TestResult, error) {
-	if key.TestID == r.panicTestID {
-		panic(fmt.Sprintf("literalPanicRunner: deliberate panic for test %q — testing scheduler goroutine containment", key.TestID))
+	if key.TestName == r.panicTestID {
+		panic(fmt.Sprintf("literalPanicRunner: deliberate panic for test %q — testing scheduler goroutine containment", key.TestName))
 	}
 	ev := passingEvidence()
 	ev.Key = key

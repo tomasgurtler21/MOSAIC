@@ -1,5 +1,11 @@
 schema_version: 1
-id: greet
+name: greet
+id: 31
+version: 1
+changelog:
+  - version: 1
+    date: "2026-01-01"
+    changes: "Initial."
 description: >
   The scripted subject dispatches one collaborator, substituted directly by
   the scripted adapter; the collaborator's declared side effect must exist

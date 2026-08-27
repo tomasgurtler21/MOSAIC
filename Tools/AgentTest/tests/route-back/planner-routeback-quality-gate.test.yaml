@@ -1,5 +1,11 @@
 schema_version: 1
-id: planner-routeback-quality-gate
+name: planner-routeback-quality-gate
+id: 67
+version: 1
+changelog:
+  - version: 1
+    date: "2026-01-01"
+    changes: "Initial."
 description: >
   Scenarios R-1 + R-2 + R-4. test-runner returns COMPLETED_NEEDS_ACTION.
   Orchestrator routes back to planner-tdd-soft (On Findings target). After
@@ -74,9 +80,14 @@ assertions:
       required_input_artifacts:
         - Orchestration-{run_id}/Research.md
         - Orchestration-{run_id}/Requirements.md
+        - Orchestration-{run_id}/TestResults.md
       optional_input_artifacts:
         - Orchestration-{run_id}/Plan.md
-        - Orchestration-{run_id}/TestResults.md
+        - Orchestration-{run_id}/ContractsDesign.md
+        - Orchestration-{run_id}/Stage-1/Plan.md
+        - Orchestration-{run_id}/Stage-2/Plan.md
+        - Orchestration-{run_id}/Stage-1/PlanProgress.md
+        - Orchestration-{run_id}/Stage-2/PlanProgress.md
 
     # Dispatch 2: plan-review (quality gate — R-1/R-4)
     # Must receive updated Plan.md + all stage plans including new stage 3
@@ -86,6 +97,7 @@ assertions:
       required_input_artifacts:
         - Orchestration-{run_id}/Requirements.md
         - Orchestration-{run_id}/Plan.md
+        - Orchestration-{run_id}/TestResults.md
       optional_input_artifacts:
         - Orchestration-{run_id}/Stage-1/Plan.md
         - Orchestration-{run_id}/Stage-2/Plan.md

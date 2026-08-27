@@ -102,12 +102,19 @@ func TestParseTestDefinition_HarnessKeyInSettings_RejectedAsRemoved(t *testing.T
 		Path: "d.test.yaml",
 		Data: []byte(`
 schema_version: 1
-id: d
+name: d
+id: 1
+version: 1
+changelog:
+  - version: 1
+    date: "2026-01-01"
+    changes: "Initial."
 layer: orchestrator
 harness: claude-code
 subject:
   identity: orchestrator
   agent: orchestrator
+  infrastructure_agents: []
 stub_registry: stubs/d.stubs.json
 `),
 	}
@@ -129,7 +136,13 @@ func TestParseTestDefinition_NoHarnessKeyDeclared_ValidatesCleanly(t *testing.T)
 		Path: "d.test.yaml",
 		Data: []byte(`
 schema_version: 1
-id: d
+name: d
+id: 1
+version: 1
+changelog:
+  - version: 1
+    date: "2026-01-01"
+    changes: "Initial."
 layer: orchestrator
 subject:
   identity: orchestrator

@@ -384,7 +384,7 @@ func setup(ctx context.Context, d Deps, req Request) (domain.Sandbox, SetupLedge
 	// turn limit.
 	store := runstate.NewStore(sb.ControlDir, d.Clock)
 	state := domain.RunState{
-		TestID:    req.Test.Definition.ID,
+		TestID:    req.Test.Definition.Name,
 		RunNumber: req.Key.RunNumber,
 		RunID:     req.Key.RunID,
 	}

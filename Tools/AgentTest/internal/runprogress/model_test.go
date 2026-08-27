@@ -37,13 +37,13 @@ import (
 // ---------------------------------------------------------------------------
 
 func makeRunKey(runID, testID string, runNumber int) domain.RunKey {
-	return domain.RunKey{RunID: runID, TestID: testID, RunNumber: runNumber}
+	return domain.RunKey{RunID: runID, TestName: testID, RunNumber: runNumber}
 }
 
 func startedEv(run domain.RunKey, repetitions int) domain.ProgressEvent {
 	return domain.ProgressEvent{
 		Kind:        domain.ProgressTestStarted,
-		TestID:      run.TestID,
+		TestID:      run.TestName,
 		Repetition:  run.RunNumber,
 		Repetitions: repetitions,
 		Run:         run,
@@ -53,7 +53,7 @@ func startedEv(run domain.RunKey, repetitions int) domain.ProgressEvent {
 func finishedEv(run domain.RunKey, repetitions int, verdict domain.Verdict) domain.ProgressEvent {
 	return domain.ProgressEvent{
 		Kind:        domain.ProgressTestFinished,
-		TestID:      run.TestID,
+		TestID:      run.TestName,
 		Repetition:  run.RunNumber,
 		Repetitions: repetitions,
 		Verdict:     verdict,

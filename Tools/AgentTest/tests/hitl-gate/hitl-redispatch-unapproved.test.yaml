@@ -1,5 +1,11 @@
 schema_version: 1
-id: hitl-redispatch-unapproved
+name: hitl-redispatch-unapproved
+id: 57
+version: 1
+changelog:
+  - version: 1
+    date: "2026-01-01"
+    changes: "Initial."
 description: >
   Scenario H-1. requirements-refinement returned SUCCESS but its output
   artifact Requirements.md has human_approved: false. The orchestrator must
