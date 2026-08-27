@@ -8,6 +8,7 @@ package screens_test
 // the raw mode string for any unmapped mode rather than defaulting to a real mode's name.
 
 import (
+	"fmt"
 	"strings"
 	"testing"
 
@@ -594,8 +595,10 @@ func TestReviewScreen_DeletedDelta_PopulatedSource_RendersExactlyAsToday(t *test
 	view := s.View()
 
 	// Assert: all three pieces of information must appear in the rendered output.
-	if !strings.Contains(view, field) {
-		t.Errorf("review screen does not show the version field name for a normal delta:\n%s", view)
+	// The raw "workflow:existing-flow" field name is translated to a user-facing label;
+	// we check for the workflow ID itself ("existing-flow") which the label preserves.
+	if !strings.Contains(view, "existing-flow") {
+		t.Errorf("review screen does not show the workflow ID for a normal delta:\n%s", view)
 	}
 	if !strings.Contains(view, deployed) {
 		t.Errorf("review screen does not show the deployed version for a normal delta:\n%s", view)
@@ -766,6 +769,505 @@ func TestReviewScreen_AllSurvivingModes_TableDriven(t *testing.T) {
 					tc.mode, tc.wantLabel, s.View())
 			}
 		})
+	}
+}
+
+// ---------------------------------------------------------------------------
+// Version-delta label rendering (T3.1)
+// ---------------------------------------------------------------------------
+
+// TestReviewScreen_VersionDelta_NoDuplicateBetweenReasonAndDeltaLines verifies that when a
+// stale plan item carries both a Reason string (as the plan builder populates it from version
+// deltas) and per-field Stale deltas, each version change appears exactly once in the review
+// output. The current bug renders the same change twice — once as a Reason line and once as
+// a per-delta line — which confuses users who see duplicate information.
+func TestReviewScreen_VersionDelta_NoDuplicateBetweenReasonAndDeltaLines(t *testing.T) {
+	// Use version strings that are unique enough to count occurrences reliably.
+	const deployed = "9.8.7"
+	const source = "9.9.0"
+
+	// Reason mimics what buildAgentUpdateReasons/formatVersionDeltas generates for standard
+	// version fields, which is the duplicated content the fix must suppress.
+	p := planWithItems(domain.ModeUpdateWorkspace, []domain.PlanItem{
+		{
+			Ref:    agentRef("stale-agent"),
+			Action: domain.ActionUpdate,
+			Reason: fmt.Sprintf("version changed from %q to %q", deployed, source),
+			Stale: []domain.VersionDelta{
+				{Field: "version", Deployed: deployed, Source: source},
+			},
+		},
+	})
+	s := screens.NewReviewScreen(p, 120, 80, plainStyles())
+	view := s.View()
+
+	// The deployed version string must appear at most once: the per-delta line is the correct
+	// rendering; the Reason line repeats it and must be suppressed for stale items that have
+	// per-delta lines to display.
+	deployedCount := strings.Count(view, deployed)
+	if deployedCount > 1 {
+		t.Errorf("deployed version %q appears %d times in the plan review (want at most 1); "+
+			"the Reason line and per-delta lines are duplicating the same version change — "+
+			"only the per-delta lines should be shown:\n%s",
+			deployed, deployedCount, view)
+	}
+}
+
+// TestReviewScreen_VersionDelta_ToolMappingsVersionUsesUserFacingLabel verifies that the
+// raw internal field name "tool_mappings_version" is replaced by the user-facing label
+// "tool mappings hash" in the plan review. Raw field names are implementation details that
+// should not be exposed to the user.
+func TestReviewScreen_VersionDelta_ToolMappingsVersionUsesUserFacingLabel(t *testing.T) {
+	p := planWithItems(domain.ModeUpdateWorkspace, []domain.PlanItem{
+		{
+			Ref:    agentRef("some-agent"),
+			Action: domain.ActionUpdate,
+			Stale: []domain.VersionDelta{
+				{Field: "tool_mappings_version", Deployed: "aaaa1111", Source: "bbbb2222"},
+			},
+		},
+	})
+	s := screens.NewReviewScreen(p, 120, 80, plainStyles())
+	view := s.View()
+
+	if !strings.Contains(view, "tool mappings hash") {
+		t.Errorf("plan review does not show user-facing label \"tool mappings hash\" for "+
+			"\"tool_mappings_version\" delta; raw internal field names must not be shown to users:\n%s", view)
+	}
+}
+
+// TestReviewScreen_VersionDelta_HarnessVersionUsesUserFacingLabel verifies that the raw
+// internal field name "harness_version" is replaced by the user-facing label "harness version".
+func TestReviewScreen_VersionDelta_HarnessVersionUsesUserFacingLabel(t *testing.T) {
+	p := planWithItems(domain.ModeUpdateWorkspace, []domain.PlanItem{
+		{
+			Ref:    agentRef("some-agent"),
+			Action: domain.ActionUpdate,
+			Stale: []domain.VersionDelta{
+				{Field: "harness_version", Deployed: "1.0", Source: "1.1"},
+			},
+		},
+	})
+	s := screens.NewReviewScreen(p, 120, 80, plainStyles())
+	view := s.View()
+
+	if !strings.Contains(view, "harness version") {
+		t.Errorf("plan review does not show user-facing label \"harness version\" for "+
+			"\"harness_version\" delta; raw internal field names must not be shown to users:\n%s", view)
+	}
+}
+
+// TestReviewScreen_VersionDelta_InjectionsVersionUsesUserFacingLabel verifies that the raw
+// internal field name "injections_version" is replaced by the user-facing label
+// "harness injection version (body tag)". The explanation is necessary because the field
+// name "injections_version" is ambiguous — it actually refers to a body-tag version
+// attribute, not a frontmatter key, which the label makes clear.
+func TestReviewScreen_VersionDelta_InjectionsVersionUsesUserFacingLabel(t *testing.T) {
+	p := planWithItems(domain.ModeUpdateWorkspace, []domain.PlanItem{
+		{
+			Ref:    agentRef("some-agent"),
+			Action: domain.ActionUpdate,
+			Stale: []domain.VersionDelta{
+				{Field: "injections_version", Deployed: "2.0", Source: "2.1"},
+			},
+		},
+	})
+	s := screens.NewReviewScreen(p, 120, 80, plainStyles())
+	view := s.View()
+
+	if !strings.Contains(view, "harness injection version") {
+		t.Errorf("plan review does not show user-facing label containing \"harness injection version\" for "+
+			"\"injections_version\" delta; raw field names must not be exposed to users:\n%s", view)
+	}
+}
+
+// TestReviewScreen_VersionDelta_CatalogVersionFieldUsesUserFacingLabel verifies that the raw
+// internal field name "version" (the catalog version stamp) is replaced by the user-facing
+// label "catalog version". The bare word "version" is too ambiguous in context; the label
+// must clarify that it is the catalog-level version field.
+func TestReviewScreen_VersionDelta_CatalogVersionFieldUsesUserFacingLabel(t *testing.T) {
+	p := planWithItems(domain.ModeUpdateWorkspace, []domain.PlanItem{
+		{
+			Ref:    agentRef("some-agent"),
+			Action: domain.ActionUpdate,
+			Stale: []domain.VersionDelta{
+				{Field: "version", Deployed: "3.0", Source: "3.1"},
+			},
+		},
+	})
+	s := screens.NewReviewScreen(p, 120, 80, plainStyles())
+	view := s.View()
+
+	if !strings.Contains(view, "catalog version") {
+		t.Errorf("plan review does not show user-facing label \"catalog version\" for "+
+			"the \"version\" delta field; the bare word \"version\" is too ambiguous in context:\n%s", view)
+	}
+}
+
+// TestReviewScreen_VersionDelta_BundleVersionUsesUserFacingLabel verifies that the raw
+// internal field name "bundle_version" is replaced by the user-facing label "bundle version".
+func TestReviewScreen_VersionDelta_BundleVersionUsesUserFacingLabel(t *testing.T) {
+	p := planWithItems(domain.ModeUpdateWorkspace, []domain.PlanItem{
+		{
+			Ref:    agentRef("some-agent"),
+			Action: domain.ActionUpdate,
+			Stale: []domain.VersionDelta{
+				{Field: "bundle_version", Deployed: "5.0", Source: "5.1"},
+			},
+		},
+	})
+	s := screens.NewReviewScreen(p, 120, 80, plainStyles())
+	view := s.View()
+
+	if !strings.Contains(view, "bundle version") {
+		t.Errorf("plan review does not show user-facing label \"bundle version\" for "+
+			"\"bundle_version\" delta; raw internal field names must not be shown to users:\n%s", view)
+	}
+}
+
+// TestReviewScreen_VersionDelta_OrchestratorInjectionsVersionUsesUserFacingLabel verifies
+// that the raw internal field name "orchestrator_injections_version" is replaced by the
+// user-facing label "orchestrator injection version".
+func TestReviewScreen_VersionDelta_OrchestratorInjectionsVersionUsesUserFacingLabel(t *testing.T) {
+	p := planWithItems(domain.ModeUpdateWorkspace, []domain.PlanItem{
+		{
+			Ref:    agentRef("some-agent"),
+			Action: domain.ActionUpdate,
+			Stale: []domain.VersionDelta{
+				{Field: "orchestrator_injections_version", Deployed: "4.0", Source: "4.1"},
+			},
+		},
+	})
+	s := screens.NewReviewScreen(p, 120, 80, plainStyles())
+	view := s.View()
+
+	if !strings.Contains(view, "orchestrator injection version") {
+		t.Errorf("plan review does not show user-facing label \"orchestrator injection version\" for "+
+			"\"orchestrator_injections_version\" delta; raw field names must not be exposed:\n%s", view)
+	}
+}
+
+// TestReviewScreen_VersionDelta_ProtocolVersionUsesUserFacingLabel verifies that the raw
+// internal field name "protocol_version" (the ProtocolDeltaField constant from the plan
+// package) is replaced by the user-facing label "harness protocol version". This delta
+// reaches the review screen via item.Stale and must be labelled like every other delta.
+func TestReviewScreen_VersionDelta_ProtocolVersionUsesUserFacingLabel(t *testing.T) {
+	// "protocol_version" is the value of plan.ProtocolDeltaField. Use it directly here so
+	// the test remains accurate without importing the plan package.
+	p := planWithItems(domain.ModeUpdateWorkspace, []domain.PlanItem{
+		{
+			Ref:    agentRef("some-agent"),
+			Action: domain.ActionUpdate,
+			Stale: []domain.VersionDelta{
+				{Field: "protocol_version", Deployed: "1.9", Source: "1.10"},
+			},
+		},
+	})
+	s := screens.NewReviewScreen(p, 120, 80, plainStyles())
+	view := s.View()
+
+	if !strings.Contains(view, "harness protocol version") {
+		t.Errorf("plan review does not show user-facing label \"harness protocol version\" for "+
+			"\"protocol_version\" delta; the raw field name must be translated for users:\n%s", view)
+	}
+}
+
+// TestReviewScreen_VersionDelta_WorkflowPrefixedFieldUsesReadableLabel verifies that a
+// VersionDelta whose field follows the "workflow:<id>" convention renders with a readable
+// label that includes the workflow ID but strips the raw "workflow:" prefix. A rendered
+// label of "workflow my-workflow version" (or similar) is user-facing; the raw
+// "workflow:my-workflow" prefix is not.
+func TestReviewScreen_VersionDelta_WorkflowPrefixedFieldUsesReadableLabel(t *testing.T) {
+	const workflowID = "my-workflow"
+	p := planWithItems(domain.ModeUpdateWorkspace, []domain.PlanItem{
+		{
+			Ref:    agentRef("orchestrator"),
+			Action: domain.ActionUpdate,
+			Stale: []domain.VersionDelta{
+				{Field: "workflow:" + workflowID, Deployed: "1.0.0", Source: "1.1.0"},
+			},
+		},
+	})
+	s := screens.NewReviewScreen(p, 120, 80, plainStyles())
+	view := s.View()
+
+	// The workflow ID must appear so the user knows which workflow changed.
+	if !strings.Contains(view, workflowID) {
+		t.Errorf("plan review does not show workflow ID %q in the delta label; "+
+			"the workflow ID must be preserved so the user can identify which workflow changed:\n%s",
+			workflowID, view)
+	}
+
+	// The raw "workflow:" prefix must not appear as the label delimiter; the colon-separated
+	// form is an internal naming convention that is not meaningful to users.
+	if strings.Contains(view, "workflow:"+workflowID) {
+		t.Errorf("plan review shows raw \"workflow:%s\" field name in the output; "+
+			"the \"workflow:\" prefix must be translated to a readable label:\n%s",
+			workflowID, view)
+	}
+}
+
+// ---------------------------------------------------------------------------
+// Version-delta rendering — regression guards (T3.1)
+// ---------------------------------------------------------------------------
+
+// TestReviewScreen_VersionDelta_ActionCreateWithNoDeltas_RendersCorrectly is a regression
+// guard verifying that ActionCreate items — which never carry version deltas — continue to
+// render their [CREATE] badge and agent key correctly after the delta-label changes. The
+// label mapping must not disturb items that have an empty Stale slice.
+func TestReviewScreen_VersionDelta_ActionCreateWithNoDeltas_RendersCorrectly(t *testing.T) {
+	p := planWithItems(domain.ModeDeployWorkspace, []domain.PlanItem{
+		{
+			Ref:        agentRef("brand-new-agent"),
+			Action:     domain.ActionCreate,
+			TargetPath: "Agents/brand-new-agent.agent.md",
+		},
+	})
+	s := screens.NewReviewScreen(p, 120, 80, plainStyles())
+	view := collapseWhitespace(s.View())
+
+	if !strings.Contains(view, "[CREATE]") {
+		t.Errorf("regression: ActionCreate item no longer shows [CREATE] badge after delta-label changes:\n%s",
+			s.View())
+	}
+	if !strings.Contains(view, "brand-new-agent") {
+		t.Errorf("regression: ActionCreate item no longer shows agent key after delta-label changes:\n%s",
+			s.View())
+	}
+}
+
+// TestReviewScreen_VersionDelta_UnmappedFieldFallsBackToRawName is a regression guard
+// verifying that a VersionDelta whose field name has no entry in the label map renders the
+// raw field name verbatim rather than crashing or emitting an empty label. New, previously
+// unseen field names must degrade gracefully so the user still sees something meaningful.
+func TestReviewScreen_VersionDelta_UnmappedFieldFallsBackToRawName(t *testing.T) {
+	const unknownField = "some_future_field_xyz"
+	p := planWithItems(domain.ModeUpdateWorkspace, []domain.PlanItem{
+		{
+			Ref:    agentRef("some-agent"),
+			Action: domain.ActionUpdate,
+			Stale: []domain.VersionDelta{
+				{Field: unknownField, Deployed: "1.0", Source: "2.0"},
+			},
+		},
+	})
+	s := screens.NewReviewScreen(p, 120, 80, plainStyles())
+	view := s.View()
+
+	// The raw field name must appear as a fallback so the user has some indicator of what changed.
+	if !strings.Contains(view, unknownField) {
+		t.Errorf("plan review does not show raw field name %q for an unmapped delta field; "+
+			"unmapped fields must fall back to the raw name rather than silently omitting the label:\n%s",
+			unknownField, view)
+	}
+}
+
+// TestReviewScreen_VersionDelta_MultipleDeltas_AllRendered is a regression guard verifying
+// that when a single plan item carries multiple version deltas, every delta is rendered in
+// the review output. The label-mapping changes must not drop or skip any delta entries.
+func TestReviewScreen_VersionDelta_MultipleDeltas_AllRendered(t *testing.T) {
+	p := planWithItems(domain.ModeUpdateWorkspace, []domain.PlanItem{
+		{
+			Ref:    agentRef("multi-delta-agent"),
+			Action: domain.ActionUpdate,
+			Stale: []domain.VersionDelta{
+				{Field: "version", Deployed: "1.0", Source: "1.1"},
+				{Field: "harness_version", Deployed: "2.0", Source: "2.1"},
+				{Field: "tool_mappings_version", Deployed: "aaa", Source: "bbb"},
+			},
+		},
+	})
+	s := screens.NewReviewScreen(p, 120, 80, plainStyles())
+	view := s.View()
+
+	// All three source versions must appear: if any delta is dropped, its source version is absent.
+	for _, src := range []string{"1.1", "2.1", "bbb"} {
+		if !strings.Contains(view, src) {
+			t.Errorf("plan review does not show source version %q; "+
+				"all version deltas must be rendered when a plan item carries multiple deltas:\n%s",
+				src, view)
+		}
+	}
+}
+
+// ---------------------------------------------------------------------------
+// Physical-row scroll behavior with line wrapping
+// ---------------------------------------------------------------------------
+
+// longItemPlan builds a plan with n create items whose rendered review lines (badge +
+// ref path) exceed 40 terminal columns. At width=40, each such item's badge line wraps
+// to at least two physical terminal rows, making physical row count greater than logical
+// line count. This fixture is the basis for all physical-row scroll tests below.
+func longItemPlan(n int) domain.Plan {
+	items := make([]domain.PlanItem, n)
+	for i := range items {
+		items[i] = domain.PlanItem{
+			Ref:        agentRef(fmt.Sprintf("some-long-agent-name-%02d", i)),
+			Action:     domain.ActionCreate,
+			TargetPath: fmt.Sprintf("Agents/a-very-long-subdirectory-path/some-long-agent-name-%02d.agent.md", i),
+		}
+	}
+	return planWithItems(domain.ModeDeployWorkspace, items)
+}
+
+// scrollIndicatorTotal parses the scroll position indicator line in a rendered view and
+// returns the total row count it reports. The indicator format is "── A–B of C lines ──";
+// this function extracts and returns C. Returns 0, false if no indicator line is found.
+func scrollIndicatorTotal(view string) (int, bool) {
+	for _, line := range strings.Split(view, "\n") {
+		if !strings.Contains(line, " of ") || !strings.Contains(line, " lines") {
+			continue
+		}
+		ofIdx := strings.Index(line, " of ")
+		if ofIdx < 0 {
+			continue
+		}
+		rest := line[ofIdx+4:] // characters after " of "
+		linesIdx := strings.Index(rest, " lines")
+		if linesIdx < 0 {
+			continue
+		}
+		numStr := strings.TrimSpace(rest[:linesIdx])
+		var n int
+		if _, err := fmt.Sscanf(numStr, "%d", &n); err == nil && n > 0 {
+			return n, true
+		}
+	}
+	return 0, false
+}
+
+// physicalRowCount returns the number of physical terminal rows a rendered view string
+// occupies, by counting newline separators. A view that does not end in a newline has
+// its final line counted as a row. This matches how a terminal emulator consumes the string.
+func physicalRowCount(view string) int {
+	if view == "" {
+		return 0
+	}
+	n := strings.Count(view, "\n")
+	if !strings.HasSuffix(view, "\n") {
+		n++
+	}
+	return n
+}
+
+// TestReviewScreen_PhysicalRows_ViewAtOffset0DoesNotExceedTerminalHeight verifies that
+// when a ReviewScreen is created with a narrow terminal width that forces long review lines
+// to wrap (40 columns here), the View() output at scroll offset 0 does not exceed the
+// configured terminal height in physical rows. The current implementation sizes the scroll
+// window by counting logical review-line entries, not physical rows, so this test fails
+// until the scroll window computation is rewritten to accumulate physical rows.
+func TestReviewScreen_PhysicalRows_ViewAtOffset0DoesNotExceedTerminalHeight(t *testing.T) {
+	// Arrange: 40-column terminal forces each long item line to wrap to multiple physical
+	// rows. 10 items is enough to fill and exceed the scroll window when wrapping is counted.
+	const width = 40
+	const height = 15
+
+	s := screens.NewReviewScreen(longItemPlan(10), width, height, plainStyles())
+
+	// Act: render at scroll offset 0 (the default initial position).
+	view := s.View()
+
+	// Assert: physical rows must fit within the configured terminal height.
+	rows := physicalRowCount(view)
+	if rows > height {
+		t.Errorf("View() at scroll offset 0 occupies %d physical rows but terminal height is %d; "+
+			"the scroll window must be computed in physical rows (accounting for lipgloss line "+
+			"wrapping) not in logical review-line count:\n%s",
+			rows, height, view)
+	}
+}
+
+// TestReviewScreen_PhysicalRows_ScrollIndicator_ReflectsPhysicalRowCount verifies that the
+// scroll-position indicator ("── A–B of C lines ──") reports a total based on physical
+// terminal rows, not the count of logical review-line entries. When line wrapping is in
+// effect at a narrow width, physical rows exceed logical lines; the indicator must report
+// the larger physical total so the user knows how much content remains to scroll through.
+func TestReviewScreen_PhysicalRows_ScrollIndicator_ReflectsPhysicalRowCount(t *testing.T) {
+	// Arrange: narrow terminal so all long lines wrap; small height to force the indicator.
+	// 12 create items → 4 header lines + 12 item lines = 16 logical lines.
+	// At width=40, each line wraps to multiple physical rows → physical total is well above 16.
+	const width = 40
+	const height = 8
+	const itemCount = 12
+	// 4 header lines (mode, blank, count, separator) + 1 badge line per item.
+	const logicalLineCount = 4 + itemCount
+
+	s := screens.NewReviewScreen(longItemPlan(itemCount), width, height, plainStyles())
+
+	// Act
+	view := s.View()
+
+	// Assert: the scroll indicator must appear (content exceeds visible window).
+	total, ok := scrollIndicatorTotal(view)
+	if !ok {
+		t.Fatalf("scroll position indicator not found in view; "+
+			"with %d items at height %d, scrolling must be active and the indicator visible:\n%s",
+			itemCount, height, view)
+	}
+
+	// Assert: indicator total must exceed the logical line count, proving it uses physical rows.
+	if total <= logicalLineCount {
+		t.Errorf("scroll indicator total=%d is not greater than logical line count %d; "+
+			"the indicator must report physical rows (which exceed logical lines when wrapping "+
+			"is in effect), not the count of pre-rendered review-line entries:\n%s",
+			total, logicalLineCount, view)
+	}
+}
+
+// TestReviewScreen_PhysicalRows_NoWrapping_BehavesIdentically is a regression guard that
+// verifies on a wide terminal where no review lines wrap, the physical-row scroll logic
+// produces the same visible result as the original logical-line logic. When each logical
+// line occupies exactly one physical row the two approaches are equivalent; the fix must
+// not change behaviour for plans that fit without wrapping.
+func TestReviewScreen_PhysicalRows_NoWrapping_BehavesIdentically(t *testing.T) {
+	// Arrange: 200-column terminal — all review lines are well under 200 columns, no wrapping.
+	const width = 200
+	const height = 40
+
+	s := screens.NewReviewScreen(longItemPlan(10), width, height, plainStyles())
+
+	// Act
+	view := s.View()
+
+	// Assert: physical rows must fit within terminal height (regression guard).
+	rows := physicalRowCount(view)
+	if rows > height {
+		t.Errorf("View() on a wide terminal (width=%d, no wrapping) occupies %d physical rows "+
+			"but terminal height is %d; plans with no line-wrapping must render identically "+
+			"after the physical-row scroll fix is applied",
+			width, rows, height)
+	}
+
+	// Assert: the view must not be empty.
+	if view == "" {
+		t.Error("View() returned empty string for a valid plan at wide terminal width")
+	}
+}
+
+// TestReviewScreen_PhysicalRows_AfterResizeNarrow_ViewDoesNotExceedNewTerminalHeight verifies
+// that after Resize() to a narrower terminal width, the scroll window accounts for the
+// additional physical rows introduced by line wrapping. View() must fit within the new
+// terminal height even though the same logical lines now occupy more physical rows than
+// they did at the original width.
+func TestReviewScreen_PhysicalRows_AfterResizeNarrow_ViewDoesNotExceedNewTerminalHeight(t *testing.T) {
+	// Arrange: start wide (no wrapping), then resize to narrow (wrapping forces more rows).
+	const wideWidth = 200
+	const narrowWidth = 40
+	const height = 15
+
+	s := screens.NewReviewScreen(longItemPlan(10), wideWidth, height, plainStyles())
+
+	// Act: resize to a narrow terminal where all long item lines wrap to multiple rows.
+	s.Resize(narrowWidth, height)
+	view := s.View()
+
+	// Assert: physical rows must not exceed the (unchanged) terminal height.
+	rows := physicalRowCount(view)
+	if rows > height {
+		t.Errorf("View() after Resize to width=%d occupies %d physical rows but terminal height is %d; "+
+			"Resize must recompute the scroll window in physical rows so the view does not "+
+			"overflow the terminal when the width narrows and line wrapping increases:\n%s",
+			narrowWidth, rows, height, view)
 	}
 }
 

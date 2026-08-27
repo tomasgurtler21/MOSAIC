@@ -324,26 +324,31 @@ func TestUpdate_WorkflowDiscovery_NoSeparateOrchestratorRead(t *testing.T) {
 }
 
 // ---------------------------------------------------------------------------
-// End-to-end conflict detection (AC3.5)
+// End-to-end classification: agent hash mismatch with matching version
 // ---------------------------------------------------------------------------
 
-// TestDeployNew_LocallyModifiedFile_ConflictDetectedEndToEnd verifies that when a workspace
-// file's content hash (as probed from disk) differs from the hash recorded in the manifest,
-// the planner classifies the item as ActionConflict and the flow asks QLocalModification.
+// TestDeployNew_AgentHashMismatch_VersionMatch_ClassifiedAsUnchanged verifies that when a
+// workspace agent file's content hash differs from the manifest's recorded hash but the
+// version strings match, the planner classifies the agent as ActionUnchanged and does NOT
+// ask QLocalModification.
+//
+// The hash-mismatch check was removed from classifyAgentItem. Agents with matching versions
+// now fall through to the staleness check and are classified as ActionUnchanged regardless
+// of hash differences. QLocalModification is not triggered by a hash difference alone.
 //
 // This is an end-to-end test: it uses the real plan builder so that the full path from
-// probe → DeployedState → planner classification is exercised rather than a pre-scripted
-// plan stub. The test will be in RED phase until the deploy-new flow wires the probe and
-// populates plan.Input.DeployedState before calling the planner.
-func TestDeployNew_LocallyModifiedFile_ConflictDetectedEndToEnd(t *testing.T) {
+// probe -> DeployedState -> planner classification is exercised rather than a pre-scripted
+// plan stub.
+func TestDeployNew_AgentHashMismatch_VersionMatch_ClassifiedAsUnchanged(t *testing.T) {
 	ws := t.TempDir()
 
 	// Write "test-runner.md" with content that has a specific hash.
 	fileContent := []byte("---\nversion: \"1.0\"\n---\nThis file was locally modified after deployment.\n")
 	writeProbeWiringFile(t, ws, "test-runner.md", fileContent)
 
-	// The manifest records a different hash for the same target path, simulating a file that
-	// was modified on disk after the last deployment wrote the recorded hash.
+	// The manifest records a different hash for the same target path, but the version matches.
+	// Under the current classification logic, matching versions mean ActionUnchanged regardless
+	// of the hash.
 	manifestEntry := domain.ManifestEntry{
 		Ref:         domain.ArtifactRef{Kind: domain.ArtifactAgent, Key: "test-runner"},
 		TargetPath:  "test-runner.md",
@@ -357,34 +362,28 @@ func TestDeployNew_LocallyModifiedFile_ConflictDetectedEndToEnd(t *testing.T) {
 		},
 	}
 
-	// Pre-answer QLocalModification so the flow does not block waiting for user input.
-	stub := interactiontest.NewBuilder().
-		AnswerSelectOne(domain.QLocalModification, "test-runner.md", string(domain.DecisionSkip)).
-		Build()
+	// No need to pre-answer QLocalModification: the flow must not ask it.
+	stub := interactiontest.NewBuilder().Build()
 	deps, _ := newBaseDeps(t, stub)
 	deps.Manifest = &stubManifestStore{snap: snap}
-	// Use the real planner: conflict classification must come from the planner reading
-	// DeployedState[test-runner.md].ContentHash != manifestEntry.ContentHash, not from a pre-scripted plan.
+	// Use the real planner: classification must come from the planner reading
+	// DeployedState[test-runner.md], not from a pre-scripted plan.
 	deps.Planner = plan.New()
 	svc := app.New(deps)
 
-	// Act — the probe must populate DeployedState[test-runner.md] with the real file hash;
-	// the real planner must see the hash mismatch and classify test-runner.md as ActionConflict.
+	// Act
 	_, err := svc.DeployNew(context.Background(), newDeployRequest(ws, "stub-harness", []string{"quick-fix"}))
 	if err != nil {
 		t.Fatalf("DeployNew: %v", err)
 	}
 
-	// Assert — QLocalModification must have been asked for test-runner.md, proving that:
-	//   (1) the probe ran and set DeployedState[test-runner.md].ContentHash to the real file hash,
-	//   (2) the real planner detected that hash != manifest's recorded hash and returned
-	//       ActionConflict for that item,
-	//   (3) the deploy-new flow forwarded the conflict to the user via QLocalModification.
-	if !stub.WasAsked(domain.QLocalModification, "test-runner.md") {
-		t.Error("QLocalModification was not asked for test-runner.md; " +
-			"expected end-to-end conflict detection to fire when the probed file hash " +
-			"differs from the manifest's recorded hash (DeployedState must be populated " +
-			"from the probe before calling the planner)")
+	// Assert — QLocalModification must NOT have been asked for test-runner.md.
+	// Agents with hash mismatch but matching versions are classified as ActionUnchanged;
+	// the conflict question is not triggered.
+	if stub.WasAsked(domain.QLocalModification, "test-runner.md") {
+		t.Error("QLocalModification was asked for test-runner.md; " +
+			"expected no conflict detection when agent versions match even if the content hash differs " +
+			"(classifyAgentItem no longer performs a hash check; matching versions yield ActionUnchanged)")
 	}
 }
 

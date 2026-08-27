@@ -17,7 +17,9 @@ package plan_test
 //
 // Local-modification detection (T4.5, T4.8):
 //   - The deployed file's content hash is compared against the manifest's recorded hash.
-//   - A hash mismatch classifies the item as ActionConflict regardless of staleness.
+//   - For hooks, a hash mismatch classifies the item as ActionConflict regardless of staleness.
+//     For agents and skills, hash mismatch is ignored (Step 4 removed); classification falls
+//     through to version-stamp staleness.
 //   - A deployed file whose hash matches the manifest's recorded hash, and whose version
 //     stamps match the source stamps, classifies as ActionUnchanged.
 //   - A file present on disk with no manifest record for the current target path is a conflict.
@@ -516,10 +518,12 @@ func TestBuild_LocalModification_HashMatch_ClassifiesAsUnchanged(t *testing.T) {
 	}
 }
 
-// TestBuild_LocalModification_HashMismatch_ClassifiesAsConflict verifies that when the
-// current hash of a deployed file differs from the hash in the manifest, the plan item is
-// ActionConflict with a populated Conflict field.
-func TestBuild_LocalModification_HashMismatch_ClassifiesAsConflict(t *testing.T) {
+// TestBuild_LocalModification_AgentHashMismatch_FallsThroughToStaleness_ClassifiesAsUnchanged
+// verifies that when an agent's deployed hash differs from the manifest's recorded hash but all
+// version stamps match, the item is ActionUnchanged. The Step 4 whole-file hash check is
+// removed for agents: a hash mismatch no longer triggers ActionConflict. Classification falls
+// through to the version-stamp staleness comparison; matching stamps produce ActionUnchanged.
+func TestBuild_LocalModification_AgentHashMismatch_FallsThroughToStaleness_ClassifiesAsUnchanged(t *testing.T) {
 	const targetPath = "agents/test-agent.md"
 	const recordedHash = "sha256:aaaa"
 	const currentHash = "sha256:bbbb"
@@ -537,7 +541,9 @@ func TestBuild_LocalModification_HashMismatch_ClassifiesAsConflict(t *testing.T)
 		Entries:       []domain.ManifestEntry{manifestEntry},
 	})
 
-	// Deployed hash differs from manifest — locally modified.
+	// Deployed hash differs from manifest, but all version stamps match source.
+	// For agents, the Step 4 hash check is removed: hash mismatch is ignored and
+	// classification falls through to staleness. Version stamps all match → ActionUnchanged.
 	ds := map[string]domain.DeployedArtifactState{
 		targetPath: deployedState(currentHash, "1.0", "1.0", "1.0"),
 	}
@@ -551,19 +557,20 @@ func TestBuild_LocalModification_HashMismatch_ClassifiesAsConflict(t *testing.T)
 	if !ok {
 		t.Fatal("plan has no item for test-agent")
 	}
-	if item.Action != domain.ActionConflict {
-		t.Errorf("test-agent with hash mismatch: Action = %q, want %q",
-			item.Action, domain.ActionConflict)
-	}
-	if item.Conflict == nil {
-		t.Error("test-agent with hash mismatch: Conflict is nil; expected a populated LocalModification")
+	if item.Action != domain.ActionUnchanged {
+		t.Errorf("test-agent with hash mismatch but matching versions: Action = %q, want %q; "+
+			"the Step 4 hash check is removed for agents — hash mismatch must fall through to "+
+			"staleness comparison, and matching version stamps classify as ActionUnchanged",
+			item.Action, domain.ActionUnchanged)
 	}
 }
 
-// TestBuild_LocalModification_WhitespaceChange_ClassifiesAsConflict verifies that a
-// whitespace-only change is detected as a local modification. Content hashes use no
-// normalisation: a line-ending or whitespace change changes the hash.
-func TestBuild_LocalModification_WhitespaceChange_ClassifiesAsConflict(t *testing.T) {
+// TestBuild_LocalModification_AgentWhitespaceChange_FallsThroughToStaleness_ClassifiesAsUnchanged
+// verifies that a whitespace-only change to an agent's deployed file, when all version stamps
+// match the source, classifies as ActionUnchanged. The Step 4 hash check is removed for
+// agents: even a hash difference caused by whitespace does not trigger ActionConflict.
+// Classification falls through to staleness; matching stamps produce ActionUnchanged.
+func TestBuild_LocalModification_AgentWhitespaceChange_FallsThroughToStaleness_ClassifiesAsUnchanged(t *testing.T) {
 	const targetPath = "agents/test-agent.md"
 
 	// Simulate: original content was "content\n", now the file has "content\r\n".
@@ -589,6 +596,9 @@ func TestBuild_LocalModification_WhitespaceChange_ClassifiesAsConflict(t *testin
 		Entries:       []domain.ManifestEntry{manifestEntry},
 	})
 
+	// Whitespace-only change causes a hash difference, but version stamps all match source.
+	// For agents, the Step 4 hash check is removed: the hash difference is ignored and
+	// classification falls through to staleness. Matching version stamps → ActionUnchanged.
 	ds := map[string]domain.DeployedArtifactState{
 		targetPath: deployedState(currentHash, "1.0", "1.0", "1.0"),
 	}
@@ -602,9 +612,11 @@ func TestBuild_LocalModification_WhitespaceChange_ClassifiesAsConflict(t *testin
 	if !ok {
 		t.Fatal("plan has no item for test-agent")
 	}
-	if item.Action != domain.ActionConflict {
-		t.Errorf("test-agent with whitespace-only hash change: Action = %q, want %q",
-			item.Action, domain.ActionConflict)
+	if item.Action != domain.ActionUnchanged {
+		t.Errorf("test-agent with whitespace-only hash change and matching versions: Action = %q, want %q; "+
+			"the Step 4 hash check is removed for agents — whitespace-only hash difference must not "+
+			"trigger ActionConflict; matching version stamps classify as ActionUnchanged",
+			item.Action, domain.ActionUnchanged)
 	}
 }
 

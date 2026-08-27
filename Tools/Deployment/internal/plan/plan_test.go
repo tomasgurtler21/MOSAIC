@@ -12,7 +12,10 @@ package plan_test
 //   - ActionCreate: artifact in set, not in manifest, not on disk
 //   - ActionUpdate: artifact in manifest, at least one version field differs
 //   - ActionUnchanged: artifact in manifest, all versions match, hash matches
-//   - ActionConflict: artifact in manifest, current hash differs from recorded hash
+//   - ActionConflict: for hooks, artifact in manifest and current hash differs from recorded
+//     hash; for all types, FR-4 edge cases (no manifest, no manifest entry, parse failure).
+//     Agents and skills no longer produce ActionConflict on hash mismatch alone (Step 4
+//     removed); they fall through to version-stamp staleness instead.
 //   - Empty workspace (no manifest, no deployed files): all items are ActionCreate
 //   - Items are ordered by kind then key
 //
@@ -373,10 +376,12 @@ func TestBuild_Artifact_InManifest_VersionMismatch_StaleHasAtLeastOneDelta(t *te
 	}
 }
 
-// TestBuild_Artifact_InManifest_HashMismatch_ClassifiesAsConflict verifies that when an
-// artifact's deployed hash differs from the manifest's recorded hash (locally modified), the
-// item gets ActionConflict regardless of version staleness.
-func TestBuild_Artifact_InManifest_HashMismatch_ClassifiesAsConflict(t *testing.T) {
+// TestBuild_Artifact_InManifest_AgentHashMismatch_ClassifiesAsUnchanged verifies that when an
+// agent's deployed hash differs from the manifest's recorded hash but all version stamps match,
+// the item is ActionUnchanged. The Step 4 whole-file hash check is removed for agents: hash
+// mismatch is no longer an ActionConflict trigger. Classification falls through to staleness;
+// matching version stamps produce ActionUnchanged.
+func TestBuild_Artifact_InManifest_AgentHashMismatch_ClassifiesAsUnchanged(t *testing.T) {
 	agent := makeAgent("test-agent", "1.0")
 	skill := makeSkill("a-skill", "1.0")
 
@@ -393,7 +398,9 @@ func TestBuild_Artifact_InManifest_HashMismatch_ClassifiesAsConflict(t *testing.
 		Entries:       []domain.ManifestEntry{entry},
 	})
 
-	// Deployed hash differs from manifest — locally modified.
+	// Deployed hash differs from manifest, but all version stamps match source.
+	// For agents, the Step 4 hash check is removed: hash mismatch is ignored and
+	// classification falls through to staleness. Version stamps all match → ActionUnchanged.
 	ds := map[string]domain.DeployedArtifactState{
 		agentTarget: deployedState("sha256:modified", "1.0", "1.0", "1.0"),
 	}
@@ -407,8 +414,11 @@ func TestBuild_Artifact_InManifest_HashMismatch_ClassifiesAsConflict(t *testing.
 	if !ok {
 		t.Fatal("plan has no item for test-agent")
 	}
-	if item.Action != domain.ActionConflict {
-		t.Errorf("agent with hash mismatch: Action = %q, want %q", item.Action, domain.ActionConflict)
+	if item.Action != domain.ActionUnchanged {
+		t.Errorf("agent with hash mismatch but matching versions: Action = %q, want %q; "+
+			"the Step 4 hash check is removed for agents — hash mismatch must fall through to "+
+			"staleness comparison, and matching version stamps classify as ActionUnchanged",
+			item.Action, domain.ActionUnchanged)
 	}
 }
 
@@ -1121,16 +1131,19 @@ func TestBuild_ManifestEntryAtDifferentTargetPath_FileExistsAtCurrentPath_Classi
 //         precedence over version staleness
 // ---------------------------------------------------------------------------
 
-// TestBuild_HashMismatch_TakesPrecedenceOverVersionStaleness verifies that when a deployed
-// file's hash differs from the manifest's recorded hash (locally modified), the item is
-// ActionConflict even when version staleness would also fire. Conflict detection is applied
-// before staleness in the classification decision tree, and its result is final.
-func TestBuild_HashMismatch_TakesPrecedenceOverVersionStaleness(t *testing.T) {
+// TestBuild_AgentHashMismatch_FallsThroughToVersionStaleness_ClassifiesAsUpdate verifies that
+// when an agent's deployed hash differs from the manifest's recorded hash AND the version stamps
+// are also stale, the item is ActionUpdate — not ActionConflict. The Step 4 whole-file hash
+// check is removed for agents: hash mismatch no longer short-circuits classification. Instead,
+// classification falls through to staleness (Steps 5-7) and the stale version stamps drive
+// the ActionUpdate outcome.
+func TestBuild_AgentHashMismatch_FallsThroughToVersionStaleness_ClassifiesAsUpdate(t *testing.T) {
 	const targetPath = "agents/test-agent.md"
 	const recordedHash = "sha256:recorded"
 
 	// Source version "2.0"; deployed file has version "1.0" and a modified hash.
-	// Without conflict short-circuit this would be ActionUpdate. With it: ActionConflict.
+	// Before Stage 2 this would be ActionConflict (hash check fires first). After Stage 2
+	// the hash check is removed, staleness fires, and the version delta produces ActionUpdate.
 	agent := makeAgent("test-agent", "2.0")
 
 	entry := makeManifestEntry(agentRef("test-agent"), targetPath, "2.0", recordedHash)
@@ -1144,7 +1157,8 @@ func TestBuild_HashMismatch_TakesPrecedenceOverVersionStaleness(t *testing.T) {
 		Entries:       []domain.ManifestEntry{entry},
 	})
 
-	// Deployed file: hash differs from manifest (locally modified) AND version is stale.
+	// Deployed file: hash differs from manifest AND version is stale (deployed "1.0", source "2.0").
+	// After Stage 2: hash mismatch is ignored; staleness check fires and produces ActionUpdate.
 	ds := map[string]domain.DeployedArtifactState{
 		targetPath: deployedState("sha256:modified-by-hand", "1.0", "1.0", "1.0"),
 	}
@@ -1178,8 +1192,10 @@ func TestBuild_HashMismatch_TakesPrecedenceOverVersionStaleness(t *testing.T) {
 	if !ok {
 		t.Fatal("plan has no item for test-agent")
 	}
-	if item.Action != domain.ActionConflict {
-		t.Errorf("test-agent: hash mismatch + version staleness → Action = %q, want ActionConflict; conflict must take precedence",
+	if item.Action != domain.ActionUpdate {
+		t.Errorf("test-agent: hash mismatch + version staleness → Action = %q, want ActionUpdate; "+
+			"the Step 4 hash check is removed for agents — hash mismatch must not short-circuit "+
+			"classification. Staleness fires and the stale version produces ActionUpdate.",
 			item.Action)
 	}
 }

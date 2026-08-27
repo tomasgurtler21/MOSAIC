@@ -45,9 +45,13 @@ package plan_test
 //
 //   Precedence (T7.4):
 //
-//     - When a deployed file has both a hash conflict (local modification) and a stale protocol
-//       version, the item is classified as ActionConflict. Hash conflicts always take precedence
-//       over any staleness signal, including protocol staleness.
+//     - For hooks: when a deployed file has both a hash conflict (local modification) and a
+//       stale protocol version, the item is classified as ActionConflict. Hook hash conflicts
+//       always take precedence over any staleness signal, including protocol staleness.
+//     - For agents and skills: hash mismatch is not checked (Step 4 was removed in Stage 2).
+//       When an agent or skill has a differing deployed hash AND a stale protocol version, the
+//       item falls through to staleness classification and is classified as ActionUpdate. The
+//       Conflict field is nil because no hash-conflict check ran.
 
 import (
 	"context"
@@ -772,18 +776,19 @@ func TestBuild_ProtocolStaleness_DeltaNotRoutedThroughVersionFieldFormatter(t *t
 }
 
 // ---------------------------------------------------------------------------
-// T7.4 — Precedence: hash conflict takes priority over protocol staleness
+// T7.4 — Precedence: hash conflict takes priority over protocol staleness (hooks only)
 // ---------------------------------------------------------------------------
 
-// TestBuild_ProtocolStale_AndHashConflict_ConflictTakesPrecedence verifies that when a
-// deployed file has both a hash mismatch (indicating a local modification) and a stale
-// protocol version, the item is classified as ActionConflict. The hash conflict path runs
-// before protocol staleness is consulted, so a locally-modified file is never silently
-// overwritten as a routine protocol update.
-func TestBuild_ProtocolStale_AndHashConflict_ConflictTakesPrecedence(t *testing.T) {
+// TestBuild_Agent_HashMismatch_AndProtocolStale_FallsThroughToStaleness verifies that when a
+// deployed agent file has both a differing hash (which would formerly have been treated as a
+// local modification) and a stale protocol version, the item is classified as ActionUpdate.
+// For agents, the Step 4 hash-mismatch check was removed (Stage 2), so the hash difference is
+// ignored and classification falls through to staleness. The stale protocol version drives the
+// ActionUpdate result. No conflict is produced.
+func TestBuild_Agent_HashMismatch_AndProtocolStale_FallsThroughToStaleness(t *testing.T) {
 	const targetPath = "agents/test-agent.md"
 	const recordedHash = "sha256:original"
-	const currentHash = "sha256:modified" // differs — local modification
+	const currentHash = "sha256:modified" // differs — but agents no longer check hash at Step 4
 
 	agent := makeAgent("test-agent", "1.0")
 
@@ -799,7 +804,8 @@ func TestBuild_ProtocolStale_AndHashConflict_ConflictTakesPrecedence(t *testing.
 		Entries:       []domain.ManifestEntry{manifestEntry},
 	})
 
-	// Deployed state: hash differs (conflict) AND protocol is stale.
+	// Deployed state: hash differs AND protocol is stale. For agents, only the protocol
+	// staleness signal drives classification (hash mismatch is no longer checked).
 	ds := map[string]domain.DeployedArtifactState{
 		targetPath: deployedStateWithProtocol(currentHash, "1.0", "1.0", "1.0", "1.7"),
 	}
@@ -814,21 +820,24 @@ func TestBuild_ProtocolStale_AndHashConflict_ConflictTakesPrecedence(t *testing.
 	if !ok {
 		t.Fatal("plan has no item for test-agent")
 	}
-	if item.Action != domain.ActionConflict {
-		t.Errorf("agent with hash conflict and stale protocol version: Action = %q, want %q; "+
-			"content-hash conflict detection must take precedence over protocol staleness",
-			item.Action, domain.ActionConflict)
+	if item.Action != domain.ActionUpdate {
+		t.Errorf("agent with differing hash and stale protocol version: Action = %q, want %q; "+
+			"agent hash mismatch is no longer checked (Stage 2), so classification falls through "+
+			"to protocol staleness which must produce ActionUpdate",
+			item.Action, domain.ActionUpdate)
 	}
-	if item.Conflict == nil {
-		t.Error("item.Conflict is nil; expected a populated LocalModification for a hash-conflict item")
+	if item.Conflict != nil {
+		t.Errorf("item.Conflict = %+v, want nil; agents no longer produce ActionConflict from "+
+			"hash mismatch (Step 4 removed in Stage 2)", item.Conflict)
 	}
 }
 
-// TestBuild_ProtocolStale_AndHashConflict_ConflictFieldsCorrect verifies that when a hash
-// conflict takes precedence over protocol staleness, the LocalModification struct carries the
-// expected hash values (recorded hash from manifest, current hash from the deployed file).
-// This ensures the conflict-resolution UI can present the correct information to the user.
-func TestBuild_ProtocolStale_AndHashConflict_ConflictFieldsCorrect(t *testing.T) {
+// TestBuild_Agent_HashMismatch_AndProtocolStale_ConflictFieldIsNil verifies that when a
+// deployed agent file has a differing hash and a stale protocol version, the item's Conflict
+// field is nil. For agents, the Step 4 hash-mismatch check was removed (Stage 2), so no
+// LocalModification struct is populated. The item is classified as ActionUpdate (protocol
+// staleness), not ActionConflict.
+func TestBuild_Agent_HashMismatch_AndProtocolStale_ConflictFieldIsNil(t *testing.T) {
 	const targetPath = "agents/test-agent.md"
 	const recordedHash = "sha256:aaaa"
 	const currentHash = "sha256:bbbb"
@@ -860,15 +869,14 @@ func TestBuild_ProtocolStale_AndHashConflict_ConflictFieldsCorrect(t *testing.T)
 	if !ok {
 		t.Fatal("plan has no item for test-agent")
 	}
-	if item.Conflict == nil {
-		t.Fatal("item.Conflict is nil; cannot verify conflict fields")
+	if item.Action != domain.ActionUpdate {
+		t.Errorf("agent with differing hash and stale protocol: Action = %q, want %q; "+
+			"agent hash mismatch is no longer checked (Stage 2 Step 4 removal), protocol "+
+			"staleness must classify the item as ActionUpdate",
+			item.Action, domain.ActionUpdate)
 	}
-	if item.Conflict.RecordedHash != recordedHash {
-		t.Errorf("item.Conflict.RecordedHash = %q, want %q (hash from manifest)",
-			item.Conflict.RecordedHash, recordedHash)
-	}
-	if item.Conflict.CurrentHash != currentHash {
-		t.Errorf("item.Conflict.CurrentHash = %q, want %q (hash from deployed file)",
-			item.Conflict.CurrentHash, currentHash)
+	if item.Conflict != nil {
+		t.Errorf("item.Conflict = %+v, want nil; no LocalModification is produced for agent "+
+			"hash mismatch because Step 4 was removed in Stage 2", item.Conflict)
 	}
 }

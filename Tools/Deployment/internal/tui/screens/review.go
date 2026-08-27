@@ -20,10 +20,11 @@ import (
 // ReviewScreen renders the full deployment plan and captures the user's go/no-go decision.
 // It is shown as an overlay during screenRunning; it is not a navigation step.
 type ReviewScreen struct {
-	plan        domain.Plan
-	lines       []reviewLine // pre-rendered, scrollable content
+	plan         domain.Plan
+	lines        []reviewLine // pre-rendered, scrollable content
+	physHeights  []int        // physical terminal row height of each reviewLine at current width
 	scrollOffset int
-	visibleLines int // number of content lines visible at once
+	visibleLines int // fallback line count; physical-row logic uses computeContentBudget instead
 	done         bool
 	answer       domain.ConfirmAnswer
 	width        int
@@ -47,18 +48,89 @@ func NewReviewScreen(p domain.Plan, width, height int, styles Styles) *ReviewScr
 	}
 	s.lines = buildReviewLines(p)
 	s.visibleLines = reviewVisibleLines(height)
+	s.recomputePhysHeights()
 	return s
 }
 
-// reviewVisibleLines computes the scrollable area height.
+// reviewVisibleLines computes the scrollable area height using a fixed chrome estimate.
+// It is kept for backward compatibility; View() uses computeContentBudget() for accuracy.
 func reviewVisibleLines(totalHeight int) int {
-	// title + subtitle + border + help = 5 fixed lines
+	// title + subtitle + border + indicator + help = 5 fixed lines (assumes no chrome wrapping)
 	h := totalHeight - 5
 	if h < 3 {
 		return 3
 	}
 	return h
 }
+
+// physicalHeight returns the number of physical terminal rows a rendered string occupies.
+// lipgloss Width(w).Render(text) may insert newline characters when text exceeds w columns;
+// counting those internal newlines gives the true row count.
+func physicalHeight(rendered string) int {
+	n := strings.Count(rendered, "\n") + 1
+	if n < 1 {
+		return 1
+	}
+	return n
+}
+
+// recomputePhysHeights re-renders every content line at the current width and records
+// how many physical terminal rows each occupies. This must be called whenever the width
+// changes so that scroll bounds and the content budget remain accurate.
+func (s *ReviewScreen) recomputePhysHeights() {
+	s.physHeights = make([]int, len(s.lines))
+	for i, line := range s.lines {
+		s.physHeights[i] = physicalHeight(s.renderLine(line))
+	}
+}
+
+// computeContentBudget returns the number of physical terminal rows available for
+// scrollable content. It renders each fixed chrome element at the current width to
+// measure its true height (accounting for wrapping), then subtracts all chrome rows
+// and one reserved row for the scroll-position indicator from the terminal height.
+func (s *ReviewScreen) computeContentBudget() int {
+	titleH := physicalHeight(s.styles.Title.Width(s.width).Render(reviewTitle))
+	subtitleH := physicalHeight(s.styles.Subtitle.Width(s.width).Render(reviewSubtitle))
+	borderH := physicalHeight(s.styles.Border.Width(s.width).Render(strings.Repeat("─", s.width)))
+	helpH := physicalHeight(s.styles.Help.Width(s.width).Render(reviewHelpText))
+	const indicatorRows = 1
+	budget := s.height - titleH - subtitleH - borderH - helpH - indicatorRows
+	if budget < 1 {
+		return 1
+	}
+	return budget
+}
+
+// computeMaxScrollOffset returns the largest scroll offset at which there is still
+// enough content below to fill the visible content area. Prevents the user from
+// scrolling past the last meaningful content.
+func (s *ReviewScreen) computeMaxScrollOffset() int {
+	budget := s.computeContentBudget()
+	accum := 0
+	for i := len(s.physHeights) - 1; i >= 0; i-- {
+		accum += s.physHeights[i]
+		if accum >= budget {
+			return i
+		}
+	}
+	return 0
+}
+
+// totalContentPhysicalRows returns the sum of physical row heights for all content lines.
+func (s *ReviewScreen) totalContentPhysicalRows() int {
+	total := 0
+	for _, h := range s.physHeights {
+		total += h
+	}
+	return total
+}
+
+// reviewTitle, reviewSubtitle, and reviewHelpText are the fixed strings rendered as chrome
+// outside the scrollable content area. They are defined here so computeContentBudget and
+// View use identical text when measuring chrome heights.
+const reviewTitle = "Review Deployment Plan"
+const reviewSubtitle = "Review all planned actions before any file is written."
+const reviewHelpText = "↑/k up  ↓/j down  y/enter proceed  n/q/esc cancel"
 
 // buildReviewLines constructs the pre-rendered line list from the plan, grouping items by action.
 func buildReviewLines(p domain.Plan) []reviewLine {
@@ -129,7 +201,10 @@ func buildReviewLines(p domain.Plan) []reviewLine {
 			)
 			add(line, g.style)
 
-			if item.Reason != "" {
+			// Show the Reason line only when there are no per-field delta lines to display.
+			// When Stale deltas are present, the per-delta loop below already shows the
+			// version changes with before/after values; the Reason string would duplicate that.
+			if item.Reason != "" && len(item.Stale) == 0 {
 				add("               "+item.Reason, "muted")
 			}
 
@@ -187,19 +262,48 @@ func modeDisplayName(mode domain.RunMode) string {
 	}
 }
 
+// versionDeltaLabel returns the user-facing label for a VersionDelta.Field value.
+// Fields with a well-known internal name are translated to a descriptive label.
+// Fields with the "workflow:" prefix are translated to "workflow <id> version".
+// Any other field falls back to the raw field name so new fields degrade gracefully.
+func versionDeltaLabel(field string) string {
+	switch field {
+	case "version":
+		return "catalog version"
+	case "harness_version":
+		return "harness version"
+	case "injections_version":
+		return "harness injection version (body tag)"
+	case "tool_mappings_version":
+		return "tool mappings hash"
+	case "bundle_version":
+		return "bundle version"
+	case "orchestrator_injections_version":
+		return "orchestrator injection version"
+	case "protocol_version":
+		return "harness protocol version"
+	}
+	const workflowPrefix = "workflow:"
+	if strings.HasPrefix(field, workflowPrefix) {
+		id := strings.TrimPrefix(field, workflowPrefix)
+		return "workflow " + id + " version"
+	}
+	return field
+}
+
 // formatVersionDelta renders one staleness comparison for the plan review.
 //
 // An empty Source is the shared, documented representation of a removal. It renders as the
 // word "deleted" rather than a bare trailing arrow. Every other delta renders verbatim.
 //
-//	{Field}: {Deployed} → {Source}     when Source != ""
-//	{Field}: {Deployed} → deleted      when Source == ""
+//	{Label}: {Deployed} → {Source}     when Source != ""
+//	{Label}: {Deployed} → deleted      when Source == ""
 func formatVersionDelta(delta domain.VersionDelta) string {
 	source := delta.Source
 	if source == "" {
 		source = "deleted"
 	}
-	return fmt.Sprintf("%s: %s → %s", delta.Field, delta.Deployed, source)
+	return fmt.Sprintf("%s: %s → %s", versionDeltaLabel(delta.Field), delta.Deployed, source)
 }
 
 // shortHash abbreviates a "sha256:..." hash to "sha256:xxxxxxxx…" for display.
@@ -223,10 +327,7 @@ func (s *ReviewScreen) Update(msg tea.Msg) bool {
 			s.scrollOffset--
 		}
 	case "down", "j":
-		maxOffset := len(s.lines) - s.visibleLines
-		if maxOffset < 0 {
-			maxOffset = 0
-		}
+		maxOffset := s.computeMaxScrollOffset()
 		if s.scrollOffset < maxOffset {
 			s.scrollOffset++
 		}
@@ -249,42 +350,57 @@ func (s *ReviewScreen) Done() bool { return s.done }
 func (s *ReviewScreen) Answer() domain.ConfirmAnswer { return s.answer }
 
 // View renders the plan review overlay.
+//
+// The scrollable content area is sized by counting physical terminal rows (accounting for
+// lipgloss line-wrapping of long lines at the current width), not by counting logical
+// reviewLine entries. Chrome elements outside the content area — title, subtitle, border,
+// indicator, and help — are rendered first so their physical heights can be measured and
+// subtracted from the terminal height to yield the correct content budget.
 func (s *ReviewScreen) View() string {
 	var sb strings.Builder
 
-	sb.WriteString(s.styles.Title.Width(s.width).Render("Review Deployment Plan"))
+	sb.WriteString(s.styles.Title.Width(s.width).Render(reviewTitle))
 	sb.WriteByte('\n')
-	sb.WriteString(s.styles.Subtitle.Width(s.width).Render("Review all planned actions before any file is written."))
+	sb.WriteString(s.styles.Subtitle.Width(s.width).Render(reviewSubtitle))
 	sb.WriteByte('\n')
 	sb.WriteString(s.styles.Border.Width(s.width).Render(strings.Repeat("─", s.width)))
 	sb.WriteByte('\n')
 
-	// Scrollable content window.
+	// Scrollable content window: accumulate physical rows until the budget is exhausted.
+	contentBudget := s.computeContentBudget()
 	start := s.scrollOffset
-	end := start + s.visibleLines
-	if end > len(s.lines) {
-		end = len(s.lines)
-	}
-	for i := start; i < end; i++ {
-		line := s.lines[i]
-		rendered := s.renderLine(line)
-		sb.WriteString(rendered)
+	rowsUsed := 0
+	for i := start; i < len(s.lines); i++ {
+		h := s.physHeights[i]
+		if rowsUsed+h > contentBudget {
+			break
+		}
+		sb.WriteString(s.renderLine(s.lines[i]))
 		sb.WriteByte('\n')
+		rowsUsed += h
 	}
 
-	// Scroll position indicator.
-	if len(s.lines) > s.visibleLines {
-		total := len(s.lines)
-		shown := end - start
+	// Scroll position indicator: shown when total physical content exceeds the budget,
+	// meaning some lines are hidden above or below. Reports physical row positions so the
+	// user knows how much content remains to scroll through.
+	totalPhys := s.totalContentPhysicalRows()
+	if totalPhys > contentBudget {
+		physBefore := 0
+		for i := 0; i < start && i < len(s.physHeights); i++ {
+			physBefore += s.physHeights[i]
+		}
+		physStart := physBefore + 1
+		physEnd := physBefore + rowsUsed
+		if physEnd < physStart {
+			physEnd = physStart
+		}
 		sb.WriteString(s.styles.Muted.Width(s.width).Render(
-			fmt.Sprintf("── %d–%d of %d lines ──", start+1, start+shown, total),
+			fmt.Sprintf("── %d–%d of %d lines ──", physStart, physEnd, totalPhys),
 		))
 		sb.WriteByte('\n')
 	}
 
-	sb.WriteString(s.styles.Help.Width(s.width).Render(
-		"↑/k up  ↓/j down  y/enter proceed  n/q/esc cancel",
-	))
+	sb.WriteString(s.styles.Help.Width(s.width).Render(reviewHelpText))
 	return sb.String()
 }
 
@@ -308,16 +424,16 @@ func (s *ReviewScreen) renderLine(line reviewLine) string {
 	}
 }
 
-// Resize updates the overlay dimensions and recomputes the visible line count.
+// Resize updates the overlay dimensions and recomputes physical line heights.
+// After a resize, line wrapping changes (narrower widths wrap more), so physical heights
+// for all content lines are recomputed before clamping the scroll offset.
 func (s *ReviewScreen) Resize(width, height int) {
 	s.width = width
 	s.height = height
 	s.visibleLines = reviewVisibleLines(height)
-	// Clamp scroll offset to the new bounds.
-	maxOffset := len(s.lines) - s.visibleLines
-	if maxOffset < 0 {
-		maxOffset = 0
-	}
+	s.recomputePhysHeights()
+	// Clamp scroll offset to the new physical-row-based bounds.
+	maxOffset := s.computeMaxScrollOffset()
 	if s.scrollOffset > maxOffset {
 		s.scrollOffset = maxOffset
 	}

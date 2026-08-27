@@ -382,6 +382,11 @@ func TestBuild_ActionUpdate_ResolvedModel_NoGapNoModel(t *testing.T) {
 // agent's file has a local modification (ActionConflict), the incoming model selection is
 // unresolved, and the deployed file carries no embedded ModelID, the plan surfaces a
 // GapNoModel gap.
+//
+// ActionConflict is produced here by an FR-4 edge case: the manifest is present but contains
+// no entry for the agent. A deployed file with no manifest record classifies as ActionConflict
+// with ManifestMissing: true. This mechanism applies both before and after Stage 2 (the Stage 2
+// change only removes the hash-mismatch trigger; FR-4 edge cases still produce ActionConflict).
 func TestBuild_ActionConflict_NoModel_NoDeployedModel_EmitsGapNoModel(t *testing.T) {
 	agent := makeAgent("test-agent", "1.0")
 	wf := makeWorkflow("test-wf", agent.Key)
@@ -393,15 +398,13 @@ func TestBuild_ActionConflict_NoModel_NoDeployedModel_EmitsGapNoModel(t *testing
 
 	const agentTarget = "agents/test-agent.md"
 
-	entry := makeManifestEntry(agentRef("test-agent"), agentTarget, "1.0", "sha256:recorded")
-	entry.HarnessVersion = "1.0"
-	entry.InjectionsVersion = "1.0"
-
+	// Manifest is present but has NO entry for test-agent. A deployed file with no manifest
+	// record → ActionConflict with ManifestMissing: true (FR-4 edge case).
 	snap := presentSnapshot(domain.Manifest{
 		SchemaVersion: manifest.SchemaVersion,
 		HarnessID:     "test-harness",
 		UpdatedAt:     time.Now(),
-		Entries:       []domain.ManifestEntry{entry},
+		Entries:       nil, // no entry for test-agent
 	})
 
 	input := plan.Input{
@@ -420,8 +423,8 @@ func TestBuild_ActionConflict_NoModel_NoDeployedModel_EmitsGapNoModel(t *testing
 		DeployedState: map[string]domain.DeployedArtifactState{
 			agentTarget: {
 				Present:     true,
-				ContentHash: "sha256:locally-modified", // differs from manifest record → ActionConflict
-				ModelID:     "",                         // no deployed model
+				ContentHash: "sha256:current",
+				ModelID:     "", // no deployed model
 			},
 		},
 	}
@@ -446,6 +449,11 @@ func TestBuild_ActionConflict_NoModel_NoDeployedModel_EmitsGapNoModel(t *testing
 // an agent's file has a local modification (ActionConflict), the incoming model selection is
 // unresolved, but the deployed file carries an embedded ModelID, the plan emits no GapNoModel
 // gap. The embedded model will be preserved if the conflict is resolved with a rewrite.
+//
+// ActionConflict is produced here by an FR-4 edge case: the manifest is present but contains
+// no entry for the agent. A deployed file with no manifest record classifies as ActionConflict
+// with ManifestMissing: true. This mechanism applies both before and after Stage 2 (the Stage 2
+// change only removes the hash-mismatch trigger; FR-4 edge cases still produce ActionConflict).
 func TestBuild_ActionConflict_NoModel_WithDeployedModel_SuppressesGapNoModel(t *testing.T) {
 	agent := makeAgent("test-agent", "1.0")
 	wf := makeWorkflow("test-wf", agent.Key)
@@ -457,15 +465,15 @@ func TestBuild_ActionConflict_NoModel_WithDeployedModel_SuppressesGapNoModel(t *
 
 	const agentTarget = "agents/test-agent.md"
 
-	entry := makeManifestEntry(agentRef("test-agent"), agentTarget, "1.0", "sha256:recorded")
-	entry.HarnessVersion = "1.0"
-	entry.InjectionsVersion = "1.0"
-
+	// Manifest is present but has NO entry for test-agent. A deployed file with no manifest
+	// record → ActionConflict with ManifestMissing: true (FR-4 edge case). The deployed file
+	// carries a ModelID; the gap must be suppressed because the model will be preserved if the
+	// conflict is resolved with a rewrite.
 	snap := presentSnapshot(domain.Manifest{
 		SchemaVersion: manifest.SchemaVersion,
 		HarnessID:     "test-harness",
 		UpdatedAt:     time.Now(),
-		Entries:       []domain.ManifestEntry{entry},
+		Entries:       nil, // no entry for test-agent
 	})
 
 	input := plan.Input{
@@ -484,7 +492,7 @@ func TestBuild_ActionConflict_NoModel_WithDeployedModel_SuppressesGapNoModel(t *
 		DeployedState: map[string]domain.DeployedArtifactState{
 			agentTarget: {
 				Present:     true,
-				ContentHash: "sha256:locally-modified",
+				ContentHash: "sha256:current",
 				ModelID:     "claude-sonnet-4-5", // deployed model present
 			},
 		},

@@ -7,9 +7,10 @@ package plan_test
 //   A single-file skill (only SKILL.md) must continue to produce exactly one PlanItem.
 //
 //   T4.6 — Classification independence: each file in a multi-file skill is classified
-//   independently based on its own deployed state and manifest entry. If one file is locally
-//   modified (hash mismatch → ActionConflict) and another is unchanged (hash matches →
-//   ActionUnchanged), the two PlanItems carry different Action values.
+//   independently based on its own deployed state and manifest entry. The entry file is
+//   classified via version-stamp staleness (ActionUpdate when stale, ActionUnchanged when
+//   current). Non-entry companion files bypass version staleness; after Step 4 removal for
+//   skills, a companion with a differing hash but no staleness classifies as ActionUnchanged.
 //
 // These tests are written in the TDD RED phase. Build currently produces one PlanItem per
 // skill (the skill loop uses paths.Path(ref) and calls classifySkillItem once), so all
@@ -308,40 +309,54 @@ func TestBuild_MultiFileSkill_NewDeployment_AllFilesAreActionCreate(t *testing.T
 // T4.6 — Classification independence: each file classified independently
 // ---------------------------------------------------------------------------
 
-// TestBuild_MultiFileSkill_ClassificationIsIndependentPerFile verifies that when a
-// multi-file skill is partially locally modified, each file is classified based on its
-// own deployed state and manifest entry. The locally-modified file gets ActionConflict;
-// the unmodified file gets ActionUnchanged.
+// TestBuild_MultiFileSkill_ClassificationIsIndependentPerFile verifies that each file in a
+// multi-file skill is classified independently based on its own deployed state and manifest
+// entry. The entry file (SKILL.md) is classified as ActionUpdate when the skill version
+// advances. A non-entry companion file whose deployed hash differs from the manifest entry
+// is classified as ActionUnchanged — because the Step 4 hash check is removed for skills
+// in the same way as for agents: SkillStaleness is not applied to non-entry files, so
+// hash mismatch alone does not produce ActionConflict.
 //
-// This test requires Build to produce 2 PlanItems (one per file), so it depends on T4.3
-// being met. With the current single-item implementation, the test fails at the count
-// assertion before reaching the action assertions.
+// With the current implementation (Step 4 hash check still present), the companion file's
+// hash mismatch produces ActionConflict instead of ActionUnchanged, so this test fails.
+// After the Step 4 removal, the companion's hash mismatch is ignored and it classifies as
+// ActionUnchanged, making this test pass.
 func TestBuild_MultiFileSkill_ClassificationIsIndependentPerFile(t *testing.T) {
-	skill := makeMultiFileSkill("lean-tdd", []string{"SKILL.md", "companion.md"})
+	// skill.Version is "2.0" — bumped from the manifest-recorded "1.0".
+	skill := domain.Skill{
+		Key:       "lean-tdd",
+		Name:      "lean-tdd-name",
+		Version:   "2.0",
+		SourceDir: "/fake/skills/lean-tdd",
+		EntryFile: "SKILL.md",
+		Files:     []string{"SKILL.md", "companion.md"},
+	}
 
 	const entryTargetPath    = "skills/lean-tdd/SKILL.md"
 	const companionTargetPath = "skills/lean-tdd/companion.md"
-	const recordedHash       = "abc123"
-	const modifiedHash       = "xyz789" // differs from recorded → conflict
+	const recordedHash        = "abc123"
+	const modifiedHash        = "xyz789" // differs from recordedHash — hash mismatch for companion
 
-	skillRef := domain.ArtifactRef{Kind: domain.ArtifactSkill, Key: "lean-tdd"}
+	ref := domain.ArtifactRef{Kind: domain.ArtifactSkill, Key: "lean-tdd"}
 
-	// Manifest has entries for both files with the same recorded hash.
+	// Manifest records version "1.0" and recordedHash for both files.
 	m := domain.Manifest{
 		Entries: []domain.ManifestEntry{
-			makeManifestEntry(skillRef, entryTargetPath, "1.0", recordedHash),
-			makeManifestEntry(skillRef, companionTargetPath, "1.0", recordedHash),
+			makeManifestEntry(ref, entryTargetPath, "1.0", recordedHash),
+			makeManifestEntry(ref, companionTargetPath, "1.0", recordedHash),
 		},
 	}
 
-	// SKILL.md: unchanged (deployed hash matches recorded hash).
-	// companion.md: locally modified (deployed hash differs from recorded hash).
-	deployedState := map[string]domain.DeployedArtifactState{
+	// Entry file: hash matches manifest, but version "1.0" deployed vs "2.0" source → ActionUpdate.
+	// Companion (non-entry): hash DIFFERS from manifest (modifiedHash), no SkillStaleness applied.
+	//   Before Stage 2: Step 4 hash check fires → ActionConflict (current code — test fails here).
+	//   After Stage 2: Step 4 removed for skills → hash ignored → ActionUnchanged.
+	deployed := map[string]domain.DeployedArtifactState{
 		entryTargetPath:    deployedState(recordedHash, "1.0", "1.0", "1.0"),
 		companionTargetPath: deployedState(modifiedHash, "", "", ""),
 	}
 
-	input := buildInputWithMultiFileSkill(skill, presentSnapshot(m), deployedState)
+	input := buildInputWithMultiFileSkill(skill, presentSnapshot(m), deployed)
 	p, err := plan.New().Build(context.Background(), input)
 	if err != nil {
 		t.Fatalf("Build: %v", err)
@@ -360,21 +375,25 @@ func TestBuild_MultiFileSkill_ClassificationIsIndependentPerFile(t *testing.T) {
 		itemByPath[item.TargetPath] = item
 	}
 
-	// SKILL.md: deployed hash matches manifest → ActionUnchanged.
+	// Entry file (SKILL.md): version stale (deployed "1.0" vs source "2.0") → ActionUpdate.
 	entryItem, ok := itemByPath[entryTargetPath]
 	if !ok {
 		t.Errorf("no PlanItem found for entry file target path %q", entryTargetPath)
-	} else if entryItem.Action != domain.ActionUnchanged {
-		t.Errorf("entry file (hash matches manifest) has Action = %v, want ActionUnchanged",
+	} else if entryItem.Action != domain.ActionUpdate {
+		t.Errorf("entry file (version stale 1.0 -> 2.0) has Action = %v, want ActionUpdate",
 			entryItem.Action)
 	}
 
-	// companion.md: deployed hash differs from manifest → ActionConflict.
+	// Companion file (non-entry): hash mismatch is ignored after Step 4 removal; no SkillStaleness
+	// applied → ActionUnchanged. With the current implementation (Step 4 present), the hash
+	// mismatch returns ActionConflict, so this assertion is the one that causes RED failure.
 	companionItem, ok := itemByPath[companionTargetPath]
 	if !ok {
 		t.Errorf("no PlanItem found for companion file target path %q", companionTargetPath)
-	} else if companionItem.Action != domain.ActionConflict {
-		t.Errorf("companion file (hash mismatch) has Action = %v, want ActionConflict",
+	} else if companionItem.Action != domain.ActionUnchanged {
+		t.Errorf("companion file (non-entry, hash mismatch ignored after Step 4 removal, no SkillStaleness applied) "+
+			"has Action = %v, want ActionUnchanged; the Step 4 hash check must be removed for skills "+
+			"so that hash mismatch alone does not produce ActionConflict for non-entry skill files",
 			companionItem.Action)
 	}
 }

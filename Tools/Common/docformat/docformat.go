@@ -1208,9 +1208,28 @@ func serializeListEntry(key string, v mosaic.FieldValue, nl string) string {
 		sb.WriteString(":")
 		sb.WriteString(nl)
 		for _, item := range v.Items {
-			sb.WriteString("  - ")
-			sb.WriteString(serializeScalarInline(item))
-			sb.WriteString(nl)
+			switch item.Kind {
+			case mosaic.KindMapping:
+				// Serialize each pair of the mapping item. The first pair appears on
+				// the "  - " line; subsequent pairs are indented with four spaces so
+				// the YAML structure is unambiguous to parsers and human readers.
+				for i, pair := range item.Pairs {
+					if i == 0 {
+						sb.WriteString("  - ")
+					} else {
+						sb.WriteString("    ")
+					}
+					sb.WriteString(pair.Key)
+					sb.WriteString(": ")
+					sb.WriteString(serializeScalarInline(pair.Value))
+					sb.WriteString(nl)
+				}
+			default:
+				// KindScalar (and KindList as a future-concern fallback).
+				sb.WriteString("  - ")
+				sb.WriteString(serializeScalarInline(item))
+				sb.WriteString(nl)
+			}
 		}
 	}
 	return sb.String()
