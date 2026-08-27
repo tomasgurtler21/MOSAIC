@@ -2,6 +2,7 @@ package evaluate
 
 import (
 	"fmt"
+	"strings"
 
 	"mosaic-agent-test/internal/domain"
 )
@@ -112,6 +113,27 @@ func exclusionDetail(r domain.TestResult, reason domain.ExclusionReason) string 
 		return "harness process exited non-zero"
 	case domain.ExclusionStateIntegrity:
 		return "lock was reclaimed; one or more state updates may have been lost"
+	case domain.ExclusionEchoMismatch:
+		// Collect every ClassEchoFidelity assertion that failed. Each carries
+		// the invocation number in its Target field. Build a semicolon-separated
+		// list so the reader can tell which invocations mismatched without
+		// inspecting a retained sandbox.
+		var parts []string
+		for _, a := range r.Assertions {
+			if a.Class == domain.ClassEchoFidelity && a.Outcome == domain.AssertionFail {
+				parts = append(parts, "invocation "+a.Target+": echo mismatch")
+			}
+		}
+		detail := strings.Join(parts, "; ")
+		if detail == "" {
+			detail = "echo mismatch"
+		}
+		// When an assertion failure co-occurred, note it so the reader is not
+		// misled into thinking the run would have passed its subject assertions.
+		if hasReason(r.Reasons, domain.ReasonAssertion) {
+			detail += "; assertion failures also present"
+		}
+		return detail
 	default:
 		return string(reason)
 	}

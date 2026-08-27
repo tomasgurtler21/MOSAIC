@@ -7,6 +7,7 @@ package evaluate_test
 // as an infrastructure failure.
 
 import (
+	"strings"
 	"testing"
 
 	"mosaic-agent-test/internal/domain"
@@ -248,5 +249,174 @@ func TestNeedsRetry_TimeoutResult_ReportsFalse(t *testing.T) {
 	timeout := domain.TestResult{Verdict: domain.VerdictTimeout, Reasons: []domain.FailureReason{domain.ReasonTimeout}}
 	if evaluate.NeedsRetry(timeout) {
 		t.Error("NeedsRetry(timeout result) = true, want false — a timeout is the subject's own outcome, not an infrastructure fault to retry")
+	}
+}
+
+// echoMismatchResult builds an echo-mismatch-excluded TestResult analogous to
+// stateIntegrityResult. The Assertions slice contains one ClassEchoFidelity
+// fail entry for invocation 1, which is the minimal shape exclusionDetail
+// needs to build the per-invocation detail string.
+func echoMismatchResult(n int) domain.TestResult {
+	return domain.TestResult{
+		Key:     domain.RunKey{RunID: "run-1", TestName: "example", RunNumber: n},
+		Verdict: domain.VerdictFail,
+		Reasons: []domain.FailureReason{domain.ReasonEchoMismatch},
+		Assertions: []domain.AssertionResult{
+			{Class: domain.ClassEchoFidelity, Target: "1", Outcome: domain.AssertionFail},
+		},
+	}
+}
+
+// --- T1.3: Aggregate with echo-mismatch-excluded runs ---
+
+// TestAggregate_EchoMismatchRun_ExcludedFromDenominator verifies that a run
+// excluded for echo_mismatch does not enter the pass-rate denominator:
+// Excluded increments and Counted does not.
+func TestAggregate_EchoMismatchRun_ExcludedFromDenominator(t *testing.T) {
+	results := []domain.TestResult{passResult(1), echoMismatchResult(2), passResult(3)}
+	policy := domain.RepetitionPolicy{Repetitions: 3, PassRate: 1.0}
+
+	got := evaluate.Aggregate(results, policy)
+
+	if got.Excluded != 1 {
+		t.Errorf("Excluded = %d, want 1 — the echo-mismatch run must be excluded", got.Excluded)
+	}
+	if got.Counted != 2 {
+		t.Errorf("Counted = %d, want 2 — the echo-mismatch run must not enter the denominator", got.Counted)
+	}
+	if got.Passed != 2 {
+		t.Errorf("Passed = %d, want 2", got.Passed)
+	}
+	if got.Verdict != domain.VerdictPass {
+		t.Errorf("Verdict = %q, want PASS — both counted runs passed", got.Verdict)
+	}
+}
+
+// TestNeedsRetry_EchoMismatchResult_ReportsTrue verifies that NeedsRetry
+// returns true for an echo-mismatch result. NeedsRetry delegates to
+// ExclusionOf, so this also confirms ExclusionOf returns non-empty for
+// ReasonEchoMismatch.
+func TestNeedsRetry_EchoMismatchResult_ReportsTrue(t *testing.T) {
+	if !evaluate.NeedsRetry(echoMismatchResult(1)) {
+		t.Error("NeedsRetry(echo mismatch result) = false, want true — an echo-mismatch run must be retried like other excluded runs")
+	}
+}
+
+// TestAggregate_TwoEchoMismatchRuns_SetsInfrastructureFailure verifies that
+// two echo-mismatch exclusions in the same aggregate trigger InfrastructureFailure
+// (same-reason recurrence rule, FR-5): the fault persisted after its single retry.
+func TestAggregate_TwoEchoMismatchRuns_SetsInfrastructureFailure(t *testing.T) {
+	results := []domain.TestResult{echoMismatchResult(1), echoMismatchResult(2), passResult(3)}
+	policy := domain.RepetitionPolicy{Repetitions: 3, PassRate: 1.0}
+
+	got := evaluate.Aggregate(results, policy)
+
+	if !got.InfrastructureFailure {
+		t.Error("InfrastructureFailure = false, want true — two echo-mismatch exclusions indicate the fault recurred after its retry")
+	}
+	if got.Verdict != domain.VerdictFail {
+		t.Errorf("Verdict = %q, want FAIL", got.Verdict)
+	}
+}
+
+// TestAggregate_OneEchoMismatchAmongPassingRuns_NoInfrastructureFailure
+// verifies that a single echo-mismatch exclusion among otherwise-passing runs
+// does not set InfrastructureFailure: one occurrence awaiting its retry is not
+// yet a confirmed infrastructure fault.
+func TestAggregate_OneEchoMismatchAmongPassingRuns_NoInfrastructureFailure(t *testing.T) {
+	results := []domain.TestResult{passResult(1), echoMismatchResult(2), passResult(3)}
+	policy := domain.RepetitionPolicy{Repetitions: 3, PassRate: 1.0}
+
+	got := evaluate.Aggregate(results, policy)
+
+	if got.InfrastructureFailure {
+		t.Error("InfrastructureFailure = true, want false — a single echo-mismatch occurrence awaiting its retry is not yet an infrastructure failure")
+	}
+}
+
+// --- T1.2: exclusionDetail for echo_mismatch (via Aggregate.Exclusions) ---
+
+// TestAggregate_EchoMismatch_DetailListsSingleMismatchedInvocation verifies
+// that when one invocation mismatched, the exclusion detail is
+// "invocation N: echo mismatch" identifying the specific invocation number.
+func TestAggregate_EchoMismatch_DetailListsSingleMismatchedInvocation(t *testing.T) {
+	r := domain.TestResult{
+		Key:     domain.RunKey{RunID: "run-1", TestName: "example", RunNumber: 1},
+		Verdict: domain.VerdictFail,
+		Reasons: []domain.FailureReason{domain.ReasonEchoMismatch},
+		Assertions: []domain.AssertionResult{
+			{Class: domain.ClassEchoFidelity, Target: "2", Outcome: domain.AssertionFail},
+		},
+	}
+	policy := domain.RepetitionPolicy{Repetitions: 1, PassRate: 1.0}
+
+	got := evaluate.Aggregate([]domain.TestResult{r}, policy)
+
+	if got.Excluded != 1 {
+		t.Fatalf("Excluded = %d, want 1 — setup sanity", got.Excluded)
+	}
+	want := "invocation 2: echo mismatch"
+	if got.Exclusions[0].Detail != want {
+		t.Errorf("ExcludedRun.Detail = %q, want %q", got.Exclusions[0].Detail, want)
+	}
+}
+
+// TestAggregate_EchoMismatch_DetailListsMultipleMismatchedInvocations verifies
+// that when multiple invocations mismatched, the exclusion detail is a
+// semicolon-separated list of per-invocation entries in the format
+// "invocation 1: echo mismatch; invocation 3: echo mismatch" (FR-7).
+func TestAggregate_EchoMismatch_DetailListsMultipleMismatchedInvocations(t *testing.T) {
+	r := domain.TestResult{
+		Key:     domain.RunKey{RunID: "run-1", TestName: "example", RunNumber: 1},
+		Verdict: domain.VerdictFail,
+		Reasons: []domain.FailureReason{domain.ReasonEchoMismatch},
+		Assertions: []domain.AssertionResult{
+			{Class: domain.ClassEchoFidelity, Target: "1", Outcome: domain.AssertionFail},
+			{Class: domain.ClassEchoFidelity, Target: "3", Outcome: domain.AssertionFail},
+		},
+	}
+	policy := domain.RepetitionPolicy{Repetitions: 1, PassRate: 1.0}
+
+	got := evaluate.Aggregate([]domain.TestResult{r}, policy)
+
+	if got.Excluded != 1 {
+		t.Fatalf("Excluded = %d, want 1 — setup sanity", got.Excluded)
+	}
+	want := "invocation 1: echo mismatch; invocation 3: echo mismatch"
+	if got.Exclusions[0].Detail != want {
+		t.Errorf("ExcludedRun.Detail = %q, want %q", got.Exclusions[0].Detail, want)
+	}
+}
+
+// TestAggregate_EchoMismatchWithAssertionFailure_DetailNotesAssertionFailures
+// verifies that when ReasonAssertion is also present alongside ReasonEchoMismatch,
+// the exclusion detail notes that assertion failures were also present (FR-2),
+// so a reader understands the run had both infrastructure and subject faults.
+func TestAggregate_EchoMismatchWithAssertionFailure_DetailNotesAssertionFailures(t *testing.T) {
+	r := domain.TestResult{
+		Key:     domain.RunKey{RunID: "run-1", TestName: "example", RunNumber: 1},
+		Verdict: domain.VerdictFail,
+		Reasons: []domain.FailureReason{domain.ReasonEchoMismatch, domain.ReasonAssertion},
+		Assertions: []domain.AssertionResult{
+			{Class: domain.ClassEchoFidelity, Target: "1", Outcome: domain.AssertionFail},
+		},
+	}
+	policy := domain.RepetitionPolicy{Repetitions: 1, PassRate: 1.0}
+
+	got := evaluate.Aggregate([]domain.TestResult{r}, policy)
+
+	if got.Excluded != 1 {
+		t.Fatalf("Excluded = %d, want 1 — setup sanity", got.Excluded)
+	}
+	detail := got.Exclusions[0].Detail
+	// The detail must describe the invocation mismatch.
+	if detail == "" {
+		t.Fatal("ExcludedRun.Detail is empty, want a non-empty detail describing the exclusion")
+	}
+	// The detail must also note that assertion failures were present alongside
+	// the echo mismatch, so a reader is not misled into thinking the run
+	// would have passed its assertions.
+	if !strings.Contains(detail, "assertion") {
+		t.Errorf("ExcludedRun.Detail = %q — want it to note assertion failures were also present (FR-2)", detail)
 	}
 }

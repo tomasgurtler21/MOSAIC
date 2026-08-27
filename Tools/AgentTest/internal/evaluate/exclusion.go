@@ -21,5 +21,10 @@ func ExclusionOf(r domain.TestResult) domain.ExclusionReason {
 	if r.SubjectResult.Disposition == domain.DispositionSpawnFailed {
 		return domain.ExclusionSpawnFailed
 	}
+	// Echo mismatch: a stubbed collaborator did not echo its stub faithfully.
+	// Evidence about the tool's environment, not the subject. Lowest precedence.
+	if hasReason(r.Reasons, domain.ReasonEchoMismatch) {
+		return domain.ExclusionEchoMismatch
+	}
 	return ""
 }

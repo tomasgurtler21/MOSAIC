@@ -13,6 +13,11 @@ const (
 	// subject may never have run at all. Evidence about the tool's environment,
 	// not about the subject.
 	ExclusionSpawnFailed ExclusionReason = "spawn_failed"
+
+	// ExclusionEchoMismatch: a stubbed collaborator did not echo its stub
+	// faithfully. Evidence about the tool's environment, not about the subject.
+	// Lowest in the precedence chain: state_integrity > spawn_failed > echo_mismatch.
+	ExclusionEchoMismatch ExclusionReason = "echo_mismatch"
 )
 
 // ExcludedRun is one run kept out of the pass-rate denominator, and why.

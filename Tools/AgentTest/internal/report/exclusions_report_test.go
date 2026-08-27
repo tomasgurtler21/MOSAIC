@@ -305,6 +305,127 @@ func TestRenderText_Exclusions_AppearsInOutput(t *testing.T) {
 	}
 }
 
+// ---------------------------------------------------------------------------
+// Echo-mismatch exclusion rendering
+// ---------------------------------------------------------------------------
+
+// fixtureResultWithEchoMismatchExclusion builds a report.Result whose one
+// test's aggregate has one excluded echo-mismatch run and one counted passing
+// run, so the exclusions field has echo_mismatch content to verify against.
+// Analogous to fixtureResultWithSpawnFailedExclusion.
+func fixtureResultWithEchoMismatchExclusion() report.Result {
+	excl := domain.ExcludedRun{
+		Key:               domain.RunKey{RunID: "run-001", TestName: "echo-test", RunNumber: 1},
+		Reason:            domain.ExclusionEchoMismatch,
+		TerminationReason: string(domain.DispositionCompleted),
+		Detail:            "stub echo mismatch on invocation 1: status_code differs",
+	}
+	return report.Result{
+		SchemaVersion: report.SchemaVersion,
+		SuiteID:       "echo-mismatch-suite",
+		StartedAt:     fixtureStarted(),
+		FinishedAt:    fixtureFinished(),
+		Tests: []report.TestReport{
+			{
+				TestName:    "echo-test",
+				Description: "echo-mismatch retry and exclusion",
+				Layer:       domain.LayerSubagent,
+				Aggregate: domain.AggregateResult{
+					TestName: "echo-test",
+					Verdict:  domain.VerdictPass,
+					Counted:  1,
+					Passed:   1,
+					Excluded: 1,
+					PassRate: 1.0,
+					TotalCost: domain.CostReport{
+						Attribution: domain.AttributionAttributed,
+					},
+					Exclusions: []domain.ExcludedRun{excl},
+				},
+				Runs: []report.RunReport{
+					{
+						Key:      domain.RunKey{RunID: "run-002", TestName: "echo-test", RunNumber: 2},
+						Verdict:  domain.VerdictPass,
+						Duration: 2 * time.Second,
+						Cost: domain.CostReport{
+							Attribution: domain.AttributionAttributed,
+						},
+					},
+				},
+			},
+		},
+		Counts: map[domain.Verdict]int{domain.VerdictPass: 1},
+	}
+}
+
+// TestRenderJSON_EchoMismatch_ExclusionReasonAppearsInArray asserts that when
+// a run was excluded for echo mismatch, the JSON report's exclusions array
+// contains the "echo_mismatch" reason string, so a machine reader can
+// distinguish this exclusion from spawn_failed or state_integrity.
+func TestRenderJSON_EchoMismatch_ExclusionReasonAppearsInArray(t *testing.T) {
+	out, err := renderJSON(t, fixtureResultWithEchoMismatchExclusion())
+	if err != nil {
+		t.Fatalf("RenderJSON returned an error: %v", err)
+	}
+	if !strings.Contains(string(out), string(domain.ExclusionEchoMismatch)) {
+		t.Errorf("machine-readable report does not contain exclusion reason %q in its exclusions array\noutput: %s", domain.ExclusionEchoMismatch, out)
+	}
+}
+
+// TestRenderJSON_EchoMismatch_DetailIsNonEmpty asserts that the echo-mismatch
+// excluded-run object carries a non-empty detail field, explaining the
+// exclusion without requiring sandbox inspection.
+func TestRenderJSON_EchoMismatch_DetailIsNonEmpty(t *testing.T) {
+	out, err := renderJSON(t, fixtureResultWithEchoMismatchExclusion())
+	if err != nil {
+		t.Fatalf("RenderJSON returned an error: %v", err)
+	}
+
+	// Decode to verify the detail field is present and non-empty in the
+	// structured output rather than just checking for a substring.
+	var decoded map[string]any
+	if err := json.Unmarshal(out, &decoded); err != nil {
+		t.Fatalf("output is not valid JSON: %v", err)
+	}
+	tests, _ := decoded["tests"].([]any)
+	if len(tests) == 0 {
+		t.Fatal("no tests in decoded output")
+	}
+	test0, _ := tests[0].(map[string]any)
+	agg, _ := test0["aggregate"].(map[string]any)
+	exclusions, _ := agg["exclusions"].([]any)
+	if len(exclusions) == 0 {
+		t.Fatal("exclusions array is empty in decoded output")
+	}
+	excl0, _ := exclusions[0].(map[string]any)
+	detail, _ := excl0["detail"].(string)
+	if detail == "" {
+		t.Error("exclusions[0].detail is empty, want non-empty — the detail must explain the echo-mismatch exclusion without requiring sandbox inspection")
+	}
+}
+
+// TestRenderText_EchoMismatch_ExclusionAppearsInOutput asserts that the
+// human-readable terminal report mentions the echo_mismatch reason or its
+// explanatory detail for each excluded run of that kind, so a user reading
+// terminal output can determine why the run was excluded without opening a
+// retained sandbox.
+func TestRenderText_EchoMismatch_ExclusionAppearsInOutput(t *testing.T) {
+	out, err := renderText(t, fixtureResultWithEchoMismatchExclusion())
+	if err != nil {
+		t.Fatalf("RenderText returned an error: %v", err)
+	}
+	// The report must surface at least the exclusion reason ("echo_mismatch")
+	// or its detail so the reader knows why the run did not count.
+	if !strings.Contains(out, string(domain.ExclusionEchoMismatch)) {
+		t.Errorf(
+			"text report does not mention exclusion reason %q "+
+				"— a user reading the terminal cannot determine why the run was excluded "+
+				"without inspecting a sandbox\noutput:\n%s",
+			domain.ExclusionEchoMismatch, out,
+		)
+	}
+}
+
 // TestRenderText_Exclusions_EmptyExclusionsDoNotAddNoise asserts that when no
 // runs were excluded the text report does not spuriously mention exclusion
 // content. A reader who sees "spawn_failed" in a report where nothing was
