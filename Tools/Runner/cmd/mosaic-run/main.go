@@ -302,14 +302,15 @@ func runTUIMode(args []string) {
 
 	ctx := context.Background()
 	if err := tui.Run(ctx, initSess, tui.Options{
-		Interaction:      programRef,
-		Selection:        identity.Selection,
-		ScanResult:       identity.ScanResult,
-		ResolvedRunID:    identity.RunID,
-		IsNewRun:         identity.IsNewRun,
-		InitialRunFolder: identity.RunFolder,
-		SessionFactory:   sessFactory,
-		MintRunIdentity:  minter,
+		Interaction:            programRef,
+		Selection:              identity.Selection,
+		ScanResult:             identity.ScanResult,
+		ResolvedRunID:          identity.RunID,
+		IsNewRun:               identity.IsNewRun,
+		InitialRunFolder:       identity.RunFolder,
+		SessionFactory:         sessFactory,
+		MintRunIdentity:        minter,
+		OrchestratorDiscoverer: harness.DiscoverOrchestrator,
 		ArtifactStoreFactory: func(runFolder string) domain.ArtifactStore {
 			return newLoggedArtifactStore(filepath.Join(runFolder, "Orchestration.md"), logger)
 		},
@@ -573,11 +574,6 @@ func hasPositionalArg(args []string) bool {
 		}
 	}
 	return false
-}
-
-// orchFileDir returns the directory containing the orchestrator file.
-func orchFileDir(orchFile string) string {
-	return filepath.Dir(orchFile)
 }
 
 // scanFlag does a minimal pre-scan of args for a named flag. It understands both

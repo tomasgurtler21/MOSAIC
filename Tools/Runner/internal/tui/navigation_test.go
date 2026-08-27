@@ -10,6 +10,8 @@ package tui
 import (
 	"context"
 	"errors"
+	"os"
+	"path/filepath"
 	"testing"
 	"time"
 
@@ -74,26 +76,110 @@ func makeChoiceQuestion(title string, optionIDs []string) interaction.ChoiceQues
 // Initial state
 // ---------------------------------------------------------------------------
 
-func TestNavigation_InitialScreen_IsSetupFile(t *testing.T) {
+func TestNavigation_InitialScreen_IsSetupHarness(t *testing.T) {
 	m := newTestModel()
-	if m.screen != screenSetupFile {
-		t.Errorf("initial screen = %v, want screenSetupFile (%v)", m.screen, screenSetupFile)
+	if m.screen != screenSetupHarness {
+		t.Errorf("initial screen = %v, want screenSetupHarness (%v)", m.screen, screenSetupHarness)
 	}
 }
 
-func TestNavigation_FileScreen_ViewNonEmpty(t *testing.T) {
+func TestNavigation_HarnessScreen_ViewNonEmpty(t *testing.T) {
 	m := newTestModel()
 	view := m.View()
 	if view == "" {
-		t.Error("View() returned empty string on file screen; want non-empty output")
+		t.Error("View() returned empty string on harness screen; want non-empty output")
 	}
 }
 
-func TestNavigation_FileScreen_ViewContainsTitleText(t *testing.T) {
+func TestNavigation_HarnessScreen_ViewContainsTitleText(t *testing.T) {
 	m := newTestModel()
 	view := m.View()
-	if !containsAny(view, "Orchestrator", "orchestrator", "File", "file") {
-		t.Errorf("file screen view does not contain expected title text:\n%s", view)
+	if !containsAny(view, "Harness", "harness", "Select", "select") {
+		t.Errorf("harness screen view does not contain expected title text:\n%s", view)
+	}
+}
+
+// newTestModelWithDiscoverer creates a rootModel with the given OrchestratorDiscoverer
+// injected via Options so that harness-screen Enter-key paths can be exercised.
+func newTestModelWithDiscoverer(discoverer func(workDir, harnessID string) (string, error)) *rootModel {
+	sess := &stubNavSession{outcome: domain.RunOutcome{Status: domain.RunCompleted, Message: "ok"}}
+	return newRootModel(context.Background(), sess, Options{
+		Theme:                  tuicommon.DefaultTheme(),
+		OrchestratorDiscoverer: discoverer,
+	})
+}
+
+// ---------------------------------------------------------------------------
+// Harness screen: Enter-key outcome paths
+// ---------------------------------------------------------------------------
+
+// TestHarnessScreen_Enter_DiscoveryFailure_TransitionsToDoneScreen verifies that
+// when OrchestratorDiscoverer returns an error after the user presses Enter on
+// the harness screen, the model transitions to screenDone with the error
+// displayed (AC3.4, TUI side).
+func TestHarnessScreen_Enter_DiscoveryFailure_TransitionsToDoneScreen(t *testing.T) {
+	failDiscoverer := func(workDir, harnessID string) (string, error) {
+		return "", errors.New("workspace not deployed for harness " + harnessID +
+			": expected orchestrator-script at " + workDir)
+	}
+	m := newTestModelWithDiscoverer(failDiscoverer)
+
+	if m.screen != screenSetupHarness {
+		t.Fatalf("precondition: screen = %v, want screenSetupHarness", m.screen)
+	}
+
+	// The harness screen has at least one item pre-selected; pressing Enter
+	// causes Done() == true and triggers auto-discovery.
+	sendKey(m, tea.KeyEnter)
+
+	if m.screen != screenDone {
+		t.Errorf("screen = %v after Enter with failing discoverer, want screenDone (%v)",
+			m.screen, screenDone)
+	}
+	if m.doneScreen == nil {
+		t.Error("doneScreen = nil after discovery failure; must be populated with the error")
+	}
+}
+
+// TestHarnessScreen_Enter_DiscoverySuccess_TransitionsToWorkflowScreen verifies
+// that when OrchestratorDiscoverer returns a valid orchestrator path, pressing
+// Enter on the harness screen transitions to screenSetupWorkflow and populates
+// selections.orchestratorFile (AC3.2, TUI side integration).
+func TestHarnessScreen_Enter_DiscoverySuccess_TransitionsToWorkflowScreen(t *testing.T) {
+	// Write a minimal orchestrator file with one workflow region so that
+	// orchfile.EnumerateWorkflows returns successfully.
+	orchDir := t.TempDir()
+	orchFilePath := filepath.Join(orchDir, "orchestrator-script.md")
+	orchContent := `<Workflow type="core" name="test-workflow" version="1.0">
+## Test Workflow
+
+| Phase | Subagent | HITL | Input | Output |
+|-------|----------|:----:|-------|--------|
+| PLANNING | planner | TRUE | - | Plan.md |
+</Workflow>
+`
+	if err := os.WriteFile(orchFilePath, []byte(orchContent), 0o644); err != nil {
+		t.Fatalf("WriteFile: %v", err)
+	}
+
+	succeedDiscoverer := func(workDir, harnessID string) (string, error) {
+		return orchFilePath, nil
+	}
+	m := newTestModelWithDiscoverer(succeedDiscoverer)
+
+	if m.screen != screenSetupHarness {
+		t.Fatalf("precondition: screen = %v, want screenSetupHarness", m.screen)
+	}
+
+	sendKey(m, tea.KeyEnter)
+
+	if m.screen != screenSetupWorkflow {
+		t.Errorf("screen = %v after Enter with successful discoverer, want screenSetupWorkflow (%v)",
+			m.screen, screenSetupWorkflow)
+	}
+	if m.selections.orchestratorFile != orchFilePath {
+		t.Errorf("selections.orchestratorFile = %q, want %q",
+			m.selections.orchestratorFile, orchFilePath)
 	}
 }
 
@@ -153,14 +239,14 @@ func TestNavigation_WindowResize_WithProgressScreenDoesNotPanic(t *testing.T) {
 }
 
 // ---------------------------------------------------------------------------
-// Esc from file screen
+// Esc from harness screen
 // ---------------------------------------------------------------------------
 
-func TestNavigation_EscFromFileScreen_ReturnsQuitCommand(t *testing.T) {
+func TestNavigation_EscFromHarnessScreen_ReturnsQuitCommand(t *testing.T) {
 	m := newTestModel()
 	_, cmd := sendKey(m, tea.KeyEsc)
 	if cmd == nil {
-		t.Error("cmd = nil after Esc from file screen; want tea.Quit (non-nil command)")
+		t.Error("cmd = nil after Esc from harness screen; want tea.Quit (non-nil command)")
 	}
 }
 
@@ -424,9 +510,9 @@ func TestNavigation_AskTextQuestion_EnterSendsTextAnswer(t *testing.T) {
 // Setup screen back-navigation
 // ---------------------------------------------------------------------------
 
-// TestNavigation_WorkflowScreen_EscReturnsToFileScreen verifies that pressing Esc on the
-// workflow selection screen transitions back to the orchestrator file entry screen.
-func TestNavigation_WorkflowScreen_EscReturnsToFileScreen(t *testing.T) {
+// TestNavigation_WorkflowScreen_EscReturnsToHarnessScreen verifies that pressing Esc on the
+// workflow selection screen transitions back to the harness selection screen.
+func TestNavigation_WorkflowScreen_EscReturnsToHarnessScreen(t *testing.T) {
 	m := newTestModel()
 	style := stylesFromTheme(m.theme)
 	m.workflowScreen = screens.NewWorkflowSelectScreen(
@@ -437,8 +523,8 @@ func TestNavigation_WorkflowScreen_EscReturnsToFileScreen(t *testing.T) {
 
 	sendKey(m, tea.KeyEsc)
 
-	if m.screen != screenSetupFile {
-		t.Errorf("screen = %v after Esc from workflow screen, want screenSetupFile (%v)", m.screen, screenSetupFile)
+	if m.screen != screenSetupHarness {
+		t.Errorf("screen = %v after Esc from workflow screen, want screenSetupHarness (%v)", m.screen, screenSetupHarness)
 	}
 }
 
@@ -609,12 +695,12 @@ func TestRunSelect_InitialScreen_IsRunSelectWithMultipleCandidates(t *testing.T)
 	}
 }
 
-// TestRunSelect_InitialScreen_IsSetupFileWithZeroCandidates verifies that an empty scan
-// result (no resumable runs) skips the run-selection screen and goes to the file screen.
-func TestRunSelect_InitialScreen_IsSetupFileWithZeroCandidates(t *testing.T) {
+// TestRunSelect_InitialScreen_IsSetupHarnessWithZeroCandidates verifies that an empty scan
+// result (no resumable runs) skips the run-selection screen and goes to the harness screen.
+func TestRunSelect_InitialScreen_IsSetupHarnessWithZeroCandidates(t *testing.T) {
 	m := newModelWithScan(nil)
-	if m.screen != screenSetupFile {
-		t.Errorf("initial screen = %v, want screenSetupFile (%v) for zero candidates", m.screen, screenSetupFile)
+	if m.screen != screenSetupHarness {
+		t.Errorf("initial screen = %v, want screenSetupHarness (%v) for zero candidates", m.screen, screenSetupHarness)
 	}
 	if m.runSelectScreen != nil {
 		t.Error("runSelectScreen should be nil when there are zero candidates")
@@ -644,7 +730,7 @@ func TestRunSelect_InitialScreen_IsRunSelectWithOneCandidate(t *testing.T) {
 }
 
 // TestRunSelect_SkippedWhenResolvedRunIDSet verifies that when ResolvedRunID is populated
-// (i.e. --run was given), the TUI starts directly on the file screen.
+// (i.e. --run was given), the TUI starts directly on the harness screen.
 func TestRunSelect_SkippedWhenResolvedRunIDSet(t *testing.T) {
 	candidates := []runscan.RunCandidate{
 		makeCandidate("20260701T120000Z-a3f9", "/ws/Orchestration-20260701T120000Z-a3f9"),
@@ -656,13 +742,13 @@ func TestRunSelect_SkippedWhenResolvedRunIDSet(t *testing.T) {
 		ScanResult:    &runscan.ScanResult{Candidates: candidates},
 		ResolvedRunID: "20260701T120000Z-a3f9",
 	})
-	if m.screen != screenSetupFile {
-		t.Errorf("initial screen = %v, want screenSetupFile (%v) when ResolvedRunID is set", m.screen, screenSetupFile)
+	if m.screen != screenSetupHarness {
+		t.Errorf("initial screen = %v, want screenSetupHarness (%v) when ResolvedRunID is set", m.screen, screenSetupHarness)
 	}
 }
 
 // TestRunSelect_SkippedWhenIsNewRunSet verifies that when IsNewRun is true
-// (i.e. --new-run was given), the TUI starts directly on the file screen.
+// (i.e. --new-run was given), the TUI starts directly on the harness screen.
 func TestRunSelect_SkippedWhenIsNewRunSet(t *testing.T) {
 	candidates := []runscan.RunCandidate{
 		makeCandidate("20260701T120000Z-a3f9", "/ws/Orchestration-20260701T120000Z-a3f9"),
@@ -674,8 +760,8 @@ func TestRunSelect_SkippedWhenIsNewRunSet(t *testing.T) {
 		ScanResult: &runscan.ScanResult{Candidates: candidates},
 		IsNewRun:   true,
 	})
-	if m.screen != screenSetupFile {
-		t.Errorf("initial screen = %v, want screenSetupFile (%v) when IsNewRun is set", m.screen, screenSetupFile)
+	if m.screen != screenSetupHarness {
+		t.Errorf("initial screen = %v, want screenSetupHarness (%v) when IsNewRun is set", m.screen, screenSetupHarness)
 	}
 }
 
@@ -732,8 +818,8 @@ func TestRunSelect_EnterOnNewRun_SetsIsNewRunAndAdvances(t *testing.T) {
 	// The first item is "Start a new run" (NewRunSentinelID). Press Enter to select it.
 	sendKey(m, tea.KeyEnter)
 
-	if m.screen != screenSetupFile {
-		t.Errorf("screen = %v after selecting 'Start new run', want screenSetupFile (%v)", m.screen, screenSetupFile)
+	if m.screen != screenSetupHarness {
+		t.Errorf("screen = %v after selecting 'Start new run', want screenSetupHarness (%v)", m.screen, screenSetupHarness)
 	}
 	if !m.selections.isNewRun {
 		t.Error("selections.isNewRun = false after selecting 'Start new run'; want true")
@@ -756,8 +842,8 @@ func TestRunSelect_EnterOnCandidate_SetsRunIDAndAdvances(t *testing.T) {
 	sendKey(m, tea.KeyDown)
 	sendKey(m, tea.KeyEnter)
 
-	if m.screen != screenSetupFile {
-		t.Errorf("screen = %v after selecting candidate, want screenSetupFile (%v)", m.screen, screenSetupFile)
+	if m.screen != screenSetupHarness {
+		t.Errorf("screen = %v after selecting candidate, want screenSetupHarness (%v)", m.screen, screenSetupHarness)
 	}
 	if m.selections.isNewRun {
 		t.Error("selections.isNewRun = true after selecting an existing candidate; want false")

@@ -153,7 +153,7 @@ func TestSessionFactory_WithoutExecOverride_ModelSendsEmptyPath(t *testing.T) {
 		},
 	})
 
-	// Jump to the config screen (the model starts at screenSetupFile).
+	// Jump to the config screen (the model starts at screenSetupHarness).
 	m.screen = screenSetupConfig
 
 	// Drive the config screen through all steps for orchestrated mode, which

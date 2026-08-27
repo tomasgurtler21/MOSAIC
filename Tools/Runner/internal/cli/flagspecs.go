@@ -28,7 +28,6 @@ type FlagSpec struct {
 // that the run subcommand does not register, so it is not registered here.
 // RunFlagSpecs appends it explicitly with TakesValue: false.
 func RegisterRunFlags(fs *pflag.FlagSet) {
-	fs.String("orchestrator-file", "", "Path to the orchestrator agent file (required)")
 	fs.String("workflow", "", "Workflow identifier (required)")
 	fs.String("task", "", "Task description (required)")
 	fs.Bool("allow-version-drift", false, "Allow workflow version mismatch when resuming")

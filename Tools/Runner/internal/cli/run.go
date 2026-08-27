@@ -12,6 +12,8 @@ import (
 
 	"github.com/spf13/cobra"
 
+	commonharness "mosaic-common/harness"
+
 	"mosaic-run/internal/artifact"
 	"mosaic-run/internal/domain"
 	"mosaic-run/internal/harness"
@@ -94,7 +96,6 @@ func Run(ctx context.Context, args []string, store domain.ArtifactStore, identit
 			// errors are impossible here: every flag was registered with the correct
 			// type, so the only possible error is "flag does not exist", which would
 			// be a programming error caught immediately in testing.
-			orchestratorFile, _ := cmd.Flags().GetString("orchestrator-file")
 			workflowID, _ := cmd.Flags().GetString("workflow")
 			task, _ := cmd.Flags().GetString("task")
 			allowVersionDrift, _ := cmd.Flags().GetBool("allow-version-drift")
@@ -120,11 +121,6 @@ func Run(ctx context.Context, args []string, store domain.ArtifactStore, identit
 			}
 
 			// Validate required flags.
-			if orchestratorFile == "" {
-				fmt.Fprintf(errOut, "error: --orchestrator-file is required\n")
-				exitCode = ExitUsage
-				return nil
-			}
 			if workflowID == "" {
 				fmt.Fprintf(errOut, "error: --workflow is required\n")
 				exitCode = ExitUsage
@@ -365,9 +361,32 @@ func Run(ctx context.Context, args []string, store domain.ArtifactStore, identit
 				}
 			}
 
+			// Auto-discover the orchestrator-script.md path from the harness convention.
+			// For CLI-backed harnesses, this verifies the workspace is deployed for
+			// the selected harness. For non-CLI harnesses (e.g. the "fake" test
+			// double), discovery is skipped and OrchestratorFilePath is left empty,
+			// since those harnesses have no agents directory convention.
+			var discoveredOrchPath string
+			if commonharness.IsCLIHarness(harnessFlag) {
+				discoveryWorkDir, wdErr := os.Getwd()
+				if wdErr != nil {
+					fmt.Fprintf(errOut, "error: getting working directory: %v\n", wdErr)
+					exitCode = ExitUsage
+					return nil
+				}
+				orchPath, orchErr := harness.DiscoverOrchestrator(discoveryWorkDir, harnessFlag)
+				if orchErr != nil {
+					fmt.Fprintf(errOut, "error: %v\n", orchErr)
+					exitCode = ExitRefused
+					return nil
+				}
+				discoveredOrchPath = orchPath
+			}
+
 			// Build the run configuration from parsed flags and resolved run identity.
 			config := domain.RunConfig{
-				OrchestratorFilePath: orchestratorFile,
+				OrchestratorFilePath: discoveredOrchPath,
+				HarnessID:            harnessFlag,
 				WorkflowID:           domain.WorkflowID(workflowID),
 				Task:                 task,
 				AllowVersionDrift:    allowVersionDrift,

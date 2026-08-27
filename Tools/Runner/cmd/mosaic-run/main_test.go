@@ -2371,10 +2371,6 @@ func TestHasPositionalArg_MultipleValueBearingFlags_SpaceSeparated_NoPositional(
 			[]string{"--harness", "claude-code", "--claude-path", "/opt/bin/claude"},
 		},
 		{
-			"mode and orchestrator-file",
-			[]string{"--mode", "auto", "--orchestrator-file", "/work/orch.md"},
-		},
-		{
 			"workflow and task",
 			[]string{"--workflow", "w1", "--task", "do the work"},
 		},
@@ -2386,7 +2382,6 @@ func TestHasPositionalArg_MultipleValueBearingFlags_SpaceSeparated_NoPositional(
 				"--timeout", "30m",
 				"--mode", "auto",
 				"--new-run",
-				"--orchestrator-file", "orch.md",
 			},
 		},
 		{
@@ -2520,7 +2515,6 @@ func TestHasPositionalArg_FlagOnlyInvocationNoPositional_ReturnsFalse(t *testing
 		"--mode", "auto",
 		"--new-run",
 		"--pre-consult",
-		"--orchestrator-file", "/work/orch.md",
 	}
 	if hasPositionalArg(args) {
 		t.Errorf("hasPositionalArg(%v) = true, want false; "+

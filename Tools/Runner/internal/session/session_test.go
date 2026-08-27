@@ -92,6 +92,20 @@ package session_test
 //   - A stage set already derived earlier in the run survives a later failed
 //     re-read (triggered by a further Stage-* output): EXECUTION is still
 //     reached and dispatched, not stopped.
+//
+//   Run-start snapshot integration (step 5a): [RED]
+//   - CLI harness run: every dispatched AgentReference.DefinitionPath points
+//     into the run-scoped snapshot directory, not the original agents dir.
+//   - CLI harness run with RunCompleted: snapshot directory is deleted after
+//     the run finishes.
+//   - CLI harness run with RunStopped: snapshot directory is also deleted on
+//     graceful stop.
+//   - Snapshot collision (snapshot dir pre-exists): run is refused before any
+//     dispatch.
+//   - Cleanup failure is non-fatal: Start returns RunCompleted with nil error
+//     even when cleanup encounters an error.
+//   - Non-CLI harness (HarnessID empty): snapshot step is skipped, agents
+//     resolve from the original dir (no "agents-runner-" path segment).
 
 import (
 	"context"
@@ -243,6 +257,55 @@ func (h *callbackHarness) Invoke(ctx context.Context, agent domain.AgentReferenc
 		h.onInvoke(agent.Identifier)
 	}
 	return resp, err
+}
+
+// ---- orchRefCaptureConsultant ----
+
+// orchRefCaptureConsultant is a test-only domain.RoutingConsultant that also
+// implements domain.RunContextBinder. Every time the session calls
+// BindRunContext, the consultant records the supplied orchestrator reference.
+// After session.Start returns, lastBoundOrchRef returns the most-recently
+// recorded reference, which should be the snapshot-resolved one if step 5a
+// ran and re-bound consultants correctly.
+type orchRefCaptureConsultant struct {
+	mu    sync.Mutex
+	bound []domain.RunContext
+}
+
+// BindRunContext implements domain.RunContextBinder.
+func (c *orchRefCaptureConsultant) BindRunContext(rc domain.RunContext) {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	c.bound = append(c.bound, rc)
+}
+
+// ConsultRouting implements domain.RoutingConsultant. It returns an error so
+// that any unexpected consultation call surfaces immediately as a test failure
+// rather than hanging or panicking.
+func (c *orchRefCaptureConsultant) ConsultRouting(_ context.Context, _ domain.ConsultationRequest) (domain.RoutingInstruction, error) {
+	return domain.RoutingInstruction{}, &domain.ConsultationError{
+		Failure: domain.ConsultFailTransport,
+		Detail:  "orchRefCaptureConsultant: ConsultRouting called unexpectedly in this test",
+	}
+}
+
+// lastBoundOrchRef returns the orchestrator reference from the most recent
+// BindRunContext call, or a zero AgentReference if BindRunContext was never
+// called.
+func (c *orchRefCaptureConsultant) lastBoundOrchRef() domain.AgentReference {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	if len(c.bound) == 0 {
+		return domain.AgentReference{}
+	}
+	return c.bound[len(c.bound)-1].Orchestrator
+}
+
+// bindCallCount returns how many times BindRunContext was called.
+func (c *orchRefCaptureConsultant) bindCallCount() int {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	return len(c.bound)
 }
 
 // ---- test helpers ----
@@ -8777,5 +8840,502 @@ func TestSession_RunStart_IncapableApprovalReader_NoHITLWorkflow_Proceeds(t *tes
 	if got.Status == domain.RunRefused {
 		t.Errorf("want run NOT refused when workflow has no human-review rows, "+
 			"even with an incapable approval reader; got RunRefused (message: %q)", got.Message)
+	}
+}
+
+// ===== Run-start snapshot integration (step 5a) =====
+
+// writeCLIHarnessDir creates a temp directory following the claude-code
+// harness agents-directory convention (.claude/agents/) and populates it with
+// the linear workflow orchestrator file and both agent definition files.
+//
+// Returns the work directory root, the orchestrator file path (inside the
+// agents dir), and the expected snapshot directory path for the given run ID.
+// The snapshot path is computed using the same convention as
+// harness.SnapshotDirPath for the "claude-code" harness:
+//
+//	filepath.Join(workDir, ".claude", "agents-runner-"+runID)
+func writeCLIHarnessDir(t *testing.T, runID string) (workDir, orchPath, snapshotDir string) {
+	t.Helper()
+	workDir = t.TempDir()
+	agentsDir := filepath.Join(workDir, ".claude", "agents")
+	if err := os.MkdirAll(agentsDir, 0o755); err != nil {
+		t.Fatalf("writeCLIHarnessDir: create agents dir: %v", err)
+	}
+
+	data, err := os.ReadFile(orchFilePath("linear-orch.md"))
+	if err != nil {
+		t.Fatalf("writeCLIHarnessDir: read linear-orch.md: %v", err)
+	}
+	orchPath = filepath.Join(agentsDir, "orchestrator.md")
+	if err := os.WriteFile(orchPath, data, 0o600); err != nil {
+		t.Fatalf("writeCLIHarnessDir: write orchestrator: %v", err)
+	}
+
+	writeAgentFile(t, agentsDir, "agent-a")
+	writeAgentFile(t, agentsDir, "agent-b")
+
+	// Snapshot dir is a sibling of the agents dir, following SnapshotDirPath:
+	//   filepath.Join(workDir, filepath.Dir(agentsDir_relative), filepath.Base(agentsDir_relative)+"-runner-"+runID)
+	// For claude-code, agentsDir_relative = ".claude/agents", so:
+	snapshotDir = filepath.Join(workDir, ".claude", "agents-runner-"+runID)
+	return
+}
+
+// baseCLIHarnessConfig returns a RunConfig for the linear workflow with the
+// claude-code harness identity and an explicit run ID, so that step 5a
+// activates and writes to a predictable snapshot directory path.
+func baseCLIHarnessConfig(orchPath, runID string) domain.RunConfig {
+	return domain.RunConfig{
+		OrchestratorFilePath: orchPath,
+		WorkflowID:           "linear",
+		Task:                 "snapshot integration test",
+		IsNewRun:             true,
+		RunID:                runID,
+		RunSettings:          domain.RunSettings{Mode: domain.ExecutionModeAuto},
+		HarnessID:            "claude-code",
+	}
+}
+
+// containsSnapshotPathSegment reports whether path contains the run-scoped
+// snapshot directory name component for the given run ID.
+func containsSnapshotPathSegment(path, runID string) bool {
+	return strings.Contains(filepath.ToSlash(path), "agents-runner-"+runID)
+}
+
+// TestSession_Start_CLIHarness_AgentDefinitionPathsInSnapshot verifies that
+// after step 5a creates the snapshot, every harness invocation receives an
+// AgentReference whose DefinitionPath is inside the snapshot directory, not
+// the original agents directory.
+func TestSession_Start_CLIHarness_AgentDefinitionPathsInSnapshot(t *testing.T) {
+	const runID = "testsnap-paths-01"
+	_, orchPath, _ := writeCLIHarnessDir(t, runID)
+
+	f := harness.NewFakeAdapter()
+	f.Queue("agent-a", harness.ScriptedEntry{Response: &domain.ProtocolResponse{
+		AgentInstanceID: "agent-a#1",
+		StatusCode:      domain.StatusSUCCESS,
+		StatusMessage:   "done",
+	}})
+	f.Queue("agent-b", harness.ScriptedEntry{Response: &domain.ProtocolResponse{
+		AgentInstanceID: "agent-b#2",
+		StatusCode:      domain.StatusSUCCESS,
+		StatusMessage:   "done",
+	}})
+
+	ses := session.New(session.Deps{
+		Harness:  f,
+		Store:    &memStore{},
+		Clock:    fixedClock{t: epoch},
+		Interact: &noopInteraction{},
+	})
+
+	got, err := ses.Start(context.Background(), baseCLIHarnessConfig(orchPath, runID))
+	requireRunStatus(t, got, err, domain.RunCompleted)
+
+	invs := f.Invocations()
+	if len(invs) == 0 {
+		t.Fatal("want at least one harness invocation, got none")
+	}
+	for _, inv := range invs {
+		if !containsSnapshotPathSegment(inv.Agent.DefinitionPath, runID) {
+			t.Errorf("agent %q: DefinitionPath %q does not contain snapshot path segment %q; "+
+				"agents must be re-resolved from the snapshot directory after step 5a",
+				inv.Agent.Identifier, inv.Agent.DefinitionPath, "agents-runner-"+runID)
+		}
+	}
+}
+
+// TestSession_Start_CLIHarness_SnapshotDeletedOnRunCompleted verifies that
+// when a CLI-harness run completes (RunCompleted), the run-scoped snapshot
+// directory created at step 5a is deleted.
+func TestSession_Start_CLIHarness_SnapshotDeletedOnRunCompleted(t *testing.T) {
+	const runID = "testsnap-cleanup-complete-01"
+	_, orchPath, snapshotDir := writeCLIHarnessDir(t, runID)
+
+	f := harness.NewFakeAdapter()
+	f.Queue("agent-a", harness.ScriptedEntry{Response: &domain.ProtocolResponse{
+		AgentInstanceID: "agent-a#1",
+		StatusCode:      domain.StatusSUCCESS,
+		StatusMessage:   "done",
+	}})
+	f.Queue("agent-b", harness.ScriptedEntry{Response: &domain.ProtocolResponse{
+		AgentInstanceID: "agent-b#2",
+		StatusCode:      domain.StatusSUCCESS,
+		StatusMessage:   "done",
+	}})
+
+	ses := session.New(session.Deps{
+		Harness:  f,
+		Store:    &memStore{},
+		Clock:    fixedClock{t: epoch},
+		Interact: &noopInteraction{},
+	})
+
+	got, err := ses.Start(context.Background(), baseCLIHarnessConfig(orchPath, runID))
+	requireRunStatus(t, got, err, domain.RunCompleted)
+
+	// Agents must have been dispatched from inside the snapshot directory,
+	// confirming the snapshot was actually created during the run.
+	for _, inv := range f.Invocations() {
+		if !containsSnapshotPathSegment(inv.Agent.DefinitionPath, runID) {
+			t.Errorf("agent %q: DefinitionPath %q does not contain snapshot path segment "+
+				"(snapshot was not created or step 5a did not run)",
+				inv.Agent.Identifier, inv.Agent.DefinitionPath)
+		}
+	}
+
+	// After RunCompleted, the snapshot directory must be deleted.
+	if _, statErr := os.Stat(snapshotDir); !errors.Is(statErr, os.ErrNotExist) {
+		t.Errorf("snapshot directory %q must be deleted after RunCompleted, stat returned: %v",
+			snapshotDir, statErr)
+	}
+}
+
+// TestSession_Start_CLIHarness_SnapshotDeletedOnRunStopped verifies that
+// when a CLI-harness run is gracefully stopped (RunStopped), the snapshot
+// directory is also deleted (cleanup applies to RunStopped as well as
+// RunCompleted).
+func TestSession_Start_CLIHarness_SnapshotDeletedOnRunStopped(t *testing.T) {
+	const runID = "testsnap-cleanup-stop-01"
+	_, orchPath, snapshotDir := writeCLIHarnessDir(t, runID)
+
+	f := harness.NewFakeAdapter()
+	ctx, cancel := context.WithCancel(context.Background())
+
+	// Cancel the context after agent-a finishes to trigger a graceful stop.
+	// Only agent-a is queued; the session stops after agent-a's dispatch.
+	cbHarness := &callbackHarness{
+		delegate: f,
+		onInvoke: func(agentID string) {
+			if agentID == "agent-a" {
+				cancel()
+			}
+		},
+	}
+	f.Queue("agent-a", harness.ScriptedEntry{Response: &domain.ProtocolResponse{
+		AgentInstanceID: "agent-a#1",
+		StatusCode:      domain.StatusSUCCESS,
+		StatusMessage:   "done",
+	}})
+
+	ses := session.New(session.Deps{
+		Harness:  cbHarness,
+		Store:    &memStore{},
+		Clock:    fixedClock{t: epoch},
+		Interact: &noopInteraction{},
+	})
+
+	got, err := ses.Start(ctx, baseCLIHarnessConfig(orchPath, runID))
+	requireRunStatus(t, got, err, domain.RunStopped)
+
+	// The dispatched invocation must have used the snapshot directory,
+	// confirming the snapshot was created before dispatching began.
+	invs := f.Invocations()
+	if len(invs) == 0 {
+		t.Fatal("want at least one invocation before graceful stop, got none")
+	}
+	if !containsSnapshotPathSegment(invs[0].Agent.DefinitionPath, runID) {
+		t.Errorf("agent %q: DefinitionPath %q does not contain snapshot path segment "+
+			"(step 5a did not run or re-resolved agents from original dir)",
+			invs[0].Agent.Identifier, invs[0].Agent.DefinitionPath)
+	}
+
+	// Snapshot directory must also be deleted on RunStopped.
+	if _, statErr := os.Stat(snapshotDir); !errors.Is(statErr, os.ErrNotExist) {
+		t.Errorf("snapshot directory %q must be deleted after RunStopped, stat returned: %v",
+			snapshotDir, statErr)
+	}
+}
+
+// TestSession_Start_CLIHarness_SnapshotCreationFailure_RefusesRun verifies
+// that when snapshot creation fails (here: the snapshot directory already
+// exists at the expected path, simulating a stale artifact from a prior run),
+// session.Start refuses the run with RunRefused and a nil error.
+func TestSession_Start_CLIHarness_SnapshotCreationFailure_RefusesRun(t *testing.T) {
+	const runID = "testsnap-collision-01"
+	_, orchPath, snapshotDir := writeCLIHarnessDir(t, runID)
+
+	// Pre-create the snapshot directory to trigger CreateSnapshot's collision
+	// guard ("snapshot directory already exists").
+	if err := os.MkdirAll(snapshotDir, 0o755); err != nil {
+		t.Fatalf("pre-create snapshot dir: %v", err)
+	}
+
+	ses := session.New(session.Deps{
+		Harness:  harness.NewFakeAdapter(),
+		Store:    &memStore{},
+		Clock:    fixedClock{t: epoch},
+		Interact: &noopInteraction{},
+	})
+
+	got, err := ses.Start(context.Background(), baseCLIHarnessConfig(orchPath, runID))
+	requireRefused(t, got, err)
+}
+
+// TestSession_Start_CLIHarness_CleanupFailureIsNonFatal verifies that when
+// cleanup of the snapshot directory fails, Start still returns RunCompleted
+// with a nil error, and the failure is recorded as an EventSnapshotCleanupFailed
+// debug log entry instead of being surfaced as a returned error or a changed
+// run outcome.
+//
+// To force cleanup to fail the test holds the snapshot directory open while
+// session.Start runs:
+//   - On Windows: an open file handle inside the directory prevents os.RemoveAll.
+//   - On Linux/Mac: making the parent directory read-only (0o555) prevents
+//     os.Remove from unlinking the snapshot directory.
+//
+// Both mechanisms are applied so the test is reliably cross-platform.
+func TestSession_Start_CLIHarness_CleanupFailureIsNonFatal(t *testing.T) {
+	const runID = "testsnap-cleanup-nonfatal-01"
+	_, orchPath, snapshotDir := writeCLIHarnessDir(t, runID)
+	parentDir := filepath.Dir(snapshotDir)
+
+	logger := &sessionRecordingLogger{}
+	f := harness.NewFakeAdapter()
+	f.Queue("agent-a", harness.ScriptedEntry{Response: &domain.ProtocolResponse{
+		AgentInstanceID: "agent-a#1",
+		StatusCode:      domain.StatusSUCCESS,
+		StatusMessage:   "done",
+	}})
+	f.Queue("agent-b", harness.ScriptedEntry{Response: &domain.ProtocolResponse{
+		AgentInstanceID: "agent-b#2",
+		StatusCode:      domain.StatusSUCCESS,
+		StatusMessage:   "done",
+	}})
+
+	// openedFile holds an open handle to a file inside the snapshot directory.
+	// It is set inside onInvoke (after step 5a creates the snapshot) and kept
+	// open while session.Start's deferred cleanup runs so that os.RemoveAll
+	// fails on Windows. The handle is closed after ses.Start returns so that
+	// t.TempDir can remove the directory in test cleanup.
+	var openedFile *os.File
+
+	// t.Cleanup ensures permissions and the file handle are restored even if
+	// the test fails before the explicit restore below.
+	t.Cleanup(func() {
+		if openedFile != nil {
+			openedFile.Close()
+		}
+		// Restore the parent directory so t.TempDir cleanup can remove it.
+		os.Chmod(parentDir, 0o755) //nolint:errcheck
+	})
+
+	cbHarness := &callbackHarness{
+		delegate: f,
+		onInvoke: func(agentID string) {
+			// Only arm the failure mechanism once, after the first dispatch.
+			// By the time onInvoke fires, step 5a has already created the
+			// snapshot directory, so the directory and its contents exist.
+			if agentID != "agent-a" {
+				return
+			}
+			// Windows: open a file inside the snapshot dir to lock it.
+			if fh, err := os.Open(filepath.Join(snapshotDir, "agent-a.md")); err == nil {
+				openedFile = fh
+			}
+			// Linux/Mac: make the parent directory read-only so os.Remove
+			// cannot unlink the snapshot directory from it.
+			os.Chmod(parentDir, 0o555) //nolint:errcheck
+		},
+	}
+
+	ses := session.New(session.Deps{
+		Harness:  cbHarness,
+		Store:    &memStore{},
+		Clock:    fixedClock{t: epoch},
+		Interact: &noopInteraction{},
+		Debug:    logger,
+	})
+
+	got, err := ses.Start(context.Background(), baseCLIHarnessConfig(orchPath, runID))
+
+	// Restore access before any further assertions so that the test directory
+	// can be cleaned up by t.TempDir regardless of outcome.
+	if openedFile != nil {
+		openedFile.Close()
+		openedFile = nil
+	}
+	os.Chmod(parentDir, 0o755) //nolint:errcheck
+
+	// Cleanup failure must not surface as a returned error.
+	if err != nil {
+		t.Fatalf("want nil error (cleanup failure must be non-fatal), got %v", err)
+	}
+	// Cleanup failure must not change the run outcome.
+	if got.Status != domain.RunCompleted {
+		t.Errorf("want RunCompleted (cleanup failure must not change run outcome), got %q (message: %q)",
+			got.Status, got.Message)
+	}
+	// Cleanup failure must be recorded as a debug log event.
+	if !logger.eventLogged(domain.EventSnapshotCleanupFailed) {
+		t.Error("want EventSnapshotCleanupFailed debug event logged when snapshot cleanup fails, " +
+			"but the event was not found in the debug log; " +
+			"the implementation must log cleanup failures rather than silently ignore or surface them")
+	}
+}
+
+// TestSession_Start_CLIHarness_OrchestratorRefPointsIntoSnapshot verifies that
+// step 5a re-resolves the orchestrator reference from the snapshot directory
+// and re-binds consultants with the snapshot-resolved reference. After Start
+// returns, any consultant that implements domain.RunContextBinder must have
+// received an orchRef whose DefinitionPath is inside the snapshot directory
+// (not the original agents directory), with InvocationKind ==
+// InvocationOrchestrator.
+//
+// This test wires an orchRefCaptureConsultant as the Routing dependency. The
+// consultant implements RunContextBinder so it captures every orchRef the
+// session hands to it. The last captured orchRef -- after step 5a runs the
+// second bindRunContext call -- must contain the snapshot path segment.
+func TestSession_Start_CLIHarness_OrchestratorRefPointsIntoSnapshot(t *testing.T) {
+	const runID = "testsnap-orchref-01"
+	_, orchPath, _ := writeCLIHarnessDir(t, runID)
+
+	f := harness.NewFakeAdapter()
+	f.Queue("agent-a", harness.ScriptedEntry{Response: &domain.ProtocolResponse{
+		AgentInstanceID: "agent-a#1",
+		StatusCode:      domain.StatusSUCCESS,
+		StatusMessage:   "done",
+	}})
+	f.Queue("agent-b", harness.ScriptedEntry{Response: &domain.ProtocolResponse{
+		AgentInstanceID: "agent-b#2",
+		StatusCode:      domain.StatusSUCCESS,
+		StatusMessage:   "done",
+	}})
+
+	// capture records every BindRunContext call the session makes so we can
+	// inspect the orchRef that step 5a supplies after re-resolving from the
+	// snapshot directory.
+	capture := &orchRefCaptureConsultant{}
+
+	ses := session.New(session.Deps{
+		Harness:  f,
+		Store:    &memStore{},
+		Clock:    fixedClock{t: epoch},
+		Interact: &noopInteraction{},
+		Routing:  capture,
+	})
+
+	got, err := ses.Start(context.Background(), baseCLIHarnessConfig(orchPath, runID))
+	requireRunStatus(t, got, err, domain.RunCompleted)
+
+	// Step 5a must call bindRunContext a second time (after re-resolving from
+	// the snapshot dir). The first call happens before step 5a with the
+	// original orchRef; the second call inside step 5a supplies the snapshot
+	// orchRef. We expect at least 2 bindings.
+	if capture.bindCallCount() < 2 {
+		t.Fatalf("want BindRunContext called at least twice (once before step 5a, "+
+			"once after re-resolution), got %d call(s); step 5a may have omitted "+
+			"the re-bind of consultants with the snapshot orchestrator reference",
+			capture.bindCallCount())
+	}
+
+	// The last-bound orchRef must point into the snapshot directory.
+	orchRef := capture.lastBoundOrchRef()
+	if !containsSnapshotPathSegment(orchRef.DefinitionPath, runID) {
+		t.Errorf("orchRef.DefinitionPath %q does not contain snapshot path segment %q; "+
+			"step 5a must re-resolve the orchestrator from the snapshot directory and "+
+			"re-bind consultants so that consultation uses the snapshot copy of the "+
+			"orchestrator script rather than the original",
+			orchRef.DefinitionPath, "agents-runner-"+runID)
+	}
+	// The re-resolved orchRef must retain InvocationOrchestrator kind.
+	if orchRef.InvocationKind != domain.InvocationOrchestrator {
+		t.Errorf("orchRef.InvocationKind: want %q, got %q; "+
+			"ResolveOrchestrator must set InvocationKind to InvocationOrchestrator",
+			domain.InvocationOrchestrator, orchRef.InvocationKind)
+	}
+}
+
+// TestSession_Start_CLIHarness_SnapshotRetainedOnDeviationUnresolved verifies
+// that when Start returns a non-terminal outcome (RunDeviationUnresolved), the
+// snapshot directory is NOT deleted. Non-terminal outcomes leave the run in a
+// resumable state; deleting the snapshot would remove the agent files needed
+// for a future resume dispatch.
+//
+// The deviation is produced by having agent-a return PARTIALLY_DONE in the
+// linear workflow (which has no On Findings column), with no routing consultant
+// wired. The engine cannot route automatically, so the session returns
+// RunDeviationUnresolved.
+func TestSession_Start_CLIHarness_SnapshotRetainedOnDeviationUnresolved(t *testing.T) {
+	const runID = "testsnap-nonterminal-01"
+	_, orchPath, snapshotDir := writeCLIHarnessDir(t, runID)
+
+	f := harness.NewFakeAdapter()
+	// agent-a returns PARTIALLY_DONE; the linear workflow has On Findings "-",
+	// so the engine cannot route automatically. Without a routing consultant,
+	// the session returns RunDeviationUnresolved.
+	f.Queue("agent-a", harness.ScriptedEntry{Response: &domain.ProtocolResponse{
+		AgentInstanceID: "agent-a#1",
+		StatusCode:      domain.StatusPARTIALLY_DONE,
+		StatusMessage:   "partially done, needs more work",
+	}})
+
+	ses := session.New(session.Deps{
+		Harness:  f,
+		Store:    &memStore{},
+		Clock:    fixedClock{t: epoch},
+		Interact: &noopInteraction{},
+		// No Routing consultant wired: deviation terminates with RunDeviationUnresolved.
+	})
+
+	got, err := ses.Start(context.Background(), baseCLIHarnessConfig(orchPath, runID))
+	requireRunStatus(t, got, err, domain.RunDeviationUnresolved)
+
+	// Step 5a must have run and agents must have been dispatched from the
+	// snapshot directory. This confirms the snapshot was actually created.
+	invs := f.Invocations()
+	if len(invs) == 0 {
+		t.Fatal("want at least one harness invocation, got none")
+	}
+	if !containsSnapshotPathSegment(invs[0].Agent.DefinitionPath, runID) {
+		t.Errorf("agent %q: DefinitionPath %q does not contain snapshot path segment %q; "+
+			"step 5a must run before the first dispatch so that agent files are "+
+			"resolved from the snapshot directory",
+			invs[0].Agent.Identifier, invs[0].Agent.DefinitionPath, "agents-runner-"+runID)
+	}
+
+	// The snapshot directory must still exist after RunDeviationUnresolved.
+	// Cleanup must NOT run on non-terminal outcomes; the snapshot remains
+	// available for run resumption.
+	if _, statErr := os.Stat(snapshotDir); errors.Is(statErr, os.ErrNotExist) {
+		t.Errorf("snapshot directory %q must NOT be deleted when Start returns "+
+			"RunDeviationUnresolved; non-terminal outcomes leave the run resumable "+
+			"and the snapshot must persist so that agent files are available on resume",
+			snapshotDir)
+	}
+}
+
+// TestSession_Start_NonCLIHarness_SnapshotStepSkipped verifies that when
+// HarnessID is empty (not a known CLI harness), the snapshot step is skipped:
+// agents are resolved from the original agents directory and no snapshot path
+// segment appears in any DefinitionPath.
+func TestSession_Start_NonCLIHarness_SnapshotStepSkipped(t *testing.T) {
+	ses, f, _, orchPath := newLinearSession(t)
+
+	f.Queue("agent-a", harness.ScriptedEntry{Response: &domain.ProtocolResponse{
+		AgentInstanceID: "agent-a#1",
+		StatusCode:      domain.StatusSUCCESS,
+		StatusMessage:   "done",
+	}})
+	f.Queue("agent-b", harness.ScriptedEntry{Response: &domain.ProtocolResponse{
+		AgentInstanceID: "agent-b#2",
+		StatusCode:      domain.StatusSUCCESS,
+		StatusMessage:   "done",
+	}})
+
+	// HarnessID is "" (default from newLinearSession) — not a CLI harness.
+	cfg := baseLinearConfig(orchPath)
+
+	got, err := ses.Start(context.Background(), cfg)
+	requireRunStatus(t, got, err, domain.RunCompleted)
+
+	// Agents must NOT have been dispatched from a snapshot directory.
+	for _, inv := range f.Invocations() {
+		if strings.Contains(filepath.ToSlash(inv.Agent.DefinitionPath), "agents-runner-") {
+			t.Errorf("agent %q: DefinitionPath %q contains snapshot path segment but no "+
+				"snapshot should be created when HarnessID is not a CLI harness",
+				inv.Agent.Identifier, inv.Agent.DefinitionPath)
+		}
 	}
 }

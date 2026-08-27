@@ -312,4 +312,7 @@ const (
 	EventSessionHITLRedispatch  = "session.hitl.redispatch"
 	EventSessionHITLEscalate    = "session.hitl.escalate"
 	EventSessionManualResolve   = "session.manual.resolve"
+
+	// Snapshot event names.
+	EventSnapshotCleanupFailed = "session.snapshot.cleanup_failed"
 )

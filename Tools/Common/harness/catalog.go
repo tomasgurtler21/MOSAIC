@@ -20,6 +20,13 @@ type CLIHarness struct {
 	// Label is the human-readable name a selection UI or a help text shows.
 	// It is presentation only; nothing ever switches on it.
 	Label string
+
+	// AgentsDir is the harness-convention relative path (from the project
+	// root) to the directory that holds agent definition files. For example,
+	// ".claude/agents" for claude-code or ".opencode/agents" for opencode.
+	// Runner uses this value when computing the run-scoped snapshot directory
+	// path via SnapshotDirPath.
+	AgentsDir string
 }
 
 // cliHarnesses is the catalog's single declaration of every CLI-backed
@@ -40,10 +47,14 @@ type CLIHarness struct {
 // name says and what this list is for. A tool-local test double is not a
 // CLI harness and has no entry; a tool that accepts one composes it into its
 // own accepted set alongside these entries.
+// AgentsDir values are seeded verbatim from the Deployment tool's builtin
+// harness descriptors (paths.agents.project) and must stay in sync with
+// those YAML manifests. The consistency test in Tools/Deployment guards
+// against drift.
 var cliHarnesses = []CLIHarness{
-	{ID: HarnessIDClaudeCode, Label: "Claude Code CLI"},
-	{ID: HarnessIDOpenCode, Label: "OpenCode CLI"},
-	{ID: HarnessIDGHCPCLI, Label: "GitHub Copilot CLI"},
+	{ID: HarnessIDClaudeCode, Label: "Claude Code CLI", AgentsDir: ".claude/agents"},
+	{ID: HarnessIDOpenCode, Label: "OpenCode CLI", AgentsDir: ".opencode/agents"},
+	{ID: HarnessIDGHCPCLI, Label: "GitHub Copilot CLI", AgentsDir: ".github/agents"},
 }
 
 // CLIHarnesses returns every CLI-backed harness this module can spawn

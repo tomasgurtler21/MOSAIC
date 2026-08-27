@@ -9,10 +9,13 @@ package screens
 // validateOrchestratorFile directly. FilePath() is an exported method on
 // *OrchestratorFileScreen and is equally accessible here.
 //
-// TDD RED: tests that assert quote-stripping behavior will fail until the shared
-// normalisation helper is added (Implementation tasks I1.1-I1.3). Tests that
-// assert pre-existing behavior (empty rejection, unquoted paths, one-sided quotes
-// left intact) are included to guard against regressions during implementation.
+// DEAD CODE COVERAGE NOTE: OrchestratorFileScreen is no longer on any active
+// navigation path following the Stage 3 removal of the orchestrator-file setup
+// screen. The screen type and its associated validateOrchestratorFile function
+// remain in setup.go as deliberate retained dead code (removal was optional per
+// the Stage 3 design). These tests are kept to preserve coverage of the retained
+// code and to prevent silent breakage if the dead code is ever revived. If
+// OrchestratorFileScreen is removed from setup.go, remove this entire file too.
 
 import (
 	"os"

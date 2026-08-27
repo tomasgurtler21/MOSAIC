@@ -58,6 +58,7 @@ import (
 	"time"
 
 	"mosaic-common/interaction"
+	commonharness "mosaic-common/harness"
 	"mosaic-run/internal/agentresolve"
 	"mosaic-run/internal/compat"
 	"mosaic-run/internal/domain"
@@ -65,6 +66,7 @@ import (
 	"mosaic-run/internal/orchfile"
 	"mosaic-run/internal/planstages"
 	"mosaic-run/internal/seed"
+	"mosaic-run/internal/snapshot"
 	"mosaic-run/internal/workflow"
 )
 
@@ -191,6 +193,10 @@ type sessionImpl struct {
 	// when config.ManualDispatch is true; cleared after the first consultRoute
 	// call so that subsequent routing decisions use the configured consultant.
 	manualDispatchPending bool
+	// snapshotDir is the absolute path to the run-scoped agent snapshot
+	// directory created at step 5a. Empty until step 5a succeeds. Used by
+	// cleanup to know what to delete on terminal completion.
+	snapshotDir string
 }
 
 // invokeAndLog wraps s.deps.Harness.Invoke with dispatch logging. It logs the
@@ -209,7 +215,7 @@ func (s *sessionImpl) invokeAndLog(ctx context.Context, agentRef domain.AgentRef
 }
 
 // Start implements Session.
-func (s *sessionImpl) Start(ctx context.Context, config domain.RunConfig) (domain.RunOutcome, error) {
+func (s *sessionImpl) Start(ctx context.Context, config domain.RunConfig) (outcome domain.RunOutcome, err error) {
 	// =========================================================================
 	// Run-start sequence (fixed order)
 	// =========================================================================
@@ -323,6 +329,63 @@ func (s *sessionImpl) Start(ctx context.Context, config domain.RunConfig) (domai
 	agents, err := agentresolve.ResolveAll(orchDir, identifiers)
 	if err != nil {
 		return s.refusal(err.Error()), nil
+	}
+
+	// Step 5a: Create a run-scoped agent snapshot (CLI harnesses only).
+	// Skip for non-CLI harnesses (e.g. the "fake" test double) which have
+	// no agents directory convention. For CLI harnesses, copy the agents
+	// directory to a sibling snapshot directory, re-resolve all agents against
+	// the snapshot, and re-bind consultants with the snapshot-resolved
+	// orchestrator reference. On failure, refuse the run.
+	if commonharness.IsCLIHarness(config.HarnessID) {
+		// The snapshot directory is a sibling of the agents directory, named
+		// by appending "-runner-{runID}" to the agents directory base name.
+		snapshotDir := filepath.Join(filepath.Dir(orchDir), filepath.Base(orchDir)+"-runner-"+config.RunID)
+		rules := snapshot.TransformationsFor(config.HarnessID)
+		if err := snapshot.CreateSnapshot(orchDir, snapshotDir, rules); err != nil {
+			return s.refusal(err.Error()), nil
+		}
+		s.snapshotDir = snapshotDir
+
+		// Defer cleanup: delete the snapshot directory on terminal completion
+		// (RunCompleted or RunStopped). Non-terminal outcomes leave the snapshot
+		// in place so the run can be resumed with access to the original agent files.
+		// The named return variable 'outcome' is read by the deferred function after
+		// all return statements have set it.
+		defer func() {
+			if s.snapshotDir == "" {
+				return
+			}
+			if outcome.Status == domain.RunCompleted || outcome.Status == domain.RunStopped {
+				if rmErr := os.RemoveAll(s.snapshotDir); rmErr != nil {
+					s.deps.Debug.Log(domain.EventSnapshotCleanupFailed,
+						fmt.Sprintf("failed to remove snapshot directory %s: %v", s.snapshotDir, rmErr))
+				}
+			}
+		}()
+
+		// Re-resolve all agents against the snapshot directory so every dispatch
+		// uses the transformed snapshot copies, not the originals.
+		agents, err = agentresolve.ResolveAll(snapshotDir, identifiers)
+		if err != nil {
+			return s.refusal(err.Error()), nil
+		}
+
+		// Re-resolve the orchestrator against the snapshot directory.
+		snapshotOrchPath := filepath.Join(snapshotDir, filepath.Base(config.OrchestratorFilePath))
+		orchRef, err = agentresolve.ResolveOrchestrator(snapshotOrchPath)
+		if err != nil {
+			return s.refusal(err.Error()), nil
+		}
+		s.orchRef = orchRef
+
+		// Re-bind consultants with the snapshot-resolved orchestrator reference
+		// so consultation dispatches the transformed copy of the orchestrator
+		// script rather than the original.
+		rc = domain.RunContext{Orchestrator: orchRef, Table: table}
+		bindRunContext(s.deps.Routing, rc)
+		bindRunContext(s.deps.Manual, rc)
+		bindRunContext(s.deps.PreConsult, rc)
 	}
 
 	// Step 6: Read the stage set from the run folder, if a plan file is

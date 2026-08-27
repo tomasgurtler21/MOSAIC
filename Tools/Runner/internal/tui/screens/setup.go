@@ -121,6 +121,91 @@ func (s *OrchestratorFileScreen) Resize(width, height int) {
 }
 
 // ---------------------------------------------------------------------------
+// HarnessSelectScreen
+// ---------------------------------------------------------------------------
+
+// HarnessSelectScreen lets the user select the AI harness adapter before the
+// rest of the setup sequence proceeds.
+//
+// Navigation contract:
+//   - Enter on a harness -> Done() == true, SelectedID() returns its ID.
+//   - Esc -> Back() == true (quit; this is the first setup screen).
+type HarnessSelectScreen struct {
+	list   *widgets.List
+	width  int
+	height int
+	styles Styles
+}
+
+// NewHarnessSelectScreen creates the harness selection screen.
+func NewHarnessSelectScreen(width, height int, styles Styles) *HarnessSelectScreen {
+	sels := harness.CLISelections()
+	items := make([]widgets.ListItem, len(sels))
+	for i, s := range sels {
+		items[i] = widgets.ListItem{
+			ID:    s.ID,
+			Label: s.Label,
+		}
+	}
+	listStyles := widgets.ListStyles{
+		Normal:   styles.Body,
+		Selected: styles.Selected,
+		Disabled: styles.Muted,
+		Cursor:   "▶",
+	}
+	contentH := height - 6
+	if contentH < 1 {
+		contentH = 1
+	}
+	list := widgets.NewList(items, contentH, width, listStyles)
+	return &HarnessSelectScreen{
+		list:   list,
+		width:  width,
+		height: height,
+		styles: styles,
+	}
+}
+
+// Update processes a key message and delegates to the list widget.
+func (s *HarnessSelectScreen) Update(msg tea.Msg) tea.Cmd {
+	s.list.Update(msg)
+	return nil
+}
+
+// View renders the harness selection screen.
+func (s *HarnessSelectScreen) View() string {
+	title := s.styles.Title.Width(s.width).Render("Select Harness")
+	subtitle := s.styles.Subtitle.Width(s.width).Render("Choose the AI harness to use for this run.")
+	border := s.styles.Border.Width(s.width).Render(strings.Repeat("─", s.width))
+	listView := s.list.View()
+	help := s.styles.Help.Width(s.width).Render("↑/k up  ↓/j down  enter select  esc quit  ctrl+c quit")
+	return strings.Join([]string{title, subtitle, border, listView, border, help}, "\n")
+}
+
+// Done reports whether the user selected a harness.
+func (s *HarnessSelectScreen) Done() bool { return s.list.Done() }
+
+// Back reports whether the user pressed Esc.
+func (s *HarnessSelectScreen) Back() bool { return s.list.Back() }
+
+// SelectedID returns the selected harness ID. Only valid when Done() is true.
+func (s *HarnessSelectScreen) SelectedID() string { return s.list.SelectedID() }
+
+// Reset clears the done and back flags.
+func (s *HarnessSelectScreen) Reset() { s.list.Reset() }
+
+// Resize updates the screen dimensions and reflows the list.
+func (s *HarnessSelectScreen) Resize(width, height int) {
+	s.width = width
+	s.height = height
+	contentH := height - 6
+	if contentH < 1 {
+		contentH = 1
+	}
+	s.list.Resize(contentH, width)
+}
+
+// ---------------------------------------------------------------------------
 // WorkflowSelectScreen
 // ---------------------------------------------------------------------------
 
@@ -533,15 +618,16 @@ type infraClassEntry struct {
 //   - Conditional steps (commits, commit-branch, pre-consult) are skipped in both
 //     navigation directions when their conditions are not met.
 type ConfigScreen struct {
-	step           configStep
-	back           bool
-	sel            ConfigSelection
-	cursor         int
-	width          int
-	height         int
-	styles         Styles
-	timeoutInput   *widgets.TextInput
-	declaredAgents []domain.DeclaredInfraAgent // populated by SetDeclaredAgents
+	step               configStep
+	back               bool
+	sel                ConfigSelection
+	cursor             int
+	width              int
+	height             int
+	styles             Styles
+	timeoutInput       *widgets.TextInput
+	declaredAgents     []domain.DeclaredInfraAgent // populated by SetDeclaredAgents
+	harnessPreselected bool                        // true when harness was selected before config wizard
 
 	// infraClassQueue holds the gated classes needing user selection, in the
 	// order they were encountered in declaredAgents. Populated when
@@ -600,8 +686,13 @@ func (s *ConfigScreen) Update(msg tea.Msg) tea.Cmd {
 		cmd := s.timeoutInput.Update(msg)
 		if s.timeoutInput.Back() {
 			s.timeoutInput.Reset()
-			s.step = configStepHarness
-			s.cursor = 0
+			if s.harnessPreselected {
+				s.step = configStepMode
+				s.cursor = s.modeIndex()
+			} else {
+				s.step = configStepHarness
+				s.cursor = 0
+			}
 			return nil
 		}
 		if s.timeoutInput.Done() {
@@ -682,6 +773,14 @@ func (s *ConfigScreen) advance() tea.Cmd {
 		modes := domain.ExecutionModes()
 		if s.cursor < len(modes) {
 			s.sel.Settings.Mode = modes[s.cursor]
+		}
+		if s.harnessPreselected {
+			// Harness was selected on the dedicated harness screen; skip the
+			// harness step and go directly to the timeout input.
+			s.step = configStepHarnessTimeout
+			s.timeoutInput.Reset()
+			s.cursor = 0
+			return s.timeoutInput.Init()
 		}
 		s.step = configStepHarness
 		s.cursor = 0
@@ -1005,4 +1104,13 @@ func (s *ConfigScreen) Resize(width, height int) {
 // skipped and the single agent is auto-selected.
 func (s *ConfigScreen) SetDeclaredAgents(agents []domain.DeclaredInfraAgent) {
 	s.declaredAgents = agents
+}
+
+// SetPreselectedHarness records that the harness was already chosen on the
+// harness-selection screen. The config wizard skips the configStepHarness
+// prompt and the back path from configStepHarnessTimeout goes directly to
+// configStepMode rather than configStepHarness.
+func (s *ConfigScreen) SetPreselectedHarness(id string) {
+	s.sel.Harness = id
+	s.harnessPreselected = true
 }

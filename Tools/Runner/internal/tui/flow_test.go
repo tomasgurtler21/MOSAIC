@@ -210,12 +210,12 @@ func TestFlow_CtrlC_DuringProgress_CancelsAndQuits(t *testing.T) {
 // Run setup sequence
 // ---------------------------------------------------------------------------
 
-// TestFlow_SetupSequence_StartsOnFileScreen verifies that a fresh model starts on the
-// orchestrator file entry screen, which is the first step of the setup sequence.
-func TestFlow_SetupSequence_StartsOnFileScreen(t *testing.T) {
+// TestFlow_SetupSequence_StartsOnHarnessScreen verifies that a fresh model starts on the
+// harness selection screen, which is the first step of the setup sequence.
+func TestFlow_SetupSequence_StartsOnHarnessScreen(t *testing.T) {
 	m := newFlowModel(domain.RunOutcome{Status: domain.RunCompleted})
-	if m.screen != screenSetupFile {
-		t.Errorf("fresh model screen = %v, want screenSetupFile (%v)", m.screen, screenSetupFile)
+	if m.screen != screenSetupHarness {
+		t.Errorf("fresh model screen = %v, want screenSetupHarness (%v)", m.screen, screenSetupHarness)
 	}
 }
 

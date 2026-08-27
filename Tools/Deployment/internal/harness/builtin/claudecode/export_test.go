@@ -46,3 +46,16 @@ func NewWithMapsForTesting(t testing.TB, shared, orchContent map[string]string) 
 	}
 	return &module{ref: ref, desc: desc, injections: shared, orchInjections: orchContent}
 }
+
+// DescriptorForTesting parses the embedded claude-code.yaml descriptor and
+// returns the resulting HarnessDescriptor. It is used by consistency tests
+// that compare the embedded YAML's path values against the shared harness
+// catalog without requiring an on-disk fixture directory.
+func DescriptorForTesting(t testing.TB) *domain.HarnessDescriptor {
+	t.Helper()
+	desc, err := descriptor.Parse(embeddedDescriptor, "builtin:claude-code")
+	if err != nil {
+		t.Fatalf("DescriptorForTesting: parse embedded claude-code descriptor: %v", err)
+	}
+	return desc
+}

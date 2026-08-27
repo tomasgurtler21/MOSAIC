@@ -29,7 +29,7 @@ import (
 // ---------------------------------------------------------------------------
 
 // newStopRecoveryModel creates a rootModel with a stubNavSession that returns
-// RunStoppedByConsultant when started. The model starts at screenSetupFile.
+// RunStoppedByConsultant when started. The model starts at screenSetupHarness.
 func newStopRecoveryModel(stopReason string) *rootModel {
 	sess := &stubNavSession{
 		outcome: domain.RunOutcome{
