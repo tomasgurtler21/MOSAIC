@@ -7,6 +7,7 @@ description: >
   inert (not run end-to-end); only its preflight validation is exercised by
   the automated regression test.
 defaults:
-  repetitions: 1
+  repetitions: 100
+  pass_rate: 0.95
 tests:
   - path: ref-check.test.yaml

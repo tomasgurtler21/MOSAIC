@@ -6,9 +6,9 @@ description: >
   the HITL gate was not discharged.
 defaults:
   timeout: 10m
-  turn_limit: 30
-  repetitions: 1
-  pass_rate: 1.0
+  turn_limit: 5
+  repetitions: 100
+  pass_rate: 0.98
   echo_fidelity: advisory
 tests:
   - path: hitl-redispatch-unapproved.test.yaml

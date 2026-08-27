@@ -33,7 +33,7 @@ subject:
 stub_registry: planner-routeback-quality-gate.stubs.json
 
 timeout: 10m
-turn_limit: 30
+turn_limit: 10
 stop_after_invocations: 2
 
 seed_files:

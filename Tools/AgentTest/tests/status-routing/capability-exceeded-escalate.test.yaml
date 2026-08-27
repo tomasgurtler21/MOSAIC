@@ -31,7 +31,7 @@ subject:
 stub_registry: capability-exceeded-escalate.stubs.json
 
 timeout: 5m
-turn_limit: 15
+turn_limit: 5
 
 seed_files:
   - path: Orchestration-{run_id}/Orchestration.md

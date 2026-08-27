@@ -30,7 +30,7 @@ subject:
 stub_registry: multiple-triggers-same-boundary.stubs.json
 
 timeout: 10m
-turn_limit: 30
+turn_limit: 15
 stop_after_invocations: 3
 
 seed_files:

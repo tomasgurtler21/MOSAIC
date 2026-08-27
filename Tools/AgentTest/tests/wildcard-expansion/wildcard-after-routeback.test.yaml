@@ -30,7 +30,7 @@ subject:
 stub_registry: wildcard-after-routeback.stubs.json
 
 timeout: 10m
-turn_limit: 30
+turn_limit: 5
 stop_after_invocations: 1
 
 seed_files:
@@ -84,6 +84,7 @@ assertions:
         - Orchestration-{run_id}/Stage-1/PlanProgress.md
         - Orchestration-{run_id}/Stage-2/PlanProgress.md
         - Orchestration-{run_id}/Stage-3/PlanProgress.md
+      optional_input_artifacts:
         - Orchestration-{run_id}/TestResults.md
       required_output_artifacts:
         - Orchestration-{run_id}/plan-review.md

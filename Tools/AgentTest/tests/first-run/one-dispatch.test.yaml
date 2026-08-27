@@ -40,7 +40,7 @@ subject:
 stub_registry: one-dispatch.stubs.json
 
 timeout: 10m
-turn_limit: 20
+turn_limit: 5
 stop_after_invocations: 1
 
 assertions:

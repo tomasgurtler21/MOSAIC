@@ -8,9 +8,9 @@ description: >
   against a live claude-code harness.
 defaults:
   timeout: 10m
-  turn_limit: 20
-  repetitions: 1
-  pass_rate: 1.0
+  turn_limit: 5
+  repetitions: 100
+  pass_rate: 0.95
 tests:
   - path: one-dispatch.test.yaml
   - path: research-routing.test.yaml

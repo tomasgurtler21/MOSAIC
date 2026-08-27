@@ -31,7 +31,7 @@ subject:
 stub_registry: creator-fix-rereview.stubs.json
 
 timeout: 10m
-turn_limit: 30
+turn_limit: 5
 stop_after_invocations: 1
 
 seed_files:

@@ -8,9 +8,9 @@ description: >
   CAPABILITY_EXCEEDED.
 defaults:
   timeout: 10m
-  turn_limit: 30
-  repetitions: 1
-  pass_rate: 1.0
+  turn_limit: 5
+  repetitions: 100
+  pass_rate: 0.95
   echo_fidelity: advisory
 tests:
   - path: findings-route-back.test.yaml

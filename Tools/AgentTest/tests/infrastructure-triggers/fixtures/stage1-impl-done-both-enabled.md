@@ -9,6 +9,7 @@ last_updated: 2026-01-15T11:15:00Z
 global_sequence: 10
 checkpoints: enabled
 commits: enabled
+commit_branch: mosaic/run/{run_id}
 current_state:
   phase: EXECUTION
   stage: Implementation.1

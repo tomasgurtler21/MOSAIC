@@ -235,7 +235,31 @@ Available assertion classes, all evaluated from the evidence snapshot:
 
 Plus **echo fidelity** — evaluated unconditionally on every run, never declared, never invertible. Every stubbed collaborator's observed response must match the declared stub response exactly.
 
-### 4.4 Report Fields for Test Identity and Versioning
+### 4.4 Task Message Assertions and Artifact Set Semantics
+
+The `task_messages` assertion class inspects individual task invocation messages recorded by the interception pipeline. Each entry targets a specific dispatch (by ordinal position) and can assert on several fields:
+
+| Field | What it checks |
+|-------|---------------|
+| `identity` | The collaborator identity (`tool`/`agent`) matches |
+| `human_in_the_loop` | The HITL flag matches the declared value |
+| `required_input_artifacts` | Every listed artifact must be present in the dispatch's `input_artifacts` |
+| `optional_input_artifacts` | These artifacts may be present but are not required |
+| `required_output_artifacts` | Every listed artifact must be present in the dispatch's `output_artifacts` |
+| `optional_output_artifacts` | These artifacts may be present but are not required |
+| `task_description_contains` | The task description contains all listed substrings |
+
+**Artifact set evaluation is closed.** When `required_input_artifacts` or `optional_input_artifacts` is declared (either one, or both), the evaluator applies closed-set semantics to the observed artifact list. Specifically:
+
+1. Every artifact in the `required` list must appear in the observed list. Any missing required artifact fails the assertion.
+2. Artifacts in the `optional` list may appear in the observed list or not -- neither case affects the outcome.
+3. **Any observed artifact that appears in neither the required nor the optional list fails the assertion.** The observed set is not open-ended; every artifact the orchestrator passes must be accounted for in one of the two declared lists.
+
+This means a test author must anticipate every artifact the orchestrator might reasonably include. Omitting an artifact from both lists does not silently ignore it -- it causes a hard failure with the detail message: `"input artifact(s) in neither the required nor the optional set: {path}"`. When a test is about one specific routing concern (e.g. wildcard expansion) but the dispatch may carry artifacts unrelated to that concern, those artifacts belong in the `optional` list so the test does not fail for reasons outside its scope.
+
+**When neither list is declared** for a given direction (input or output), the evaluator skips that check entirely -- no artifact assertion is produced for that direction, and the orchestrator may pass whatever it wants.
+
+### 4.5 Report Fields for Test Identity and Versioning
 
 The report JSON emitted after a suite run carries the test identity and versioning fields through all levels:
 
