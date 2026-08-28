@@ -81,6 +81,10 @@ func writeTestLine(w io.Writer, t TestReport) error {
 	if _, err := fmt.Fprintln(w, line); err != nil {
 		return err
 	}
+	// seenConditions tracks (Kind, Detail) pairs already rendered for this
+	// test. Conditions identical across multiple runs appear only once.
+	seenConditions := make(map[string]bool)
+
 	for _, run := range t.Runs {
 		for _, a := range run.Assertions {
 			switch a.Outcome {
@@ -111,6 +115,11 @@ func writeTestLine(w io.Writer, t TestReport) error {
 			}
 		}
 		for _, c := range run.Conditions {
+			key := string(c.Kind) + "\x00" + c.Detail
+			if seenConditions[key] {
+				continue
+			}
+			seenConditions[key] = true
 			if _, err := fmt.Fprintf(w, "  ! %s: %s\n", c.Kind, c.Detail); err != nil {
 				return err
 			}

@@ -13,12 +13,13 @@ import (
 // Only digit characters are accepted; non-digit keys are silently ignored.
 // Enter confirms the current draft value and sets Done; Esc sets Back.
 type MaxConcurrentRunsScreen struct {
-	value  int    // last confirmed value (or initial)
-	draft  string // in-progress digit input; empty means no active edit
-	width  int
-	styles Styles
-	done   bool
-	back   bool
+	value       int    // last confirmed value (or initial)
+	draft       string // in-progress digit input; empty means no active edit
+	draftEdited bool   // true once any digit or backspace key has been pressed
+	width       int
+	styles      Styles
+	done        bool
+	back        bool
 }
 
 // NewMaxConcurrentRunsScreen creates a MaxConcurrentRunsScreen initialized to initial.
@@ -49,10 +50,16 @@ func (s *MaxConcurrentRunsScreen) Update(msg tea.Msg) tea.Cmd {
 	case tea.KeyEsc:
 		s.draft = ""
 		s.back = true
+	case tea.KeyBackspace:
+		if len(s.draft) > 0 {
+			s.draft = s.draft[:len(s.draft)-1]
+		}
+		s.draftEdited = true
 	case tea.KeyRunes:
 		for _, r := range key.Runes {
 			if unicode.IsDigit(r) {
 				s.draft += string(r)
+				s.draftEdited = true
 			}
 		}
 	}
@@ -67,7 +74,7 @@ func (s *MaxConcurrentRunsScreen) View() string {
 	}
 	title := s.styles.Title.Render("Max Concurrent Runs")
 	value := s.styles.Selected.Render(display)
-	help := s.styles.Help.Render("type digits  enter confirm  esc back")
+	help := s.styles.Help.Render("type digits  backspace delete  enter confirm  esc back")
 	content := title + "\n\n  " + value + "\n\n" + help
 	if s.width > 0 {
 		return lipgloss.NewStyle().Width(s.width).Render(content)
@@ -81,13 +88,21 @@ func (s *MaxConcurrentRunsScreen) Done() bool { return s.done }
 // Back reports whether the user pressed Esc to navigate backward.
 func (s *MaxConcurrentRunsScreen) Back() bool { return s.back }
 
-// Reset clears the Done and Back flags and discards any in-progress digit
-// draft so the screen behaves as if freshly entered.
+// Reset clears the Done and Back flags, discards any in-progress digit
+// draft, and clears the edited flag so the screen behaves as if freshly entered.
 func (s *MaxConcurrentRunsScreen) Reset() {
 	s.done = false
 	s.back = false
 	s.draft = ""
+	s.draftEdited = false
 }
+
+// WasEdited reports whether the user has pressed at least one digit or
+// backspace key since the screen was created or last Reset. Callers use this
+// to distinguish "user pressed Enter without typing" (WasEdited false, initial
+// value should not be committed as an override) from "user typed something"
+// (WasEdited true, the confirmed Value should be committed).
+func (s *MaxConcurrentRunsScreen) WasEdited() bool { return s.draftEdited }
 
 // Resize updates the available width without affecting Done, Back, or the
 // current value.

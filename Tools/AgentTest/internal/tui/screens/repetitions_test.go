@@ -6,6 +6,7 @@ package screens_test
 // Reset discards any partially typed draft so the screen behaves as if freshly entered.
 
 import (
+	"strings"
 	"testing"
 
 	"mosaic-agent-test/internal/tui/screens"
@@ -264,6 +265,28 @@ func TestRepetitionsScreen_Backspace_OnEmptyDraft_IsNoOp(t *testing.T) {
 	}
 }
 
+// TestRepetitionsScreen_InPlaceEdit_TypeBackspaceTypeThenEnter_ConfirmsCorrectValue
+// verifies the complete in-place correction workflow described in AC2.3: type
+// digits, use backspace to erase the last digit, type more digits, then confirm
+// with Enter. The confirmed value must reflect only the final draft content.
+func TestRepetitionsScreen_InPlaceEdit_TypeBackspaceTypeThenEnter_ConfirmsCorrectValue(t *testing.T) {
+	// Arrange
+	s := newRepetitionsScreen(1)
+
+	// Act — type "42" (draft = "42"), backspace once (draft = "4"),
+	// type '3' (draft = "43"), then confirm.
+	s.Update(digitKey('4'))
+	s.Update(digitKey('2'))
+	s.Update(backspaceKey()) // removes '2'; draft = "4"
+	s.Update(digitKey('3'))  // draft = "43"
+	s.Update(enterKey())
+
+	// Assert — the confirmed value must be 43, not 42 or 423.
+	if s.Value() != 43 {
+		t.Errorf("Value() = %d after typing '4','2', Backspace, '3', Enter; want 43 (in-place correction must yield the final draft digits)", s.Value())
+	}
+}
+
 // TestRepetitionsScreen_Backspace_DoesNotSetDoneOrBack verifies that a Backspace
 // key press alone does not accidentally advance or cancel the screen.
 func TestRepetitionsScreen_Backspace_DoesNotSetDoneOrBack(t *testing.T) {
@@ -321,5 +344,42 @@ func TestRepetitionsScreen_View_ReturnsNonEmptyString(t *testing.T) {
 	// Assert
 	if len(view) == 0 {
 		t.Error("View() returned an empty string; the repetitions screen must render visible content")
+	}
+}
+
+// TestRepetitionsScreen_View_ContainsInitialValue verifies that View shows the
+// initial value when no draft has been typed, so the user can see the resolved
+// default before making any changes.
+func TestRepetitionsScreen_View_ContainsInitialValue(t *testing.T) {
+	// Arrange
+	s := newRepetitionsScreen(7)
+
+	// Act
+	view := collapseWhitespace(s.View())
+
+	// Assert — the rendered output must contain "7" before any digit is typed
+	if !strings.Contains(view, "7") {
+		t.Errorf("View() = %q; want it to contain the initial value \"7\" before any user input", view)
+	}
+}
+
+// ---------------------------------------------------------------------------
+// Enter without typing — preserves the initial value
+// ---------------------------------------------------------------------------
+
+// TestRepetitionsScreen_EnterWithoutTyping_PreservesInitialValue verifies that
+// pressing Enter without typing any digits leaves Value() equal to the initial
+// value. This is the screen-level contract that allows the caller to pass the
+// resolved suite default as the initial so pressing Enter alone accepts it.
+func TestRepetitionsScreen_EnterWithoutTyping_PreservesInitialValue(t *testing.T) {
+	// Arrange
+	s := newRepetitionsScreen(5)
+
+	// Act — confirm without typing anything
+	s.Update(enterKey())
+
+	// Assert
+	if s.Value() != 5 {
+		t.Errorf("Value() = %d after Enter without typing; want initial value 5 (no typed draft must not overwrite the initial)", s.Value())
 	}
 }

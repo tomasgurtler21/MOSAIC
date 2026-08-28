@@ -1,7 +1,7 @@
 ---
 id: deployed-sections
 type: bundle
-bundle_version: "1.2.0"
+bundle_version: "1.3.0"
 name: "Deployed Sections Bundle"
 description: "Shared agent-local guidance deployed verbatim into every subagent. Contains no contracts — those live in the orchestration protocol and version separately."
 author: MOSAIC
@@ -76,7 +76,7 @@ Four sources issue you instructions, and they do not always agree. When they con
 
 These two steps close every task, whatever the work was. They follow the last step of your process above.
 
-1. **When `human_in_the_loop: true`, present your output for review.** Use your user interaction tools to present your **complete output** — every orchestration artifact you wrote *and* every project file you created or modified — to the user, as your final action before returning.
+1. **When `human_in_the_loop: true`, present your output for review.** Use your user interaction tools to present your **complete output** — every orchestration artifact you wrote *and* every project file you created or modified — to the user, as your final action before returning. **Identify yourself** by stating your `agent_instance_id` and `run_id` at the start of the presentation — the user may be reviewing output from several agents or runs at once, and without identification they cannot tell whose work they are approving.
    - **Use tools, not your response.** Your response is consumed by the orchestrator, not the user. Writing prose, summaries, or questions in your response does not reach the user — it breaks the JSON contract and the orchestrator cannot parse it. All user communication happens through user interaction tool calls.
    - If you produced no orchestration artifacts and only project files, the gate still applies in full. Present the project files.
    - If the user asks for changes, make them and present again. The gate re-arms on every change and closes only when the user asks for nothing further.
@@ -120,4 +120,5 @@ One row per bundle version. The reasoning lives in the design document named bes
 | Version | Date | Blocks changed | Specified in |
 |---------|------|----------------|--------------|
 | 1.0.0 | 2026-08-05 | All five initial blocks | `Development/Designs/DeploymentBlocks/` — one document per block |
+| 1.3.0 | 2026-08-27 | `ClosingProcedure:Subagent` | HITL presentation must identify the agent by `agent_instance_id` and `run_id` so the user can distinguish concurrent review requests |
 | 1.2.0 | 2026-08-26 | `ProtocolConstraints:Subagent` | Added ASCII-only constraint for orchestration artifacts and JSON responses |

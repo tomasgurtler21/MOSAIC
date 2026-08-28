@@ -7,18 +7,25 @@ import (
 	"time"
 )
 
+
 // formatPassRate formats a pass rate (0.0–1.0) as a percentage string like "100%".
 func formatPassRate(rate float64) string {
 	return fmt.Sprintf("%.0f%%", rate*100)
 }
 
-// formatCost formats a cost value. When warning is true the cost is unresolved
-// and the marker "[cost?]" is returned instead of a dollar amount.
-func formatCost(cost float64, warning bool) string {
+// formatCost formats a cost value normalized to per-100-tests. When warning is
+// true the cost is unresolved and the marker "[cost?]" is returned instead of
+// a computed value. testCount is the denominator; if zero the per-100-tests
+// value is computed as zero.
+func formatCost(cost float64, testCount int, warning bool) string {
 	if warning {
 		return "[cost?]"
 	}
-	return fmt.Sprintf("$%.2f", cost)
+	var normalized float64
+	if testCount > 0 {
+		normalized = cost / float64(testCount) * 100
+	}
+	return fmt.Sprintf("$%.2f/100t", normalized)
 }
 
 // formatDuration formats a duration for display. Zero duration returns "-".
@@ -27,14 +34,6 @@ func formatDuration(d time.Duration) string {
 		return "-"
 	}
 	return d.String()
-}
-
-// partialSuffix returns " [partial]" when hasPartial is true, otherwise "".
-func partialSuffix(hasPartial bool) string {
-	if hasPartial {
-		return " [partial]"
-	}
-	return ""
 }
 
 // RenderVersionSummary produces the complete Markdown content for one
@@ -65,11 +64,6 @@ func RenderVersionSummary(v VersionSummary) string {
 	renderOverviewSection(&sb, v)
 	sb.WriteString("<!-- /generated:overview -->\n\n")
 
-	// generated:model-results
-	sb.WriteString("<!-- generated:model-results -->\n")
-	renderModelResultsSection(&sb, v)
-	sb.WriteString("<!-- /generated:model-results -->\n\n")
-
 	// generated:model-comparison
 	sb.WriteString("<!-- generated:model-comparison -->\n")
 	renderModelComparisonSection(&sb, v)
@@ -79,6 +73,11 @@ func RenderVersionSummary(v VersionSummary) string {
 	sb.WriteString("<!-- generated:harness-comparison -->\n")
 	renderHarnessComparisonSection(&sb, v)
 	sb.WriteString("<!-- /generated:harness-comparison -->\n\n")
+
+	// generated:model-results
+	sb.WriteString("<!-- generated:model-results -->\n")
+	renderModelResultsSection(&sb, v)
+	sb.WriteString("<!-- /generated:model-results -->\n\n")
 
 	// generated:problem-areas
 	sb.WriteString("<!-- generated:problem-areas -->\n")
@@ -109,8 +108,8 @@ func renderModelResultsSection(sb *strings.Builder, v VersionSummary) {
 	for _, model := range v.Models { // v.Models is already sorted
 		sb.WriteString(fmt.Sprintf("### %s\n\n", model))
 
-		sb.WriteString("| Suite | Harness | Tests | Pass Rate | Avg Duration | Cost |\n")
-		sb.WriteString("|-------|---------|-------|-----------|--------------|------|\n")
+		sb.WriteString("| Suite | Harness | Tests | Pass Rate | Cost |\n")
+		sb.WriteString("|-------|---------|-------|-----------|------|\n")
 
 		// Iterate suites in sorted order for determinism.
 		for _, suite := range v.Suites { // v.Suites is already sorted
@@ -132,13 +131,11 @@ func renderModelResultsSection(sb *strings.Builder, v VersionSummary) {
 
 			for _, harness := range harnesses {
 				stats := byHarness[harness]
-				flags := partialSuffix(stats.HasPartial)
-				sb.WriteString(fmt.Sprintf("| %s | %s | %d | %s%s | %s | %s |\n",
+				sb.WriteString(fmt.Sprintf("| %s | %s | %d | %s | %s |\n",
 					suite, harness,
 					stats.TestCount,
-					formatPassRate(stats.PassRate), flags,
-					formatDuration(stats.AvgDuration),
-					formatCost(stats.TotalCost, stats.CostWarning),
+					formatPassRate(stats.PassRate),
+					formatCost(stats.TotalCost, stats.TestCount, stats.CostWarning),
 				))
 			}
 		}
@@ -163,7 +160,7 @@ func renderModelComparisonSection(sb *strings.Builder, v VersionSummary) {
 
 		var testCount, passCount int
 		var totalCost float64
-		var costWarning, hasPartial bool
+		var costWarning bool
 
 		for _, harness := range harnesses {
 			s := byHarness[harness]
@@ -173,9 +170,6 @@ func renderModelComparisonSection(sb *strings.Builder, v VersionSummary) {
 			if s.CostWarning {
 				costWarning = true
 			}
-			if s.HasPartial {
-				hasPartial = true
-			}
 		}
 
 		var passRate float64
@@ -183,11 +177,10 @@ func renderModelComparisonSection(sb *strings.Builder, v VersionSummary) {
 			passRate = float64(passCount) / float64(testCount)
 		}
 
-		flags := partialSuffix(hasPartial)
-		sb.WriteString(fmt.Sprintf("| %s | %d | %s%s | %s |\n",
+		sb.WriteString(fmt.Sprintf("| %s | %d | %s | %s |\n",
 			model, testCount,
-			formatPassRate(passRate), flags,
-			formatCost(totalCost, costWarning),
+			formatPassRate(passRate),
+			formatCost(totalCost, testCount, costWarning),
 		))
 	}
 	sb.WriteString("\n")
@@ -204,7 +197,6 @@ func renderHarnessComparisonSection(sb *strings.Builder, v VersionSummary) {
 		passCount   int
 		totalCost   float64
 		costWarning bool
-		hasPartial  bool
 	}
 	aggMap := make(map[string]*hAgg)
 
@@ -225,9 +217,6 @@ func renderHarnessComparisonSection(sb *strings.Builder, v VersionSummary) {
 			if s.CostWarning {
 				a.costWarning = true
 			}
-			if s.HasPartial {
-				a.hasPartial = true
-			}
 		}
 	}
 
@@ -240,11 +229,10 @@ func renderHarnessComparisonSection(sb *strings.Builder, v VersionSummary) {
 		if a.testCount > 0 {
 			passRate = float64(a.passCount) / float64(a.testCount)
 		}
-		flags := partialSuffix(a.hasPartial)
-		sb.WriteString(fmt.Sprintf("| %s | %d | %s%s | %s |\n",
+		sb.WriteString(fmt.Sprintf("| %s | %d | %s | %s |\n",
 			harness, a.testCount,
-			formatPassRate(passRate), flags,
-			formatCost(a.totalCost, a.costWarning),
+			formatPassRate(passRate),
+			formatCost(a.totalCost, a.testCount, a.costWarning),
 		))
 	}
 	sb.WriteString("\n")

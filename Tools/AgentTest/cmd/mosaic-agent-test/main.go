@@ -347,6 +347,9 @@ func discoverSuites(root string) []string {
 			if path != root && strings.HasPrefix(d.Name(), ".") {
 				return filepath.SkipDir
 			}
+			if path != root && d.Name() == "testdata" {
+				return filepath.SkipDir
+			}
 			return nil
 		}
 		if strings.HasSuffix(d.Name(), ".suite.yaml") {

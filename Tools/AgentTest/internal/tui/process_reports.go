@@ -16,6 +16,7 @@ package tui
 
 import (
 	"fmt"
+	"os"
 	"strings"
 
 	tea "github.com/charmbracelet/bubbletea"
@@ -144,7 +145,11 @@ func (m Model) updateProcessSelect(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		case 0: // "Store Reports"
 			m.processReports.mode = "store"
 			var styles screens.Styles
-			m.processReports.storeInput = screens.NewStoreInputScreen("", m.width, styles)
+			cwd, err := os.Getwd()
+			if err != nil {
+				cwd = "."
+			}
+			m.processReports.storeInput = screens.NewStoreInputScreen(cwd, m.width, styles)
 			m.screen = ScreenStoreInput
 		case 1: // "Generate Summary"
 			m.processReports.mode = "summary"

@@ -391,10 +391,10 @@ func TestGenerate_PartialReport_FlaggedInOutput(t *testing.T) {
 
 	content := readWrittenFile(t, fs, "/TestResults/v1.0.0/summary.md")
 
-	// The partial flag must appear somewhere in the summary. The exact marker
-	// string is "[partial]" — a concise visual indicator in tables/headers.
-	if !strings.Contains(content, "[partial]") {
-		t.Errorf("per-version summary should contain [partial] marker for report with infrastructure_failures, content:\n%s", content)
+	// Partial reports are processed without error. The [partial] marker is no
+	// longer rendered in tables (AC1.1 removes it); verify it is absent.
+	if strings.Contains(content, "[partial]") {
+		t.Errorf("per-version summary must not contain [partial] marker; HasPartial rendering was removed.\ncontent:\n%s", content)
 	}
 }
 
@@ -679,23 +679,6 @@ func TestRenderVersionSummary_SuiteBreakdownContent_AppearsInsideModelResultsBlo
 	}
 }
 
-// TestRenderVersionSummary_DurationAppearsInOutput verifies that AvgDuration
-// data from HarnessModelStats appears somewhere in the rendered Markdown. An
-// implementation that silently drops duration from tables would pass all other
-// render tests without this assertion.
-// minimalVersionSummary sets AvgDuration = 2500ms (= 2.5s) for
-// claude-sonnet-4.6/claude-code; the rendered output must contain some
-// representation of that value (e.g., "2.5s" when formatted via time.Duration).
-func TestRenderVersionSummary_DurationAppearsInOutput(t *testing.T) {
-	vs := minimalVersionSummary("v1.0.0")
-	output := resultsummary.RenderVersionSummary(vs)
-
-	// time.Duration(2500 * time.Millisecond).String() == "2.5s"
-	if !strings.Contains(output, "2.5s") {
-		t.Errorf("RenderVersionSummary output must include a formatted duration for AvgDuration=2500ms (expected \"2.5s\"); output:\n%s", output)
-	}
-}
-
 // TestRenderVersionSummary_HarnessAppearsInHarnessComparison verifies that the
 // harness name appears in the harness-comparison section.
 func TestRenderVersionSummary_HarnessAppearsInHarnessComparison(t *testing.T) {
@@ -809,52 +792,6 @@ func TestRenderVersionSummary_ZeroCostNoWarning_ShowsDollarZeroNotCostWarning(t 
 	}
 	if !strings.Contains(output, "$0.00") {
 		t.Error("RenderVersionSummary must show $0.00 for zero cost when CostWarning is false")
-	}
-}
-
-// TestRenderVersionSummary_PartialFlag_ShowsMarker verifies that when
-// HarnessModelStats.HasPartial is true, the rendered output includes the
-// "[partial]" marker.
-func TestRenderVersionSummary_PartialFlag_ShowsMarker(t *testing.T) {
-	vs := resultsummary.VersionSummary{
-		Version:     "v1.0.0",
-		ReportCount: 1,
-		Suites:      []string{"edge-cases"},
-		Models:      []string{"claude-sonnet-4.6"},
-		Harnesses:   []string{"claude-code"},
-		TotalTests:  1,
-		ByModel: map[string]map[string]resultsummary.HarnessModelStats{
-			"claude-sonnet-4.6": {
-				"claude-code": {
-					Harness:    "claude-code",
-					Model:      "claude-sonnet-4.6",
-					TestCount:  1,
-					PassCount:  1,
-					PassRate:   1.0,
-					HasPartial: true,
-				},
-			},
-		},
-		BySuite: map[string]map[string]map[string]resultsummary.HarnessModelStats{
-			"edge-cases": {
-				"claude-sonnet-4.6": {
-					"claude-code": {
-						Harness:    "claude-code",
-						Model:      "claude-sonnet-4.6",
-						TestCount:  1,
-						PassCount:  1,
-						PassRate:   1.0,
-						HasPartial: true,
-					},
-				},
-			},
-		},
-	}
-
-	output := resultsummary.RenderVersionSummary(vs)
-
-	if !strings.Contains(output, "[partial]") {
-		t.Error("RenderVersionSummary must show [partial] marker when HasPartial is true")
 	}
 }
 

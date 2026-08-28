@@ -129,41 +129,30 @@ func (m Model) viewModelSelect() string {
 // Suite selection
 // ---------------------------------------------------------------------------
 
-// suiteSelectHelp is EntryScreenHelp with the detail-pane scroll entry
-// prepended, so all affordances on this screen are discoverable via the
-// help bar.
+// suiteSelectHelp returns help entries for the suite-select screen, combining
+// the multiselect key hints (up/down/space/enter/esc/ctrl+c) with the
+// detail-pane scroll affordance.
 func suiteSelectHelp() []tuicommon.HelpEntry {
 	scrollEntry := tuicommon.HelpEntry{
 		Key:  "pgup/pgdn",
 		Desc: "scroll detail",
 	}
-	return append([]tuicommon.HelpEntry{scrollEntry}, tuicommon.EntryScreenHelp()...)
+	return append([]tuicommon.HelpEntry{scrollEntry}, tuicommon.MultiSelectHelp()...)
 }
 
 func (m Model) viewSuiteSelect() string {
-	width := m.contentWidth()
-
-	var b strings.Builder
-	if len(m.opts.Suites) == 0 {
-		b.WriteString(tuicommon.Truncate("no suites discovered", width))
-	}
-	for i, s := range m.opts.Suites {
-		prefix := "  "
-		if i == m.suiteCursor {
-			prefix = "> "
-		}
-		if i > 0 {
-			b.WriteString("\n")
-		}
-		b.WriteString(tuicommon.Truncate(prefix+s, width))
+	var body string
+	if m.suiteMultiSelect != nil {
+		body = m.suiteMultiSelect.View()
+	} else if len(m.opts.Suites) == 0 {
+		body = tuicommon.Truncate("no suites discovered", m.contentWidth())
 	}
 
-	body := b.String()
 	if m.showFailureDetail && m.detailPane != nil {
 		body = body + "\n" + m.detailPane.View()
 	}
 
-	return m.renderScreen("Select a Suite", "", body, suiteSelectHelp())
+	return m.renderScreen("Select Suite(s)", "", body, suiteSelectHelp())
 }
 
 // ---------------------------------------------------------------------------

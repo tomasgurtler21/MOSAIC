@@ -319,8 +319,19 @@ type Model struct {
 	selectedStubModel    string
 
 	// Suite-select screen state.
-	suiteCursor int
-	running     bool
+	suiteCursor     int
+	running         bool
+	suiteMultiSelect *widgets.MultiSelect
+
+	// selectedSuites is the ordered list of suite paths confirmed by the
+	// multiselect widget when the user presses Enter on the suite-select screen.
+	// For a single-press-Enter selection (no Space toggles), it holds one entry.
+	selectedSuites []string
+
+	// selectedSuiteIdx is the zero-based index into selectedSuites of the
+	// suite currently running (or the last one that finished). It advances
+	// after each suite completes so the next suite in the queue can start.
+	selectedSuiteIdx int
 
 	// resolvedSuiteDefaults holds the declared defaults from the currently
 	// selected suite file, resolved lazily on construction and on each
@@ -463,7 +474,22 @@ func NewModel(o Options) Model {
 	}
 	paneH, paneW := m.paneGeometry()
 	m.detailPane = widgets.NewDetailPane(paneH, paneW, widgets.DefaultDetailPaneStyles())
+	m.suiteMultiSelect = buildSuiteMultiSelect(o)
 	return m
+}
+
+// buildSuiteMultiSelect constructs the multiselect widget for the suite-select
+// screen from the given options. Items use the suite path as both ID and label.
+func buildSuiteMultiSelect(o Options) *widgets.MultiSelect {
+	items := make([]widgets.ListItem, len(o.Suites))
+	for i, s := range o.Suites {
+		items[i] = widgets.ListItem{ID: s, Label: s}
+	}
+	h := tuicommon.ContentHeight(tuicommon.DefaultHeight, false)
+	if h <= 0 {
+		h = 10
+	}
+	return widgets.NewMultiSelect(items, h, tuicommon.DefaultWidth, widgets.DefaultMultiSelectStyles())
 }
 
 // paneGeometry returns the height and width for the failure-detail pane,
@@ -537,6 +563,13 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		paneH, paneW := m.paneGeometry()
 		m.detailPane.Resize(paneH, paneW)
 		m.resizeActiveSettingScreen(msg.Width)
+		if m.suiteMultiSelect != nil {
+			h := tuicommon.ContentHeight(msg.Height, false)
+			if h <= 0 {
+				h = 10
+			}
+			m.suiteMultiSelect.Resize(h, msg.Width)
+		}
 		return m, nil
 
 	case tea.KeyMsg:
@@ -547,7 +580,7 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		return m, nil
 
 	case SuiteFinishedMsg:
-		return m.handleSuiteFinished(msg), nil
+		return m.handleSuiteFinished(msg)
 
 	case StoreFinishedMsg:
 		return m.handleStoreFinished(msg), nil
@@ -775,46 +808,51 @@ func (m Model) updateModelSelect(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	return m, nil
 }
 
-// updateSuiteSelect handles suite-cursor movement and explicit suite
-// confirmation. Pressing Enter confirms the current suite, resolves suite-scoped
-// defaults, and transitions to the first settings screen (ScreenRetention) so
-// the user can configure per-run settings before the suite starts. Tab no
-// longer navigates to settings; Enter is the only transition into the
-// sequential settings flow.
+// updateSuiteSelect handles suite selection using the multiselect widget.
+// Space toggles the suite under the cursor; Enter confirms the selection and
+// transitions to the first settings screen (ScreenRetention). When Enter is
+// pressed without any suite toggled, the suite under the cursor is treated as
+// the selection, preserving the single-press-Enter behavior.
 func (m Model) updateSuiteSelect(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
+	// Handle PgDown/PgUp for the failure-detail pane before the widget sees them.
 	switch {
-	case tuicommon.MatchesKey(msg, tuicommon.GlobalKeys.Down):
-		if m.suiteCursor < len(m.opts.Suites)-1 {
-			m.suiteCursor++
-		}
-		return m, nil
-
-	case tuicommon.MatchesKey(msg, tuicommon.GlobalKeys.Up):
-		if m.suiteCursor > 0 {
-			m.suiteCursor--
-		}
-		return m, nil
-
 	case msg.Type == tea.KeyPgDown:
 		if m.showFailureDetail {
 			m.detailPane.ScrollDown()
 		}
 		return m, nil
-
 	case msg.Type == tea.KeyPgUp:
 		if m.showFailureDetail {
 			m.detailPane.ScrollUp()
 		}
 		return m, nil
+	}
 
-	case tuicommon.MatchesKey(msg, tuicommon.GlobalKeys.Select):
-		if len(m.opts.Suites) == 0 || m.suiteCursor >= len(m.opts.Suites) {
+	if m.suiteMultiSelect == nil {
+		return m, nil
+	}
+	m.suiteMultiSelect.Update(msg)
+	// Keep suiteCursor in sync with the widget cursor so SettingsEntries()
+	// and resolveForSuite() see the current cursor position while navigating.
+	m.suiteCursor = m.suiteMultiSelect.CursorIndex()
+
+	if m.suiteMultiSelect.Done() {
+		m.suiteMultiSelect.Reset()
+		selectedIDs := m.suiteMultiSelect.SelectedIDs()
+		// When no suite was toggled, fall back to the cursor item so that a
+		// single Enter press (without Space) still confirms the current suite.
+		if len(selectedIDs) == 0 && m.suiteCursor < len(m.opts.Suites) {
+			selectedIDs = []string{m.opts.Suites[m.suiteCursor]}
+		}
+		if len(selectedIDs) == 0 {
 			return m, nil
 		}
-		// Resolve suite-scoped defaults only after explicit suite confirmation.
+		m.selectedSuites = selectedIDs
+
+		// Resolve suite-scoped defaults from the first selected suite.
 		// A nil resolver is silently skipped; an error keeps the user on
 		// ScreenSuiteSelect so they can choose a different suite.
-		suitePath := m.opts.Suites[m.suiteCursor]
+		suitePath := selectedIDs[0]
 		if m.opts.ResolveSuiteDefaults != nil {
 			defaults, err := m.opts.ResolveSuiteDefaults(suitePath)
 			if err != nil {
@@ -824,11 +862,10 @@ func (m Model) updateSuiteSelect(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 			}
 			m.resolvedSuiteDefaults = defaults
 		}
-		// Recompute the report path from the selected suite name when the
+		// Recompute the report path from the first selected suite when the
 		// composition root has supplied a path function and the user has not
-		// manually edited the path (i.e. it still matches the initial Options
-		// value). This must happen before initSettingScreens so the settings
-		// flow displays the real output location during configuration.
+		// manually edited the path. This must happen before initSettingScreens
+		// so the settings flow displays the real output location.
 		if m.opts.ReportPathFor != nil && m.reportPath == m.opts.ReportPath {
 			m.reportPath = m.opts.ReportPathFor(suitePath)
 		}
@@ -836,6 +873,12 @@ func (m Model) updateSuiteSelect(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		m.screen = ScreenRetention
 		return m, nil
 	}
+
+	if m.suiteMultiSelect.Back() {
+		m.suiteMultiSelect.Reset()
+		// Esc from suite-select: no parent screen to return to; stay here.
+	}
+
 	return m, nil
 }
 
@@ -857,22 +900,28 @@ func (m Model) initSettingScreens() Model {
 	}
 	m.retentionScr = screens.NewRetentionScreen(retentionInitial, width, styles)
 
-	// RepetitionsScreen: initialize from user override only. Suite defaults
-	// are shown in SettingsEntries() for display purposes but must NOT be
-	// committed as user overrides when the user presses Enter without typing.
-	// Zero means "no override" — pressing Enter without typing keeps m.repetitions nil.
+	// RepetitionsScreen: when the user has set an explicit override, start from
+	// that value. When no override is set, display the resolved suite default so
+	// the user sees the effective value before making any changes. Pressing Enter
+	// without typing is detected via WasEdited() in updateRepetitionsScreen and
+	// leaves m.repetitions nil (no override committed).
 	repsInitial := 0
 	if m.repetitions != nil {
 		repsInitial = *m.repetitions
+	} else if m.resolvedSuiteDefaults.Repetitions != nil {
+		repsInitial = *m.resolvedSuiteDefaults.Repetitions
 	}
 	m.repetitionsScr = screens.NewRepetitionsScreen(repsInitial, width, styles)
 
 	m.reportPathScr = screens.NewReportPathScreen(m.reportPath, width, styles)
 	m.catalogFolderScr = screens.NewCatalogFolderScreen(m.catalogFolder, width, styles)
 
-	// MaxConcurrentRunsScreen: user override or 0 meaning "let the suite
-	// apply its own default".
-	maxInitial := 0
+	// MaxConcurrentRunsScreen: when the user has set an explicit override, start
+	// from that value. Otherwise display the documented conservative default so
+	// the user sees what bound will apply before making any changes. Pressing
+	// Enter without typing is detected via WasEdited() in
+	// updateMaxConcurrentRunsScreen and leaves m.maxConcurrentRuns nil.
+	maxInitial := suite.DefaultMaxConcurrentRuns
 	if m.maxConcurrentRuns != nil {
 		maxInitial = *m.maxConcurrentRuns
 	}
@@ -916,11 +965,16 @@ func (m Model) updateRepetitionsScreen(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	}
 	cmd := m.repetitionsScr.Update(msg)
 	if m.repetitionsScr.Done() {
-		v := m.repetitionsScr.Value()
-		if v > 0 {
-			m.repetitions = &v
-		} else {
-			m.repetitions = nil
+		// Only commit a new override when the user actually typed something.
+		// Pressing Enter without typing preserves the existing m.repetitions
+		// value (nil when no override is set) so the suite applies its own default.
+		if m.repetitionsScr.WasEdited() {
+			v := m.repetitionsScr.Value()
+			if v > 0 {
+				m.repetitions = &v
+			} else {
+				m.repetitions = nil
+			}
 		}
 		m.repetitionsScr.Reset()
 		m.screen = ScreenReportPath
@@ -973,13 +1027,18 @@ func (m Model) updateMaxConcurrentRunsScreen(msg tea.KeyMsg) (tea.Model, tea.Cmd
 	}
 	cmd := m.maxConcurrentRunsScr.Update(msg)
 	if m.maxConcurrentRunsScr.Done() {
-		v := m.maxConcurrentRunsScr.Value()
-		if v > 0 {
-			m.maxConcurrentRuns = &v
-		} else {
-			m.maxConcurrentRuns = nil
+		// Only commit a new override when the user actually typed something.
+		// Pressing Enter without typing preserves the existing m.maxConcurrentRuns
+		// value (nil when no override is set) so the suite applies its own default.
+		if m.maxConcurrentRunsScr.WasEdited() {
+			v := m.maxConcurrentRunsScr.Value()
+			if v > 0 {
+				m.maxConcurrentRuns = &v
+			} else {
+				m.maxConcurrentRuns = nil
+			}
 		}
-		return m.startSelectedSuite()
+		return m.startSelectedSuites()
 	} else if m.maxConcurrentRunsScr.Back() {
 		m.maxConcurrentRunsScr.Reset()
 		m.screen = ScreenCatalogFolder
@@ -1050,18 +1109,35 @@ func (m Model) SettingsEntries() []SettingsEntry {
 	}
 }
 
-// startSelectedSuite pre-flights the cursor's suite and, when it validates,
-// moves to the progress screen and starts the suite in the background. The
-// suite runs through a context this Model owns, so a later quit can cancel
-// it (AC16.7).
-func (m Model) startSelectedSuite() (tea.Model, tea.Cmd) {
-	if len(m.opts.Suites) == 0 || m.suiteCursor >= len(m.opts.Suites) {
+// startSelectedSuites begins executing the suites confirmed by the multiselect
+// widget. It initialises the suite index and delegates to startSuiteAt for the
+// first suite. When selectedSuites is empty (which should not occur in normal
+// operation), it falls back to the cursor item as a safety measure.
+func (m Model) startSelectedSuites() (tea.Model, tea.Cmd) {
+	if len(m.selectedSuites) == 0 {
+		if len(m.opts.Suites) == 0 || m.suiteCursor >= len(m.opts.Suites) {
+			m.statusMsg = "no suite available to select"
+			m.statusError = true
+			return m, nil
+		}
+		m.selectedSuites = []string{m.opts.Suites[m.suiteCursor]}
+	}
+	m.selectedSuiteIdx = 0
+	return m.startSuiteAt(0)
+}
+
+// startSuiteAt pre-flights the suite at selectedSuites[idx] and, when it
+// validates, moves to the progress screen and starts the suite in the
+// background. The suite runs through a context this Model owns, so a later
+// quit can cancel it.
+func (m Model) startSuiteAt(idx int) (tea.Model, tea.Cmd) {
+	if idx >= len(m.selectedSuites) {
 		m.statusMsg = "no suite available to select"
 		m.statusError = true
 		return m, nil
 	}
 
-	suitePath := m.opts.Suites[m.suiteCursor]
+	suitePath := m.selectedSuites[idx]
 
 	// Resolve the max-concurrent-runs bound from the model. A nil override
 	// means the suite should apply its documented default; zero carries that
@@ -1185,16 +1261,15 @@ func (m Model) startSelectedSuite() (tea.Model, tea.Cmd) {
 }
 
 // handleSuiteFinished carries the suite's terminal report.Result into the
-// Model once Suite.Run returns, and moves to the results screen. This is
-// where the richer per-test detail (assertions, reasons, conditions) the
-// detail screen needs arrives; the live folded state Fold produces from the
-// event stream is what the progress screen showed while the suite ran.
+// Model once Suite.Run returns. For the last (or only) suite in the queue it
+// moves to the results screen. For all earlier suites it starts the next
+// suite in the queue, staying on the progress screen.
 //
 // When a report path is in force and the run succeeded, the JSON report is
 // written through opts.WriteFile. A write failure is surfaced via statusMsg
 // so the user can see why the report file is missing; it never masks the
-// run's own result.
-func (m Model) handleSuiteFinished(msg SuiteFinishedMsg) Model {
+// run's own result. A write failure also stops subsequent suites.
+func (m Model) handleSuiteFinished(msg SuiteFinishedMsg) (tea.Model, tea.Cmd) {
 	m.running = false
 	m.resultErr = msg.Err
 	if msg.Err == nil {
@@ -1210,19 +1285,36 @@ func (m Model) handleSuiteFinished(msg SuiteFinishedMsg) Model {
 				m.statusError = true
 				m.screen = ScreenResults
 				m.resultsCursor = 0
-				return m
+				return m, nil
 			}
 		}
-		// Success: clear any failure detail from a previous operation.
+		// If there are more suites in the queue, start the next one. Each
+		// suite runs with its own report path (computed fresh from ReportPathFor)
+		// and a clean progress state so the progress screen reflects only the
+		// current suite's activity.
+		if m.selectedSuiteIdx < len(m.selectedSuites)-1 {
+			m.selectedSuiteIdx++
+			nextSuite := m.selectedSuites[m.selectedSuiteIdx]
+			if m.opts.ReportPathFor != nil {
+				m.reportPath = m.opts.ReportPathFor(nextSuite)
+			}
+			// Reset per-suite progress state for the incoming suite.
+			m.progress = runprogress.Model{}
+			m.finished = nil
+			m.result = nil
+			return m.startSuiteAt(m.selectedSuiteIdx)
+		}
+		// Last (or only) suite completed successfully.
 		m = m.clearFailureDetail()
 	} else {
+		// An error in any suite stops the queue; subsequent suites do not start.
 		m = m.withFailureDetail("Suite run failed", authoring.RenderReport(authoring.RunFailureReport("", msg.Err)))
 		m.statusMsg = msg.Err.Error()
 		m.statusError = true
 	}
 	m.screen = ScreenResults
 	m.resultsCursor = 0
-	return m
+	return m, nil
 }
 
 // writeReportFile renders result to JSON and writes the bytes through
