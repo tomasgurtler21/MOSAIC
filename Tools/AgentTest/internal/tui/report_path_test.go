@@ -314,13 +314,25 @@ func TestSettings_EditedReportPath_ReachesRun(t *testing.T) {
 
 	// Complete the remaining settings screens to start the suite.
 	m, _ = safeUpdate(t, m, keyMsg("\r")) // → ScreenMaxConcurrentRuns
-	m, cmd := safeUpdate(t, m, keyMsg("\r")) // → ScreenProgress + Cmd
-	_ = m
-	msg := runCmd(t, cmd)
-	if msg == nil {
+	m, cmd := safeUpdate(t, m, keyMsg("\r"))
+	// Drive through the pre-flight notice screen if the implementation introduces
+	// it before ScreenProgress (queue-wide pre-flight sequence).
+	if m.Screen() == ScreenPreflightNotice && cmd != nil {
+		msg := runCmd(t, cmd)
+		m, cmd = safeUpdate(t, m, msg)
+	}
+	if m.Screen() != ScreenProgress {
+		t.Fatalf("Screen() = %q, want %q after settings", m.Screen(), ScreenProgress)
+	}
+	if cmd == nil {
 		t.Fatalf("no tea.Cmd returned when starting the suite")
 	}
-	safeUpdate(t, m, msg)
+	msg := runCmd(t, cmd)
+	if msg == nil {
+		t.Fatalf("no message returned from suite-start Cmd")
+	}
+	m, _ = safeUpdate(t, m, msg)
+	_ = m
 
 	if n := capture.callCount(); n != 1 {
 		t.Fatalf("WriteFile called %d times, want 1", n)

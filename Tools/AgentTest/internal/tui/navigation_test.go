@@ -86,6 +86,22 @@ func TestNavigation_KeySequences(t *testing.T) {
 			wantScreen:  ScreenResults,
 		},
 		{
+			name:        "esc from the results screen moves to mode-select",
+			runToResult: true,
+			steps:       []tea.KeyMsg{keyType(tea.KeyEsc)},
+			wantScreen:  ScreenModeSelect,
+		},
+		{
+			name:        "esc from detail then esc from results reaches mode-select",
+			runToResult: true,
+			steps: []tea.KeyMsg{
+				keyType(tea.KeyDown), keyType(tea.KeyEnter), // drill into detail
+				keyType(tea.KeyEsc),                         // back to results
+				keyType(tea.KeyEsc),                         // back to mode-select
+			},
+			wantScreen: ScreenModeSelect,
+		},
+		{
 			name:       "ctrl+c from mode select quits",
 			steps:      []tea.KeyMsg{keyType(tea.KeyCtrlC)},
 			wantScreen: ScreenModeSelect,

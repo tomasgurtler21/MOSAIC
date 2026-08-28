@@ -530,6 +530,12 @@ func TestSettings_ChangedRepetitions_ReachesPreflightOverrides(t *testing.T) {
 	}
 	var cmd tea.Cmd
 	m, cmd = safeUpdate(t, m, keyMsg("\r"))
+	// Drive through the pre-flight notice screen if the implementation introduces
+	// it before ScreenProgress (queue-wide pre-flight sequence).
+	if m.Screen() == ScreenPreflightNotice && cmd != nil {
+		msg := runCmd(t, cmd)
+		m, cmd = safeUpdate(t, m, msg)
+	}
 	if m.Screen() != ScreenProgress {
 		t.Fatalf("Screen() = %q, want %q after final Enter", m.Screen(), ScreenProgress)
 	}

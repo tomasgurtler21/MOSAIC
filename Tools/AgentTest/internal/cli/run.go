@@ -586,15 +586,16 @@ func renderResult(w io.Writer, format string, result report.Result) error {
 }
 
 // exitCodeForResult classifies a finished run's result into the exit-code
-// contract. An infrastructure fault always reads as ExitFailure — a
-// statement about the tool, never about the subject — even when the same
-// result also carries a FAIL verdict.
+// contract. Classification is delegated to the shared session model so the
+// decision lives in one place and both frontends derive consistent outcomes.
 func exitCodeForResult(result report.Result) int {
-	if result.InfrastructureFailures > 0 {
+	session := report.NewSession([]report.Result{result}, nil, false)
+	switch session.Outcome {
+	case report.SessionInfrastructureFailure:
 		return ExitFailure
-	}
-	if result.Counts[domain.VerdictFail] > 0 {
+	case report.SessionTestsFailed:
 		return ExitTestsFailed
+	default:
+		return ExitSuccess
 	}
-	return ExitSuccess
 }

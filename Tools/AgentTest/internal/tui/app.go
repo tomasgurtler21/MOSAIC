@@ -13,6 +13,7 @@ import (
 	"bytes"
 	"context"
 	"fmt"
+	"strings"
 
 	tea "github.com/charmbracelet/bubbletea"
 
@@ -252,6 +253,12 @@ const (
 	ScreenReportPath        Screen = "report_path"
 	ScreenCatalogFolder     Screen = "catalog_folder"
 	ScreenMaxConcurrentRuns Screen = "max_concurrent_runs"
+
+	// ScreenPreflightNotice is shown while all selected suites are being
+	// pre-flighted. It accepts no navigation keys beyond the shared cancel
+	// binding. The screen's text tells the user that pre-flight is in progress
+	// for all selected suites.
+	ScreenPreflightNotice Screen = "preflight_notice"
 )
 
 // modelSelectPhase tracks which phase of the model-selection screen is active.
@@ -271,6 +278,34 @@ type ProgressMsg struct{ Event domain.ProgressEvent }
 type SuiteFinishedMsg struct {
 	Result report.Result
 	Err    error
+}
+
+// preflightQueueMsg triggers the synchronous pre-flight of every selected
+// suite. It is produced by the command returned when the screen switches
+// to ScreenPreflightNotice, ensuring the framework renders the notice
+// frame before this message arrives and pre-flight begins.
+type preflightQueueMsg struct{}
+
+// preflightQueueDoneMsg carries the outcome of the queue-wide pre-flight.
+// On success, Plans holds the resolved plan for each selected suite in
+// selection order. On failure, Failures holds every diagnostic from every
+// failing suite, and Warnings holds warnings from suites that did not fail.
+type preflightQueueDoneMsg struct {
+	Plans    []preflight.Plan
+	Failures []suitePreflightFailure
+	Warnings []suitePreflightWarning
+}
+
+// suitePreflightFailure pairs a suite path with the diagnostics it produced.
+type suitePreflightFailure struct {
+	SuitePath   string
+	Diagnostics string
+}
+
+// suitePreflightWarning pairs a suite path with the warning diagnostics it produced.
+type suitePreflightWarning struct {
+	SuitePath   string
+	Diagnostics string
 }
 
 // Model is the TUI's state, folded from the progress-event stream and
@@ -332,6 +367,23 @@ type Model struct {
 	// suite currently running (or the last one that finished). It advances
 	// after each suite completes so the next suite in the queue can start.
 	selectedSuiteIdx int
+
+	// preflightedPlans holds the resolved plan for each selected suite,
+	// keyed by index into selectedSuites. Populated during queue-wide
+	// pre-flight (Stage 3), consumed by suite start so pre-flight is not
+	// repeated. Cleared on reset.
+	preflightedPlans []preflight.Plan
+
+	// queueRunsTotal is the sum of TotalRuns across all preflightedPlans,
+	// computed once during queue-wide pre-flight. Used by the progress screen
+	// to show the queue-level remaining count. Cleared on reset.
+	queueRunsTotal int
+
+	// completedSuiteRuns accumulates the total runs from suites that have
+	// finished, so queue-level remaining = queueRunsTotal - completedSuiteRuns
+	// - currentSuiteFold.Running - currentSuiteFold.Finished. Updated by
+	// handleSuiteFinished. Cleared on reset.
+	completedSuiteRuns int
 
 	// resolvedSuiteDefaults holds the declared defaults from the currently
 	// selected suite file, resolved lazily on construction and on each
@@ -400,6 +452,17 @@ type Model struct {
 	finished  []report.RunReport
 	result    *report.Result
 	resultErr error
+
+	// suiteResults holds each finished suite's Result in execution order.
+	// Populated by handleSuiteFinished; not cleared between suites (unlike
+	// the existing result field, which is reset before the next suite starts).
+	// The results and detail screens draw from this slice so every suite's
+	// tests remain visible after the queue drains.
+	suiteResults []report.Result
+
+	// session holds the session-level roll-up built from suiteResults when
+	// the queue reaches the results screen. Cleared on reset.
+	session *report.Session
 
 	// Results/detail screen state.
 	resultsCursor      int
@@ -587,6 +650,14 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 
 	case SummaryFinishedMsg:
 		return m.handleSummaryFinished(msg), nil
+
+	case preflightQueueMsg:
+		// Run synchronous pre-flight for every selected suite and process the
+		// combined outcome immediately (no second message hop needed since
+		// pre-flight is synchronous and this message already arrived in its
+		// own update frame, after the notice was rendered).
+		done := m.collectQueuePreflight()
+		return m.handlePreflightQueueDone(done)
 	}
 
 	return m, nil
@@ -651,6 +722,10 @@ func (m Model) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		return m.updateResults(msg)
 	case ScreenDetail:
 		return m.updateDetail(msg)
+	case ScreenPreflightNotice:
+		// The pre-flight notice accepts no navigation keys beyond the shared
+		// Cancel binding already handled above; the pre-flight work is in flight.
+		return m, nil
 	default:
 		// ScreenProgress accepts no navigation keys beyond the shared
 		// Cancel binding handled above; the suite is driving the screen.
@@ -839,9 +914,15 @@ func (m Model) updateSuiteSelect(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	if m.suiteMultiSelect.Done() {
 		m.suiteMultiSelect.Reset()
 		selectedIDs := m.suiteMultiSelect.SelectedIDs()
+		// Track whether we fell back to the cursor (no Space toggles were made).
+		// For cursor-fallback selections the derived report path is computed here
+		// so the settings flow can display it. For explicitly toggled (multi-suite)
+		// selections the path is resolved per-suite at suite start time instead,
+		// so that each suite's path reflects when that suite actually begins.
+		wasCursorFallback := len(selectedIDs) == 0
 		// When no suite was toggled, fall back to the cursor item so that a
 		// single Enter press (without Space) still confirms the current suite.
-		if len(selectedIDs) == 0 && m.suiteCursor < len(m.opts.Suites) {
+		if wasCursorFallback && m.suiteCursor < len(m.opts.Suites) {
 			selectedIDs = []string{m.opts.Suites[m.suiteCursor]}
 		}
 		if len(selectedIDs) == 0 {
@@ -864,9 +945,11 @@ func (m Model) updateSuiteSelect(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		}
 		// Recompute the report path from the first selected suite when the
 		// composition root has supplied a path function and the user has not
-		// manually edited the path. This must happen before initSettingScreens
-		// so the settings flow displays the real output location.
-		if m.opts.ReportPathFor != nil && m.reportPath == m.opts.ReportPath {
+		// manually edited the path. Only done for cursor-fallback (single Enter
+		// with no Space toggles) so the settings flow shows the suite-derived
+		// output location. For multi-suite Space selections the path is deferred
+		// to suite start time.
+		if wasCursorFallback && m.opts.ReportPathFor != nil && m.reportPath == m.opts.ReportPath {
 			m.reportPath = m.opts.ReportPathFor(suitePath)
 		}
 		m = m.initSettingScreens()
@@ -1109,10 +1192,10 @@ func (m Model) SettingsEntries() []SettingsEntry {
 	}
 }
 
-// startSelectedSuites begins executing the suites confirmed by the multiselect
-// widget. It initialises the suite index and delegates to startSuiteAt for the
-// first suite. When selectedSuites is empty (which should not occur in normal
-// operation), it falls back to the cursor item as a safety measure.
+// startSelectedSuites begins the run for the suites confirmed by the multiselect
+// widget. It switches to the pre-flight notice screen and returns a command that
+// produces preflightQueueMsg. The two-update split ensures the notice frame
+// renders before the synchronous pre-flight work blocks the UI thread.
 func (m Model) startSelectedSuites() (tea.Model, tea.Cmd) {
 	if len(m.selectedSuites) == 0 {
 		if len(m.opts.Suites) == 0 || m.suiteCursor >= len(m.opts.Suites) {
@@ -1123,13 +1206,148 @@ func (m Model) startSelectedSuites() (tea.Model, tea.Cmd) {
 		m.selectedSuites = []string{m.opts.Suites[m.suiteCursor]}
 	}
 	m.selectedSuiteIdx = 0
+	m.screen = ScreenPreflightNotice
+	return m, func() tea.Msg { return preflightQueueMsg{} }
+}
+
+// collectQueuePreflight runs the pre-flight function synchronously for every
+// selected suite and returns the combined outcome. It is called from the
+// preflightQueueMsg handler, which runs in its own update frame after the
+// pre-flight notice has been rendered.
+func (m Model) collectQueuePreflight() preflightQueueDoneMsg {
+	bound := 0
+	if v := m.MaxConcurrentRuns(); v != nil {
+		bound = *v
+	}
+
+	var activePreflight PreflightFunc
+	if m.opts.NewSuiteRunner != nil {
+		_, pf, err := m.opts.NewSuiteRunner(bound, m.selectedHarness)
+		if err != nil {
+			// Harness resolution failed: every selected suite fails.
+			failures := make([]suitePreflightFailure, len(m.selectedSuites))
+			for i, sp := range m.selectedSuites {
+				failures[i] = suitePreflightFailure{
+					SuitePath:   sp,
+					Diagnostics: err.Error(),
+				}
+			}
+			return preflightQueueDoneMsg{Failures: failures}
+		}
+		activePreflight = pf
+	} else {
+		activePreflight = m.opts.Preflight
+	}
+
+	plans := make([]preflight.Plan, len(m.selectedSuites))
+	var failures []suitePreflightFailure
+	var warnings []suitePreflightWarning
+
+	for i, suitePath := range m.selectedSuites {
+		if activePreflight == nil {
+			// No pre-flight configured; treat this suite as passing with a zero plan.
+			continue
+		}
+		var catOverride *string
+		if m.catalogFolder != m.opts.CatalogFolder {
+			v := m.catalogFolder
+			catOverride = &v
+		}
+		resolved, rpt := activePreflight(preflight.Input{
+			SuitePath:     suitePath,
+			HarnessID:     m.selectedHarness,
+			CatalogFolder: m.opts.CatalogFolder,
+			Overrides: preflight.Overrides{
+				SubjectModel:  m.selectedSubjectModel,
+				StubModel:     m.selectedStubModel,
+				Repetitions:   m.repetitions,
+				CatalogFolder: catOverride,
+			},
+		})
+		if rpt.HasErrors() {
+			failures = append(failures, suitePreflightFailure{
+				SuitePath:   suitePath,
+				Diagnostics: authoring.RenderReport(rpt),
+			})
+			continue
+		}
+		if len(rpt.Diagnostics) > 0 {
+			warnings = append(warnings, suitePreflightWarning{
+				SuitePath:   suitePath,
+				Diagnostics: authoring.RenderReport(rpt),
+			})
+		}
+		plans[i] = resolved
+	}
+
+	return preflightQueueDoneMsg{
+		Plans:    plans,
+		Failures: failures,
+		Warnings: warnings,
+	}
+}
+
+// handlePreflightQueueDone processes the combined pre-flight outcome for all
+// selected suites. On any failure no suite starts and the user is returned to
+// suite-select. On warnings only, the detail pane is populated and the queue
+// proceeds. On a clean pre-flight, the queue starts from the first suite.
+func (m Model) handlePreflightQueueDone(done preflightQueueDoneMsg) (tea.Model, tea.Cmd) {
+	if len(done.Failures) > 0 {
+		// Render all failures together with per-suite attribution in the body.
+		var b strings.Builder
+		for _, f := range done.Failures {
+			fmt.Fprintf(&b, "%s\n%s\n", f.SuitePath, f.Diagnostics)
+		}
+		m = m.withFailureDetail("Pre-flight failed", b.String())
+		m.statusMsg = fmt.Sprintf("pre-flight failed for %d suite(s)", len(done.Failures))
+		m.statusError = true
+		m.screen = ScreenSuiteSelect
+		return m, nil
+	}
+
+	// Store the resolved plans so each suite start consumes them without
+	// invoking pre-flight a second time.
+	m.preflightedPlans = done.Plans
+
+	// Compute the queue-level total run count from all retained plans so the
+	// progress screen can show queue-level remaining from the moment the first
+	// suite starts.
+	total := 0
+	for _, p := range done.Plans {
+		total += p.TotalRuns()
+	}
+	m.queueRunsTotal = total
+
+	if len(done.Warnings) > 0 {
+		// Render all warnings with per-suite attribution. The queue proceeds.
+		var b strings.Builder
+		for _, w := range done.Warnings {
+			fmt.Fprintf(&b, "%s\n%s\n", w.SuitePath, w.Diagnostics)
+		}
+		m = m.withFailureDetail("Pre-flight warnings", b.String())
+		m.statusMsg = fmt.Sprintf("%d suite(s) produced pre-flight warnings", len(done.Warnings))
+		m.statusError = false
+	} else {
+		m = m.clearFailureDetail()
+		// Clear any status message left from a prior run so the progress screen
+		// starts clean.
+		m.statusMsg = ""
+		m.statusError = false
+	}
+
+	// All selected suites passed (or warned); start the first suite.
 	return m.startSuiteAt(0)
 }
 
-// startSuiteAt pre-flights the suite at selectedSuites[idx] and, when it
-// validates, moves to the progress screen and starts the suite in the
-// background. The suite runs through a context this Model owns, so a later
-// quit can cancel it.
+// startSuiteAt moves to the progress screen and starts the suite at
+// selectedSuites[idx] in the background. When preflightedPlans has been
+// populated by queue-wide pre-flight, the resolved plan for this suite is
+// consumed directly without invoking pre-flight again. When it has not been
+// populated (legacy test path), pre-flight is called here as before.
+//
+// The report file path is resolved at this point — not earlier — so that the
+// timestamp embedded in the filename reflects when this suite actually starts
+// rather than when the settings flow completed or pre-flight ran.
 func (m Model) startSuiteAt(idx int) (tea.Model, tea.Cmd) {
 	if idx >= len(m.selectedSuites) {
 		m.statusMsg = "no suite available to select"
@@ -1170,7 +1388,12 @@ func (m Model) startSuiteAt(idx int) (tea.Model, tea.Cmd) {
 	}
 
 	var plan preflight.Plan
-	if activePreflight != nil {
+	if idx < len(m.preflightedPlans) {
+		// Queue-wide pre-flight already resolved this plan; consume it directly
+		// so pre-flight is not invoked a second time for the same suite.
+		plan = m.preflightedPlans[idx]
+	} else if activePreflight != nil {
+		// Legacy path: per-suite pre-flight when queue pre-flight was not used.
 		// Build the catalog-folder override: only set it when the user
 		// changed the value from the initial Options.CatalogFolder default,
 		// so a nil pointer means "use the process-wide default".
@@ -1196,9 +1419,7 @@ func (m Model) startSuiteAt(idx int) (tea.Model, tea.Cmd) {
 			m.statusMsg = "pre-flight failed for " + suitePath
 			m.statusError = true
 			// Return the user to suite-select so they can choose a different
-			// suite or retry after fixing the problem. This matches the original
-			// behavior where the suite never left suite-select before the
-			// settings flow was introduced.
+			// suite or retry after fixing the problem.
 			m.screen = ScreenSuiteSelect
 			return m, nil
 		}
@@ -1209,10 +1430,15 @@ func (m Model) startSuiteAt(idx int) (tea.Model, tea.Cmd) {
 			m.statusError = false
 		} else {
 			m = m.clearFailureDetail()
+			m.statusMsg = ""
+			m.statusError = false
 		}
 		plan = resolved
 	} else {
 		m = m.clearFailureDetail()
+		// Clear any status message from a prior run so ScreenProgress starts clean.
+		m.statusMsg = ""
+		m.statusError = false
 	}
 
 	base := m.ctx
@@ -1224,8 +1450,6 @@ func (m Model) startSuiteAt(idx int) (tea.Model, tea.Cmd) {
 	m.cancel = cancel
 	m.running = true
 	m.screen = ScreenProgress
-	m.statusMsg = ""
-	m.statusError = false
 	sink := m.sinkBox.get()
 	// The live toggle value, not Options.Retention: this is what makes the
 	// suite-select screen's affordance actually reach the run it starts,
@@ -1260,6 +1484,22 @@ func (m Model) startSuiteAt(idx int) (tea.Model, tea.Cmd) {
 	}
 }
 
+// buildSessionPtr constructs the session roll-up from the suites that
+// executed and the queue's completion state. aborted is true when the queue
+// stopped before all selected suites ran. The unrun suite names are derived
+// from the selected suites beyond the current index.
+func (m Model) buildSessionPtr(aborted bool) *report.Session {
+	var unrun []string
+	if aborted {
+		nextIdx := m.selectedSuiteIdx + 1
+		if nextIdx < len(m.selectedSuites) {
+			unrun = m.selectedSuites[nextIdx:]
+		}
+	}
+	sess := report.NewSession(m.suiteResults, unrun, aborted)
+	return &sess
+}
+
 // handleSuiteFinished carries the suite's terminal report.Result into the
 // Model once Suite.Run returns. For the last (or only) suite in the queue it
 // moves to the results screen. For all earlier suites it starts the next
@@ -1275,6 +1515,17 @@ func (m Model) handleSuiteFinished(msg SuiteFinishedMsg) (tea.Model, tea.Cmd) {
 	if msg.Err == nil {
 		r := msg.Result
 		m.result = &r
+		// Retain this suite's result in execution order so the results screen
+		// can list tests from every suite that ran, not only the last one.
+		m.suiteResults = append(m.suiteResults, r)
+		// Resolve the report file path for the current suite at finish time so
+		// the timestamp in the filename reflects the actual suite run. For
+		// cursor-fallback single-suite selections the path was already resolved
+		// in updateSuiteSelect for settings display purposes; ReportPathFor is
+		// still called here so the write uses the run-start-aligned timestamp.
+		if m.opts.ReportPathFor != nil && m.selectedSuiteIdx < len(m.selectedSuites) {
+			m.reportPath = m.opts.ReportPathFor(m.selectedSuites[m.selectedSuiteIdx])
+		}
 		// Write the JSON report file if a path is configured.
 		if m.reportPath != "" {
 			if err := m.writeReportFile(msg.Result); err != nil {
@@ -1283,21 +1534,20 @@ func (m Model) handleSuiteFinished(msg SuiteFinishedMsg) (tea.Model, tea.Cmd) {
 				m = m.withFailureDetail("Cannot write report to "+m.reportPath, writeBody)
 				m.statusMsg = writeErrText
 				m.statusError = true
+				m.session = m.buildSessionPtr(true)
 				m.screen = ScreenResults
 				m.resultsCursor = 0
 				return m, nil
 			}
 		}
-		// If there are more suites in the queue, start the next one. Each
-		// suite runs with its own report path (computed fresh from ReportPathFor)
-		// and a clean progress state so the progress screen reflects only the
-		// current suite's activity.
+		// If there are more suites in the queue, start the next one.
 		if m.selectedSuiteIdx < len(m.selectedSuites)-1 {
-			m.selectedSuiteIdx++
-			nextSuite := m.selectedSuites[m.selectedSuiteIdx]
-			if m.opts.ReportPathFor != nil {
-				m.reportPath = m.opts.ReportPathFor(nextSuite)
+			// Accumulate this suite's completed runs so queue-level remaining
+			// does not restart at the suite boundary.
+			if m.selectedSuiteIdx < len(m.preflightedPlans) {
+				m.completedSuiteRuns += m.preflightedPlans[m.selectedSuiteIdx].TotalRuns()
 			}
+			m.selectedSuiteIdx++
 			// Reset per-suite progress state for the incoming suite.
 			m.progress = runprogress.Model{}
 			m.finished = nil
@@ -1312,6 +1562,7 @@ func (m Model) handleSuiteFinished(msg SuiteFinishedMsg) (tea.Model, tea.Cmd) {
 		m.statusMsg = msg.Err.Error()
 		m.statusError = true
 	}
+	m.session = m.buildSessionPtr(msg.Err != nil)
 	m.screen = ScreenResults
 	m.resultsCursor = 0
 	return m, nil
@@ -1330,15 +1581,24 @@ func (m Model) writeReportFile(result report.Result) error {
 	return m.opts.WriteFile(m.reportPath, buf.Bytes())
 }
 
-// resultTests returns the tests the results and detail screens list. The
-// terminal report.Result (once the suite has finished with no error) is
-// preferred: it carries the per-run assertions, reasons and conditions the
-// detail screen needs. Before that arrives — or when it carries no tests,
-// as a caller supplying only a scripted event stream and no explicit result
-// does — the folded progress stream (Fold's Finished()) is grouped into the
-// same shape, one synthesized TestReport per finished run, so navigation
-// still works from live-folded state alone.
+// resultTests returns the tests the results and detail screens list. When any
+// suite has completed, tests from every retained suite result are returned in
+// execution order so the results screen lists every suite that ran. This is
+// the flat list that the cursor and detail-screen resolution address: group
+// headings in the view are derived from suiteResults but do not occupy cursor
+// positions.
+//
+// The fallback (no completed suites yet) returns the single in-progress result
+// when it has tests, or synthesises one TestReport per finished run from the
+// folded progress stream so navigation still works from live-folded state alone.
 func (m Model) resultTests() []report.TestReport {
+	if len(m.suiteResults) > 0 {
+		var tests []report.TestReport
+		for i := range m.suiteResults {
+			tests = append(tests, m.suiteResults[i].Tests...)
+		}
+		return tests
+	}
 	if m.result != nil && len(m.result.Tests) > 0 {
 		return m.result.Tests
 	}
@@ -1353,6 +1613,42 @@ func (m Model) resultTests() []report.TestReport {
 		})
 	}
 	return tests
+}
+
+// resetToModeSelect rebuilds the model from its construction options and
+// returns to the mode-select screen. Two things are carried over from the
+// current model rather than being recreated: the shared progress-sink holder
+// (sinkBox), which the running program installed its sink into and which must
+// remain the same pointer so subsequent progress events still reach the model,
+// and the current terminal dimensions (width, height), which a resize event
+// established after the initial construction and which a fresh NewModel would
+// not know about. The detail pane geometry is re-derived from those dimensions.
+func (m Model) resetToModeSelect() Model {
+	sb := m.sinkBox
+	w := m.width
+	h := m.height
+
+	fresh := NewModel(m.opts)
+	fresh.sinkBox = sb
+	fresh.width = w
+	fresh.height = h
+
+	// Re-derive the detail pane geometry from the carried dimensions so the
+	// pane is sized correctly for the actual terminal rather than the defaults.
+	paneH, paneW := fresh.paneGeometry()
+	fresh.detailPane.Resize(paneH, paneW)
+
+	// Resize the suite multiselect widget to match the carried dimensions.
+	if fresh.suiteMultiSelect != nil && h > 0 {
+		contentH := tuicommon.ContentHeight(h, false)
+		if contentH <= 0 {
+			contentH = 10
+		}
+		fresh.suiteMultiSelect.Resize(contentH, w)
+	}
+
+	fresh.screen = ScreenModeSelect
+	return fresh
 }
 
 // updateResults handles cursor movement and drilling into a finished test's
@@ -1380,6 +1676,12 @@ func (m Model) updateResults(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		m.screen = ScreenDetail
 		m.detailScrollOffset = 0
 		return m, nil
+
+	case tuicommon.MatchesKey(msg, tuicommon.GlobalKeys.Back):
+		// Back on the results screen returns the application to mode-select
+		// with all run state cleared, so the user can start a different run
+		// without restarting the program.
+		return m.resetToModeSelect(), nil
 
 	case msg.Type == tea.KeyPgDown:
 		if m.showFailureDetail {
@@ -1495,6 +1797,8 @@ func (m Model) View() string {
 			return m.maxConcurrentRunsScr.View()
 		}
 		return ""
+	case ScreenPreflightNotice:
+		return m.viewPreflightNotice()
 	case ScreenProgress:
 		return m.viewProgress()
 	case ScreenResults:

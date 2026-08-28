@@ -200,6 +200,43 @@ func TestSuiteRun_FailingSinkDoesNotFailRun(t *testing.T) {
 	}
 }
 
+// TestSuiteRun_SuiteStartedCarriesTotalRuns asserts the suite-started event
+// carries the sum of explicit repetitions across all tests in the plan.
+// This pins the TotalRuns value so a behavioral difference introduced when
+// the inline summation is replaced by Plan.TotalRuns() is caught immediately.
+func TestSuiteRun_SuiteStartedCarriesTotalRuns(t *testing.T) {
+	// Arrange
+	runner := newScriptedRunner()
+	runner.scriptFor("test-a", scriptedOutcome{evidence: passingEvidence()})
+	runner.scriptFor("test-b", scriptedOutcome{evidence: passingEvidence()})
+	sink := &recordingSink{}
+	s := newSuite(runner, newFakeClock(), sink)
+	// Plan: test-a runs 3 times, test-b runs 2 times -> TotalRuns must be 5.
+	plan := buildPlan(
+		resolvedTest("test-a", 3, 1.0),
+		resolvedTest("test-b", 2, 1.0),
+	)
+
+	// Act
+	_, err := runSuite(t, s, context.Background(), plan)
+
+	// Assert
+	if err != nil {
+		t.Fatalf("Suite.Run returned an error: %v", err)
+	}
+	events := sink.all()
+	if len(events) == 0 {
+		t.Fatalf("no progress events were emitted")
+	}
+	if events[0].Kind != domain.ProgressSuiteStarted {
+		t.Fatalf("first event kind = %v, want ProgressSuiteStarted", events[0].Kind)
+	}
+	const want = 5 // 3 repetitions for test-a + 2 for test-b
+	if events[0].TotalRuns != want {
+		t.Errorf("ProgressSuiteStarted.TotalRuns = %d, want %d (3 repetitions for test-a + 2 for test-b)", events[0].TotalRuns, want)
+	}
+}
+
 // assertContainsInOrder asserts want appears as a (not necessarily
 // contiguous) subsequence of got, in the same relative order.
 func assertContainsInOrder(t *testing.T, got, want []domain.ProgressKind) {

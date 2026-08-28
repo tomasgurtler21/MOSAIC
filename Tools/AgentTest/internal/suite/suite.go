@@ -225,16 +225,9 @@ func (s *Suite) Run(ctx context.Context, p preflight.Plan) (report.Result, error
 
 	started := clock.Now()
 
-	// totalRuns is the sum of repetitions across every test in the plan,
-	// so the suite-started event carries the full run count for display.
-	var totalRuns int
-	for _, rt := range p.Tests {
-		reps := 1
-		if rt.Settings.Repetitions != nil {
-			reps = *rt.Settings.Repetitions
-		}
-		totalRuns += reps
-	}
+	// totalRuns is the number of runs this plan implies, derived once from
+	// the plan so the suite-started event and every frontend agree on the count.
+	totalRuns := p.TotalRuns()
 
 	emitSafe(sink, domain.ProgressEvent{
 		Kind:       domain.ProgressSuiteStarted,

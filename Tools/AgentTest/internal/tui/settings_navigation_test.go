@@ -164,8 +164,13 @@ func TestSettingsNavigation_CompletingLastSettingScreenStartsSuite(t *testing.T)
 		}
 	}
 
-	// Enter on the last screen must start the suite.
+	// Enter on the last screen must transition to ScreenProgress (possibly via
+	// ScreenPreflightNotice when queue-wide pre-flight is active).
 	m, cmd := pressEnterOnScreen(t, m)
+	if m.Screen() == ScreenPreflightNotice && cmd != nil {
+		msg := runCmd(t, cmd)
+		m, cmd = safeUpdate(t, m, msg)
+	}
 	if m.Screen() != ScreenProgress {
 		t.Errorf("Enter on ScreenMaxConcurrentRuns: Screen() = %q, want %q", m.Screen(), ScreenProgress)
 	}
@@ -424,8 +429,13 @@ func TestSettingsNavigation_ConfiguredRetentionReachesRunner(t *testing.T) {
 		}
 	}
 
-	// Confirm the last screen — must transition to ScreenProgress and return a Cmd.
+	// Confirm the last screen — must transition to ScreenProgress (possibly via
+	// ScreenPreflightNotice when queue-wide pre-flight is active) and return a Cmd.
 	m, cmd := pressEnterOnScreen(t, m)
+	if m.Screen() == ScreenPreflightNotice && cmd != nil {
+		msg := runCmd(t, cmd)
+		m, cmd = safeUpdate(t, m, msg)
+	}
 	if m.Screen() != ScreenProgress {
 		t.Fatalf("Enter on ScreenMaxConcurrentRuns: Screen() = %q, want %q", m.Screen(), ScreenProgress)
 	}

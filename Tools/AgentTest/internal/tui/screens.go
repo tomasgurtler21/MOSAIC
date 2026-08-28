@@ -17,6 +17,7 @@ import (
 
 	tuicommon "mosaic-common/tui"
 
+	"mosaic-agent-test/internal/domain"
 	"mosaic-agent-test/internal/report"
 )
 
@@ -156,6 +157,19 @@ func (m Model) viewSuiteSelect() string {
 }
 
 // ---------------------------------------------------------------------------
+// Pre-flight notice
+// ---------------------------------------------------------------------------
+
+// viewPreflightNotice renders the notice shown while all selected suites are
+// being pre-flighted. It accepts no navigation keys beyond the shared cancel
+// binding. The body tells the user that pre-flight is in progress across all
+// selected suites so they do not interpret the pause as a hang.
+func (m Model) viewPreflightNotice() string {
+	body := "Pre-flighting all selected suites, please wait..."
+	return m.renderScreen("Pre-flight in Progress", "", body, tuicommon.EntryScreenHelp())
+}
+
+// ---------------------------------------------------------------------------
 // Live progress
 // ---------------------------------------------------------------------------
 
@@ -164,6 +178,26 @@ func (m Model) viewProgress() string {
 
 	lines := []string{fmt.Sprintf("Total tests: %d", m.TotalTests())}
 
+	// Queue-position indicator: only shown when more than one suite was selected.
+	if len(m.selectedSuites) > 1 {
+		pos := m.selectedSuiteIdx + 1
+		total := len(m.selectedSuites)
+		suiteName := ""
+		if m.selectedSuiteIdx < len(m.selectedSuites) {
+			suiteName = m.selectedSuites[m.selectedSuiteIdx]
+		}
+		lines = append(lines, tuicommon.Truncate(fmt.Sprintf("Suite %d of %d: %s", pos, total, suiteName), width))
+	}
+
+	// Queue-level figures: total runs across all selected suites and how many remain.
+	tally := m.Tally()
+	queueRemaining := m.queueRunsTotal - m.completedSuiteRuns - tally.Running - tally.Finished
+	if queueRemaining < 0 {
+		queueRemaining = 0
+	}
+	lines = append(lines, fmt.Sprintf("Queue: Total: %d | Remaining: %d", m.queueRunsTotal, queueRemaining))
+
+	// In-flight tests for the current suite.
 	running := m.Running()
 	if len(running) > 0 {
 		for _, rp := range running {
@@ -177,8 +211,9 @@ func (m Model) viewProgress() string {
 	} else {
 		lines = append(lines, "Waiting for the next test to start...")
 	}
-	tally := m.Tally()
-	lines = append(lines, fmt.Sprintf("Running: %d | Finished: %d | Remaining: %d", tally.Running, tally.Finished, tally.Remaining))
+
+	// Suite-level tally with scope label, distinguishable from the queue-level figures.
+	lines = append(lines, fmt.Sprintf("Suite: Running: %d | Finished: %d | Remaining: %d", tally.Running, tally.Finished, tally.Remaining))
 
 	body := strings.Join(lines, "\n")
 	if m.showFailureDetail && m.detailPane != nil {
@@ -205,25 +240,67 @@ func resultsHelp() []tuicommon.HelpEntry {
 
 func (m Model) viewResults() string {
 	width := m.contentWidth()
-	tests := m.resultTests()
 
 	var b strings.Builder
-	if len(tests) == 0 {
-		b.WriteString(tuicommon.Truncate("no test results available", width))
-	}
-	for i, t := range tests {
-		verdict := "?"
-		if len(t.Runs) > 0 {
-			verdict = string(t.Runs[len(t.Runs)-1].Verdict)
-		}
-		prefix := "  "
-		if i == m.resultsCursor {
-			prefix = "> "
-		}
-		if i > 0 {
+
+	// Session roll-up: rendered when the session model has been built on
+	// reaching the results screen. The figures are read directly from the
+	// session model; none is computed here.
+	if m.session != nil {
+		b.WriteString(tuicommon.Truncate(fmt.Sprintf("Session: %s", m.session.Outcome), width))
+		passCount := m.session.Counts[domain.VerdictPass]
+		failCount := m.session.Counts[domain.VerdictFail]
+		b.WriteString("\n")
+		b.WriteString(tuicommon.Truncate(
+			fmt.Sprintf("Session counts: %d passed, %d failed | Cost: %.4f USD",
+				passCount, failCount, m.session.TotalCost.TotalUSD), width))
+		if m.session.Aborted {
 			b.WriteString("\n")
+			b.WriteString(tuicommon.Truncate(
+				"Queue aborted. Suites not run: "+strings.Join(m.session.UnrunSuites, ", "), width))
 		}
-		b.WriteString(tuicommon.Truncate(fmt.Sprintf("%s%-8s %s", prefix, verdict, t.TestName), width))
+		b.WriteString("\n")
+	}
+
+	if len(m.suiteResults) > 0 {
+		// Grouped view: one suite heading per suite, with aggregate-derived rows
+		// for each test. The cursor addresses the flat test index (no heading
+		// occupies a cursor position).
+		flatIdx := 0
+		for _, sr := range m.suiteResults {
+			if b.Len() > 0 {
+				b.WriteString("\n")
+			}
+			b.WriteString(tuicommon.Truncate("["+sr.SuiteID+"]", width))
+			for _, t := range sr.Tests {
+				prefix := "  "
+				if flatIdx == m.resultsCursor {
+					prefix = "> "
+				}
+				b.WriteString("\n")
+				b.WriteString(tuicommon.Truncate(prefix+formatTestRow(t), width))
+				flatIdx++
+			}
+		}
+		if b.Len() == 0 {
+			b.WriteString(tuicommon.Truncate("no test results available", width))
+		}
+	} else {
+		// Fallback: flat list for in-progress state or event-stream-only tests.
+		tests := m.resultTests()
+		if len(tests) == 0 {
+			b.WriteString(tuicommon.Truncate("no test results available", width))
+		}
+		for i, t := range tests {
+			prefix := "  "
+			if i == m.resultsCursor {
+				prefix = "> "
+			}
+			if i > 0 {
+				b.WriteString("\n")
+			}
+			b.WriteString(tuicommon.Truncate(prefix+formatTestRow(t), width))
+		}
 	}
 
 	body := b.String()
@@ -232,6 +309,22 @@ func (m Model) viewResults() string {
 	}
 
 	return m.renderScreen("Results", "", body, resultsHelp())
+}
+
+// formatTestRow builds the display line for one test on the results screen.
+// The content matches the command-line text report's per-test line wording
+// (from internal/report/text.go): name, aggregate verdict, passed/counted,
+// achieved pass rate, and required pass rate. No value here is computed from
+// individual runs; every figure comes from the pre-computed aggregate.
+func formatTestRow(t report.TestReport) string {
+	achievedPct := "n/a"
+	if t.Aggregate.Counted > 0 {
+		achievedPct = fmt.Sprintf("%.0f%%", t.Aggregate.PassRate*100)
+	}
+	requiredPct := fmt.Sprintf("%.0f%%", t.Aggregate.RequiredPassRate*100)
+	stats := fmt.Sprintf("%d/%d passed (%s, required %s)",
+		t.Aggregate.Passed, t.Aggregate.Counted, achievedPct, requiredPct)
+	return fmt.Sprintf("%s: %s %s", t.TestName, t.Aggregate.Verdict, stats)
 }
 
 // ---------------------------------------------------------------------------

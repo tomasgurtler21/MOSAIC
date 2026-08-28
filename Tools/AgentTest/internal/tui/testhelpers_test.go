@@ -134,10 +134,14 @@ func fixturePlan(suiteID string) preflight.Plan {
 // ---------------------------------------------------------------------------
 
 // advanceThroughSettingsToProgress navigates from ScreenRetention through all
-// five sequential settings screens by pressing Enter five times, landing on
-// ScreenProgress with the suite-start Cmd. The caller must already be at
-// ScreenRetention (e.g. after advanceToSettingsFlow). It fails the test
-// immediately if any intermediate screen is wrong.
+// five sequential settings screens and returns the model on ScreenProgress with
+// the suite-start Cmd. The caller must already be at ScreenRetention.
+//
+// When the implementation routes through ScreenPreflightNotice (queue-wide
+// pre-flight), this helper drives the two-update notice-then-preflight sequence
+// so callers consistently land on ScreenProgress. When the implementation
+// transitions directly to ScreenProgress (pre-queue-wide implementations), the
+// helper returns immediately.
 func advanceThroughSettingsToProgress(t *testing.T, m Model) (Model, tea.Cmd) {
 	t.Helper()
 	// Press Enter on ScreenRetention → ScreenRepetitions → ScreenReportPath
@@ -150,8 +154,16 @@ func advanceThroughSettingsToProgress(t *testing.T, m Model) (Model, tea.Cmd) {
 			t.Fatalf("advanceThroughSettingsToProgress: Screen() = %q, want %q", m.Screen(), want)
 		}
 	}
-	// Final Enter on ScreenMaxConcurrentRuns transitions to ScreenProgress.
+	// Final Enter on ScreenMaxConcurrentRuns.
 	m, cmd := safeUpdate(t, m, keyMsg("\r"))
+	// If the implementation introduces a pre-flight notice screen first, drive
+	// through the two-update notice→pre-flight sequence before asserting
+	// ScreenProgress. This keeps the helper compatible with both old (direct to
+	// ScreenProgress) and new (via ScreenPreflightNotice) implementations.
+	if m.Screen() == ScreenPreflightNotice && cmd != nil {
+		msg := runCmd(t, cmd) // cmd produces preflightQueueMsg
+		m, cmd = safeUpdate(t, m, msg)
+	}
 	if m.Screen() != ScreenProgress {
 		t.Fatalf("advanceThroughSettingsToProgress: final Screen() = %q, want %q", m.Screen(), ScreenProgress)
 	}
@@ -188,14 +200,25 @@ func navigateThroughSettings(t *testing.T, m Model) (Model, tea.Cmd) {
 }
 
 // triggerSuiteStart navigates from ScreenSuiteSelect through the full
-// settings flow and discards the returned Cmd. When the preflight fails the
-// model lands on ScreenSuiteSelect; when it succeeds the model lands on
-// ScreenProgress. Useful for tests that only care about model state after
-// the navigation, not about invoking the suite-start Cmd.
+// settings flow and drives the queue-wide pre-flight to completion, then
+// discards the suite-start Cmd. When pre-flight fails the model lands on
+// ScreenSuiteSelect; when it succeeds the model lands on ScreenProgress.
+// Useful for tests that only care about model state after navigation.
+//
+// When the implementation routes through ScreenPreflightNotice (queue-wide
+// pre-flight), the two-update notice→pre-flight sequence is driven automatically.
+// When the implementation transitions directly to ScreenProgress or
+// ScreenSuiteSelect (older implementations), the helper returns immediately.
 func triggerSuiteStart(t *testing.T, m Model) Model {
 	t.Helper()
 	m = advanceToSettingsFlow(t, m) // Enter → ScreenRetention
-	m, _ = navigateThroughSettings(t, m)
+	m, cmd := navigateThroughSettings(t, m)
+	// Drive the pre-flight notice → pre-flight update sequence only when the
+	// implementation introduces ScreenPreflightNotice; otherwise return as-is.
+	if m.Screen() == ScreenPreflightNotice && cmd != nil {
+		msg := runCmd(t, cmd) // produces preflightQueueMsg
+		m, _ = safeUpdate(t, m, msg)
+	}
 	return m
 }
 

@@ -1,24 +1,32 @@
 package tui
 
-// multi_suite_test.go covers Stage 5: Multi-Suite Selection.
+// multi_suite_test.go covers Multi-Suite Selection.
 //
-// T5.1 — Sequential execution: given N selected suites, all suites execute in
+// Sequential execution: given N selected suites, all suites execute in
 // selection order, each completing fully before the next starts. An error in
 // one suite stops the queue.
 //
-// T5.2 — Multiselect TUI integration: Space toggles items, Enter confirms the
+// Multiselect TUI integration: Space toggles items, Enter confirms the
 // selection, and the suite-select view shows checkbox indicators.
+//
+// Results representation: after a multi-suite queue completes, the results
+// screen must represent every suite that ran. The test added for this
+// requirement (TestMultiSuite_Results_AllSuitesRepresented) is a RED-phase
+// test — it fails with the current single-result implementation and becomes
+// green once the cross-suite results feature is implemented.
 
 import (
 	"fmt"
 	"strings"
 	"testing"
+	"time"
 
 	tea "github.com/charmbracelet/bubbletea"
 
 	tuicommon "mosaic-common/tui"
 
 	"mosaic-agent-test/internal/domain"
+	"mosaic-agent-test/internal/report"
 )
 
 // ---------------------------------------------------------------------------
@@ -264,5 +272,60 @@ func TestMultiSuiteSelect_EnterWithNoToggle_SelectsCursorItem(t *testing.T) {
 	}
 	if m.selectedSuites[0] != "suite-b.yaml" {
 		t.Errorf("selectedSuites[0] = %q, want %q (cursor was on suite-b)", m.selectedSuites[0], "suite-b.yaml")
+	}
+}
+
+// ---------------------------------------------------------------------------
+// Results representation after a multi-suite run (T5.7 update)
+// ---------------------------------------------------------------------------
+
+// TestMultiSuite_Results_AllSuitesRepresented verifies that after a two-suite
+// queue completes, resultTests returns tests from every suite that ran.
+//
+// The current implementation stores only the last suite's result in m.result,
+// so resultTests returns only that suite's tests. This test is the RED-phase
+// specification for the behaviour that must change: resultTests must draw from
+// all retained suite results, not only the most recent one.
+func TestMultiSuite_Results_AllSuitesRepresented(t *testing.T) {
+	resultA := report.Build("suite-a", time.Now(), time.Now(), []report.TestReport{
+		{
+			TestName:  "suite-a-test-1",
+			Aggregate: domain.AggregateResult{Verdict: domain.VerdictPass, Counted: 1, Passed: 1, PassRate: 1.0},
+			Runs:      []report.RunReport{{Key: domain.RunKey{TestName: "suite-a-test-1", RunNumber: 1}, Verdict: domain.VerdictPass}},
+		},
+	}, "")
+	resultB := report.Build("suite-b", time.Now(), time.Now(), []report.TestReport{
+		{
+			TestName:  "suite-b-test-1",
+			Aggregate: domain.AggregateResult{Verdict: domain.VerdictPass, Counted: 1, Passed: 1, PassRate: 1.0},
+			Runs:      []report.RunReport{{Key: domain.RunKey{TestName: "suite-b-test-1", RunNumber: 1}, Verdict: domain.VerdictPass}},
+		},
+	}, "")
+
+	runner := newPerCallRunner(resultA, resultB)
+	m := driveTwoSuitesToCompletion(t, []string{"suite-a.yaml", "suite-b.yaml"}, runner)
+
+	if m.Screen() != ScreenResults {
+		t.Fatalf("expected ScreenResults after both suites completed, got %q", m.Screen())
+	}
+
+	tests := m.resultTests()
+	var foundA, foundB bool
+	for _, tr := range tests {
+		if tr.TestName == "suite-a-test-1" {
+			foundA = true
+		}
+		if tr.TestName == "suite-b-test-1" {
+			foundB = true
+		}
+	}
+	if !foundA {
+		t.Errorf("resultTests() does not include suite-a-test-1 from suite-a after a two-suite run;\n"+
+			"the results screen must list tests from every suite that ran, not only the last one;\n"+
+			"got %d test(s): %v", len(tests), testReportNames(tests))
+	}
+	if !foundB {
+		t.Errorf("resultTests() does not include suite-b-test-1 from suite-b after a two-suite run;\n"+
+			"got %d test(s): %v", len(tests), testReportNames(tests))
 	}
 }
