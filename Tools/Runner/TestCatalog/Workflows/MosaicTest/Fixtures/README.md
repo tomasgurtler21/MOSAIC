@@ -17,6 +17,7 @@ Each workflow has exactly one seed root. Seed that directory and nothing else.
 | `deviation-blocked` | **auto** | `C:\AI\MOSAIC\MOSAIC\Tools\Runner\TestCatalog\Workflows\MosaicTest\Fixtures\deviation-blocked` |
 | `deviation-ambiguous` | **auto-review** | `C:\AI\MOSAIC\MOSAIC\Tools\Runner\TestCatalog\Workflows\MosaicTest\Fixtures\deviation-ambiguous` |
 | `deviation-stop` | **auto** | `C:\AI\MOSAIC\MOSAIC\Tools\Runner\TestCatalog\Workflows\MosaicTest\Fixtures\deviation-stop` |
+| `hitl-glob-staged` | **orchestrated only** | `C:\AI\MOSAIC\MOSAIC\Tools\Runner\TestCatalog\Workflows\MosaicTest\Fixtures\hitl-glob-staged` |
 
 In the TUI, paste the path at the seed-input screen. On the command line it is `--input <path>`.
 

@@ -172,6 +172,42 @@ func New(deps Deps) Session {
 //
 // It also implements domain.ApprovalCapability, returning false, so the
 // run-start refusal check can distinguish this stand-in from a real reader.
+// maxConsecutiveSameAgentDispatches is the upper bound on consecutive
+// dispatches of the same agent for the same workflow step. When the count
+// reaches this value, the next would-be dispatch is blocked and the session
+// escalates to the routing consultant instead.
+const maxConsecutiveSameAgentDispatches = 4
+
+// antiLoopState tracks consecutive same-agent dispatches for the current
+// workflow step. All fields are updated by recordDispatch. The zero value is
+// safe to use: rowIndex 0 is a valid row index so callers must initialize
+// rowIndex to -1 to indicate "no step tracked yet".
+type antiLoopState struct {
+	rowIndex  int    // -1 = no step tracked yet
+	count     int    // consecutive same-agent dispatch count for current step
+	lastAgent string // identifier of the last dispatched agent
+}
+
+// recordDispatch updates the anti-loop state for a dispatch of agentID at
+// rowIndex and reports whether the dispatch is allowed. A dispatch is blocked
+// (returns false) only when the same agent at the same row has already been
+// dispatched maxConsecutiveSameAgentDispatches times. Any change in row index
+// or agent identifier resets the counter and always permits the dispatch.
+func (a *antiLoopState) recordDispatch(rowIndex int, agentID string) bool {
+	if rowIndex != a.rowIndex || agentID != a.lastAgent {
+		// New step or different agent: reset counter.
+		a.rowIndex = rowIndex
+		a.lastAgent = agentID
+		a.count = 1
+		return true
+	}
+	if a.count >= maxConsecutiveSameAgentDispatches {
+		return false // 5th (or more) consecutive same-agent dispatch for this step
+	}
+	a.count++
+	return true
+}
+
 type unreadableApprovalReader struct{}
 
 func (unreadableApprovalReader) ReadApproval(_ context.Context, _ string) domain.HumanApproval {
@@ -634,6 +670,11 @@ func (s *sessionImpl) Start(ctx context.Context, config domain.RunConfig) (outco
 	// first workflow step completes. Updated only for workflow steps, not for
 	// infrastructure agent completions (no-cascades rule).
 	var prevWorkflowStep *domain.CompletedStep
+	// antiLoop tracks consecutive same-agent dispatches for the current step
+	// and enforces the anti-loop guard. rowIndex starts at -1 to signal that
+	// no step has been tracked yet; recordDispatch resets the counter whenever
+	// the row index or agent identifier changes.
+	antiLoop := antiLoopState{rowIndex: -1}
 
 	for {
 		decision := engine.Next(engine.NextInput{
@@ -702,6 +743,11 @@ func (s *sessionImpl) Start(ctx context.Context, config domain.RunConfig) (outco
 				Message: fmt.Sprintf("phase=%s stage=%q status=running", step.Phase, step.Stage),
 			})
 
+			// Register this auto-routed dispatch with the anti-loop guard. An
+			// engine-dispatched step always starts a new step context (new row),
+			// so recordDispatch resets the counter here and always returns true.
+			antiLoop.recordDispatch(step.RowIndex, step.Agent.Identifier)
+
 			// Invoke the harness.
 			response, invokeErr := s.invokeAndLog(ctx, step.Agent, step.Request)
 			if invokeErr != nil {
@@ -730,7 +776,7 @@ func (s *sessionImpl) Start(ctx context.Context, config domain.RunConfig) (outco
 				}
 				done, outcome, outErr := s.consultRoute(ctx, &deviationInfo, &state, &seq,
 					&lastResponse, &prevWorkflowStep, &refreshedStages, &stages,
-					table, agents, config, declaredInfraAgents, admitted)
+					table, agents, config, declaredInfraAgents, admitted, &antiLoop)
 				if done {
 					return outcome, outErr
 				}
@@ -738,11 +784,11 @@ func (s *sessionImpl) Start(ctx context.Context, config domain.RunConfig) (outco
 			}
 
 			// HITL compliance verification for auto-routed dispatches. The loop
-			// runs before Store.Apply so that a non-compliant SUCCESS is never
-			// written to the execution log as a completed step, and a resume
-			// after an interrupted run sees the step as not-yet-started rather
-			// than done. Only the HITL-accepted response is recorded, in a
-			// single Store.Apply call after the loop.
+			// runs before the final Store.Apply so that a non-compliant SUCCESS
+			// is never written to the execution log as an accepted step.
+			// Each rejected attempt is persisted immediately with HITLRejected=true
+			// and IsInfrastructure=true before the redispatch or escalation, so the
+			// execution log has a complete record of every dispatch attempt.
 			//
 			// hitlAttemptSeq tracks the sequence number assigned to each attempt.
 			// It starts at seq+1 (the slot the engine reserved for this step)
@@ -755,7 +801,8 @@ func (s *sessionImpl) Start(ctx context.Context, config domain.RunConfig) (outco
 		hitlCheckLoop:
 			for {
 				var approvals []domain.ArtifactApproval
-				for _, path := range hitlStep.Request.OutputArtifacts {
+				expandedPaths := expandStageGlobs(hitlStep.Request.OutputArtifacts, stages)
+				for _, path := range expandedPaths {
 					approvals = append(approvals, domain.ArtifactApproval{
 						Path:     path,
 						Approval: s.deps.Approvals.ReadApproval(ctx, path),
@@ -774,7 +821,59 @@ func (s *sessionImpl) Start(ctx context.Context, config domain.RunConfig) (outco
 
 				case domain.HITLRedispatch:
 					hitlRedispatchUsed = true
+					// Persist the rejected attempt before redispatching so the execution
+					// log has a complete record of every dispatch. IsInfrastructure=true
+					// leaves current_state.LastAgent unchanged, keeping ResumePoint's
+					// interruption detection correct. OutputArtifacts=nil avoids
+					// registering non-compliant paths in the artifact registry.
+					rejStep := domain.CompletedStep{
+						Seq:              hitlAttemptSeq,
+						AgentInstance:    hitlStep.Request.AgentInstanceID,
+						Phase:            hitlStep.Phase,
+						Stage:            hitlStep.Stage,
+						Status:           hitlResponse.StatusCode,
+						ErrorCode:        hitlResponse.ErrorCode,
+						Summary:          hitlResponse.StatusMessage,
+						Timestamp:        s.deps.Clock.Now(),
+						Inputs:           formatInputs(hitlStep.Request.InputArtifacts),
+						IsInfrastructure: true,
+						HITLRejected:     true,
+					}
+					state, err = s.deps.Store.Apply(ctx, state, rejStep)
+					if err != nil {
+						s.deps.Debug.Log(domain.EventSessionApplyFailed, err.Error())
+						return domain.RunOutcome{Status: domain.RunFailed, Message: err.Error()}, err
+					}
+					seq = state.GlobalSequence
 					hitlAttemptSeq++
+					// Anti-loop guard: check before performing the HITL redispatch. The
+					// rejected step was already persisted above; if the guard fires we
+					// escalate via the consultant rather than redispatching.
+					if !antiLoop.recordDispatch(hitlStep.RowIndex, hitlStep.Agent.Identifier) {
+						s.deps.Debug.Log(domain.EventSessionHITLEscalate, "anti-loop guard triggered in HITL redispatch; escalating",
+							domain.F("agent", hitlStep.Agent.Identifier),
+						)
+						if s.deps.Routing == nil {
+							alrdMsg := "anti-loop guard: no routing consultant configured"
+							s.deps.Debug.Log(domain.EventSessionDeviationUnresolved, alrdMsg)
+							return domain.RunOutcome{Status: domain.RunDeviationUnresolved, Message: alrdMsg}, nil
+						}
+						alrdDevInfo := domain.DeviationInfo{
+							Kind:          domain.DeviationNonSuccess,
+							Response:      hitlResponse,
+							CurrentRow:    hitlStep.RowIndex,
+							CurrentPhase:  hitlStep.Phase,
+							CurrentStage:  hitlStep.Stage,
+							ArtifactState: state,
+						}
+						alrdDone, alrdOutcome, alrdErr := s.consultRoute(ctx, &alrdDevInfo, &state, &seq,
+							&lastResponse, &prevWorkflowStep, &refreshedStages, &stages,
+							table, agents, config, declaredInfraAgents, admitted, &antiLoop)
+						if alrdDone {
+							return alrdOutcome, alrdErr
+						}
+						break hitlCheckLoop
+					}
 					s.deps.Debug.Log(domain.EventSessionHITLRedispatch, "HITL non-compliant; redispatching same agent",
 						domain.F("agent", hitlStep.Agent.Identifier),
 					)
@@ -808,7 +907,7 @@ func (s *sessionImpl) Start(ctx context.Context, config domain.RunConfig) (outco
 						}
 						rdDone, rdOutcome, rdOutErr := s.consultRoute(ctx, &rdDevInfo, &state, &seq,
 							&lastResponse, &prevWorkflowStep, &refreshedStages, &stages,
-							table, agents, config, declaredInfraAgents, admitted)
+							table, agents, config, declaredInfraAgents, admitted, &antiLoop)
 						if rdDone {
 							return rdOutcome, rdOutErr
 						}
@@ -818,6 +917,29 @@ func (s *sessionImpl) Start(ctx context.Context, config domain.RunConfig) (outco
 					// Loop to re-check HITL with RedispatchUsed=true.
 
 				case domain.HITLEscalate:
+					// Persist the final rejected attempt (the redispatch that also
+					// failed compliance) before escalating. IsInfrastructure=true and
+					// OutputArtifacts=nil follow the same contract as the HITLRedispatch
+					// rejected-step Apply above.
+					escRejStep := domain.CompletedStep{
+						Seq:              hitlAttemptSeq,
+						AgentInstance:    hitlStep.Request.AgentInstanceID,
+						Phase:            hitlStep.Phase,
+						Stage:            hitlStep.Stage,
+						Status:           hitlResponse.StatusCode,
+						ErrorCode:        hitlResponse.ErrorCode,
+						Summary:          hitlResponse.StatusMessage,
+						Timestamp:        s.deps.Clock.Now(),
+						Inputs:           formatInputs(hitlStep.Request.InputArtifacts),
+						IsInfrastructure: true,
+						HITLRejected:     true,
+					}
+					state, err = s.deps.Store.Apply(ctx, state, escRejStep)
+					if err != nil {
+						s.deps.Debug.Log(domain.EventSessionApplyFailed, err.Error())
+						return domain.RunOutcome{Status: domain.RunFailed, Message: err.Error()}, err
+					}
+					seq = state.GlobalSequence
 					s.deps.Debug.Log(domain.EventSessionHITLEscalate, "HITL redispatch exhausted; escalating to deviation",
 						domain.F("agent", hitlStep.Agent.Identifier),
 					)
@@ -836,7 +958,7 @@ func (s *sessionImpl) Start(ctx context.Context, config domain.RunConfig) (outco
 					}
 					escDone, escOutcome, escErr := s.consultRoute(ctx, &escDevInfo, &state, &seq,
 						&lastResponse, &prevWorkflowStep, &refreshedStages, &stages,
-						table, agents, config, declaredInfraAgents, admitted)
+						table, agents, config, declaredInfraAgents, admitted, &antiLoop)
 					if escDone {
 						return escOutcome, escErr
 					}
@@ -851,10 +973,12 @@ func (s *sessionImpl) Start(ctx context.Context, config domain.RunConfig) (outco
 				continue
 			}
 
-			// Apply the HITL-accepted response to the artifact. A single
-			// Store.Apply call here ensures that no non-compliant SUCCESS is
-			// ever persisted, and a resume after an interrupted run correctly
-			// sees the step as not-yet-completed.
+			// Apply the HITL-accepted response to the artifact. Each rejected
+			// attempt was already applied with HITLRejected=true above; this
+			// call records the final accepted outcome. Because rejected-step
+			// rows carry IsInfrastructure=true, current_state still points at
+			// the prior workflow step, so a resume after an interrupted run
+			// correctly detects the mismatch and re-dispatches the step.
 			completedStep := domain.CompletedStep{
 				Seq:             hitlAttemptSeq,
 				AgentInstance:   hitlStep.Request.AgentInstanceID,
@@ -949,7 +1073,7 @@ func (s *sessionImpl) Start(ctx context.Context, config domain.RunConfig) (outco
 			}
 			done, outcome, outErr := s.consultRoute(ctx, nil, &state, &seq,
 				&lastResponse, &prevWorkflowStep, &refreshedStages, &stages,
-				table, agents, config, declaredInfraAgents, admitted)
+				table, agents, config, declaredInfraAgents, admitted, &antiLoop)
 			if done {
 				return outcome, outErr
 			}
@@ -967,7 +1091,7 @@ func (s *sessionImpl) Start(ctx context.Context, config domain.RunConfig) (outco
 			}
 			done, outcome, outErr := s.consultRoute(ctx, &decision.Deviation.Info, &state, &seq,
 				&lastResponse, &prevWorkflowStep, &refreshedStages, &stages,
-				table, agents, config, declaredInfraAgents, admitted)
+				table, agents, config, declaredInfraAgents, admitted, &antiLoop)
 			if done {
 				return outcome, outErr
 			}
@@ -1123,6 +1247,7 @@ func (s *sessionImpl) consultRoute(
 	config domain.RunConfig,
 	declaredInfraAgents []domain.DeclaredInfraAgent,
 	admitted domain.AdmittedWorkflow,
+	antiLoop *antiLoopState,
 ) (done bool, outcome domain.RunOutcome, outErr error) {
 	// Build the consultation request. LastStatusMessage is nil on the first
 	// step of a new run and for every consultation where no prior agent result
@@ -1191,6 +1316,10 @@ func (s *sessionImpl) consultRoute(
 	}
 	dispInstr := instr.Dispatch
 
+	// Look up the routing table row early so its phase name is available for
+	// the consultation log entry and for subsequent field resolution.
+	row, _ := rowAtIndex(table, dispInstr.RowIndex)
+
 	// Record the consultation as an infrastructure-flagged Execution Log row.
 	// The row consumes a global_sequence slot so the log has no duplicate
 	// positions; Store.Apply's IsInfrastructure path leaves current_state alone.
@@ -1198,6 +1327,7 @@ func (s *sessionImpl) consultRoute(
 	consultStep := domain.CompletedStep{
 		Seq:              consultSeq,
 		AgentInstance:    s.orchRef.Identifier + "#" + strconv.Itoa(consultSeq),
+		Phase:            row.PhaseParsed.Name,
 		Status:           domain.StatusSUCCESS,
 		Summary:          dispInstr.TaskDescription,
 		Timestamp:        s.deps.Clock.Now(),
@@ -1223,10 +1353,6 @@ func (s *sessionImpl) consultRoute(
 			Message: "consultant dispatched unknown agent: " + dispInstr.Agent,
 		}, nil
 	}
-
-	// Look up the routing table row at the consultant-specified index to supply
-	// fallback values for fields the consultant omitted.
-	row, _ := rowAtIndex(table, dispInstr.RowIndex)
 
 	// Resolve each field using the priority table: non-nil pointer overrides;
 	// nil pointer falls back to the routing table row.
@@ -1273,6 +1399,38 @@ func (s *sessionImpl) consultRoute(
 	}
 
 	phase := row.PhaseParsed.Name
+
+	// Anti-loop guard: prevent the same agent from being dispatched more than
+	// maxConsecutiveSameAgentDispatches consecutive times for the same step.
+	// The counter is shared across recursive consultRoute calls via the antiLoop
+	// pointer so that escalation chains do not reset it.
+	if !antiLoop.recordDispatch(dispInstr.RowIndex, agentRef.Identifier) {
+		s.deps.Debug.Log(domain.EventSessionDeviation, "anti-loop guard triggered; escalating instead of dispatching",
+			domain.F("agent", agentRef.Identifier),
+			domain.F("count", strconv.Itoa(antiLoop.count)),
+			domain.F("row", strconv.Itoa(dispInstr.RowIndex)),
+		)
+		var lastResp domain.ProtocolResponse
+		if *lastResponse != nil {
+			lastResp = **lastResponse
+		}
+		guardDevInfo := domain.DeviationInfo{
+			Kind: domain.DeviationNonSuccess,
+			Response: domain.ProtocolResponse{
+				AgentInstanceID: fmt.Sprintf("%s#guard", agentRef.Identifier),
+				StatusCode:      domain.StatusBLOCKED,
+				StatusMessage: fmt.Sprintf("anti-loop guard: %q dispatched %d consecutive times for row %d; escalating",
+					agentRef.Identifier, antiLoop.count, dispInstr.RowIndex),
+				ErrorCode: lastResp.ErrorCode,
+			},
+			CurrentRow:    dispInstr.RowIndex,
+			CurrentPhase:  phase,
+			ArtifactState: *state,
+		}
+		return s.consultRoute(ctx, &guardDevInfo, state, seq, lastResponse, prevWorkflowStep,
+			refreshedStages, stages, table, agents, config, declaredInfraAgents, admitted, antiLoop)
+	}
+
 	s.deps.Debug.Log(domain.EventSessionDispatchStart, "dispatching consultant-routed step",
 		domain.F("agent", agentReq.AgentInstanceID),
 		domain.F("phase", phase),
@@ -1305,11 +1463,13 @@ func (s *sessionImpl) consultRoute(
 			ArtifactState: *state,
 		}
 		return s.consultRoute(ctx, &devInfo, state, seq, lastResponse, prevWorkflowStep,
-			refreshedStages, stages, table, agents, config, declaredInfraAgents, admitted)
+			refreshedStages, stages, table, agents, config, declaredInfraAgents, admitted, antiLoop)
 	}
 
-	// HITL compliance verification. Runs before Store.Apply so that a
-	// non-compliant SUCCESS result never enters the execution log as a final step.
+	// HITL compliance verification. Each rejected attempt is persisted with
+	// HITLRejected=true and IsInfrastructure=true before the redispatch or
+	// escalation, ensuring a non-compliant SUCCESS never enters the log as an
+	// accepted step and that sequence numbers remain strictly increasing.
 	// The redispatch allowance (one redispatch per step) is scoped here; it
 	// resets on every consultRoute call.
 	finalResponse := response
@@ -1320,7 +1480,8 @@ func (s *sessionImpl) consultRoute(
 hitlLoop:
 	for {
 		var approvals []domain.ArtifactApproval
-		for _, path := range currentOutputArts {
+		expandedPaths := expandStageGlobs(currentOutputArts, *stages)
+		for _, path := range expandedPaths {
 			approvals = append(approvals, domain.ArtifactApproval{
 				Path:     path,
 				Approval: s.deps.Approvals.ReadApproval(ctx, path),
@@ -1338,6 +1499,46 @@ hitlLoop:
 
 		case domain.HITLRedispatch:
 			hitlRedispatchUsed = true
+			// Persist the rejected attempt before redispatching. Use
+			// state.GlobalSequence+1 (not currentAttemptSeq) because the
+			// consultStep Apply above already consumed the currentAttemptSeq
+			// slot. IsInfrastructure=true leaves current_state unchanged.
+			// OutputArtifacts=nil avoids polluting the artifact registry.
+			rlRejStep := domain.CompletedStep{
+				Seq:              (*state).GlobalSequence + 1,
+				AgentInstance:    fmt.Sprintf("%s#%d", agentRef.Identifier, currentAttemptSeq),
+				Phase:            phase,
+				Status:           finalResponse.StatusCode,
+				ErrorCode:        finalResponse.ErrorCode,
+				Summary:          finalResponse.StatusMessage,
+				Timestamp:        s.deps.Clock.Now(),
+				Inputs:           formatInputs(agentReq.InputArtifacts),
+				IsInfrastructure: true,
+				HITLRejected:     true,
+			}
+			var rlApplyErr error
+			*state, rlApplyErr = s.deps.Store.Apply(ctx, *state, rlRejStep)
+			if rlApplyErr != nil {
+				return true, domain.RunOutcome{Status: domain.RunFailed, Message: rlApplyErr.Error()}, rlApplyErr
+			}
+			*seq = (*state).GlobalSequence
+			// Anti-loop guard: check before performing the HITL redispatch.
+			// The rejected step was already persisted above; if the guard fires
+			// we escalate via the consultant rather than redispatching.
+			if !antiLoop.recordDispatch(dispInstr.RowIndex, agentRef.Identifier) {
+				s.deps.Debug.Log(domain.EventSessionHITLEscalate, "anti-loop guard triggered in hitlLoop redispatch; escalating",
+					domain.F("agent", agentRef.Identifier),
+				)
+				alrlDevInfo := domain.DeviationInfo{
+					Kind:          domain.DeviationNonSuccess,
+					Response:      finalResponse,
+					CurrentRow:    dispInstr.RowIndex,
+					CurrentPhase:  phase,
+					ArtifactState: *state,
+				}
+				return s.consultRoute(ctx, &alrlDevInfo, state, seq, lastResponse, prevWorkflowStep,
+					refreshedStages, stages, table, agents, config, declaredInfraAgents, admitted, antiLoop)
+			}
 			s.deps.Debug.Log(domain.EventSessionHITLRedispatch, "HITL non-compliant; redispatching same agent",
 				domain.F("agent", agentRef.Identifier),
 			)
@@ -1364,12 +1565,35 @@ hitlLoop:
 					ArtifactState: *state,
 				}
 				return s.consultRoute(ctx, &rdDevInfo, state, seq, lastResponse, prevWorkflowStep,
-					refreshedStages, stages, table, agents, config, declaredInfraAgents, admitted)
+					refreshedStages, stages, table, agents, config, declaredInfraAgents, admitted, antiLoop)
 			}
 			finalResponse = rdResp
 			// Loop to re-check with RedispatchUsed=true.
 
 		case domain.HITLEscalate:
+			// Persist the final rejected attempt before escalating. Follows
+			// the same contract as the HITLRedispatch rejected-step Apply above:
+			// IsInfrastructure=true to preserve current_state, OutputArtifacts=nil
+			// to avoid polluting the registry, and seq derived from state.GlobalSequence+1
+			// to ensure strict monotonicity across all persisted dispatches.
+			elRejStep := domain.CompletedStep{
+				Seq:              (*state).GlobalSequence + 1,
+				AgentInstance:    fmt.Sprintf("%s#%d", agentRef.Identifier, currentAttemptSeq),
+				Phase:            phase,
+				Status:           finalResponse.StatusCode,
+				ErrorCode:        finalResponse.ErrorCode,
+				Summary:          finalResponse.StatusMessage,
+				Timestamp:        s.deps.Clock.Now(),
+				Inputs:           formatInputs(agentReq.InputArtifacts),
+				IsInfrastructure: true,
+				HITLRejected:     true,
+			}
+			var elApplyErr error
+			*state, elApplyErr = s.deps.Store.Apply(ctx, *state, elRejStep)
+			if elApplyErr != nil {
+				return true, domain.RunOutcome{Status: domain.RunFailed, Message: elApplyErr.Error()}, elApplyErr
+			}
+			*seq = (*state).GlobalSequence
 			s.deps.Debug.Log(domain.EventSessionHITLEscalate, "HITL redispatch exhausted; escalating to deviation",
 				domain.F("agent", agentRef.Identifier),
 			)
@@ -1381,7 +1605,7 @@ hitlLoop:
 				ArtifactState: *state,
 			}
 			return s.consultRoute(ctx, &escDevInfo, state, seq, lastResponse, prevWorkflowStep,
-				refreshedStages, stages, table, agents, config, declaredInfraAgents, admitted)
+				refreshedStages, stages, table, agents, config, declaredInfraAgents, admitted, antiLoop)
 		}
 	}
 

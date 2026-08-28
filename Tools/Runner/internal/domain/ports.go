@@ -47,6 +47,22 @@ type CompletedStep struct {
 	// dispatch. The dispatch loop uses this to enforce the no-cascades rule:
 	// when true, trigger evaluation is skipped after recording the step.
 	IsInfrastructure bool
+	// HITLRejected is true when this step was persisted as the result of an
+	// HITL non-compliance rejection (redispatch or escalation), rather than as
+	// a final accepted step. When true, the execution-log row records a
+	// dispatch attempt that was subsequently superseded by a redispatch or
+	// escalation -- it is not the step's final outcome.
+	//
+	// Resume semantics: a row with HITLRejected=true is "completed with
+	// rejection". Because it is always recorded with IsInfrastructure=true,
+	// Store.Apply does not update CurrentState for rejected rows. This means
+	// ResumePoint sees the rejected row as a workflow log entry whose agent
+	// does not match CurrentState.LastAgent, correctly concluding the step
+	// was interrupted and setting RerunLast=true.
+	//
+	// The zero value (false) preserves backward compatibility: all existing
+	// CompletedStep construction sites produce HITLRejected=false.
+	HITLRejected bool
 }
 
 // ArtifactStore is the single component that touches Orchestration.md.
