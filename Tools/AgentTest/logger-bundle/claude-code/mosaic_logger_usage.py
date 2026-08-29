@@ -280,7 +280,7 @@ def emit_usage_records(ctx: "core.HookContext",
 
                 # Decide whether to emit this record.
                 if record_id and fp:
-                    stored_fp = state.get(record_id)
+                    stored_fp = updated_state.get(record_id)
                     if stored_fp == fp:
                         # Unchanged and already emitted — skip.
                         continue

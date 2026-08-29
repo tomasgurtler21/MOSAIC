@@ -46,7 +46,7 @@ type FileInfo struct {
 
 // StoreRequest configures a single Store invocation.
 type StoreRequest struct {
-	// TestResultsRoot is the absolute path to the TestResults/ directory.
+	// TestResultsRoot is the absolute path to the OrchestrationTestResults/ directory.
 	TestResultsRoot string
 
 	// ReportFiles is the list of report file paths to process.
@@ -57,7 +57,7 @@ type StoreRequest struct {
 // carrying both the file list and directory options that the CLI and TUI present
 // to the user.
 type StoreFromPathsRequest struct {
-	// TestResultsRoot is the absolute path to the TestResults/ directory.
+	// TestResultsRoot is the absolute path to the OrchestrationTestResults/ directory.
 	TestResultsRoot string
 
 	// Files is the list of report file paths. Mutually exclusive with Dir.
@@ -296,11 +296,11 @@ func Store(fs FileSystem, req StoreRequest) (StoreResult, error) {
 			continue
 		}
 
-		// Construct target path: {root}/{version}/{suite}--{harness}--{model-short}--{timestamp}.json
+		// Construct target path: {root}/Orchestrator/{version}/{suite}--{harness}--{model-short}--{timestamp}.json
 		ts := parsed.Timestamp.UTC().Format("20060102T150405")
 		filename := fmt.Sprintf("%s--%s--%s--%s.json",
 			parsed.SuiteID, parsed.HarnessID, parsed.ModelShort, ts)
-		versionDir := req.TestResultsRoot + "/" + parsed.SubjectVersion
+		versionDir := req.TestResultsRoot + "/Orchestrator/" + parsed.SubjectVersion
 		targetPath := versionDir + "/" + filename
 
 		// Detect duplicate: if a file already exists at the target path, skip.

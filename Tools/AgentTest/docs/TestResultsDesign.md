@@ -30,21 +30,22 @@ Both axes are analytically equal — neither is inherently "above" the other. Th
 
 ### 2.1 Location
 
-`TestResults/` at the MOSAIC repository root. Results are MOSAIC-level artifacts, not tool-internal state.
+`OrchestrationTestResults/` at the MOSAIC repository root. Results are MOSAIC-level artifacts, not tool-internal state.
 
 ### 2.2 Tree Structure
 
 ```
-TestResults/
-  {orchestrator-version}/
-    {suite}--{harness}--{model-short}--{timestamp}.json
-    {suite}--{harness}--{model-short}--{timestamp}.json
-    ...
-    summary.md                  # generated: per-version summary
-  summary.md                    # generated: cross-version summary
+OrchestrationTestResults/
+  Orchestrator/
+    {orchestrator-version}/
+      {suite}--{harness}--{model-short}--{timestamp}.json
+      {suite}--{harness}--{model-short}--{timestamp}.json
+      ...
+      summary.md                  # generated: per-version summary
+  summary.md                      # generated: cross-version summary
 ```
 
-**One directory level: orchestrator version.** This is the primary grouping because the fundamental question AgentTest answers is "does this orchestrator version route correctly?" Everything else — model, harness, suite — is an environmental variable applied to that version.
+**Two directory levels: Orchestrator subfolder + orchestrator version.** The `Orchestrator` segment identifies the subject being tested, and the version segment isolates each release. This is the primary grouping because the fundamental question AgentTest answers is "does this orchestrator version route correctly?" Everything else — model, harness, suite — is an environmental variable applied to that version.
 
 **Flat within version.** Reports for all suites, harnesses, and models coexist in a single folder per version. No sub-nesting by harness or model.
 
@@ -82,7 +83,7 @@ If version is unknown, the `store` command should warn and either refuse or file
 
 ### 3.1 Run Phase (No Storage)
 
-`mosaic-agent-test` executes a suite and dumps the report JSON to the working directory (currently `dist/`). This is a raw output — debug runs, aborted runs, and experimental runs all land here. Nothing is stored in `TestResults/` automatically.
+`mosaic-agent-test` executes a suite and dumps the report JSON to the working directory (currently `dist/`). This is a raw output — debug runs, aborted runs, and experimental runs all land here. Nothing is stored in `OrchestrationTestResults/` automatically.
 
 Default behaviour: storage off. The user is iterating, debugging tests, fixing the tool. Most runs are throwaway.
 
@@ -91,8 +92,8 @@ Default behaviour: storage off. The user is iterating, debugging tests, fixing t
 The user decides a report represents real, finalized results and explicitly stores it:
 
 ```
-mosaic-agent-test store <report.json>... [--results-dir TestResults/]
-mosaic-agent-test store --dir <folder>  [--results-dir TestResults/]
+mosaic-agent-test store <report.json>... [--results-dir OrchestrationTestResults/]
+mosaic-agent-test store --dir <folder>  [--results-dir OrchestrationTestResults/]
 ```
 
 The command accepts one or more report files, or `--dir` to store all `.json` report files in a directory (e.g. `--dir dist/`). When given `--dir`, it scans for files matching the report schema (checks `schema_version` field), skipping non-report JSON files silently.
@@ -103,7 +104,7 @@ The `store` command, per report:
 2. Validates it is an AgentTest report (has `schema_version`, `suite_id`, `tests`).
 3. Extracts `subject_version`, `suite_id`, `harness_id`, `subject_model`, and the run timestamp.
 4. Validates that `subject_version` is not `unknown` (warns/refuses if so).
-5. Constructs the target path: `TestResults/{version}/{suite}--{harness}--{model-short}--{timestamp}.json`.
+5. Constructs the target path: `OrchestrationTestResults/Orchestrator/{version}/{suite}--{harness}--{model-short}--{timestamp}.json`.
 6. Creates the version directory if it does not exist.
 7. Copies (not moves) the report to the target path.
 
@@ -116,7 +117,7 @@ The original reports are untouched. The user can re-store, delete, or ignore the
 Summary generation is a separate, read-only operation over the stored results:
 
 ```
-mosaic-agent-test summary [--results-dir TestResults/] [--version v1.6.2]
+mosaic-agent-test summary [--results-dir OrchestrationTestResults/] [--version v1.6.2]
 ```
 
 The `summary` command:
@@ -169,11 +170,7 @@ interprets COMPLETED_NEEDS_ACTION status codes.
 
 The `:name` suffix on markers lets the tool match generated/analysis pairs and enables selective regeneration. The names are stable identifiers, not display text.
 
-### 4.2 Per-Version Summary (`TestResults/{version}/summary.md`)
-
-This is the primary analysis document for one orchestrator version.
-
-### 4.1 Per-Version Summary (`TestResults/{version}/summary.md`)
+### 4.2 Per-Version Summary (`OrchestrationTestResults/Orchestrator/{version}/summary.md`)
 
 This is the primary analysis document for one orchestrator version.
 
@@ -322,7 +319,7 @@ The final section of the per-version summary is pure analysis — no generated t
 <!-- /analysis:overall -->
 ```
 
-### 4.3 Cross-Version Summary (`TestResults/summary.md`)
+### 4.3 Cross-Version Summary (`OrchestrationTestResults/summary.md`)
 
 Compares orchestrator versions against each other — the regression/progress view.
 

@@ -173,6 +173,17 @@ func (m Model) viewPreflightNotice() string {
 // Live progress
 // ---------------------------------------------------------------------------
 
+// progressHelp returns help entries for the live-progress screen, adding the
+// pause/resume toggle to the standard entry-screen keys so the keybind is
+// discoverable without reading source code.
+func progressHelp() []tuicommon.HelpEntry {
+	pauseEntry := tuicommon.HelpEntry{
+		Key:  "p",
+		Desc: "pause/resume",
+	}
+	return append([]tuicommon.HelpEntry{pauseEntry}, tuicommon.EntryScreenHelp()...)
+}
+
 func (m Model) viewProgress() string {
 	width := m.contentWidth()
 
@@ -215,12 +226,18 @@ func (m Model) viewProgress() string {
 	// Suite-level tally with scope label, distinguishable from the queue-level figures.
 	lines = append(lines, fmt.Sprintf("Suite: Running: %d | Finished: %d | Remaining: %d", tally.Running, tally.Finished, tally.Remaining))
 
+	// Pause indicator: shown when the suite scheduler is paused. Workers
+	// already in progress complete normally; new ones wait until resumed.
+	if m.pauseCtl != nil && m.pauseCtl.IsPaused() {
+		lines = append(lines, "PAUSED -- press 'p' to resume scheduling")
+	}
+
 	body := strings.Join(lines, "\n")
 	if m.showFailureDetail && m.detailPane != nil {
 		body = body + "\n" + m.detailPane.View()
 	}
 
-	return m.renderScreen("Suite Progress", "", body, tuicommon.EntryScreenHelp())
+	return m.renderScreen("Suite Progress", "", body, progressHelp())
 }
 
 // ---------------------------------------------------------------------------

@@ -45,9 +45,9 @@ func passResultWithCost(n int, usd float64) domain.TestResult {
 
 // infrastructureResult is a TestResult as suite.runRepetition now builds it
 // for a runner error: FAIL, ReasonInfrastructure, and a condition carrying
-// the underlying error detail. Unlike stateIntegrityResult, this is never
-// retried — NeedsRetry only recognises ReasonStateIntegrity — so a single
-// occurrence, not a recurrence, is what Aggregate must act on.
+// the underlying error detail. A single occurrence is what Aggregate must act
+// on: once infra runs are excluded by ExclusionOf, they are never retried a
+// second time under the two-occurrence rule that applies to state-integrity.
 func infrastructureResult(n int) domain.TestResult {
 	return domain.TestResult{
 		Key:     domain.RunKey{RunID: "run-1", TestName: "example", RunNumber: n},
@@ -385,6 +385,117 @@ func TestAggregate_EchoMismatch_DetailListsMultipleMismatchedInvocations(t *test
 	want := "invocation 1: echo mismatch; invocation 3: echo mismatch"
 	if got.Exclusions[0].Detail != want {
 		t.Errorf("ExcludedRun.Detail = %q, want %q", got.Exclusions[0].Detail, want)
+	}
+}
+
+// --- Infrastructure-exclusion aggregate tests ---
+
+// TestAggregate_InfrastructureOnlyRun_ExcludedFromDenominator verifies that a
+// run excluded for infrastructure does not enter the pass-rate denominator:
+// Excluded increments and Counted does not.
+func TestAggregate_InfrastructureOnlyRun_ExcludedFromDenominator(t *testing.T) {
+	results := []domain.TestResult{infrastructureResult(1)}
+	policy := domain.RepetitionPolicy{Repetitions: 1, PassRate: 1.0}
+
+	got := evaluate.Aggregate(results, policy)
+
+	if got.Excluded != 1 {
+		t.Errorf("Excluded = %d, want 1 — the infrastructure run must be excluded from the denominator", got.Excluded)
+	}
+	if got.Counted != 0 {
+		t.Errorf("Counted = %d, want 0 — the infrastructure run must not enter the pass-rate denominator", got.Counted)
+	}
+}
+
+// TestAggregate_InfrastructureOnlyRun_ExclusionReasonIsInfrastructure verifies
+// that the exclusion entry for an infrastructure run carries ExclusionInfrastructure
+// as its reason, so a reader knows why the run did not count without inspecting
+// a sandbox.
+func TestAggregate_InfrastructureOnlyRun_ExclusionReasonIsInfrastructure(t *testing.T) {
+	results := []domain.TestResult{infrastructureResult(1)}
+	policy := domain.RepetitionPolicy{Repetitions: 1, PassRate: 1.0}
+
+	got := evaluate.Aggregate(results, policy)
+
+	if len(got.Exclusions) != 1 {
+		t.Fatalf("len(Exclusions) = %d, want 1 — setup sanity", len(got.Exclusions))
+	}
+	if got.Exclusions[0].Reason != domain.ExclusionInfrastructure {
+		t.Errorf("Exclusions[0].Reason = %q, want %q — the exclusion entry must carry ExclusionInfrastructure so a reader knows why the run did not count", got.Exclusions[0].Reason, domain.ExclusionInfrastructure)
+	}
+}
+
+// TestAggregate_InfrastructureOnlyRun_SetsInfrastructureFailure_DualMechanism
+// verifies that InfrastructureFailure is set to true even when the infrastructure
+// run is excluded (not counted). The dual-mechanism must be preserved: excluding
+// infra runs from the denominator must not silently suppress the
+// InfrastructureFailure flag that mechanism #2 (the direct hasReason check on
+// counted results) used to set.
+func TestAggregate_InfrastructureOnlyRun_SetsInfrastructureFailure_DualMechanism(t *testing.T) {
+	results := []domain.TestResult{infrastructureResult(1)}
+	policy := domain.RepetitionPolicy{Repetitions: 1, PassRate: 1.0}
+
+	got := evaluate.Aggregate(results, policy)
+
+	if !got.InfrastructureFailure {
+		t.Error("InfrastructureFailure = false, want true — an infrastructure-excluded run must still set InfrastructureFailure; excluding the run from the denominator must not suppress the flag (dual-mechanism preservation)")
+	}
+	if got.Verdict != domain.VerdictFail {
+		t.Errorf("Verdict = %q, want FAIL — an infrastructure failure must yield a FAIL verdict", got.Verdict)
+	}
+}
+
+// TestAggregate_InfrastructureRun_ExclusionDetailContainsRunnerError verifies
+// that the exclusion detail for an infrastructure run surfaces the runner error
+// from the run_not_started condition, so a reader can understand what went wrong
+// without inspecting the retained sandbox.
+func TestAggregate_InfrastructureRun_ExclusionDetailContainsRunnerError(t *testing.T) {
+	results := []domain.TestResult{infrastructureResult(1)}
+	policy := domain.RepetitionPolicy{Repetitions: 1, PassRate: 1.0}
+
+	got := evaluate.Aggregate(results, policy)
+
+	if len(got.Exclusions) != 1 {
+		t.Fatalf("len(Exclusions) = %d, want 1 — setup sanity", len(got.Exclusions))
+	}
+	detail := got.Exclusions[0].Detail
+	if detail == "" {
+		t.Fatal("Exclusions[0].Detail is empty, want a non-empty detail describing the runner error")
+	}
+	// The detail must surface the runner error text from the run_not_started condition.
+	wantSubstr := "spawn-plan failed"
+	if !strings.Contains(detail, wantSubstr) {
+		t.Errorf("Exclusions[0].Detail = %q — want it to contain the runner error %q so a reader can diagnose the failure without sandbox inspection", detail, wantSubstr)
+	}
+}
+
+// TestAggregate_InfrastructureRunAmongPassingRuns_OtherRunsStillCounted verifies
+// that when an infrastructure run appears among otherwise-passing runs, the other
+// runs are still counted normally and only the infrastructure run is excluded.
+func TestAggregate_InfrastructureRunAmongPassingRuns_OtherRunsStillCounted(t *testing.T) {
+	results := []domain.TestResult{passResult(1), infrastructureResult(2), passResult(3)}
+	policy := domain.RepetitionPolicy{Repetitions: 3, PassRate: 1.0}
+
+	got := evaluate.Aggregate(results, policy)
+
+	if got.Excluded != 1 {
+		t.Errorf("Excluded = %d, want 1 — only the infrastructure run must be excluded", got.Excluded)
+	}
+	if got.Counted != 2 {
+		t.Errorf("Counted = %d, want 2 — the two passing runs must still be counted", got.Counted)
+	}
+	if got.Passed != 2 {
+		t.Errorf("Passed = %d, want 2", got.Passed)
+	}
+}
+
+// TestNeedsRetry_InfrastructureResult_ReportsTrue verifies that NeedsRetry
+// returns true for an infrastructure result. NeedsRetry delegates to ExclusionOf,
+// so this also confirms ExclusionOf returns non-empty for a run carrying only
+// ReasonInfrastructure.
+func TestNeedsRetry_InfrastructureResult_ReportsTrue(t *testing.T) {
+	if !evaluate.NeedsRetry(infrastructureResult(1)) {
+		t.Error("NeedsRetry(infrastructure result) = false, want true — an infrastructure-excluded run must be retried like other excluded runs")
 	}
 }
 

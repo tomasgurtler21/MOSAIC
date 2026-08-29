@@ -36,7 +36,7 @@ type CommandSpec struct {
 var commandSpecs = []CommandSpec{
 	{Name: "run", Args: "<suite>", Summary: "Pre-flights the suite, then executes it"},
 	{Name: "validate", Args: "<suite>", Summary: "Pre-flights the suite only; creates no sandbox"},
-	{Name: "store", Args: "[<report.json>...]", Summary: "File reports into TestResults/", Group: "Process Test Reports"},
+	{Name: "store", Args: "[<report.json>...]", Summary: "File reports into OrchestrationTestResults/", Group: "Process Test Reports"},
 	{Name: "summary", Args: "", Summary: "Generate summary Markdown from stored reports", Group: "Process Test Reports"},
 }
 

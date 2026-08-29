@@ -44,6 +44,14 @@ func Aggregate(results []domain.TestResult, policy domain.RepetitionPolicy) doma
 		reason := ExclusionOf(r)
 		if reason != "" {
 			exclusionReasonCounts[reason]++
+			// Preserve InfrastructureFailure for infrastructure-excluded runs.
+			// Mechanism #2 (the direct hasReason check in the counted-run block
+			// below) no longer reaches these runs because they continue before
+			// that block. Setting the flag here ensures InfrastructureFailure
+			// is still set when an infra-only run is excluded.
+			if reason == domain.ExclusionInfrastructure {
+				infrastructureReason = true
+			}
 			out.Excluded++
 			out.Exclusions = append(out.Exclusions, domain.ExcludedRun{
 				Key:               r.Key,
@@ -113,6 +121,14 @@ func exclusionDetail(r domain.TestResult, reason domain.ExclusionReason) string 
 		return "harness process exited non-zero"
 	case domain.ExclusionStateIntegrity:
 		return "lock was reclaimed; one or more state updates may have been lost"
+	case domain.ExclusionInfrastructure:
+		// Extract the runner error detail from conditions if available.
+		for _, c := range r.Conditions {
+			if c.Kind == domain.ConditionRunNotStarted && c.Detail != "" {
+				return "runner/deploy error before subject started: " + c.Detail
+			}
+		}
+		return "infrastructure failure prevented the attempt from starting"
 	case domain.ExclusionEchoMismatch:
 		// Collect every ClassEchoFidelity assertion that failed. Each carries
 		// the invocation number in its Target field. Build a semicolon-separated

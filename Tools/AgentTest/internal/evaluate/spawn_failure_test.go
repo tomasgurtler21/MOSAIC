@@ -123,15 +123,16 @@ func TestExclusionOf_StateIntegrityTakesPrecedenceOverSpawnFailed(t *testing.T) 
 	}
 }
 
-// TestExclusionOf_InfrastructureRunnerError_ReturnsEmptyReason verifies that
-// a result from a runner error that carried ReasonInfrastructure directly
-// (but was never retried because the attempt never started) has no exclusion
-// reason: it triggers the infrastructure-failure flag via the direct path in
-// Aggregate, not via the exclusion path.
-func TestExclusionOf_InfrastructureRunnerError_ReturnsEmptyReason(t *testing.T) {
+// TestExclusionOf_InfrastructureRunnerError_ReturnsExclusionInfrastructure
+// verifies that a result from a runner error carrying ReasonInfrastructure
+// (the run_not_started condition -- a runner or deploy error before the subject
+// ran) is assigned ExclusionInfrastructure and excluded from the pass-rate
+// denominator. Evidence from a run that never started is evidence about the
+// infrastructure, not the subject.
+func TestExclusionOf_InfrastructureRunnerError_ReturnsExclusionInfrastructure(t *testing.T) {
 	got := evaluate.ExclusionOf(infrastructureResult(1))
-	if got != "" {
-		t.Errorf("ExclusionOf(infrastructure runner-error result) = %q, want empty — this result sets InfrastructureFailure via the direct path, not via exclusion", got)
+	if got != domain.ExclusionInfrastructure {
+		t.Errorf("ExclusionOf(infrastructure runner-error result) = %q, want %q — a run that never started must be excluded from the pass-rate denominator via ExclusionInfrastructure", got, domain.ExclusionInfrastructure)
 	}
 }
 
@@ -147,6 +148,7 @@ func TestNeedsRetry_ExclusionOfSymmetry_NeedsRetryAndExclusionOfAgree(t *testing
 		{"assertion fail", failResult(1)},
 		{"state integrity", stateIntegrityResult(1)},
 		{"spawn failed", spawnFailedResult(1)},
+		{"infrastructure", infrastructureResult(1)},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {

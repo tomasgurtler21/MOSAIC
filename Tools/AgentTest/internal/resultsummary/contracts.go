@@ -1,5 +1,5 @@
 // Package resultsummary generates Markdown summary files from stored AgentTest
-// report files in the TestResults/ directory tree. It is an adapter-layer
+// report files in the OrchestrationTestResults/ directory tree. It is an adapter-layer
 // package that reads through its FileSystem interface and writes summary.md
 // files using a marker-based merge strategy so user-authored analysis sections
 // are preserved across regenerations.
@@ -17,7 +17,7 @@ import (
 
 // SummaryRequest configures a single Generate invocation.
 type SummaryRequest struct {
-	// TestResultsRoot is the absolute path to the TestResults/ directory.
+	// TestResultsRoot is the absolute path to the OrchestrationTestResults/ directory.
 	TestResultsRoot string
 
 	// VersionFilter, when non-empty, restricts scanning to the named

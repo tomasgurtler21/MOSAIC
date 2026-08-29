@@ -22,9 +22,15 @@ func ExclusionOf(r domain.TestResult) domain.ExclusionReason {
 		return domain.ExclusionSpawnFailed
 	}
 	// Echo mismatch: a stubbed collaborator did not echo its stub faithfully.
-	// Evidence about the tool's environment, not the subject. Lowest precedence.
+	// Evidence about the tool's environment, not the subject.
 	if hasReason(r.Reasons, domain.ReasonEchoMismatch) {
 		return domain.ExclusionEchoMismatch
+	}
+	// Infrastructure: a runner error or recovered panic prevented the attempt
+	// from starting. Evidence about the infrastructure, not the subject.
+	// Lowest precedence in the chain.
+	if hasReason(r.Reasons, domain.ReasonInfrastructure) {
+		return domain.ExclusionInfrastructure
 	}
 	return ""
 }

@@ -410,7 +410,7 @@ func TestModelShort_TableDriven(t *testing.T) {
 // {testResultsRoot}/{version}/{suite}--{harness}--{model-short}--{timestamp}.json
 func TestStore_TargetPath_HasCorrectFormat(t *testing.T) {
 	fs := newFakeFS()
-	root := "/TestResults"
+	root := "/OrchestrationTestResults"
 	seedFile(fs, "/reports/valid_report.json", loadFixture(t, "valid_report.json"))
 
 	req := resultstore.StoreRequest{
@@ -426,7 +426,7 @@ func TestStore_TargetPath_HasCorrectFormat(t *testing.T) {
 		t.Fatalf("expected 1 report entry, got %d", len(result.Reports))
 	}
 
-	want := "/TestResults/v1.2.3/happy-path--claude-code--claude-sonnet-4.6--20260823T191126.json"
+	want := "/OrchestrationTestResults/Orchestrator/v1.2.3/happy-path--claude-code--claude-sonnet-4.6--20260823T191126.json"
 	if result.Reports[0].TargetPath != want {
 		t.Errorf("TargetPath = %q, want %q", result.Reports[0].TargetPath, want)
 	}
@@ -489,9 +489,9 @@ func TestStore_TargetPath_ModelShortStripsProviderPrefix(t *testing.T) {
 // file already exists Store skips and records a duplicate skip reason.
 func TestStore_DuplicateReport_IsSkippedWithWarning(t *testing.T) {
 	fs := newFakeFS()
-	root := "/TestResults"
+	root := "/OrchestrationTestResults"
 	srcPath := "/reports/valid_report.json"
-	targetPath := "/TestResults/v1.2.3/happy-path--claude-code--claude-sonnet-4.6--20260823T191126.json"
+	targetPath := "/OrchestrationTestResults/Orchestrator/v1.2.3/happy-path--claude-code--claude-sonnet-4.6--20260823T191126.json"
 
 	seedFile(fs, srcPath, loadFixture(t, "valid_report.json"))
 	// Pre-seed the target to simulate an already-stored report.
@@ -659,7 +659,7 @@ func TestStore_CreatesVersionDirectoryIfNeeded(t *testing.T) {
 	seedFile(fs, "/reports/valid_report.json", loadFixture(t, "valid_report.json"))
 
 	req := resultstore.StoreRequest{
-		TestResultsRoot: "/TestResults",
+		TestResultsRoot: "/OrchestrationTestResults",
 		ReportFiles:     []string{"/reports/valid_report.json"},
 	}
 
@@ -668,7 +668,7 @@ func TestStore_CreatesVersionDirectoryIfNeeded(t *testing.T) {
 		t.Fatalf("Store returned unexpected error: %v", err)
 	}
 
-	wantDir := "/TestResults/v1.2.3"
+	wantDir := "/OrchestrationTestResults/Orchestrator/v1.2.3"
 	if !fs.dirs[wantDir] {
 		t.Errorf("version directory %q was not created", wantDir)
 	}
@@ -1059,7 +1059,7 @@ func TestStore_SecondReport_HasCorrectTimestampInPath(t *testing.T) {
 	seedFile(fs, "/r/b.json", loadFixture(t, "second_valid_report.json"))
 
 	req := resultstore.StoreRequest{
-		TestResultsRoot: "/TestResults",
+		TestResultsRoot: "/OrchestrationTestResults",
 		ReportFiles:     []string{"/r/b.json"},
 	}
 
@@ -1071,7 +1071,7 @@ func TestStore_SecondReport_HasCorrectTimestampInPath(t *testing.T) {
 		t.Fatal("expected one report entry")
 	}
 
-	want := "/TestResults/v1.2.3/edge-cases--open-code--gpt-4o--20260824T083000.json"
+	want := "/OrchestrationTestResults/Orchestrator/v1.2.3/edge-cases--open-code--gpt-4o--20260824T083000.json"
 	if result.Reports[0].TargetPath != want {
 		t.Errorf("TargetPath = %q, want %q", result.Reports[0].TargetPath, want)
 	}
@@ -1083,7 +1083,7 @@ func TestStore_SecondReport_HasCorrectTimestampInPath(t *testing.T) {
 // returns an error from ReadFile for an input report file, Store propagates
 // the error (infrastructure failure, not a skip). The design contract states:
 // "It returns an error only for infrastructure failures (cannot read a file,
-// cannot write to TestResults/)."
+// cannot write to OrchestrationTestResults/)."
 func TestStore_ReadFileFailure_ReturnsError(t *testing.T) {
 	base := newFakeFS()
 	// The file is registered in the base fakeFS so it looks like it exists,
@@ -1151,6 +1151,191 @@ func TestStoreFromPaths_BothEmpty_ReturnsZeroAndNoError(t *testing.T) {
 	}
 	if result.Stored != 0 {
 		t.Errorf("Stored = %d, want 0 when no files are provided", result.Stored)
+	}
+}
+
+// ---- Storage path restructuring: Orchestrator subfolder ----
+
+// TestStore_TargetPath_IncludesOrchestratorSegment verifies that Store produces
+// paths under {root}/Orchestrator/{version}/{filename}.json, not the legacy
+// {root}/{version}/{filename}.json layout.
+func TestStore_TargetPath_IncludesOrchestratorSegment(t *testing.T) {
+	fs := newFakeFS()
+	root := "/OrchestrationTestResults"
+	seedFile(fs, "/reports/valid_report.json", loadFixture(t, "valid_report.json"))
+
+	req := resultstore.StoreRequest{
+		TestResultsRoot: root,
+		ReportFiles:     []string{"/reports/valid_report.json"},
+	}
+
+	// Act
+	result, err := resultstore.Store(fs, req)
+	if err != nil {
+		t.Fatalf("Store returned unexpected error: %v", err)
+	}
+	if len(result.Reports) != 1 {
+		t.Fatalf("expected 1 report entry, got %d", len(result.Reports))
+	}
+
+	// Assert: path must contain the Orchestrator segment between root and version.
+	want := "/OrchestrationTestResults/Orchestrator/v1.2.3/happy-path--claude-code--claude-sonnet-4.6--20260823T191126.json"
+	if result.Reports[0].TargetPath != want {
+		t.Errorf("TargetPath = %q, want %q", result.Reports[0].TargetPath, want)
+	}
+}
+
+// TestStore_TargetPath_NoLegacyLayout verifies that the filed path does NOT
+// follow the old {root}/{version}/{filename} layout (without Orchestrator).
+func TestStore_TargetPath_NoLegacyLayout(t *testing.T) {
+	fs := newFakeFS()
+	root := "/OrchestrationTestResults"
+	seedFile(fs, "/reports/valid_report.json", loadFixture(t, "valid_report.json"))
+
+	req := resultstore.StoreRequest{
+		TestResultsRoot: root,
+		ReportFiles:     []string{"/reports/valid_report.json"},
+	}
+
+	// Act
+	result, err := resultstore.Store(fs, req)
+	if err != nil {
+		t.Fatalf("Store returned unexpected error: %v", err)
+	}
+	if len(result.Reports) != 1 {
+		t.Fatalf("expected 1 report entry, got %d", len(result.Reports))
+	}
+
+	// Assert: old layout must NOT appear in the path.
+	legacy := root + "/v1.2.3/"
+	if strings.HasPrefix(result.Reports[0].TargetPath, legacy) {
+		t.Errorf("TargetPath %q uses legacy layout (missing Orchestrator segment)", result.Reports[0].TargetPath)
+	}
+}
+
+// TestStore_CreatesOrchestratorVersionDirectory verifies that MkdirAll is called
+// with the path {root}/Orchestrator/{version}, not {root}/{version}.
+func TestStore_CreatesOrchestratorVersionDirectory(t *testing.T) {
+	fs := newFakeFS()
+	root := "/OrchestrationTestResults"
+	seedFile(fs, "/reports/valid_report.json", loadFixture(t, "valid_report.json"))
+
+	req := resultstore.StoreRequest{
+		TestResultsRoot: root,
+		ReportFiles:     []string{"/reports/valid_report.json"},
+	}
+
+	// Act
+	_, err := resultstore.Store(fs, req)
+	if err != nil {
+		t.Fatalf("Store returned unexpected error: %v", err)
+	}
+
+	// Assert: the Orchestrator/version directory must have been created.
+	wantDir := root + "/Orchestrator/v1.2.3"
+	if !fs.dirs[wantDir] {
+		t.Errorf("expected MkdirAll to create %q, but it was not found in created dirs", wantDir)
+	}
+
+	// The legacy directory must NOT have been created.
+	legacyDir := root + "/v1.2.3"
+	if fs.dirs[legacyDir] {
+		t.Errorf("MkdirAll created legacy directory %q (Orchestrator segment missing)", legacyDir)
+	}
+}
+
+// TestStore_WithOrchestratorPath_DuplicateDetection verifies that duplicate
+// detection works correctly with the new path structure: a report is skipped
+// when its target path at {root}/Orchestrator/{version}/{filename} already exists.
+func TestStore_WithOrchestratorPath_DuplicateDetection(t *testing.T) {
+	fs := newFakeFS()
+	root := "/OrchestrationTestResults"
+	srcPath := "/reports/valid_report.json"
+	// Pre-seed the target at the NEW path structure (with Orchestrator segment).
+	targetPath := root + "/Orchestrator/v1.2.3/happy-path--claude-code--claude-sonnet-4.6--20260823T191126.json"
+
+	seedFile(fs, srcPath, loadFixture(t, "valid_report.json"))
+	seedFile(fs, targetPath, loadFixture(t, "valid_report.json"))
+
+	req := resultstore.StoreRequest{
+		TestResultsRoot: root,
+		ReportFiles:     []string{srcPath},
+	}
+
+	// Act
+	result, err := resultstore.Store(fs, req)
+	if err != nil {
+		t.Fatalf("Store returned unexpected error for duplicate: %v", err)
+	}
+
+	// Assert: duplicate is detected at the new path.
+	if result.Stored != 0 {
+		t.Errorf("Stored = %d, want 0 for a duplicate", result.Stored)
+	}
+	if result.SkippedDuplicate != 1 {
+		t.Errorf("SkippedDuplicate = %d, want 1", result.SkippedDuplicate)
+	}
+	if len(result.Reports) != 1 || result.Reports[0].SkipReason != resultstore.SkipDuplicate {
+		t.Errorf("expected SkipReason %q, got %q", resultstore.SkipDuplicate, result.Reports[0].SkipReason)
+	}
+}
+
+// TestStore_WithOrchestratorPath_UnknownVersionStillSkipped verifies that the
+// unknown-version skip behavior is preserved with the new path structure.
+func TestStore_WithOrchestratorPath_UnknownVersionStillSkipped(t *testing.T) {
+	fs := newFakeFS()
+	seedFile(fs, "/reports/unknown_version.json", loadFixture(t, "unknown_version_report.json"))
+
+	req := resultstore.StoreRequest{
+		TestResultsRoot: "/OrchestrationTestResults",
+		ReportFiles:     []string{"/reports/unknown_version.json"},
+	}
+
+	// Act
+	result, err := resultstore.Store(fs, req)
+	if err != nil {
+		t.Fatalf("Store returned an error for unknown-version report, want nil: %v", err)
+	}
+
+	// Assert: skip behavior unchanged.
+	if result.Stored != 0 {
+		t.Errorf("Stored = %d, want 0 for unknown-version report", result.Stored)
+	}
+	if result.SkippedUnknown != 1 {
+		t.Errorf("SkippedUnknown = %d, want 1", result.SkippedUnknown)
+	}
+	if len(result.Reports) == 0 || result.Reports[0].SkipReason != resultstore.SkipUnknownVersion {
+		t.Errorf("expected SkipReason %q, got %q", resultstore.SkipUnknownVersion, result.Reports[0].SkipReason)
+	}
+}
+
+// TestStore_WithOrchestratorPath_FilenameFormatPreserved verifies that the
+// filename segment of the path ({suite}--{harness}--{model-short}--{timestamp}.json)
+// is unchanged by the addition of the Orchestrator segment.
+func TestStore_WithOrchestratorPath_FilenameFormatPreserved(t *testing.T) {
+	fs := newFakeFS()
+	root := "/OrchestrationTestResults"
+	seedFile(fs, "/reports/valid_report.json", loadFixture(t, "valid_report.json"))
+
+	req := resultstore.StoreRequest{
+		TestResultsRoot: root,
+		ReportFiles:     []string{"/reports/valid_report.json"},
+	}
+
+	// Act
+	result, err := resultstore.Store(fs, req)
+	if err != nil {
+		t.Fatalf("Store returned unexpected error: %v", err)
+	}
+	if len(result.Reports) == 0 {
+		t.Fatal("expected at least one report entry")
+	}
+
+	// Assert: the filename portion still follows the expected format.
+	path := result.Reports[0].TargetPath
+	wantFilename := "happy-path--claude-code--claude-sonnet-4.6--20260823T191126.json"
+	if !strings.HasSuffix(path, "/"+wantFilename) {
+		t.Errorf("TargetPath %q does not end with expected filename %q", path, wantFilename)
 	}
 }
 

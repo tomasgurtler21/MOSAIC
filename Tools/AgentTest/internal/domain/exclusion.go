@@ -16,8 +16,14 @@ const (
 
 	// ExclusionEchoMismatch: a stubbed collaborator did not echo its stub
 	// faithfully. Evidence about the tool's environment, not about the subject.
-	// Lowest in the precedence chain: state_integrity > spawn_failed > echo_mismatch.
 	ExclusionEchoMismatch ExclusionReason = "echo_mismatch"
+
+	// ExclusionInfrastructure: a runner error or recovered panic prevented
+	// the attempt from starting (the run_not_started condition). Evidence
+	// about the infrastructure, not about the subject.
+	// Lowest in the precedence chain:
+	//   state_integrity > spawn_failed > echo_mismatch > infrastructure.
+	ExclusionInfrastructure ExclusionReason = "infrastructure"
 )
 
 // ExcludedRun is one run kept out of the pass-rate denominator, and why.

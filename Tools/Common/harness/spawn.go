@@ -234,11 +234,11 @@ func Run(ctx context.Context, cmd Command, args []string, o RunOptions) (Respons
 	var waitErr error
 	select {
 	case <-ctx.Done():
-		_ = execCmd.Process.Kill()
+		killProcessTree(execCmd.Process)
 		<-waitCh
 		return Response{}, ErrCancelled
 	case <-time.After(timeout):
-		_ = execCmd.Process.Kill()
+		killProcessTree(execCmd.Process)
 		<-waitCh
 		logEvent(o.Sink, "spawn.timeout", "invocation exceeded configured timeout", nil)
 		return Response{}, ErrTimeout

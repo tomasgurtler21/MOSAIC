@@ -260,7 +260,7 @@ func renderProblemAreasSection(sb *strings.Builder, v VersionSummary) {
 }
 
 // RenderCrossVersionSummary produces the complete Markdown content for the
-// cross-version summary.md file at TestResults/summary.md. It renders a
+// cross-version summary.md file at OrchestrationTestResults/summary.md. It renders a
 // comparison table showing how each model+harness combination performs across
 // versions, enabling regression detection.
 //

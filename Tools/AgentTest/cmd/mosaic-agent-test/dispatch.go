@@ -457,8 +457,8 @@ type Deps struct {
 	FixtureRoot   string
 	WorkspaceRoot string
 
-	// TestResultsRoot is the absolute path to the TestResults/ directory,
-	// derived from MosaicRoot as filepath.Join(MosaicRoot, "TestResults").
+	// TestResultsRoot is the absolute path to the OrchestrationTestResults/ directory,
+	// derived from MosaicRoot as filepath.Join(MosaicRoot, "OrchestrationTestResults").
 	// Supplied to both frontends so store/summary subcommands and TUI
 	// flows can resolve the storage tree without re-deriving it.
 	TestResultsRoot string
@@ -640,7 +640,7 @@ func buildDeps(cfg WiringConfig) (Deps, error) {
 		HarnessID:       cfg.HarnessID,
 		FixtureRoot:     cfg.FixtureRoot,
 		WorkspaceRoot:   cfg.WorkspaceRoot,
-		TestResultsRoot: filepath.Join(cfg.MosaicRoot, "TestResults"),
+		TestResultsRoot: filepath.Join(cfg.MosaicRoot, "OrchestrationTestResults"),
 
 		SandboxDiagnostics: diagDest == DestRunSandbox,
 	}, nil
@@ -720,6 +720,11 @@ type composedSuiteRunner struct {
 	// into suite.Options.MaxConcurrentRuns when the suite is constructed.
 	maxConcurrentRuns int
 
+	// pause, when non-nil, is the PauseControl threaded from the TUI through
+	// the composition root into suite.Options.Pause. nil means no pausing
+	// (CLI path and any caller that does not supply a control).
+	pause *suite.PauseControl
+
 	// newSuite is an injectable constructor that replaces suite.New in tests,
 	// allowing the caller to capture suite.Options before the suite is created
 	// for field-for-field wiring assertions. nil uses suite.New.
@@ -747,6 +752,7 @@ func (r composedSuiteRunner) Run(ctx context.Context, p preflight.Plan, sink dom
 		Clock:             r.deps.Clock,
 		Retention:         r.retention,
 		MaxConcurrentRuns: r.maxConcurrentRuns,
+		Pause:             r.pause,
 	})
 	return s.Run(ctx, p)
 }
@@ -790,6 +796,11 @@ type tuiSuiteRunner struct {
 	// Zero means suite.DefaultMaxConcurrentRuns.
 	maxConcurrentRuns int
 
+	// pause, when non-nil, is the PauseControl created by the TUI at
+	// run-start and passed here so that the suite's workers observe the
+	// same signal the TUI keybinding handler drives. nil means no pausing.
+	pause *suite.PauseControl
+
 	// newSuite is an injectable constructor that replaces suite.New in tests,
 	// allowing the caller to capture suite.Options before the suite is created
 	// for field-for-field wiring assertions. nil uses suite.New.
@@ -803,6 +814,7 @@ func (r tuiSuiteRunner) Run(ctx context.Context, p preflight.Plan, sink domain.P
 		ws:                r.ws,
 		retention:         retention,
 		maxConcurrentRuns: r.maxConcurrentRuns,
+		pause:             r.pause,
 		newSuite:          r.newSuite,
 	}.Run(ctx, p, sink)
 }
@@ -943,7 +955,7 @@ func cliOptions(d Deps, stdout, stderr io.Writer) cli.Options {
 		WriteFile: osWriteFile,
 
 		// Store and Summary wire the report-processing subcommands to the
-		// real filesystem and the resolved TestResults root. All Dir-or-Files
+		// real filesystem and the resolved OrchestrationTestResults root. All Dir-or-Files
 		// branching and mutual-exclusion validation live in StoreFromPaths, so
 		// these closures are pure argument-passing.
 		Store: func(req resultstore.StoreFromPathsRequest) (resultstore.StoreResult, error) {
@@ -994,7 +1006,7 @@ func tuiOptions(d Deps, suites []string) (tui.Options, error) {
 	return tui.Options{
 		Preflight: d.Preflight,
 		Suite:     tuiSuiteRunner{deps: d, bundle: defaultBundle, ws: ws},
-		NewSuiteRunner: func(maxConcurrentRuns int, harnessID string) (tui.SuiteRunner, tui.PreflightFunc, error) {
+		NewSuiteRunner: func(maxConcurrentRuns int, harnessID string, pause *suite.PauseControl) (tui.SuiteRunner, tui.PreflightFunc, error) {
 			bundle, err := d.HarnessFactory.Bundle(context.Background(), harnessID)
 			if err != nil {
 				return nil, nil, fmt.Errorf("harness %q: %w", harnessID, err)
@@ -1009,6 +1021,7 @@ func tuiOptions(d Deps, suites []string) (tui.Options, error) {
 				bundle:            bundle,
 				ws:                ws,
 				maxConcurrentRuns: maxConcurrentRuns,
+				pause:             pause,
 			}
 			return r, pf, nil
 		},
@@ -1059,7 +1072,7 @@ func tuiOptions(d Deps, suites []string) (tui.Options, error) {
 		},
 
 		// Store and Summary wire the process-reports flow to the real
-		// filesystem and the resolved TestResults root. Same pattern as
+		// filesystem and the resolved OrchestrationTestResults root. Same pattern as
 		// cliOptions: pure argument-passing, all branching in StoreFromPaths.
 		Store: func(req resultstore.StoreFromPathsRequest) (resultstore.StoreResult, error) {
 			return resultstore.StoreFromPaths(osFileSystem{}, req)

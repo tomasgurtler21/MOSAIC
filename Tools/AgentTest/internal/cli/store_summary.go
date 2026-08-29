@@ -7,10 +7,10 @@ import (
 	"mosaic-agent-test/internal/resultsummary"
 )
 
-// StoreFunc processes report files into the TestResults tree. The
+// StoreFunc processes report files into the OrchestrationTestResults tree. The
 // composition root supplies a function that calls
 // resultstore.StoreFromPaths with a real filesystem and the resolved
-// TestResults root.
+// OrchestrationTestResults root.
 //
 // The function receives a StoreFromPathsRequest (with file paths from
 // positional args or a directory from --dir) and returns the result.
@@ -23,7 +23,7 @@ type StoreFunc func(req resultstore.StoreFromPathsRequest) (resultstore.StoreRes
 // SummaryFunc generates summary Markdown files from stored reports.
 // The composition root supplies a function that calls
 // resultsummary.Generate with a real filesystem and the resolved
-// TestResults root.
+// OrchestrationTestResults root.
 type SummaryFunc func(req resultsummary.SummaryRequest) (resultsummary.SummaryResult, error)
 
 // storeCommand implements the `store` command: validates input, builds a

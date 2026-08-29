@@ -138,7 +138,7 @@ type Options struct {
 	// WriteFile writes the JSON report file. See WriteFileFunc.
 	WriteFile WriteFileFunc
 
-	// Store processes report files into TestResults/. Nil means the
+	// Store processes report files into OrchestrationTestResults/. Nil means the
 	// store command is unavailable (wiring omission is surfaced as an
 	// error, not silently skipped).
 	Store StoreFunc
@@ -147,8 +147,8 @@ type Options struct {
 	// is unavailable.
 	Summary SummaryFunc
 
-	// TestResultsRoot is the absolute path to the TestResults/ directory,
-	// resolved by the composition root as filepath.Join(MosaicRoot, "TestResults").
+	// TestResultsRoot is the absolute path to the OrchestrationTestResults/ directory,
+	// resolved by the composition root as filepath.Join(MosaicRoot, "OrchestrationTestResults").
 	// Passed through to StoreFunc/SummaryFunc by the composition root's
 	// wiring; the CLI itself does not use it directly but may display it
 	// in output messages.

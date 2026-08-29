@@ -404,7 +404,7 @@ func (m Model) viewSummaryResult() string {
 		r := m.processReports.summaryResult
 		total := len(r.FilesWritten) + len(r.FilesUpdated)
 		if total == 0 {
-			b.WriteString("No summary files written (TestResults/ may be empty).")
+			b.WriteString("No summary files written (OrchestrationTestResults/ may be empty).")
 		} else {
 			b.WriteString(fmt.Sprintf("%d summary file(s) written or updated.", total))
 			for _, f := range r.FilesWritten {

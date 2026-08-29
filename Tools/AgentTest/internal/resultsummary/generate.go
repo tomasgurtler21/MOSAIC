@@ -72,12 +72,12 @@ func (a *statsAccumulator) toStats(model, harness string) HarnessModelStats {
 	}
 }
 
-// Generate scans the TestResults tree, groups reports, and writes or
+// Generate scans the OrchestrationTestResults tree, groups reports, and writes or
 // updates summary.md files. It returns a result describing which files
 // were written or updated. It returns an error only for infrastructure
-// failures (cannot read TestResults/, cannot write a summary.md).
+// failures (cannot read OrchestrationTestResults/, cannot write a summary.md).
 //
-// An empty or missing TestResults tree is not an error; Generate
+// An empty or missing OrchestrationTestResults tree is not an error; Generate
 // returns a SummaryResult with zero files written.
 //
 // When req.VersionFilter is non-empty, only that version directory

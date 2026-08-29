@@ -286,6 +286,10 @@ type spyUserConfig struct {
 	// call in saved (Save's contract is "attempt the write and report the error", not
 	// "silently drop the attempt").
 	saveErr error
+
+	// lockErr, when non-nil, is returned by WithLock instead of calling fn.
+	// Simulates a lock-acquisition timeout for testing the notifyPersistFailure path.
+	lockErr error
 }
 
 func (s *spyUserConfig) Load() (config.UserConfig, error) {
@@ -304,6 +308,16 @@ func (s *spyUserConfig) Save(cfg config.UserConfig) error {
 	return nil
 }
 func (s *spyUserConfig) Path() string { return s.path }
+
+// WithLock on the spy calls fn directly (no actual locking needed in unit tests).
+// When lockErr is non-nil, WithLock returns that error instead of calling fn,
+// simulating a lock-acquisition timeout.
+func (s *spyUserConfig) WithLock(fn func() error) error {
+	if s.lockErr != nil {
+		return s.lockErr
+	}
+	return fn()
+}
 
 // ---------------------------------------------------------------------------
 // stubLogger — satisfies logging.Logger without recording

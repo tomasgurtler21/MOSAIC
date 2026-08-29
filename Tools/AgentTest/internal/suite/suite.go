@@ -111,6 +111,15 @@ type Options struct {
 	// configured with and the value reaching the runner are the same one,
 	// checkable field-for-field rather than trusted by comment.
 	Retention domain.RetentionPolicy
+
+	// Pause, when non-nil, is checked by workers before picking up each new
+	// work item. When paused, workers block until resumed or the context is
+	// cancelled. When nil, workers never pause (backward compatible).
+	//
+	// The caller retains a reference to the same PauseControl it passes here,
+	// enabling external triggering (TUI keybinding, CLI signal) without the
+	// suite needing to know about frontends.
+	Pause *PauseControl
 }
 
 // Suite runs a validated plan and renders the single result model both
@@ -298,6 +307,15 @@ func (s *Suite) Run(ctx context.Context, p preflight.Plan) (report.Result, error
 				// goroutine and the suite does not orphan goroutines.
 				if ctx.Err() != nil {
 					continue
+				}
+
+				// Block while paused. If ctx is cancelled during the wait,
+				// fall through to the ctx.Err() drain on the next iteration.
+				// Pause is independent of ctx: in-flight runs are unaffected.
+				if s.opts.Pause != nil {
+					if err := s.opts.Pause.WaitIfPaused(ctx); err != nil {
+						continue // context cancelled while paused; drain
+					}
 				}
 
 				final, attempts := s.executeWork(ctx, item, slot, sink, clock)

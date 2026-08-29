@@ -15,6 +15,7 @@ import (
 	"fmt"
 	"strings"
 
+	"github.com/charmbracelet/bubbles/key"
 	tea "github.com/charmbracelet/bubbletea"
 
 	commonharness "mosaic-common/harness"
@@ -47,9 +48,9 @@ type PreflightFunc func(preflight.Input) (preflight.Plan, authoring.Report)
 // write, so a wiring omission is visible.
 type WriteFileFunc func(path string, data []byte) error
 
-// StoreFunc processes report files into the TestResults tree. The composition
+// StoreFunc processes report files into the OrchestrationTestResults tree. The composition
 // root supplies a function that calls resultstore.StoreFromPaths with a real
-// filesystem and the resolved TestResults root.
+// filesystem and the resolved OrchestrationTestResults root.
 //
 // Following the PreflightFunc precedent, this type references resultstore types
 // directly rather than defining mirror types.
@@ -57,7 +58,7 @@ type StoreFunc func(req resultstore.StoreFromPathsRequest) (resultstore.StoreRes
 
 // SummaryFunc generates summary Markdown files from stored reports. The
 // composition root supplies a function that calls resultsummary.Generate with a
-// real filesystem and the resolved TestResults root.
+// real filesystem and the resolved OrchestrationTestResults root.
 type SummaryFunc func(req resultsummary.SummaryRequest) (resultsummary.SummaryResult, error)
 
 // StoreFinishedMsg carries the store operation's outcome into the Bubble Tea
@@ -131,7 +132,7 @@ type Options struct {
 	//
 	// When nil, Suite and the top-level Preflight are used instead (fallback
 	// for tests that supply a fake runner directly).
-	NewSuiteRunner func(maxConcurrentRuns int, harnessID string) (SuiteRunner, PreflightFunc, error)
+	NewSuiteRunner func(maxConcurrentRuns int, harnessID string, pause *suite.PauseControl) (SuiteRunner, PreflightFunc, error)
 
 	// Suites are the discovered suite paths offered for selection on the
 	// suite-select screen.
@@ -188,7 +189,7 @@ type Options struct {
 	// one preflight applies at run start.
 	ResolveSuiteDefaults func(suitePath string) (SuiteDefaults, error)
 
-	// Store processes report files into TestResults/. Nil means the
+	// Store processes report files into OrchestrationTestResults/. Nil means the
 	// "Store Reports" flow is unavailable (the TUI disables the option
 	// rather than crashing).
 	Store StoreFunc
@@ -197,7 +198,7 @@ type Options struct {
 	// Summary" flow is unavailable.
 	Summary SummaryFunc
 
-	// TestResultsRoot is the absolute path to TestResults/, shown read-only
+	// TestResultsRoot is the absolute path to OrchestrationTestResults/, shown read-only
 	// in the store/summary input screens for user confirmation.
 	TestResultsRoot string
 }
@@ -324,8 +325,9 @@ type Model struct {
 	width  int
 	height int
 
-	ctx    context.Context
-	cancel context.CancelFunc
+	ctx      context.Context
+	cancel   context.CancelFunc
+	pauseCtl *suite.PauseControl
 
 	// sinkBox is a pointer so that Run can install the real, program-backed
 	// sink after tea.NewProgram constructs its own copy of the initial
@@ -674,6 +676,15 @@ func normalizeEnter(msg tea.KeyMsg) tea.KeyMsg {
 	return msg
 }
 
+// keyPause is the AgentTest-local keybinding for pausing and resuming a
+// running suite. It is defined here (not in Tools/Common/tui/keys.go) because
+// pause/resume is specific to AgentTest's suite scheduler and must not leak
+// into the shared GlobalKeys used by Deployment, LogAnalyzer, and Runner.
+var keyPause = key.NewBinding(
+	key.WithKeys("p"),
+	key.WithHelp("p", "pause/resume"),
+)
+
 // handleKey routes a key press. The shared Cancel binding quits from any
 // screen; while a suite is running it cancels through the suite's context
 // first, so the per-test lifecycle's guaranteed teardown removes the
@@ -726,9 +737,21 @@ func (m Model) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		// The pre-flight notice accepts no navigation keys beyond the shared
 		// Cancel binding already handled above; the pre-flight work is in flight.
 		return m, nil
+	case ScreenProgress:
+		// Pause/resume the running suite on 'p'. The keypress toggles the
+		// PauseControl that was wired end-to-end to the suite's workers at
+		// run-start. No-op when no pause control is available.
+		if tuicommon.MatchesKey(msg, keyPause) && m.pauseCtl != nil {
+			if m.pauseCtl.IsPaused() {
+				m.pauseCtl.Resume()
+			} else {
+				m.pauseCtl.Pause()
+			}
+		}
+		return m, nil
 	default:
-		// ScreenProgress accepts no navigation keys beyond the shared
-		// Cancel binding handled above; the suite is driving the screen.
+		// Other screens (e.g. ScreenPreflightNotice) accept no navigation
+		// keys beyond the shared Cancel binding handled above.
 		return m, nil
 	}
 }
@@ -1222,7 +1245,7 @@ func (m Model) collectQueuePreflight() preflightQueueDoneMsg {
 
 	var activePreflight PreflightFunc
 	if m.opts.NewSuiteRunner != nil {
-		_, pf, err := m.opts.NewSuiteRunner(bound, m.selectedHarness)
+		_, pf, err := m.opts.NewSuiteRunner(bound, m.selectedHarness, nil)
 		if err != nil {
 			// Harness resolution failed: every selected suite fails.
 			failures := make([]suitePreflightFailure, len(m.selectedSuites))
@@ -1373,8 +1396,13 @@ func (m Model) startSuiteAt(idx int) (tea.Model, tea.Cmd) {
 	var runner SuiteRunner
 	var activePreflight PreflightFunc
 
+	// Create a fresh PauseControl for this run. It is retained on the Model
+	// (m.pauseCtl) so the TUI keybinding handler can call Pause/Resume, and
+	// passed into the runner so the suite's workers observe the same signal.
+	pc := suite.NewPauseControl()
+
 	if m.opts.NewSuiteRunner != nil {
-		r, pf, err := m.opts.NewSuiteRunner(bound, m.selectedHarness)
+		r, pf, err := m.opts.NewSuiteRunner(bound, m.selectedHarness, pc)
 		if err != nil {
 			m.statusMsg = fmt.Sprintf("cannot use harness %q: %v", m.selectedHarness, err)
 			m.statusError = true
@@ -1448,6 +1476,7 @@ func (m Model) startSuiteAt(idx int) (tea.Model, tea.Cmd) {
 	ctx, cancel := context.WithCancel(base)
 	m.ctx = ctx
 	m.cancel = cancel
+	m.pauseCtl = pc
 	m.running = true
 	m.screen = ScreenProgress
 	sink := m.sinkBox.get()

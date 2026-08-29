@@ -47,9 +47,16 @@ import (
 // TestDeployNew_PersistSaveFails_SucceedsWithWarningNotice verifies that DeployNew still
 // reports success when the post-execution persist Save fails, and that the failure is
 // surfaced through a warning Notice naming the config file.
+//
+// Under R1 (interactive-only persistence), persistTierModels only calls Save when at least
+// one tier model was answered interactively. This test scripts a QTierModel answer so that
+// the persist is triggered and Save is attempted; the configured saveErr then fires so the
+// Notice path can be exercised.
 func TestDeployNew_PersistSaveFails_SucceedsWithWarningNotice(t *testing.T) {
-	// Arrange
-	stub := interactiontest.NewBuilder().Build()
+	// Arrange — script a QTierModel answer so persistTierModels attempts Save.
+	stub := interactiontest.NewBuilder().
+		AnswerSelectOne(domain.QTierModel, "HIGH", "model-a").
+		Build()
 	deps, workspace := newBaseDeps(t, stub)
 	saveErr := errors.New("permission denied")
 	spy := &spyUserConfig{saveErr: saveErr, path: "/mosaic/MosaicDeploy/config/user-config.yaml"}
@@ -102,9 +109,18 @@ func TestDeployNew_PersistSaveFails_SucceedsWithWarningNotice(t *testing.T) {
 // TestDeployNew_PersistSaveFails_BothPersistsSurfacedIndependently verifies that when both
 // persistTierModels and persistCustomModelIDs fail at DeployNew's persist site, each produces
 // its own Notice — a failure of one does not suppress the other's attempt or its Notice.
+//
+// Under R1 (interactive-only persistence), each persist helper only calls Save when it has
+// interactive results to write. Scripting a custom QTierModel answer (ans.Custom set)
+// satisfies both conditions simultaneously: the custom tier model ID is recorded in
+// interactivelyResolvedTiers (triggering persistTierModels) and is also accumulated by
+// appendCustomID (triggering persistCustomModelIDs). Both Saves fail with saveErr, each
+// producing its own Notice independently.
 func TestDeployNew_PersistSaveFails_BothPersistsSurfacedIndependently(t *testing.T) {
-	// Arrange
-	stub := interactiontest.NewBuilder().Build()
+	// Arrange — a custom QTierModel answer triggers both persists in one run.
+	stub := interactiontest.NewBuilder().
+		AnswerSelectOneCustom(domain.QTierModel, "HIGH", "custom-tier-model-persist-test").
+		Build()
 	deps, workspace := newBaseDeps(t, stub)
 	spy := &spyUserConfig{saveErr: errors.New("disk full"), path: "/mosaic/MosaicDeploy/config/user-config.yaml"}
 	deps.UserConfig = spy
@@ -143,9 +159,16 @@ func TestDeployNew_PersistSaveFails_BothPersistsSurfacedIndependently(t *testing
 // TestUpdate_PersistCustomModelIDsSaveFails_SucceedsWithWarningNotice verifies that Update
 // still reports success when its persistCustomModelIDs Save fails, surfaced through a
 // warning Notice.
+//
+// Under R1 (interactive-only persistence), persistCustomModelIDs only calls Save when at
+// least one custom model ID was entered interactively. This test scripts a QAgentModel
+// custom answer (and skips QTierModel) so that appendCustomID is called and the persist
+// path is reached; the configured saveErr then fires so the Notice path can be exercised.
 func TestUpdate_PersistCustomModelIDsSaveFails_SucceedsWithWarningNotice(t *testing.T) {
-	// Arrange
-	stub := interactiontest.NewBuilder().Build()
+	// Arrange — script a custom QAgentModel answer to trigger persistCustomModelIDs.
+	stub := interactiontest.NewBuilder().
+		AnswerSelectOneCustom(domain.QAgentModel, "test-runner", "custom-update-model-test").
+		Build()
 	deps, workspace := newBaseDeps(t, stub)
 	saveErr := errors.New("permission denied")
 	spy := &spyUserConfig{saveErr: saveErr, path: "/mosaic/MosaicDeploy/config/user-config.yaml"}
@@ -154,11 +177,13 @@ func TestUpdate_PersistCustomModelIDsSaveFails_SucceedsWithWarningNotice(t *test
 	deps.Executor = executor
 	svc := app.New(deps)
 
-	// Act — "test-runner.md" is absent, so it is newly-required and reaches the persist step.
+	// Act — AddWorkflowIDs drives resolveModels for the workflow's agents; SkipAll for
+	// QTierModel forces the per-agent QAgentModel path so the scripted custom answer fires.
 	_, err := svc.Update(context.Background(), app.UpdateRequest{
 		HarnessID:       "stub-harness",
 		WorkspacePath:   workspace,
 		AddWorkflowIDs:  []string{"quick-fix"},
+		SkipAll:         map[domain.QuestionID]bool{domain.QTierModel: true},
 		AutoConfirmPlan: true,
 	})
 
@@ -193,9 +218,17 @@ func TestUpdate_PersistCustomModelIDsSaveFails_SucceedsWithWarningNotice(t *test
 // UpdateWorkflows still reports success when its persist Save calls fail, surfaced through
 // warning Notices, for a run with a newly-required agent (the only case in which
 // UpdateWorkflows calls either persist function).
+//
+// Under R1 (interactive-only persistence), each persist helper only calls Save when it has
+// interactive results. Scripting a custom QTierModel answer triggers both persists at once:
+// the custom tier model ID enters interactivelyResolvedTiers (persistTierModels) and is
+// also accumulated by appendCustomID (persistCustomModelIDs). Both Saves fail with
+// saveErr, each producing its own Notice independently.
 func TestUpdateWorkflows_PersistSaveFails_SucceedsWithWarningNotices(t *testing.T) {
-	// Arrange
-	stub := interactiontest.NewBuilder().Build()
+	// Arrange — a custom QTierModel answer triggers both persists in one run.
+	stub := interactiontest.NewBuilder().
+		AnswerSelectOneCustom(domain.QTierModel, "HIGH", "custom-tier-model-wf-test").
+		Build()
 	deps, workspace := newBaseDeps(t, stub)
 	deps.Planner = &stubPlanner{plan: newAgentPlan(workspace)}
 	saveErr := errors.New("disk full")
@@ -225,6 +258,75 @@ func TestUpdateWorkflows_PersistSaveFails_SucceedsWithWarningNotices(t *testing.
 	for _, n := range notices {
 		if n.Level != domain.NoticeWarning {
 			t.Errorf("Notice.Level = %q, want %q", n.Level, domain.NoticeWarning)
+		}
+	}
+}
+
+// ---------------------------------------------------------------------------
+// Lock-timeout errors route through notifyPersistFailure
+// ---------------------------------------------------------------------------
+//
+// Coverage note for Update and UpdateWorkflows:
+// Dedicated lock-timeout tests for Update and UpdateWorkflows are intentionally
+// omitted. TestUpdate_PersistCustomModelIDsSaveFails_SucceedsWithWarningNotice and
+// TestUpdateWorkflows_PersistSaveFails_SucceedsWithWarningNotices already demonstrate
+// that notifyPersistFailure routing works for any non-nil error from the persist helper
+// (saveErr, lockErr, or otherwise) — the error source is transparent at the call site.
+// Adding parallel lockErr variants would duplicate rather than extend the coverage.
+
+// TestDeployNew_LockTimeoutFails_SucceedsWithWarningNotice verifies that a lock-timeout
+// error from persistTierModels (simulated via spyUserConfig.lockErr) is surfaced through
+// notifyPersistFailure and that the deploy still reports success.
+//
+// This is the same "warn, do not abort" contract as for saveErr, but for the case where
+// WithLock itself cannot acquire the lock rather than Save failing after the lock is held.
+// The notice must name the config file path and confirm the deployment itself succeeded,
+// so the user is not misled into thinking the deployment failed.
+func TestDeployNew_LockTimeoutFails_SucceedsWithWarningNotice(t *testing.T) {
+	stub := interactiontest.NewBuilder().
+		AnswerSelectOne(domain.QTierModel, "HIGH", "model-a").
+		Build()
+	deps, workspace := newBaseDeps(t, stub)
+	lockErr := errors.New("could not acquire lock on user-config.yaml.lock: another process held the lock for more than 3s")
+	spy := &spyUserConfig{lockErr: lockErr, path: "/mosaic/MosaicDeploy/config/user-config.yaml"}
+	executor := &deploySpyExecutor{}
+	deps.UserConfig = spy
+	deps.Executor = executor
+	svc := app.New(deps)
+
+	summary, err := svc.DeployNew(context.Background(), app.DeployRequest{
+		HarnessID:       "stub-harness",
+		WorkspacePath:   workspace,
+		WorkflowIDs:     []string{"quick-fix"},
+		AutoConfirmPlan: true,
+	})
+
+	if err != nil {
+		t.Fatalf("DeployNew returned an error after a lock-timeout: %v; "+
+			"a lock-timeout must not misreport an otherwise-successful deployment", err)
+	}
+	if !executor.called {
+		t.Fatal("Executor.Execute was not called; this test requires a completed deployment to isolate the lock-timeout path")
+	}
+	if summary.DeploymentRoot == "" && summary.Harness.ID == "" {
+		t.Error("RunSummary looks like the zero value after a successful deployment with a lock-timeout")
+	}
+
+	notices := stub.Notices()
+	if len(notices) == 0 {
+		t.Fatal("Interaction.Notify was never called after a lock-timeout; " +
+			"lock-timeout errors must be surfaced through notifyPersistFailure, not silently dropped")
+	}
+	for _, n := range notices {
+		if n.Level != domain.NoticeWarning {
+			t.Errorf("Notice.Level = %q, want %q for a lock-timeout failure", n.Level, domain.NoticeWarning)
+		}
+		if !strings.Contains(n.Message, spy.path) {
+			t.Errorf("Notice.Message = %q; want it to name the config file %q so the user knows which file could not be locked", n.Message, spy.path)
+		}
+		if !strings.Contains(strings.ToLower(n.Message), "succeed") {
+			t.Errorf("Notice.Message = %q; want it to state that the deployment itself succeeded, "+
+				"so the user does not mistake this warning for a failed deployment", n.Message)
 		}
 	}
 }

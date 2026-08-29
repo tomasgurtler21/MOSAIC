@@ -320,7 +320,7 @@ func (s *service) DeployNew(ctx context.Context, req DeployRequest) (domain.RunS
 		return domain.RunSummary{}, err
 	}
 
-	if err := s.persistTierModels(harnessID, modelRes.tierModelsUsed); err != nil {
+	if err := s.persistTierModels(harnessID, modelRes.interactivelyResolvedTiers); err != nil {
 		s.notifyPersistFailure(ctx, err)
 	}
 
