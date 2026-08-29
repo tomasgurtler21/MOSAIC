@@ -86,8 +86,10 @@ func (a *statsAccumulator) toStats(model, harness string) HarnessModelStats {
 func Generate(fs FileSystem, req SummaryRequest) (SummaryResult, error) {
 	var result SummaryResult
 
-	// List the root directory. Missing root is not an error.
-	rootEntries, err := fs.ListDir(req.TestResultsRoot)
+	// The result store writes reports under {root}/Orchestrator/{version}/,
+	// so we scan that subtree for version directories.
+	orchestratorRoot := req.TestResultsRoot + "/Orchestrator"
+	rootEntries, err := fs.ListDir(orchestratorRoot)
 	if err != nil {
 		if isNotExist(err) {
 			return result, nil
@@ -98,7 +100,7 @@ func Generate(fs FileSystem, req SummaryRequest) (SummaryResult, error) {
 	// Identify version directories (skip files and non-directory entries).
 	var versionDirs []string
 	for _, name := range rootEntries {
-		info, statErr := fs.Stat(req.TestResultsRoot + "/" + name)
+		info, statErr := fs.Stat(orchestratorRoot + "/" + name)
 		if statErr != nil {
 			continue
 		}
@@ -117,7 +119,7 @@ func Generate(fs FileSystem, req SummaryRequest) (SummaryResult, error) {
 	// each version that has at least one valid report.
 	allVersionSummaries := make(map[string]VersionSummary)
 	for _, ver := range versionDirs {
-		versionPath := req.TestResultsRoot + "/" + ver
+		versionPath := orchestratorRoot + "/" + ver
 		reports, scanErr := scanVersionDir(fs, versionPath)
 		if scanErr != nil {
 			return result, scanErr
@@ -148,7 +150,7 @@ func Generate(fs FileSystem, req SummaryRequest) (SummaryResult, error) {
 	// Write the cross-version summary whenever there is any data to show.
 	if len(allVersionSummaries) > 0 {
 		cv := buildCrossVersionSummary(allVersionSummaries)
-		crossPath := req.TestResultsRoot + "/summary.md"
+		crossPath := orchestratorRoot + "/summary.md"
 		outcome, writeErr := writeCrossFileSummary(fs, crossPath, cv)
 		if writeErr != nil {
 			return result, writeErr

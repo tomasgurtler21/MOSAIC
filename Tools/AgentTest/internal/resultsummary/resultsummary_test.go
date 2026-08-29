@@ -152,9 +152,11 @@ func loadFixture(t *testing.T, name string) []byte {
 // fake filesystem. root is the TestResults root (e.g. "/TestResults"). The
 // filename is constructed from the provided parts following the store convention.
 func seedReport(fs *fakeFS, root, version, suite, harness, modelShort, timestamp string, data []byte) {
-	versionDir := root + "/" + version
+	orchestratorDir := root + "/Orchestrator"
+	versionDir := orchestratorDir + "/" + version
 	filename := suite + "--" + harness + "--" + modelShort + "--" + timestamp + ".json"
 	fs.dirs[root] = true
+	fs.dirs[orchestratorDir] = true
 	fs.dirs[versionDir] = true
 	fs.files[versionDir+"/"+filename] = data
 }
@@ -177,7 +179,8 @@ func readWrittenFile(t *testing.T, fs *fakeFS, path string) string {
 // returns no error.
 func TestGenerate_EmptyTestResultsTree_ReturnsNoFilesWritten(t *testing.T) {
 	fs := newFakeFS()
-	fs.dirs["/TestResults"] = true // directory exists but is empty
+	fs.dirs["/TestResults"] = true
+	fs.dirs["/TestResults/Orchestrator"] = true // directory exists but is empty
 
 	req := resultsummary.SummaryRequest{TestResultsRoot: "/TestResults"}
 	result, err := resultsummary.Generate(fs, req)
@@ -225,7 +228,7 @@ func TestGenerate_SingleVersionSingleReport_WritesPerVersionSummary(t *testing.T
 		t.Fatalf("Generate returned unexpected error: %v", err)
 	}
 
-	perVersionPath := "/TestResults/v1.0.0/summary.md"
+	perVersionPath := "/TestResults/Orchestrator/v1.0.0/summary.md"
 	allFiles := append(result.FilesWritten, result.FilesUpdated...)
 	if !containsPath(allFiles, perVersionPath) {
 		t.Errorf("expected %q in result files, got written=%v updated=%v",
@@ -247,7 +250,7 @@ func TestGenerate_SingleVersionSingleReport_WritesCrossVersionSummary(t *testing
 		t.Fatalf("Generate returned unexpected error: %v", err)
 	}
 
-	crossVersionPath := "/TestResults/summary.md"
+	crossVersionPath := "/TestResults/Orchestrator/summary.md"
 	allFiles := append(result.FilesWritten, result.FilesUpdated...)
 	if !containsPath(allFiles, crossVersionPath) {
 		t.Errorf("expected %q in result files, got written=%v updated=%v",
@@ -277,16 +280,16 @@ func TestGenerate_VersionFilterMatching_OnlyScansMatchingVersion(t *testing.T) {
 
 	// Only v1.0.0/summary.md should appear; v2.0.0/summary.md should not.
 	allFiles := append(result.FilesWritten, result.FilesUpdated...)
-	if containsPath(allFiles, "/TestResults/v2.0.0/summary.md") {
+	if containsPath(allFiles, "/TestResults/Orchestrator/v2.0.0/summary.md") {
 		t.Errorf("VersionFilter=v1.0.0 should not produce v2.0.0/summary.md, but it did: %v", allFiles)
 	}
-	if !containsPath(allFiles, "/TestResults/v1.0.0/summary.md") {
+	if !containsPath(allFiles, "/TestResults/Orchestrator/v1.0.0/summary.md") {
 		t.Errorf("VersionFilter=v1.0.0 should produce v1.0.0/summary.md, but it did not: %v", allFiles)
 	}
 	// The cross-version summary must always be written, even when a version filter is active.
 	// An implementation that skips the cross-version write when a filter is set fails this test.
-	if !containsPath(allFiles, "/TestResults/summary.md") {
-		t.Errorf("VersionFilter=v1.0.0 should still produce /TestResults/summary.md (cross-version), but it did not: %v", allFiles)
+	if !containsPath(allFiles, "/TestResults/Orchestrator/summary.md") {
+		t.Errorf("VersionFilter=v1.0.0 should still produce /TestResults/Orchestrator/summary.md (cross-version), but it did not: %v", allFiles)
 	}
 }
 
@@ -333,10 +336,10 @@ func TestGenerate_TwoVersions_WritesTwoPerVersionSummaries(t *testing.T) {
 	}
 
 	allFiles := append(result.FilesWritten, result.FilesUpdated...)
-	if !containsPath(allFiles, "/TestResults/v1.0.0/summary.md") {
+	if !containsPath(allFiles, "/TestResults/Orchestrator/v1.0.0/summary.md") {
 		t.Errorf("expected v1.0.0/summary.md in result, got: %v", allFiles)
 	}
-	if !containsPath(allFiles, "/TestResults/v2.0.0/summary.md") {
+	if !containsPath(allFiles, "/TestResults/Orchestrator/v2.0.0/summary.md") {
 		t.Errorf("expected v2.0.0/summary.md in result, got: %v", allFiles)
 	}
 }
@@ -359,7 +362,7 @@ func TestGenerate_MultipleHarnessModelCombos_BothAppearInOutput(t *testing.T) {
 		t.Fatalf("Generate returned unexpected error: %v", err)
 	}
 
-	content := readWrittenFile(t, fs, "/TestResults/v1.0.0/summary.md")
+	content := readWrittenFile(t, fs, "/TestResults/Orchestrator/v1.0.0/summary.md")
 
 	if !strings.Contains(content, "claude-sonnet-4.6") {
 		t.Error("per-version summary should mention model claude-sonnet-4.6")
@@ -389,7 +392,7 @@ func TestGenerate_PartialReport_FlaggedInOutput(t *testing.T) {
 		t.Fatalf("Generate returned unexpected error: %v", err)
 	}
 
-	content := readWrittenFile(t, fs, "/TestResults/v1.0.0/summary.md")
+	content := readWrittenFile(t, fs, "/TestResults/Orchestrator/v1.0.0/summary.md")
 
 	// Partial reports are processed without error. The [partial] marker is no
 	// longer rendered in tables (AC1.1 removes it); verify it is absent.
@@ -413,7 +416,7 @@ func TestGenerate_UnresolvedCostAttribution_ShowsWarningMarkerNotDollarZero(t *t
 		t.Fatalf("Generate returned unexpected error: %v", err)
 	}
 
-	content := readWrittenFile(t, fs, "/TestResults/v1.0.0/summary.md")
+	content := readWrittenFile(t, fs, "/TestResults/Orchestrator/v1.0.0/summary.md")
 
 	// The cost warning marker "[cost?]" must appear; "$0.00" must not appear
 	// in a cost column for this harness+model combination.
@@ -437,7 +440,7 @@ func TestGenerate_UnavailableCostAttribution_ShowsWarningMarkerNotDollarZero(t *
 		t.Fatalf("Generate returned unexpected error: %v", err)
 	}
 
-	content := readWrittenFile(t, fs, "/TestResults/v1.0.0/summary.md")
+	content := readWrittenFile(t, fs, "/TestResults/Orchestrator/v1.0.0/summary.md")
 
 	if !strings.Contains(content, "[cost?]") {
 		t.Errorf("per-version summary should contain [cost?] warning for 'unavailable' attribution, content:\n%s", content)
@@ -462,7 +465,7 @@ func TestGenerate_PassRateAggregated_TwoReports(t *testing.T) {
 		t.Fatalf("Generate returned unexpected error: %v", err)
 	}
 
-	content := readWrittenFile(t, fs, "/TestResults/v1.0.0/summary.md")
+	content := readWrittenFile(t, fs, "/TestResults/Orchestrator/v1.0.0/summary.md")
 
 	// 100% pass rate for claude-code/claude-sonnet-4.6 should appear as a
 	// formatted percentage (e.g. "100%") — not just the bare digit "100" which
@@ -1282,7 +1285,7 @@ func TestGenerate_Regeneration_PreservesAnalysisBlockContent(t *testing.T) {
 		t.Fatalf("first Generate returned unexpected error: %v", err)
 	}
 
-	summaryPath := "/TestResults/v1.0.0/summary.md"
+	summaryPath := "/TestResults/Orchestrator/v1.0.0/summary.md"
 	firstContent := readWrittenFile(t, fs, summaryPath)
 
 	// Inject user commentary into the analysis block.
@@ -1319,7 +1322,7 @@ func TestGenerate_Regeneration_GeneratedBlocksAreUpdated(t *testing.T) {
 		t.Fatalf("first Generate returned unexpected error: %v", err)
 	}
 
-	summaryPath := "/TestResults/v1.0.0/summary.md"
+	summaryPath := "/TestResults/Orchestrator/v1.0.0/summary.md"
 	firstContent := readWrittenFile(t, fs, summaryPath)
 
 	// Corrupt a generated block to confirm it gets replaced on re-generation.
@@ -1407,8 +1410,8 @@ func TestGenerate_Determinism_SameReportsProduceIdenticalGeneratedBlocks(t *test
 
 	// Compare per-version and cross-version summaries.
 	paths := []string{
-		"/TestResults/v1.0.0/summary.md",
-		"/TestResults/summary.md",
+		"/TestResults/Orchestrator/v1.0.0/summary.md",
+		"/TestResults/Orchestrator/summary.md",
 	}
 	for _, p := range paths {
 		content1, ok1 := fs1.files[p]
@@ -1463,9 +1466,9 @@ func TestGenerate_NonReportFileInVersionDir_IsSkipped(t *testing.T) {
 	seedReport(fs, "/TestResults", "v1.0.0", "happy-path", "claude-code",
 		"claude-sonnet-4.6", "20260820T100000", loadFixture(t, "v1_claude_code_report.json"))
 	// Seed a non-report text file in the same version directory.
-	fs.files["/TestResults/v1.0.0/README.txt"] = []byte("this is not a report")
+	fs.files["/TestResults/Orchestrator/v1.0.0/README.txt"] = []byte("this is not a report")
 	// Seed a JSON file that lacks schema_version (invalid report JSON).
-	fs.files["/TestResults/v1.0.0/not-a-report.json"] = []byte(`{"some_other_key": "value"}`)
+	fs.files["/TestResults/Orchestrator/v1.0.0/not-a-report.json"] = []byte(`{"some_other_key": "value"}`)
 
 	req := resultsummary.SummaryRequest{TestResultsRoot: "/TestResults"}
 	result, err := resultsummary.Generate(fs, req)
@@ -1474,7 +1477,7 @@ func TestGenerate_NonReportFileInVersionDir_IsSkipped(t *testing.T) {
 		t.Fatalf("Generate returned unexpected error when version dir contains non-report files: %v", err)
 	}
 	allFiles := append(result.FilesWritten, result.FilesUpdated...)
-	if !containsPath(allFiles, "/TestResults/v1.0.0/summary.md") {
+	if !containsPath(allFiles, "/TestResults/Orchestrator/v1.0.0/summary.md") {
 		t.Errorf("Generate should still produce v1.0.0/summary.md when non-report files are present, got: %v", allFiles)
 	}
 }
@@ -1492,7 +1495,7 @@ func TestGenerate_ExistingCrossVersionSummaryAtRoot_NotTreatedAsVersionDir(t *te
 	seedReport(fs, "/TestResults", "v1.0.0", "happy-path", "claude-code",
 		"claude-sonnet-4.6", "20260820T100000", loadFixture(t, "v1_claude_code_report.json"))
 	// Seed a pre-existing cross-version summary.md at the root (from a prior run).
-	fs.files["/TestResults/summary.md"] = []byte("# Previous summary\n\nOld content.\n")
+	fs.files["/TestResults/Orchestrator/summary.md"] = []byte("# Previous summary\n\nOld content.\n")
 
 	req := resultsummary.SummaryRequest{TestResultsRoot: "/TestResults"}
 	result, err := resultsummary.Generate(fs, req)
@@ -1502,7 +1505,7 @@ func TestGenerate_ExistingCrossVersionSummaryAtRoot_NotTreatedAsVersionDir(t *te
 	}
 	allFiles := append(result.FilesWritten, result.FilesUpdated...)
 	// The per-version summary must still be produced.
-	if !containsPath(allFiles, "/TestResults/v1.0.0/summary.md") {
+	if !containsPath(allFiles, "/TestResults/Orchestrator/v1.0.0/summary.md") {
 		t.Errorf("Generate should produce v1.0.0/summary.md even when root summary.md exists, got: %v", allFiles)
 	}
 }
@@ -1801,7 +1804,7 @@ func TestGenerate_SameNumericID_DifferentTestNames_TrackedAsSingleTest(t *testin
 		t.Fatalf("Generate returned unexpected error: %v", err)
 	}
 
-	content := readWrittenFile(t, fs, "/TestResults/v1.0.0/summary.md")
+	content := readWrittenFile(t, fs, "/TestResults/Orchestrator/v1.0.0/summary.md")
 
 	blockStart := strings.Index(content, "<!-- generated:problem-areas -->")
 	blockEnd := strings.Index(content, "<!-- /generated:problem-areas -->")
