@@ -156,7 +156,7 @@ func main() {
 		ManualResolution: manualResolution,
 		PreConsultation:  preConsult,
 	}
-	routingDeps := buildDeps(cliSettings, rawInvoker, interact, artifact.NewApprovalReader())
+	routingDeps := buildDeps(cliSettings, rawInvoker, interact, artifact.NewApprovalReader(), dispLogger)
 
 	// Wire the session with the resolved run-scoped store and all port dependencies.
 	// The store path matches runIdentity.RunFolder, so session I/O and the COMPLETED
@@ -259,7 +259,7 @@ func runTUIMode(args []string) {
 		// share one place where consultant selection is expressed. The orchestrator
 		// reference and routing table are not known here; they reach every consultant
 		// that implements domain.RunContextBinder later, on the session's run-start path.
-		routingDeps := buildDeps(cfg.Settings, rawInvoker, programRef, artifact.NewApprovalReader())
+		routingDeps := buildDeps(cfg.Settings, rawInvoker, programRef, artifact.NewApprovalReader(), dispLogger)
 
 		return session.New(session.Deps{
 			Harness:     h,

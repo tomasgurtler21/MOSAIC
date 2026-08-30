@@ -301,18 +301,24 @@ func TestNavigation_DoneScreen_EnterKeyQuits(t *testing.T) {
 // Progress screen
 // ---------------------------------------------------------------------------
 
-func TestNavigation_ProgressScreen_GracefulStop_CancelsContext(t *testing.T) {
+func TestNavigation_ProgressScreen_GracefulStop_SignalsStopSignalWithoutCancellingContext(t *testing.T) {
+	stopSignal := session.NewStopSignal()
 	m := newTestModel()
+	m.stopSignal = stopSignal
 	m.progressScreen = newProgressScreen(m)
 	m.screen = screenProgress
 
 	m.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("s")})
+	m.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("y")})
 
 	if !m.progressScreen.GracefulStop() {
-		t.Error("GracefulStop() = false after 's' key; want true")
+		t.Error("GracefulStop() = false after 's' then 'y'; want true")
 	}
-	if m.ctx.Err() == nil {
-		t.Error("ctx.Err() = nil after graceful stop; context must be cancelled")
+	if !stopSignal.Requested() {
+		t.Error("stopSignal.Requested() = false after a confirmed graceful stop; want true")
+	}
+	if m.ctx.Err() != nil {
+		t.Errorf("m.ctx.Err() = %v after a confirmed graceful stop; want nil (ctx must remain usable for resume)", m.ctx.Err())
 	}
 }
 

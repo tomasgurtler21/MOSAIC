@@ -12,13 +12,15 @@ import (
 //
 // Navigation contract:
 //   - 'q', Enter, or Esc -> Done() == true.
+//   - 'c' / 'C' -> Continue() == true, but only when outcome.Status == domain.RunStopped.
 type DoneScreen struct {
-	outcome domain.RunOutcome
-	errMsg  string
-	done    bool
-	width   int
-	height  int
-	styles  Styles
+	outcome  domain.RunOutcome
+	errMsg   string
+	done     bool
+	cont     bool
+	width    int
+	height   int
+	styles   Styles
 }
 
 // NewDoneScreen creates a done/error summary screen.
@@ -41,6 +43,10 @@ func (s *DoneScreen) Update(msg tea.Msg) tea.Cmd {
 	switch keyMsg.String() {
 	case "q", "enter", "esc":
 		s.done = true
+	case "c", "C":
+		if s.outcome.Status == domain.RunStopped {
+			s.cont = true
+		}
 	}
 	return nil
 }
@@ -87,13 +93,24 @@ func (s *DoneScreen) View() string {
 		lines = []string{title, border, msg}
 	}
 
-	help := s.styles.Help.Width(s.width).Render("q/enter/esc  exit")
+	helpText := "q/enter/esc  exit"
+	if s.outcome.Status == domain.RunStopped {
+		helpText += "   c  continue"
+	}
+	help := s.styles.Help.Width(s.width).Render(helpText)
 	lines = append(lines, "", help)
 	return strings.Join(lines, "\n")
 }
 
 // Done reports whether the user has dismissed the screen.
 func (s *DoneScreen) Done() bool { return s.done }
+
+// Continue reports whether the user triggered the in-screen "continue"
+// action. Always false for every outcome status other than
+// domain.RunStopped -- the key binding that sets it is only active when the
+// screen was constructed for that status. Distinct from Done(): triggering
+// continue does not set Done() and vice versa.
+func (s *DoneScreen) Continue() bool { return s.cont }
 
 // Resize updates the screen dimensions.
 func (s *DoneScreen) Resize(width, height int) {

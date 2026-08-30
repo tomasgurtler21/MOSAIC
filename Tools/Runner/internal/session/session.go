@@ -141,6 +141,16 @@ type Deps struct {
 	// compliance verification. Nil is normalised in New to a reader that
 	// reports ApprovalUnreadable, so the session never nil-checks it.
 	Approvals domain.ApprovalReader
+
+	// StopRequested reports whether a graceful stop has been confirmed. The
+	// dispatch loop polls it at safe boundaries (immediately before each
+	// invokeAndLog call, never mid-invocation) and never inspects ctx for
+	// this purpose -- ctx cancellation remains the separate, unchanged
+	// hard-cancel (ctrl+c) path.
+	//
+	// Optional: nil is normalised in New to a function that always returns
+	// false, so the dispatch loop never nil-checks it.
+	StopRequested func() bool
 }
 
 // New creates a new Session with the given port dependencies.
@@ -161,6 +171,9 @@ func New(deps Deps) Session {
 	}
 	if deps.Approvals == nil {
 		deps.Approvals = unreadableApprovalReader{}
+	}
+	if deps.StopRequested == nil {
+		deps.StopRequested = func() bool { return false }
 	}
 	return &sessionImpl{deps: deps}
 }
@@ -748,6 +761,13 @@ func (s *sessionImpl) Start(ctx context.Context, config domain.RunConfig) (outco
 			// so recordDispatch resets the counter here and always returns true.
 			antiLoop.recordDispatch(step.RowIndex, step.Agent.Identifier)
 
+			// Graceful-stop checkpoint: independent of ctx cancellation. Checked
+			// immediately before the invocation so an already-recorded step is
+			// never lost and this dispatch never starts once a stop is confirmed.
+			if s.deps.StopRequested() {
+				return domain.RunOutcome{Status: domain.RunStopped, Message: "run stopped: graceful stop confirmed"}, nil
+			}
+
 			// Invoke the harness.
 			response, invokeErr := s.invokeAndLog(ctx, step.Agent, step.Request)
 			if invokeErr != nil {
@@ -904,6 +924,11 @@ func (s *sessionImpl) Start(ctx context.Context, config domain.RunConfig) (outco
 					rdReq := hitlStep.Request
 					rdReq.AgentInstanceID = fmt.Sprintf("%s#%d", hitlStep.Agent.Identifier, hitlAttemptSeq)
 					hitlStep.Request = rdReq
+					// Graceful-stop checkpoint: the rejected attempt above is already
+					// persisted, so it is safe to stop before the redispatch call.
+					if s.deps.StopRequested() {
+						return domain.RunOutcome{Status: domain.RunStopped, Message: "run stopped: graceful stop confirmed"}, nil
+					}
 					rdResp, rdErr := s.invokeAndLog(ctx, hitlStep.Agent, hitlStep.Request)
 					if rdErr != nil {
 						if ctx.Err() != nil {
@@ -1037,7 +1062,7 @@ func (s *sessionImpl) Start(ctx context.Context, config domain.RunConfig) (outco
 
 			// Infrastructure-agent trigger evaluation (FR-40).
 			if !completedStep.IsInfrastructure {
-				halt, trigErr := s.evaluateTriggers(
+				halt, trigStopped, trigErr := s.evaluateTriggers(
 					ctx, &state, &seq, completedStep, prevWorkflowStep,
 					declaredInfraAgents, config,
 					buildActiveAgentsFilter(declaredInfraAgents, config.InfraClassSelections),
@@ -1048,6 +1073,9 @@ func (s *sessionImpl) Start(ctx context.Context, config domain.RunConfig) (outco
 						return domain.RunOutcome{Status: domain.RunStopped, Message: "run stopped: context cancelled"}, nil
 					}
 					return domain.RunOutcome{Status: domain.RunFailed, Message: trigErr.Error()}, trigErr
+				}
+				if trigStopped {
+					return domain.RunOutcome{Status: domain.RunStopped, Message: "run stopped: graceful stop confirmed"}, nil
 				}
 				if halt {
 					return domain.RunOutcome{Status: domain.RunStopped, Message: "infrastructure agent halted the run"}, nil
@@ -1466,6 +1494,12 @@ func (s *sessionImpl) consultRoute(
 		Message: fmt.Sprintf("phase=%s stage=%q status=running", phase, ""),
 	})
 
+	// Graceful-stop checkpoint: the consultation record above is already
+	// persisted, so it is safe to stop before the consultant-routed dispatch.
+	if s.deps.StopRequested() {
+		return true, domain.RunOutcome{Status: domain.RunStopped, Message: "run stopped: graceful stop confirmed"}, nil
+	}
+
 	// Invoke the harness. A harness error is a deviation, not a crash.
 	response, invokeErr := s.invokeAndLog(ctx, agentRef, agentReq)
 	if invokeErr != nil {
@@ -1592,6 +1626,11 @@ hitlLoop:
 			currentAttemptSeq++
 			rdReq := agentReq
 			rdReq.AgentInstanceID = fmt.Sprintf("%s#%d", agentRef.Identifier, currentAttemptSeq)
+			// Graceful-stop checkpoint: the rejected attempt above is already
+			// persisted, so it is safe to stop before the redispatch call.
+			if s.deps.StopRequested() {
+				return true, domain.RunOutcome{Status: domain.RunStopped, Message: "run stopped: graceful stop confirmed"}, nil
+			}
 			rdResp, rdErr := s.invokeAndLog(ctx, agentRef, rdReq)
 			if rdErr != nil {
 				if ctx.Err() != nil {
@@ -1689,7 +1728,7 @@ hitlLoop:
 	// Infrastructure-agent trigger evaluation.
 	orchDir := filepath.Dir(config.OrchestratorFilePath)
 	if !completedStep.IsInfrastructure {
-		halt, trigErr := s.evaluateTriggers(
+		halt, trigStopped, trigErr := s.evaluateTriggers(
 			ctx, state, seq, completedStep, *prevWorkflowStep,
 			declaredInfraAgents, config,
 			buildActiveAgentsFilter(declaredInfraAgents, config.InfraClassSelections),
@@ -1700,6 +1739,9 @@ hitlLoop:
 				return true, domain.RunOutcome{Status: domain.RunStopped, Message: "run stopped: context cancelled"}, nil
 			}
 			return true, domain.RunOutcome{Status: domain.RunFailed, Message: trigErr.Error()}, trigErr
+		}
+		if trigStopped {
+			return true, domain.RunOutcome{Status: domain.RunStopped, Message: "run stopped: graceful stop confirmed"}, nil
 		}
 		if halt {
 			return true, domain.RunOutcome{Status: domain.RunStopped, Message: "infrastructure agent halted the run"}, nil
@@ -1989,9 +2031,14 @@ func infraTriggerFires(
 // completes (including its Execution Log row via Store.Apply) before the
 // next declared agent's triggers are evaluated.
 //
-// Returns (true, nil) when an on_failure=halt agent stops the run.
-// Returns (false, non-nil) on unexpected infrastructure errors.
-// Returns (false, nil) when all evaluations complete without a halt.
+// Returns (true, false, nil) when an on_failure=halt agent stops the run.
+// Returns (false, false, non-nil) on unexpected infrastructure errors.
+// Returns (false, true, nil) when a graceful stop is confirmed between two
+// declared agents' dispatches within this evaluation pass; any agent that
+// already fired and dispatched in this pass keeps its already-applied
+// outcome, and no further agent in the pass is dispatched.
+// Returns (false, false, nil) when all evaluations complete without a halt
+// or a confirmed stop.
 func (s *sessionImpl) evaluateTriggers(
 	ctx context.Context,
 	state *domain.ArtifactState,
@@ -2002,7 +2049,7 @@ func (s *sessionImpl) evaluateTriggers(
 	config domain.RunConfig,
 	activeAgents map[string]bool,
 	orchDir string,
-) (haltRun bool, err error) {
+) (haltRun bool, stopRequested bool, err error) {
 	for _, agent := range declared {
 		// Restore-class agents are never dispatched by automatic trigger
 		// evaluation; they act only on explicit manual instruction (MANUAL
@@ -2049,10 +2096,17 @@ func (s *sessionImpl) evaluateTriggers(
 			TaskDescription: fmt.Sprintf("infrastructure agent dispatch: %s", agent.Name),
 		}
 
+		// Graceful-stop checkpoint: any earlier agent in this pass that already
+		// fired and dispatched keeps its already-applied outcome; only this
+		// not-yet-dispatched agent (and any later declared agents) are skipped.
+		if s.deps.StopRequested() {
+			return false, true, nil
+		}
+
 		response, invokeErr := s.invokeAndLog(ctx, agentRef, req)
 		if invokeErr != nil {
 			if ctx.Err() != nil {
-				return true, ctx.Err()
+				return true, false, ctx.Err()
 			}
 			// Harness-level error: treat as non-SUCCESS and apply on_failure policy.
 			response = domain.ProtocolResponse{
@@ -2082,7 +2136,7 @@ func (s *sessionImpl) evaluateTriggers(
 		}
 		newState, applyErr := s.deps.Store.Apply(ctx, *state, infraStep)
 		if applyErr != nil {
-			return false, applyErr
+			return false, false, applyErr
 		}
 		*state = newState
 		*seq = infraSeq
@@ -2092,12 +2146,12 @@ func (s *sessionImpl) evaluateTriggers(
 		// exclusively.
 		if response.StatusCode != domain.StatusSUCCESS {
 			if agent.OnFailure == "halt" {
-				return true, nil
+				return true, false, nil
 			}
 			// continue policy: record the failure and proceed.
 		}
 	}
-	return false, nil
+	return false, false, nil
 }
 
 // validateAndApplyOverrides validates each infrastructure_overrides entry

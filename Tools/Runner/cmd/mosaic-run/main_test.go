@@ -1362,7 +1362,7 @@ func TestScanFlag_ModeFlag_AmongMixedArgs(t *testing.T) {
 // as Deps.Routing.
 func TestBuildDeps_OrchestratedMode_WiresOrchestratorConsultantAsRouting(t *testing.T) {
 	settings := domain.RunSettings{Mode: domain.ExecutionModeOrchestrated}
-	deps := buildDeps(settings, nil, nil, nil)
+	deps := buildDeps(settings, nil, nil, nil, nil)
 	if _, ok := deps.Routing.(*deviation.OrchestratorConsultant); !ok {
 		t.Errorf("buildDeps(orchestrated).Routing = %T, want *deviation.OrchestratorConsultant", deps.Routing)
 	}
@@ -1372,7 +1372,7 @@ func TestBuildDeps_OrchestratedMode_WiresOrchestratorConsultantAsRouting(t *test
 // Mode=auto wires *deviation.OrchestratorConsultant as Deps.Routing.
 func TestBuildDeps_AutoMode_WiresOrchestratorConsultantAsRouting(t *testing.T) {
 	settings := domain.RunSettings{Mode: domain.ExecutionModeAuto}
-	deps := buildDeps(settings, nil, nil, nil)
+	deps := buildDeps(settings, nil, nil, nil, nil)
 	if _, ok := deps.Routing.(*deviation.OrchestratorConsultant); !ok {
 		t.Errorf("buildDeps(auto).Routing = %T, want *deviation.OrchestratorConsultant", deps.Routing)
 	}
@@ -1382,7 +1382,7 @@ func TestBuildDeps_AutoMode_WiresOrchestratorConsultantAsRouting(t *testing.T) {
 // that Mode=auto-review wires *deviation.OrchestratorConsultant as Deps.Routing.
 func TestBuildDeps_AutoReviewMode_WiresOrchestratorConsultantAsRouting(t *testing.T) {
 	settings := domain.RunSettings{Mode: domain.ExecutionModeAutoReview}
-	deps := buildDeps(settings, nil, nil, nil)
+	deps := buildDeps(settings, nil, nil, nil, nil)
 	if _, ok := deps.Routing.(*deviation.OrchestratorConsultant); !ok {
 		t.Errorf("buildDeps(auto-review).Routing = %T, want *deviation.OrchestratorConsultant", deps.Routing)
 	}
@@ -1392,7 +1392,7 @@ func TestBuildDeps_AutoReviewMode_WiresOrchestratorConsultantAsRouting(t *testin
 // that ManualResolution=true wires *deviation.ManualResolver as Deps.Manual.
 func TestBuildDeps_ManualResolutionEnabled_WiresManualResolverAsManual(t *testing.T) {
 	settings := domain.RunSettings{Mode: domain.ExecutionModeAuto, ManualResolution: true}
-	deps := buildDeps(settings, nil, nil, nil)
+	deps := buildDeps(settings, nil, nil, nil, nil)
 	if _, ok := deps.Manual.(*deviation.ManualResolver); !ok {
 		t.Errorf("buildDeps(manualResolution=true).Manual = %T, want *deviation.ManualResolver", deps.Manual)
 	}
@@ -1402,7 +1402,7 @@ func TestBuildDeps_ManualResolutionEnabled_WiresManualResolverAsManual(t *testin
 // ManualResolution=false leaves Deps.Manual nil.
 func TestBuildDeps_ManualResolutionDisabled_LeavesManualNil(t *testing.T) {
 	settings := domain.RunSettings{Mode: domain.ExecutionModeAuto, ManualResolution: false}
-	deps := buildDeps(settings, nil, nil, nil)
+	deps := buildDeps(settings, nil, nil, nil, nil)
 	if deps.Manual != nil {
 		t.Errorf("buildDeps(manualResolution=false).Manual = %T, want nil", deps.Manual)
 	}
@@ -1415,7 +1415,7 @@ func TestBuildDeps_ManualResolutionDisabled_LeavesManualNil(t *testing.T) {
 // fail this test, not silently pass.
 func TestBuildDeps_PreConsultEnabled_WiresPreConsultant(t *testing.T) {
 	settings := domain.RunSettings{Mode: domain.ExecutionModeAuto, PreConsultation: true}
-	deps := buildDeps(settings, nil, nil, nil)
+	deps := buildDeps(settings, nil, nil, nil, nil)
 	if deps.PreConsult == nil {
 		t.Fatal("buildDeps(preConsult=true).PreConsult = nil, want *deviation.OrchestratorConsultant")
 	}
@@ -1428,7 +1428,7 @@ func TestBuildDeps_PreConsultEnabled_WiresPreConsultant(t *testing.T) {
 // PreConsultation=false leaves Deps.PreConsult nil.
 func TestBuildDeps_PreConsultDisabled_LeavesPreConsultNil(t *testing.T) {
 	settings := domain.RunSettings{Mode: domain.ExecutionModeAuto, PreConsultation: false}
-	deps := buildDeps(settings, nil, nil, nil)
+	deps := buildDeps(settings, nil, nil, nil, nil)
 	if deps.PreConsult != nil {
 		t.Errorf("buildDeps(preConsult=false).PreConsult = %T, want nil", deps.PreConsult)
 	}
@@ -1453,7 +1453,7 @@ func TestBuildDeps_AllModes_RoutingIsNeverNil(t *testing.T) {
 		mode := mode
 		t.Run(string(mode), func(t *testing.T) {
 			settings := domain.RunSettings{Mode: mode}
-			deps := buildDeps(settings, nil, nil, nil)
+			deps := buildDeps(settings, nil, nil, nil, nil)
 			if deps.Routing == nil {
 				t.Errorf("buildDeps(mode=%s).Routing = nil, want non-nil routing consultant", mode)
 			}
@@ -1470,7 +1470,7 @@ func TestBuildDeps_AllModes_RoutingIsOrchestratorConsultant(t *testing.T) {
 		mode := mode
 		t.Run(string(mode), func(t *testing.T) {
 			settings := domain.RunSettings{Mode: mode}
-			deps := buildDeps(settings, nil, nil, nil)
+			deps := buildDeps(settings, nil, nil, nil, nil)
 			if _, ok := deps.Routing.(*deviation.OrchestratorConsultant); !ok {
 				t.Errorf("buildDeps(mode=%s).Routing = %T, want *deviation.OrchestratorConsultant", mode, deps.Routing)
 			}
@@ -1484,7 +1484,7 @@ func TestBuildDeps_AllModes_RoutingIsOrchestratorConsultant(t *testing.T) {
 func TestBuildDeps_ApprovalsPassedThrough(t *testing.T) {
 	sentinelReader := &sentinelApprovalReader{}
 	settings := domain.RunSettings{Mode: domain.ExecutionModeAuto}
-	deps := buildDeps(settings, nil, nil, sentinelReader)
+	deps := buildDeps(settings, nil, nil, sentinelReader, nil)
 	if deps.Approvals != sentinelReader {
 		t.Errorf("buildDeps.Approvals = %T (%p), want the exact sentinelApprovalReader (%p) passed in",
 			deps.Approvals, deps.Approvals, sentinelReader)
@@ -1499,6 +1499,79 @@ func (r *sentinelApprovalReader) ReadApproval(_ context.Context, _ string) domai
 	return domain.ApprovalUnreadable
 }
 
+// ---------------------------------------------------------------------------
+// DispatchLogger wiring in OrchestratorConsultant
+//
+// buildDeps receives a domain.DispatchLogger and must wire it into the
+// OrchestratorConsultant so that consultation invocations (ConsultRouting and
+// PreConsult) are recorded in the same dispatch log as subagent invocations.
+// Both the Routing and PreConsult fields of session.Deps point to the same
+// OrchestratorConsultant instance, so a single DispatchLogger set on that
+// consultant covers both call sites.
+//
+// RED state: both tests below fail because buildDeps does not yet assign
+// consultant.DispatchLogger = dispLogger (that assignment is I4.3). The field
+// is declared on OrchestratorConsultant (I4.1 scaffold), so the tests compile.
+// ---------------------------------------------------------------------------
+
+// TestBuildDeps_DispatchLoggerWiredIntoRoutingConsultant verifies that when
+// a non-nil DispatchLogger is passed to buildDeps, the OrchestratorConsultant
+// wired as Deps.Routing carries that exact instance in its DispatchLogger field.
+// The pointer-equality check ensures the same logger (not a copy or wrapper)
+// reaches the consultant, which is required so that consultation log entries
+// appear in the same log file as subagent dispatch entries.
+func TestBuildDeps_DispatchLoggerWiredIntoRoutingConsultant(t *testing.T) {
+	sentinel := &sentinelDispatchLogger{}
+	settings := domain.RunSettings{Mode: domain.ExecutionModeAuto}
+
+	deps := buildDeps(settings, nil, nil, nil, sentinel)
+
+	consultant, ok := deps.Routing.(*deviation.OrchestratorConsultant)
+	if !ok {
+		t.Fatalf("deps.Routing = %T, want *deviation.OrchestratorConsultant", deps.Routing)
+	}
+	if consultant.DispatchLogger != sentinel {
+		t.Errorf("OrchestratorConsultant.DispatchLogger = %T (%p), "+
+			"want the exact sentinelDispatchLogger (%p) passed to buildDeps; "+
+			"both CLI and TUI paths must wire their dispLogger into the consultant",
+			consultant.DispatchLogger, consultant.DispatchLogger, sentinel)
+	}
+}
+
+// TestBuildDeps_DispatchLoggerWiredIntoPreConsultConsultant verifies that when
+// PreConsultation=true and a non-nil DispatchLogger is passed to buildDeps, the
+// OrchestratorConsultant wired as Deps.PreConsult also carries that exact
+// instance. Since Routing and PreConsult reference the same consultant object,
+// this test confirms the single consultant receives the logger rather than
+// checking that two separate consultants each receive a copy.
+func TestBuildDeps_DispatchLoggerWiredIntoPreConsultConsultant(t *testing.T) {
+	sentinel := &sentinelDispatchLogger{}
+	settings := domain.RunSettings{Mode: domain.ExecutionModeAuto, PreConsultation: true}
+
+	deps := buildDeps(settings, nil, nil, nil, sentinel)
+
+	preConsultant, ok := deps.PreConsult.(*deviation.OrchestratorConsultant)
+	if !ok {
+		t.Fatalf("deps.PreConsult = %T, want *deviation.OrchestratorConsultant", deps.PreConsult)
+	}
+	if preConsultant.DispatchLogger != sentinel {
+		t.Errorf("OrchestratorConsultant.DispatchLogger (via PreConsult) = %T (%p), "+
+			"want the exact sentinelDispatchLogger (%p) passed to buildDeps",
+			preConsultant.DispatchLogger, preConsultant.DispatchLogger, sentinel)
+	}
+}
+
+// sentinelDispatchLogger is a no-op domain.DispatchLogger used as a sentinel
+// for pointer-equality checks in wiring tests.
+type sentinelDispatchLogger struct{}
+
+func (s *sentinelDispatchLogger) LogRequest(_ domain.ProtocolRequest)                {}
+func (s *sentinelDispatchLogger) LogResponse(_ domain.ProtocolResponse)              {}
+func (s *sentinelDispatchLogger) LogError(_ string, _ string)                        {}
+func (s *sentinelDispatchLogger) SetRunID(_ string)                                  {}
+func (s *sentinelDispatchLogger) Close()                                             {}
+func (s *sentinelDispatchLogger) Path() string { return "" }
+
 // TestBuildDeps_SameSettingsYieldSameWiring verifies the parity contract
 // directly: calling buildDeps with the same RunSettings from the CLI path and
 // the TUI path (which both produce a domain.RunSettings) yields structurally
@@ -1512,8 +1585,8 @@ func TestBuildDeps_SameSettingsYieldSameWiring(t *testing.T) {
 		PreConsultation:  true,
 	}
 
-	cliDeps := buildDeps(settings, nil, nil, nil)
-	tuiDeps := buildDeps(settings, nil, nil, nil)
+	cliDeps := buildDeps(settings, nil, nil, nil, nil)
+	tuiDeps := buildDeps(settings, nil, nil, nil, nil)
 
 	// Routing: both must be *deviation.OrchestratorConsultant.
 	_, cliRoutingOK := cliDeps.Routing.(*deviation.OrchestratorConsultant)
@@ -1561,7 +1634,7 @@ func TestBuildDeps_EveryExecutionMode_IsAccepted(t *testing.T) {
 		mode := mode
 		t.Run(string(mode), func(t *testing.T) {
 			settings := domain.RunSettings{Mode: mode}
-			deps := buildDeps(settings, nil, nil, nil)
+			deps := buildDeps(settings, nil, nil, nil, nil)
 			if deps.Routing == nil {
 				t.Errorf("buildDeps(mode=%s) produced nil Routing; all ExecutionModes entries must be executable", mode)
 			}
@@ -1580,7 +1653,7 @@ func TestExecutionModes_AreAllHandledByBuildDeps(t *testing.T) {
 	handled := 0
 	for _, mode := range modes {
 		settings := domain.RunSettings{Mode: mode}
-		deps := buildDeps(settings, nil, nil, nil)
+		deps := buildDeps(settings, nil, nil, nil, nil)
 		if _, ok := deps.Routing.(*deviation.OrchestratorConsultant); ok {
 			handled++
 		}
@@ -1645,7 +1718,7 @@ func TestBuildDeps_PreConsultation_AdviceAppliedToDispatch_ViaBuildDeps(t *testi
 	}
 
 	// Build session deps through the shared builder (same path both frontends use).
-	deps := buildDeps(settings, fakeInvoker, &mainTestNoopInteraction{}, nil)
+	deps := buildDeps(settings, fakeInvoker, &mainTestNoopInteraction{}, nil, nil)
 
 	// Supply the infrastructure deps that buildDeps deliberately leaves empty
 	// (Harness, Store, Clock, Interact are frontend-supplied, not part of the
@@ -1724,7 +1797,7 @@ func TestBuildDeps_OrchestratedMode_RoutingConsultantIsInvoked(t *testing.T) {
 		Mode: domain.ExecutionModeOrchestrated,
 	}
 
-	deps := buildDeps(settings, fakeInvoker, nil, nil)
+	deps := buildDeps(settings, fakeInvoker, nil, nil, nil)
 
 	f := harness.NewFakeAdapter()
 	deps.Harness = f

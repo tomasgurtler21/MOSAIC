@@ -149,6 +149,17 @@ type Options struct {
 	// nil-safe (skipped when nil) and is only invoked when the resolved run_id
 	// is non-empty (empty run_id, e.g. from a nil minter, does not trigger it).
 	OnRunIDResolved func(runID string)
+
+	// StopSignal is the shared graceful-stop flag. rootModel calls Request()
+	// when the user confirms a stop (replacing the old m.ctxCancel() call)
+	// and Reset() before rebuilding and restarting a session on the
+	// in-screen continue action, so a prior confirmed stop does not
+	// immediately re-arm on the resumed run.
+	//
+	// The same instance must be the one closed over by SessionFactory's
+	// construction of session.Deps.StopRequested, otherwise the TUI's
+	// Request()/Reset() calls have no effect on the running session.
+	StopSignal *session.StopSignal
 }
 
 // runSetupSelections holds all inputs collected during the setup phase.
@@ -279,6 +290,12 @@ type rootModel struct {
 
 	// Done screen.
 	doneScreen *screens.DoneScreen
+
+	// stopSignal is the shared graceful-stop flag (session.StopSignal). See
+	// Options.StopSignal for the contract; the same instance is closed over
+	// by SessionFactory so the TUI's Request()/Reset() calls reach the
+	// running session's dispatch loop.
+	stopSignal *session.StopSignal
 }
 
 // Run owns the terminal for the lifetime of the call. It presents the setup screens,
@@ -353,27 +370,31 @@ func newRootModel(ctx context.Context, sess session.Session, opts Options) *root
 	// Zero candidates (or pre-resolved): skip run select, go straight to setup.
 
 	m := &rootModel{
-		ctx:                  ctx,
-		ctxCancel:            cancel,
-		theme:                opts.Theme,
-		screen:               initialScreen,
-		width:                w,
-		height:               h,
+		ctx:                    ctx,
+		ctxCancel:              cancel,
+		theme:                  opts.Theme,
+		screen:                 initialScreen,
+		width:                  w,
+		height:                 h,
 		sess:                   sess,
 		sessionFactory:         opts.SessionFactory,
 		mintRunIdentity:        opts.MintRunIdentity,
 		interact:               interact,
 		orchestratorDiscoverer: opts.OrchestratorDiscoverer,
-		runSelectScreen:      runSelectScreen,
-		runSelectQuestion:    runSelectQuestion,
-		harnessScreen:        harnessScreen,
-		fileScreen:           fileScreen,
-		taskScreen:           taskScreen,
-		seedInputScreen:      seedInputScreen,
-		configScreen:         configScreen,
-		artifactStoreFactory: opts.ArtifactStoreFactory,
-		clock:                opts.Clock,
-		onRunIDResolved:      opts.OnRunIDResolved,
+		runSelectScreen:        runSelectScreen,
+		runSelectQuestion:      runSelectQuestion,
+		harnessScreen:          harnessScreen,
+		fileScreen:             fileScreen,
+		taskScreen:             taskScreen,
+		seedInputScreen:        seedInputScreen,
+		configScreen:           configScreen,
+		artifactStoreFactory:   opts.ArtifactStoreFactory,
+		clock:                  opts.Clock,
+		onRunIDResolved:        opts.OnRunIDResolved,
+		stopSignal:             opts.StopSignal,
+	}
+	if m.stopSignal == nil {
+		m.stopSignal = session.NewStopSignal()
 	}
 
 	// Always propagate InitialRunFolder so readArtifactContent and the COMPLETED-marker
@@ -940,8 +961,7 @@ func (m *rootModel) updateProgress(msg tea.Msg) (tea.Model, tea.Cmd) {
 	cmd := m.progressScreen.Update(msg)
 
 	if m.progressScreen.GracefulStop() {
-		// Cancel the context so the session's next harness.Invoke sees ctx.Err().
-		m.ctxCancel()
+		m.stopSignal.Request()
 	}
 
 	if m.progressScreen.ArtifactViewRequested() {
@@ -1218,6 +1238,26 @@ func (m *rootModel) updateDone(msg tea.Msg) (tea.Model, tea.Cmd) {
 		if m.doneScreen.Done() {
 			return m, tea.Quit
 		}
+		if m.doneScreen.Continue() {
+			// Resume: disarm the prior confirmed stop so the new run's dispatch
+			// loop does not see a stale stop signal on its very first boundary check.
+			m.stopSignal.Reset()
+			// Rebuild the session via the factory if one is set, mirroring the
+			// updateExecOverride retry path. Reuse m.sess directly when no factory
+			// is set (test/backward-compat path).
+			if m.sessionFactory != nil {
+				m.sess = m.sessionFactory(m.selections.runFolder, m.selections.isNewRun, m.selections.orchestratorFile, m.selections.config)
+			}
+			// Always construct a new ProgressScreen — the old one still holds
+			// the completed run's row history and stop notice.
+			style := stylesFromTheme(m.theme)
+			m.progressScreen = screens.NewProgressScreen(m.width, m.height, style)
+			m.doneScreen = nil
+			m.screen = screenProgress
+			// Reuse m.ctx unchanged — Stage 2 stopped cancelling ctx on graceful
+			// stop, so the existing context is still valid and reusable.
+			return m, tea.Batch(m.progressScreen.Init(), m.startSession())
+		}
 	}
 	return m, nil
 }
@@ -1349,4 +1389,3 @@ func (m *rootModel) viewQuestion() string {
 	}
 	return m.theme.Style(tuicommon.RoleMuted).Render("Waiting for question…")
 }
-

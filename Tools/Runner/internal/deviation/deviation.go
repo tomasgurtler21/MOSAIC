@@ -16,6 +16,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"sync/atomic"
 
 	"mosaic-common/interaction"
 	"mosaic-run/internal/domain"
@@ -64,6 +65,15 @@ type OrchestratorConsultant struct {
 	// Table resolves a dispatch instruction's agent identifier to a row index
 	// and supplies the available-agent list for the unknown-agent error.
 	Table domain.RoutingTable
+	// DispatchLogger records each consultation invocation in the same dispatch
+	// log that invokeAndLog uses for subagent dispatches. When nil, no logging
+	// is performed. The field is set by buildDeps alongside the subagent logger.
+	DispatchLogger domain.DispatchLogger
+
+	// callSeq is a per-instance monotonic counter that gives every ConsultRouting
+	// and PreConsult call a unique dispatch-log identifier. Zero is the valid
+	// unstarted state; no constructor is needed.
+	callSeq uint64
 }
 
 // ConsultRouting implements domain.RoutingConsultant. It serialises the
@@ -93,13 +103,31 @@ func (c *OrchestratorConsultant) ConsultRouting(ctx context.Context, req domain.
 		}
 	}
 
+	seq := atomic.AddUint64(&c.callSeq, 1)
+	consultationInstanceID := fmt.Sprintf("%s#%s#%d", c.Orchestrator.Identifier, req.Context, seq)
+	if c.DispatchLogger != nil {
+		c.DispatchLogger.LogRequest(domain.ProtocolRequest{
+			AgentInstanceID: consultationInstanceID,
+			TaskDescription: string(payload),
+		})
+	}
+
 	reply, err := c.Invoker.InvokeRaw(ctx, c.Orchestrator, payload)
 	if err != nil {
+		if c.DispatchLogger != nil {
+			c.DispatchLogger.LogError(consultationInstanceID, err.Error())
+		}
 		return domain.RoutingInstruction{}, &domain.ConsultationError{
 			Failure: domain.ConsultFailTransport,
 			Detail:  fmt.Sprintf("InvokeRaw failed: %v", err),
 			Err:     err,
 		}
+	}
+	if c.DispatchLogger != nil {
+		c.DispatchLogger.LogResponse(domain.ProtocolResponse{
+			AgentInstanceID: consultationInstanceID,
+			StatusMessage:   string(reply),
+		})
 	}
 
 	extracted, err := ExtractJSONObject(reply)
@@ -194,13 +222,31 @@ func (c *OrchestratorConsultant) PreConsult(ctx context.Context, req domain.Cons
 		}
 	}
 
+	seq := atomic.AddUint64(&c.callSeq, 1)
+	consultationInstanceID := fmt.Sprintf("%s#%s#%d", c.Orchestrator.Identifier, string(domain.ConsultContextPreConsultation), seq)
+	if c.DispatchLogger != nil {
+		c.DispatchLogger.LogRequest(domain.ProtocolRequest{
+			AgentInstanceID: consultationInstanceID,
+			TaskDescription: string(payload),
+		})
+	}
+
 	reply, err := c.Invoker.InvokeRaw(ctx, c.Orchestrator, payload)
 	if err != nil {
+		if c.DispatchLogger != nil {
+			c.DispatchLogger.LogError(consultationInstanceID, err.Error())
+		}
 		return domain.PreConsultationAdvice{}, &domain.ConsultationError{
 			Failure: domain.ConsultFailTransport,
 			Detail:  fmt.Sprintf("InvokeRaw failed: %v", err),
 			Err:     err,
 		}
+	}
+	if c.DispatchLogger != nil {
+		c.DispatchLogger.LogResponse(domain.ProtocolResponse{
+			AgentInstanceID: consultationInstanceID,
+			StatusMessage:   string(reply),
+		})
 	}
 
 	extracted, err := ExtractJSONObject(reply)
