@@ -1332,11 +1332,15 @@ func TestConfigScreen_Parity_OrchestratedMode_SettingsMatchCLIEquivalent(t *test
 	}
 
 	// Equivalent CLI configuration for --mode orchestrated (all else default).
+	// When commits are disabled, CommitBranchVariant must be the zero value
+	// (empty string), not mosaic-owned. The mosaic-owned default applies only
+	// when commits are enabled.
+	// RED: current implementation pre-populates CommitBranchMOSAICOwned unconditionally.
 	wantSettings := domain.RunSettings{
 		Mode:                domain.ExecutionModeOrchestrated,
 		Checkpoints:         false,
 		Commits:             false,
-		CommitBranchVariant: domain.CommitBranchMOSAICOwned, // default
+		CommitBranchVariant: "", // zero value: commits disabled
 		PreConsultation:     false,
 		ManualResolution:    false,
 	}
@@ -1381,11 +1385,14 @@ func TestConfigScreen_Parity_AutoModeWithPreConsult_SettingsMatchCLIEquivalent(t
 		t.Fatal("ConfigScreen did not reach Done() after driving all steps")
 	}
 
+	// When commits are disabled, CommitBranchVariant must be the zero value
+	// (empty string). The mosaic-owned default applies only when commits are enabled.
+	// RED: current implementation pre-populates CommitBranchMOSAICOwned unconditionally.
 	wantSettings := domain.RunSettings{
 		Mode:                domain.ExecutionModeAuto,
 		Checkpoints:         false,
 		Commits:             false,
-		CommitBranchVariant: domain.CommitBranchMOSAICOwned,
+		CommitBranchVariant: "", // zero value: commits disabled
 		PreConsultation:     true,
 		ManualResolution:    false,
 	}
@@ -1601,11 +1608,14 @@ func TestConfigScreen_Parity_ManualResolutionEnabled_SettingsMatchCLIEquivalent(
 		t.Fatal("ConfigScreen did not reach Done() after accepting manual-resolution step")
 	}
 
+	// When commits are disabled, CommitBranchVariant must be the zero value
+	// (empty string). The mosaic-owned default applies only when commits are enabled.
+	// RED: current implementation pre-populates CommitBranchMOSAICOwned unconditionally.
 	wantSettings := domain.RunSettings{
 		Mode:                domain.ExecutionModeOrchestrated,
 		Checkpoints:         false,
 		Commits:             false,
-		CommitBranchVariant: domain.CommitBranchMOSAICOwned,
+		CommitBranchVariant: "", // zero value: commits disabled
 		PreConsultation:     false,
 		ManualResolution:    true,
 	}

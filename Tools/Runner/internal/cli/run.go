@@ -336,6 +336,13 @@ func Run(ctx context.Context, args []string, store domain.ArtifactStore, identit
 				exitCode = ExitUsage
 				return nil
 			}
+			// CommitBranchVariant is only meaningful when commits are enabled.
+			// When commits are disabled and the flag was not explicitly provided,
+			// zero out the default so a disabled-commits run carries no spurious
+			// mosaic-owned default.
+			if !commitsEnabled && commitBranchFlag == "" {
+				parsedCommitBranch = domain.CommitBranchVariant("")
+			}
 
 			// Parse --infra-class into a class-to-agent map.
 			var infraClassSelections map[string]string

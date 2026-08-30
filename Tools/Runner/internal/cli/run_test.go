@@ -2304,18 +2304,35 @@ func TestCommitBranchFlag_UserOwn_ReachesRunSettings(t *testing.T) {
 	}
 }
 
-// TestCommitBranchFlag_DefaultIsMOSAICOwned_WhenOmitted verifies that omitting
-// --commit-branch leaves CommitBranchVariant at CommitBranchMOSAICOwned, the
-// documented default.
-func TestCommitBranchFlag_DefaultIsMOSAICOwned_WhenOmitted(t *testing.T) {
+// TestCommitBranchFlag_DefaultIsMOSAICOwned_WhenOmittedAndCommitsEnabled verifies
+// that omitting --commit-branch when --commits enabled leaves CommitBranchVariant
+// at CommitBranchMOSAICOwned, the documented default for commits-enabled runs.
+func TestCommitBranchFlag_DefaultIsMOSAICOwned_WhenOmittedAndCommitsEnabled(t *testing.T) {
 	sess := &scriptedSession{outcome: domain.RunOutcome{Status: domain.RunCompleted}}
-	_, _, _ = runCLI(t, newStage7BaseArgs(), sess)
+	_, _, _ = runCLI(t, append(newStage7BaseArgs(), "--commits", "enabled"), sess)
 	if !sess.called {
 		t.Fatal("session.Start was not called")
 	}
 	if sess.config.CommitBranchVariant != domain.CommitBranchMOSAICOwned {
-		t.Errorf("CommitBranchVariant = %q, want default %q",
+		t.Errorf("CommitBranchVariant = %q, want default %q when --commits enabled and --commit-branch omitted",
 			sess.config.CommitBranchVariant, domain.CommitBranchMOSAICOwned)
+	}
+}
+
+// TestCommitBranchVariant_IsEmpty_WhenCommitsDisabledAndBranchOmitted verifies
+// that when --commits is disabled (or omitted, since disabled is the default)
+// and --commit-branch is not specified, RunSettings.CommitBranchVariant is
+// the zero value (empty string), not mosaic-owned.
+// RED: current implementation defaults to mosaic-owned regardless of --commits.
+func TestCommitBranchVariant_IsEmpty_WhenCommitsDisabledAndBranchOmitted(t *testing.T) {
+	sess := &scriptedSession{outcome: domain.RunOutcome{Status: domain.RunCompleted}}
+	_, _, _ = runCLI(t, append(newStage7BaseArgs(), "--commits", "disabled"), sess)
+	if !sess.called {
+		t.Fatal("session.Start was not called")
+	}
+	if sess.config.CommitBranchVariant != "" {
+		t.Errorf("CommitBranchVariant = %q, want %q (zero value) when --commits disabled and --commit-branch omitted",
+			sess.config.CommitBranchVariant, "")
 	}
 }
 

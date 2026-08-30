@@ -667,11 +667,7 @@ func NewConfigScreen(width, height int, styles Styles) *ConfigScreen {
 	return &ConfigScreen{
 		step:   configStepMode,
 		cursor: -1, // mode step starts with no option preselected
-		sel: ConfigSelection{
-			Settings: domain.RunSettings{
-				CommitBranchVariant: domain.CommitBranchMOSAICOwned,
-			},
-		},
+		sel:    ConfigSelection{},
 		width:        width,
 		height:       height,
 		styles:       styles,
@@ -812,6 +808,9 @@ func (s *ConfigScreen) advance() tea.Cmd {
 		if s.sel.Settings.Commits {
 			s.step = configStepCommitBranch
 		} else {
+			// CommitBranchVariant is only meaningful when commits are enabled;
+			// reset to zero value so it does not linger from a prior selection.
+			s.sel.Settings.CommitBranchVariant = domain.CommitBranchVariant("")
 			s.step = s.nextAfterCommitSection()
 			if s.step == configStepPreConsult {
 				s.cursor = 1
@@ -1077,11 +1076,7 @@ func (s *ConfigScreen) Reset() {
 	s.step = configStepMode
 	s.back = false
 	s.cursor = -1 // mode step starts with no option preselected
-	s.sel = ConfigSelection{
-		Settings: domain.RunSettings{
-			CommitBranchVariant: domain.CommitBranchMOSAICOwned,
-		},
-	}
+	s.sel = ConfigSelection{}
 	s.timeoutInput.Reset()
 	s.infraClassQueue = nil
 	s.infraClassIdx = 0

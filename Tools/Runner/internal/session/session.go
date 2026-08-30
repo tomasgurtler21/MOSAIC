@@ -1301,6 +1301,13 @@ func (s *sessionImpl) consultRoute(
 	admitted domain.AdmittedWorkflow,
 	antiLoop *antiLoopState,
 ) (done bool, outcome domain.RunOutcome, outErr error) {
+	// Capture the stage in force at this entry point so that every CompletedStep
+	// produced below carries accurate context and notifications show real stage values.
+	// This value is stable throughout the function body: the only intermediate
+	// Store.Apply (consultStep below) is IsInfrastructure=true and does not modify
+	// CurrentState. Recursive calls each capture their own entryStage independently.
+	entryStage := state.CurrentState.Stage
+
 	// Build the consultation request. LastStatusMessage is nil on the first
 	// step of a new run and for every consultation where no prior agent result
 	// exists.
@@ -1380,6 +1387,7 @@ func (s *sessionImpl) consultRoute(
 		Seq:              consultSeq,
 		AgentInstance:    s.orchRef.Identifier + "#" + strconv.Itoa(consultSeq),
 		Phase:            row.PhaseParsed.Name,
+		Stage:            entryStage,
 		Status:           domain.StatusSUCCESS,
 		Summary:          dispInstr.TaskDescription,
 		Timestamp:        s.deps.Clock.Now(),
@@ -1491,7 +1499,7 @@ func (s *sessionImpl) consultRoute(
 	s.deps.Interact.Notify(ctx, interaction.Notice{
 		Level:   interaction.NoticeInfo,
 		Title:   agentReq.AgentInstanceID,
-		Message: fmt.Sprintf("phase=%s stage=%q status=running", phase, ""),
+		Message: fmt.Sprintf("phase=%s stage=%q status=running", phase, entryStage),
 	})
 
 	// Graceful-stop checkpoint: the consultation record above is already
@@ -1589,6 +1597,7 @@ hitlLoop:
 				Seq:              (*state).GlobalSequence + 1,
 				AgentInstance:    fmt.Sprintf("%s#%d", agentRef.Identifier, currentAttemptSeq),
 				Phase:            phase,
+				Stage:            entryStage,
 				Status:           finalResponse.StatusCode,
 				ErrorCode:        finalResponse.ErrorCode,
 				Summary:          finalResponse.StatusMessage,
@@ -1666,6 +1675,7 @@ hitlLoop:
 				Seq:              (*state).GlobalSequence + 1,
 				AgentInstance:    fmt.Sprintf("%s#%d", agentRef.Identifier, currentAttemptSeq),
 				Phase:            phase,
+				Stage:            entryStage,
 				Status:           finalResponse.StatusCode,
 				ErrorCode:        finalResponse.ErrorCode,
 				Summary:          finalResponse.StatusMessage,
@@ -1702,6 +1712,7 @@ hitlLoop:
 		Seq:             workflowSeq,
 		AgentInstance:   finalAgentInstanceID,
 		Phase:           phase,
+		Stage:           entryStage,
 		Status:          finalResponse.StatusCode,
 		ErrorCode:       finalResponse.ErrorCode,
 		Summary:         finalResponse.StatusMessage,
@@ -1722,7 +1733,7 @@ hitlLoop:
 	s.deps.Interact.Notify(ctx, interaction.Notice{
 		Level:   interaction.NoticeInfo,
 		Title:   finalAgentInstanceID,
-		Message: fmt.Sprintf("phase=%s stage=%q status=%s", phase, "", string(finalResponse.StatusCode)),
+		Message: fmt.Sprintf("phase=%s stage=%q status=%s", phase, entryStage, string(finalResponse.StatusCode)),
 	})
 
 	// Infrastructure-agent trigger evaluation.
