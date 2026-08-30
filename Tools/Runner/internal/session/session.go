@@ -798,6 +798,30 @@ func (s *sessionImpl) Start(ctx context.Context, config domain.RunConfig) (outco
 			hitlStep := step
 			hitlResponse := response
 			hitlAccepted := false
+
+			// Pre-HITL-check stage-set re-derivation for self-referential rows.
+			// When this step's output contains Stage-* and no stage set has been
+			// established yet (the current row is both the Stage-* producer and
+			// the HITL subject, with no prior row having populated stages), derive
+			// the stage set from Plan.md now so that expandStageGlobs receives a
+			// non-nil stage set and produces expanded paths for approval reads.
+			// The guard prevents redundant disk reads when a prior row already
+			// established a stage set. The existing post-loop re-derivation block
+			// below remains in place for rows where this guard does not apply.
+			if stages == nil && hasStageStarArtifact(hitlStep.Request.OutputArtifacts) {
+				earlyPlanPath := filepath.Join(config.RunFolder, "Plan.md")
+				ss, ssErr := planstages.ReadStages(earlyPlanPath, admitted.GroupsDeclared)
+				if ssErr != nil {
+					s.deps.Interact.Notify(ctx, interaction.Notice{
+						Level:   interaction.NoticeWarning,
+						Message: fmt.Sprintf("failed to re-read stage set after Stage-* output: %v", ssErr),
+					})
+				} else {
+					refreshedStages = &ss
+					stages = &ss
+				}
+			}
+
 		hitlCheckLoop:
 			for {
 				var approvals []domain.ArtifactApproval
@@ -1476,6 +1500,29 @@ func (s *sessionImpl) consultRoute(
 	currentAttemptSeq := dispSeq
 	currentOutputArts := agentReq.OutputArtifacts
 	hitlRedispatchUsed := false
+
+	// Pre-HITL-check stage-set re-derivation for self-referential rows.
+	// When this step's output contains Stage-* and no stage set has been
+	// established yet (the current row is both the Stage-* producer and
+	// the HITL subject, with no prior row having populated stages), derive
+	// the stage set from Plan.md now so that expandStageGlobs receives a
+	// non-nil stage set and produces expanded paths for approval reads.
+	// The *stages == nil guard prevents redundant re-derivation across
+	// recursive consultRoute re-entries. The existing post-loop re-derivation
+	// block below remains in place for rows where this guard does not apply.
+	if *stages == nil && hasStageStarArtifact(currentOutputArts) {
+		earlyPlanPath := filepath.Join(config.RunFolder, "Plan.md")
+		ss, ssErr := planstages.ReadStages(earlyPlanPath, admitted.GroupsDeclared)
+		if ssErr != nil {
+			s.deps.Interact.Notify(ctx, interaction.Notice{
+				Level:   interaction.NoticeWarning,
+				Message: fmt.Sprintf("failed to re-read stage set after Stage-* output: %v", ssErr),
+			})
+		} else {
+			*refreshedStages = &ss
+			*stages = &ss
+		}
+	}
 
 hitlLoop:
 	for {
