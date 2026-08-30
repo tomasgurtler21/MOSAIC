@@ -265,6 +265,18 @@ func TestDeployNew_TierSkipOne_OnlySkipsThatTier(t *testing.T) {
 		Rationale: "General purpose model",
 		AgentKeys: []string{"planner"},
 	})
+	// "planner" must be in the workflow's ReferencedAgents so tier scoping includes MEDIUM.
+	// Without this, the Stage 2 filter excludes MEDIUM (no selected agent uses it) and the
+	// test would never reach the SkippedOne logic it is meant to verify.
+	cat.workflows = []domain.Workflow{{
+		ID:               "quick-fix",
+		Name:             "Quick Fix",
+		Description:      "Fix a quick issue",
+		Hint:             "Use for minor bugs",
+		Version:          "1.0",
+		Category:         "Build",
+		ReferencedAgents: []string{"test-runner", "planner"},
+	}}
 
 	deps, workspace := newBaseDeps(t, interactiontest.NewBuilder().Build())
 	deps.Catalog = cat
@@ -311,6 +323,18 @@ func TestDeployNew_TierSkipAll_StopsAskingRemainingTiers(t *testing.T) {
 		Rationale: "General purpose model",
 		AgentKeys: []string{"planner"},
 	})
+	// "planner" must be in the workflow's ReferencedAgents so tier scoping includes MEDIUM.
+	// Without this, MEDIUM would be excluded by the Stage 2 filter before SkippedAll even
+	// runs, causing the test to pass for the wrong reason.
+	cat.workflows = []domain.Workflow{{
+		ID:               "quick-fix",
+		Name:             "Quick Fix",
+		Description:      "Fix a quick issue",
+		Hint:             "Use for minor bugs",
+		Version:          "1.0",
+		Category:         "Build",
+		ReferencedAgents: []string{"test-runner", "planner"},
+	}}
 
 	stub := interactiontest.NewBuilder().
 		AnswerSkipAll(domain.QTierModel, "HIGH"). // SkippedAll on first tier

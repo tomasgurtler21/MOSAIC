@@ -494,8 +494,18 @@ func (s *service) resolveModels(
 		}
 	}
 
+	usedTiers := make(map[domain.Tier]bool, len(agents))
+	for _, a := range agents {
+		if a.RecommendedTier != "" {
+			usedTiers[a.RecommendedTier] = true
+		}
+	}
+
 	tierSkippedAll := skipAll[domain.QTierModel] || tierSkipOverride
 	for _, ti := range s.deps.Catalog.Tiers() {
+		if !usedTiers[ti.Tier] {
+			continue // skip tiers not used by any agent in the current selection
+		}
 		if _, ok := tierModelsUsed[ti.Tier]; ok {
 			continue // pre-answered, either from this request or a prior persisted run
 		}

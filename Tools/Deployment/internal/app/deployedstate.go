@@ -65,7 +65,9 @@ func probeDeployedArtifact(workspace, targetPath, modelKey string) domain.Deploy
 
 	// Read injection version from InjectionHarness-class region tag attributes.
 	// Falls back to mosaic_injections_version frontmatter for pre-migration files.
-	state.InjectionsVersion = extractDeployedInjectionVersion(data, "injections_version")
+	// found is true when at least one InjectionHarness-class region was present in the body;
+	// this signal determines whether AgentStaleness should compare InjectionsVersion at all.
+	state.InjectionsVersion, state.HasInjectionRegion = extractDeployedInjectionVersion(data, "injections_version")
 
 	// Extract workflow section markers; nil when none are present.
 	state.Workflows = extractDeployedWorkflows(data)
@@ -97,27 +99,30 @@ func readDeployedStamp(fm *docformat.Frontmatter, legacyKey string) string {
 }
 
 // extractDeployedInjectionVersion parses a deployed agent file and returns the version
-// attribute from the first InjectionHarness-class region found. Returns "" when no such
-// region exists or when the region carries no version attribute.
+// attribute from the first InjectionHarness-class region found, and whether such a region
+// was present at all. found is true whenever at least one InjectionHarness-class region
+// exists in the body, regardless of whether that region carries a version attribute.
 //
 // Falls back to reading the specified frontmatter field for pre-migration files that still
 // carry injection versions in frontmatter rather than tag attributes. The primary path
-// (tag read) takes precedence over the fallback.
+// (tag read) takes precedence over the fallback. The fallback does not set found=true
+// because a frontmatter-only file contains no InjectionHarness region in its body.
 //
 // legacyFrontmatterKey is the agentfields registry key used for the frontmatter fallback
 // (e.g., "injections_version"). The primary path reads the tag version from whichever
 // InjectionHarness-class region it finds first, since all harness regions in a file share
 // the same version value (written by applyHarnessRegion with a single role-selected value).
-func extractDeployedInjectionVersion(data []byte, legacyFrontmatterKey string) string {
+func extractDeployedInjectionVersion(data []byte, legacyFrontmatterKey string) (version string, found bool) {
 	if len(data) == 0 {
-		return ""
+		return "", false
 	}
 	doc, err := docformat.Parse(data)
 	if err != nil {
-		return ""
+		return "", false
 	}
 
 	// Primary path: enumerate all tool-managed regions and find the first InjectionHarness-class one.
+	var foundRegion bool
 	for _, node := range doc.Body().DeployedRegions() {
 		class, classErr := docformat.ClassifyRegion(node.Kind(), node.Name())
 		if classErr != nil {
@@ -126,18 +131,25 @@ func extractDeployedInjectionVersion(data []byte, legacyFrontmatterKey string) s
 		if class == mosaic.InjectionHarness {
 			v := node.Version()
 			if v != "" {
-				return v
+				// Region found with a version attribute: return immediately.
+				return v, true
 			}
-			// Found an InjectionHarness region but it has no version attribute — stop primary path.
+			// Region found but no version attribute on the tag (pre-migration file).
+			// Signal that the region is present but fall through to the frontmatter
+			// fallback to retrieve the version string.
+			foundRegion = true
 			break
 		}
 	}
 
 	// Fallback path: pre-migration files carry the injection version in frontmatter.
+	// When foundRegion is true (injection region present, no tag version), the frontmatter
+	// lookup provides the version string while preserving the HasInjectionRegion signal.
+	// When foundRegion is false (no region found), the fallback populates version only.
 	if doc.Frontmatter().Present() {
-		return readDeployedStamp(doc.Frontmatter(), legacyFrontmatterKey)
+		return readDeployedStamp(doc.Frontmatter(), legacyFrontmatterKey), foundRegion
 	}
-	return ""
+	return "", foundRegion
 }
 
 // probeDeployedHookBundle reports the on-disk state of a hook bundle, whose target path is a

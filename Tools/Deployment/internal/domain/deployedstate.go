@@ -21,6 +21,15 @@ type DeployedArtifactState struct {
 	Workflows                     DeployedWorkflows // non-nil only when the file carries workflow section markers
 	ProtocolVersion               string            // version from the `version` attribute on the deployed <CommunicationProtocol type="managed"> region's opening tag; "" when absent, region missing, or file unparseable
 	BundleVersion                 string            // frontmatter `bundle_version` scalar, verbatim; "" when absent, unparseable, or the file received no bundle region
+
+	// HasInjectionRegion reports whether the deployed file's body contains at least one region
+	// whose class is mosaic.InjectionHarness. When false, AgentStaleness skips the
+	// InjectionsVersion comparison to prevent false-positive staleness reports for agents
+	// with no injected content.
+	//
+	// Populated by the probe layer (app/deployedstate.go) during extraction.
+	// The zero value (false) means "no injection region found or file absent."
+	HasInjectionRegion bool
 }
 
 // HasVersionInfo reports whether the deployed file carries at least one readable version stamp.

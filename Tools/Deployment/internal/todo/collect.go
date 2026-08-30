@@ -104,6 +104,13 @@ func (c *collector) Items() []domain.TodoItem {
 	return c.sorted()
 }
 
+// Reset discards all previously accumulated items, returning the collector to its initial
+// empty state. Subsequent calls to Empty() return true and Items()/Groups() return empty
+// results until new items are added.
+func (c *collector) Reset() {
+	c.items = c.items[:0]
+}
+
 // Groups returns items partitioned by category in the same order as Items. Only categories
 // that have at least one item are included in the result.
 func (c *collector) Groups() []Group {

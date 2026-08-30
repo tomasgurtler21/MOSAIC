@@ -346,6 +346,7 @@ func (c *spyTodo) AddGap(g domain.Gap)       { c.gaps = append(c.gaps, g) }
 func (c *spyTodo) Items() []domain.TodoItem  { return c.items }
 func (c *spyTodo) Groups() []todo.Group      { return nil }
 func (c *spyTodo) Empty() bool               { return len(c.items) == 0 && len(c.gaps) == 0 }
+func (c *spyTodo) Reset()                    { c.items = nil; c.gaps = nil }
 
 // hasGapKind reports whether any recorded gap has the given kind.
 func (c *spyTodo) hasGapKind(kind domain.GapKind) bool {

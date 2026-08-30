@@ -37,6 +37,7 @@ func (noopTodo) AddGap(domain.Gap)     {}
 func (noopTodo) Items() []domain.TodoItem { return nil }
 func (noopTodo) Groups() []todo.Group   { return nil }
 func (noopTodo) Empty() bool            { return true }
+func (noopTodo) Reset()                 {}
 
 // newCLI constructs a cli.NewInteraction with the supplied pre-answers. All questions with
 // no pre-answer return SkippedOne, matching the behaviour of ProgramRef without a program.

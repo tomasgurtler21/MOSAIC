@@ -58,6 +58,7 @@ func (c *spyCollector) AddGap(g domain.Gap)       { c.gaps = append(c.gaps, g) }
 func (c *spyCollector) Items() []domain.TodoItem  { return c.items }
 func (c *spyCollector) Groups() []todo.Group      { return nil }
 func (c *spyCollector) Empty() bool               { return len(c.items) == 0 && len(c.gaps) == 0 }
+func (c *spyCollector) Reset()                    { c.items = c.items[:0]; c.gaps = c.gaps[:0] }
 
 // hasGapKind reports whether any gap of the given kind was collected.
 func (c *spyCollector) hasGapKind(kind domain.GapKind) bool {

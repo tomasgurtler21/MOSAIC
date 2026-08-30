@@ -160,6 +160,7 @@ func TestAgentStaleness_HarnessVersionMismatch_Only_ReturnsSingleDelta(t *testin
 // mismatch on "injections_version" alone produces exactly one delta naming "injections_version".
 func TestAgentStaleness_InjectionsVersionMismatch_Only_ReturnsSingleDelta(t *testing.T) {
 	deployed := sampleDeployedState()
+	deployed.HasInjectionRegion = true // injection region present: injections_version mismatch must produce a delta
 	agent := makeAgent("test-agent", deployed.Version)
 	stamps := domain.VersionStamps{
 		Version:           deployed.Version,
@@ -181,6 +182,7 @@ func TestAgentStaleness_InjectionsVersionMismatch_Only_ReturnsSingleDelta(t *tes
 // three version fields differ, AgentStaleness returns three deltas, one per field.
 func TestAgentStaleness_AllThreeVersionsMismatch_ReturnsThreeDeltas(t *testing.T) {
 	deployed := sampleDeployedState()
+	deployed.HasInjectionRegion = true // injection region present: injections_version mismatch must produce a delta
 	agent := makeAgent("test-agent", "1.1")
 	stamps := domain.VersionStamps{
 		Version:           "1.1", // all three differ from deployed
@@ -200,6 +202,7 @@ func TestAgentStaleness_AllThreeVersionsMismatch_ReturnsThreeDeltas(t *testing.T
 // injections_version. The order must be deterministic and independent of which fields differ.
 func TestAgentStaleness_DeltaOrder_IsFixed_VersionFirst(t *testing.T) {
 	deployed := sampleDeployedState()
+	deployed.HasInjectionRegion = true // injection region present: injections_version mismatch must produce a delta
 	agent := makeAgent("test-agent", "1.1")
 	stamps := domain.VersionStamps{
 		Version:           "1.1",
@@ -244,11 +247,12 @@ func TestAgentStaleness_PartialMismatch_VersionAndHarness_TwoDeltas(t *testing.T
 // cannot be proven current; the comparison produces deltas so the classifier detects stale.
 func TestAgentStaleness_NoVersionInfo_SourceHasValues_ProducesThreeDeltas(t *testing.T) {
 	deployed := domain.DeployedArtifactState{
-		Present:           true,
-		ContentHash:       "sha256:abc",
-		Version:           "",  // no version stamp in the deployed file
-		HarnessVersion:    "",
-		InjectionsVersion: "",
+		Present:             true,
+		ContentHash:         "sha256:abc",
+		Version:             "",  // no version stamp in the deployed file
+		HarnessVersion:      "",
+		InjectionsVersion:   "",
+		HasInjectionRegion:  true, // injection region is present but carries no version attribute
 	}
 	agent := makeAgent("test-agent", "2.0")
 	stamps := domain.VersionStamps{
@@ -278,11 +282,12 @@ func TestAgentStaleness_NoVersionInfo_SourceHasValues_ProducesThreeDeltas(t *tes
 // manifest stamping and leave deployed files with empty version fields.
 func TestAgentStaleness_DeltaFieldNames_CompatibleWithExecutorStamping(t *testing.T) {
 	deployed := domain.DeployedArtifactState{
-		Present:           true,
-		ContentHash:       "sha256:abc",
-		Version:           "1.0",
-		HarnessVersion:    "1.0",
-		InjectionsVersion: "1.0",
+		Present:            true,
+		ContentHash:        "sha256:abc",
+		Version:            "1.0",
+		HarnessVersion:     "1.0",
+		InjectionsVersion:  "1.0",
+		HasInjectionRegion: true, // injection region present: injections_version delta must be produced
 	}
 	agent := makeAgent("test-agent", "2.0")
 	stamps := domain.VersionStamps{

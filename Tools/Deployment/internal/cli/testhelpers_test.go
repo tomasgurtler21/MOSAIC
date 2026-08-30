@@ -117,6 +117,7 @@ func (c *stubTodo) AddGap(g domain.Gap)       { c.gaps = append(c.gaps, g) }
 func (c *stubTodo) Items() []domain.TodoItem  { return c.items }
 func (c *stubTodo) Groups() []todo.Group      { return nil }
 func (c *stubTodo) Empty() bool               { return len(c.items) == 0 && len(c.gaps) == 0 }
+func (c *stubTodo) Reset()                    { c.items = c.items[:0]; c.gaps = c.gaps[:0] }
 
 // hasGapKind reports whether any recorded gap has the given kind.
 func (c *stubTodo) hasGapKind(kind domain.GapKind) bool {

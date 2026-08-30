@@ -107,7 +107,7 @@ func TestExtractDeployedInjectionVersion_HarnessRegionWithVersionAttribute_Retur
 		"Harness constraint content.\n" +
 		"</HarnessConstraints>\n")
 
-	got := extractDeployedInjectionVersion(data, "injections_version")
+	got, _ := extractDeployedInjectionVersion(data, "injections_version")
 
 	if got != "1.5" {
 		t.Errorf("extractDeployedInjectionVersion: got %q, want %q; "+
@@ -126,7 +126,7 @@ func TestExtractDeployedInjectionVersion_NoVersionAttribute_ReturnsEmpty(t *test
 		"</HarnessConstraints>\n")
 
 	// No legacy frontmatter key either, so the fallback also returns empty.
-	got := extractDeployedInjectionVersion(data, "injections_version")
+	got, _ := extractDeployedInjectionVersion(data, "injections_version")
 
 	if got != "" {
 		t.Errorf("extractDeployedInjectionVersion: got %q, want empty; "+
@@ -141,7 +141,7 @@ func TestExtractDeployedInjectionVersion_NoVersionAttribute_ReturnsEmpty(t *test
 func TestExtractDeployedInjectionVersion_NoHarnessRegion_ReturnsEmpty(t *testing.T) {
 	data := []byte("---\nmosaic_version: \"2.0\"\n---\n\nPlain agent body with no managed regions.\n")
 
-	got := extractDeployedInjectionVersion(data, "injections_version")
+	got, _ := extractDeployedInjectionVersion(data, "injections_version")
 
 	if got != "" {
 		t.Errorf("extractDeployedInjectionVersion: got %q, want empty for file with no harness regions",
@@ -163,7 +163,7 @@ func TestExtractDeployedInjectionVersion_MultipleHarnessRegions_ReturnsFirstTagV
 		"Second harness region (same version, as written by applyHarnessRegion).\n" +
 		"</HarnessIdentity>\n")
 
-	got := extractDeployedInjectionVersion(data, "injections_version")
+	got, _ := extractDeployedInjectionVersion(data, "injections_version")
 
 	if got != "2.1" {
 		t.Errorf("extractDeployedInjectionVersion with multiple harness regions: got %q, want %q",
@@ -174,7 +174,7 @@ func TestExtractDeployedInjectionVersion_MultipleHarnessRegions_ReturnsFirstTagV
 // TestExtractDeployedInjectionVersion_EmptyData_ReturnsEmpty verifies that empty input
 // returns an empty string without panicking (graceful degradation).
 func TestExtractDeployedInjectionVersion_EmptyData_ReturnsEmpty(t *testing.T) {
-	got := extractDeployedInjectionVersion(nil, "injections_version")
+	got, _ := extractDeployedInjectionVersion(nil, "injections_version")
 
 	if got != "" {
 		t.Errorf("extractDeployedInjectionVersion with nil data: got %q, want empty", got)
@@ -191,7 +191,7 @@ func TestExtractDeployedInjectionVersion_MalformedDocument_ReturnsEmpty(t *testi
 	// Unclosed YAML bracket — docformat.Parse returns a non-nil error for this input.
 	data := []byte("---\ntools: [a, b\n---\n")
 
-	got := extractDeployedInjectionVersion(data, "injections_version")
+	got, _ := extractDeployedInjectionVersion(data, "injections_version")
 
 	if got != "" {
 		t.Errorf("extractDeployedInjectionVersion with malformed document: got %q, want empty; "+
@@ -326,7 +326,7 @@ func TestExtractDeployedInjectionVersion_LegacyFrontmatterKey_FallsBackWhenNoTag
 		"Content (no version attribute on tag — pre-migration).\n" +
 		"</HarnessConstraints>\n")
 
-	got := extractDeployedInjectionVersion(data, "injections_version")
+	got, _ := extractDeployedInjectionVersion(data, "injections_version")
 
 	if got != "1.2" {
 		t.Errorf("extractDeployedInjectionVersion with no tag version but legacy frontmatter: "+
@@ -344,7 +344,7 @@ func TestExtractDeployedInjectionVersion_TagVersionWinsOverFrontmatter(t *testin
 		"Content with tag version.\n" +
 		"</HarnessConstraints>\n")
 
-	got := extractDeployedInjectionVersion(data, "injections_version")
+	got, _ := extractDeployedInjectionVersion(data, "injections_version")
 
 	if got != "2.0" {
 		t.Errorf("extractDeployedInjectionVersion with both tag version and frontmatter: "+
