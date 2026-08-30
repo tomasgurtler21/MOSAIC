@@ -565,6 +565,12 @@ type ConfigSelection struct {
 	// command-line pre-scan result, and passes "" onward when both are empty
 	// so that buildAdapter's per-harness default applies.
 	ExecutablePath string
+
+	// GHCPCLIMode is the user's per-run GHCP CLI permission-mode selection.
+	// Populated by the GHCP CLI mode-selection screen or by the
+	// --ghcp-permission-mode CLI flag. Empty when the harness is not GHCP CLI.
+	// Accepted values: "blanket", "allowlist".
+	GHCPCLIMode string
 }
 
 // configStep identifies which configuration prompt is currently active.

@@ -2679,6 +2679,7 @@ func TestValueBearingFlagNames_ContainsExpectedFlags(t *testing.T) {
 		"--claude-path",
 		"--infra-class",
 		"--input",
+		"--ghcp-permission-mode",
 	}
 
 	names := cli.ValueBearingFlagNames()

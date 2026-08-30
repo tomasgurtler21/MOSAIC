@@ -135,9 +135,25 @@ func main() {
 	// Interaction (for per-step progress and notices) and writes to os.Stdout.
 	interact := cli.NewInteraction(os.Stdout)
 
+	// Pre-scan the GHCP CLI permission mode flag. Only relevant when
+	// --harness=ghcp-cli; ignored for other harnesses. The flag is optional;
+	// an absent or unrecognised value defaults to blanket mode inside buildAdapter.
+	ghcpPermissionMode := scanFlag(args, "--ghcp-permission-mode")
+
+	// FR-8: Reject a GHCP CLI run without a resolved mode before spawning.
+	// In CLI mode the flag must be supplied when the harness is ghcp-cli.
+	if harnessStr == commonharness.HarnessIDGHCPCLI && ghcpPermissionMode == "" {
+		fmt.Fprintf(os.Stderr, "error: --ghcp-permission-mode is required when --harness=ghcp-cli (accepted values: blanket, allowlist)\n")
+		os.Exit(2)
+	}
+	if ghcpPermissionMode != "" && ghcpPermissionMode != "blanket" && ghcpPermissionMode != "allowlist" {
+		fmt.Fprintf(os.Stderr, "error: --ghcp-permission-mode must be \"blanket\" or \"allowlist\", got %q\n", ghcpPermissionMode)
+		os.Exit(2)
+	}
+
 	// Build the harness adapter via buildAdapter, passing the process logger
 	// so that invocation I/O is captured in the debug log.
-	h := buildAdapter(harnessStr, claudePathStr, invocationTimeout, logger)
+	h := buildAdapter(harnessStr, claudePathStr, ghcpPermissionMode, invocationTimeout, logger)
 
 	// Extract the raw-JSON transport if the selected harness adapter implements it.
 	// Production adapters implement both HarnessAdapter and RawInvoker over the same
@@ -232,7 +248,7 @@ func runTUIMode(args []string) {
 		if execPath == "" {
 			execPath = claudePathTUI
 		}
-		h := buildAdapter(cfg.Harness, execPath, cfg.Timeout, logger)
+		h := buildAdapter(cfg.Harness, execPath, cfg.GHCPCLIMode, cfg.Timeout, logger)
 
 		artifactPath, err := resolveTUIArtifactPath(runFolder)
 		if errors.Is(err, errUnresolvedRunFolder) {
@@ -635,11 +651,17 @@ func newLoggedArtifactStore(path string, logger domain.DebugLogger) domain.Artif
 // returned. Unknown values are not rejected here; cli.Run validates the
 // --harness flag and surfaces usage errors for unknown values (AC3.8).
 //
+// ghcpMode selects the GHCP CLI permission strategy when harnessStr is
+// "ghcp-cli". Accepted values are "blanket" and "allowlist". An empty or
+// unrecognised value defaults to GHCPCLIModeBlanket (preserving pre-Stage-4
+// behavior). The TUI path always supplies a resolved mode; the CLI path
+// resolves it from --ghcp-permission-mode.
+//
 // An optional logger may be passed as the last argument. When provided, the
 // CLI adapter is constructed with the logger so that invocation I/O is
 // captured in the debug log. When omitted, the adapter uses a no-op logger.
 // The fake adapter ignores the logger in all cases.
-func buildAdapter(harnessStr, claudePathStr string, timeout time.Duration, loggers ...domain.DebugLogger) domain.HarnessAdapter {
+func buildAdapter(harnessStr, claudePathStr, ghcpMode string, timeout time.Duration, loggers ...domain.DebugLogger) domain.HarnessAdapter {
 	var logger domain.DebugLogger = domain.NopDebugLogger{}
 	if len(loggers) > 0 && loggers[0] != nil {
 		logger = loggers[0]
@@ -671,7 +693,11 @@ func buildAdapter(harnessStr, claudePathStr string, timeout time.Duration, logge
 		if timeout <= 0 {
 			timeout = 30 * time.Minute
 		}
-		return harness.NewGHCPCLIAdapterWithLogger(exe, timeout, logger)
+		mode := commonharness.GHCPCLIPermissionMode(ghcpMode)
+		if mode != commonharness.GHCPCLIModeBlanket && mode != commonharness.GHCPCLIModePartialAllowlist {
+			mode = commonharness.GHCPCLIModeBlanket
+		}
+		return harness.NewGHCPCLIAdapterWithMode(exe, timeout, logger, mode)
 	default: // "fake" or unknown
 		return harness.NewFakeAdapter()
 	}

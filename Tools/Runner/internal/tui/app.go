@@ -49,6 +49,7 @@ const (
 	screenSetupTask                      // task description entry
 	screenSetupSeedInput                 // seed-input path entry (new runs only)
 	screenSetupConfig                    // run configuration prompts
+	screenSetupGHCPMode                  // GHCP CLI permission-mode selection (shown only for ghcp-cli harness)
 	screenProgress                       // live execution progress
 	screenArtifact                       // read-only artifact inspection
 	screenQuestion                       // generic overlay from Interaction port
@@ -252,6 +253,7 @@ type rootModel struct {
 	taskScreen      *screens.TaskScreen
 	seedInputScreen *screens.SeedInputScreen
 	configScreen    *screens.ConfigScreen
+	ghcpModeScreen  *screens.GHCPCLIModeScreen
 
 	// Collected setup selections.
 	selections runSetupSelections
@@ -334,6 +336,7 @@ func newRootModel(ctx context.Context, sess session.Session, opts Options) *root
 	taskScreen := screens.NewTaskScreen(w, h, style)
 	seedInputScreen := screens.NewSeedInputScreen(w, h, style)
 	configScreen := screens.NewConfigScreen(w, h, style)
+	ghcpModeScreen := screens.NewGHCPCLIModeScreen(w, h, style)
 
 	interact := opts.Interaction
 	if interact == nil {
@@ -388,6 +391,7 @@ func newRootModel(ctx context.Context, sess session.Session, opts Options) *root
 		taskScreen:             taskScreen,
 		seedInputScreen:        seedInputScreen,
 		configScreen:           configScreen,
+		ghcpModeScreen:         ghcpModeScreen,
 		artifactStoreFactory:   opts.ArtifactStoreFactory,
 		clock:                  opts.Clock,
 		onRunIDResolved:        opts.OnRunIDResolved,
@@ -579,6 +583,8 @@ func (m *rootModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		return m.updateSetupSeedInput(msg)
 	case screenSetupConfig:
 		return m.updateSetupConfig(msg)
+	case screenSetupGHCPMode:
+		return m.updateSetupGHCPMode(msg)
 	case screenProgress:
 		return m.updateProgress(msg)
 	case screenArtifact:
@@ -616,6 +622,9 @@ func (m *rootModel) resizeScreens() {
 	}
 	if m.configScreen != nil {
 		m.configScreen.Resize(m.width, m.height)
+	}
+	if m.ghcpModeScreen != nil {
+		m.ghcpModeScreen.Resize(m.width, m.height)
 	}
 	if m.progressScreen != nil {
 		m.progressScreen.Resize(m.width, m.height)
@@ -902,22 +911,58 @@ func (m *rootModel) updateSetupConfig(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.selections.config = m.configScreen.Selection()
 		m.configScreen.Reset()
 
-		// Reconstruct the session with the harness adapter selected in the config screen.
-		// This replaces the placeholder session (which used the fake adapter) with one
-		// using the real adapter when "Claude Code CLI" was chosen.
-		if m.sessionFactory != nil {
-			m.sess = m.sessionFactory(m.selections.runFolder, m.selections.isNewRun, m.selections.orchestratorFile, m.selections.config)
+		// When the selected harness is GHCP CLI, show the permission-mode
+		// selection screen before spawning any process. For all other harnesses,
+		// proceed directly to the progress screen.
+		if m.selections.config.Harness == "ghcp-cli" {
+			m.ghcpModeScreen.Reset()
+			m.screen = screenSetupGHCPMode
+			return m, nil
 		}
 
-		// Transition to progress screen and start the session. The chosen run
-		// is stated as the initial status line before dispatch (AC2.7),
-		// mirroring the CLI's stdout announcement -- the same runselect.Announce
-		// renderer, so the wording is the single source for both frontends.
-		style := stylesFromTheme(m.theme)
-		m.progressScreen = screens.NewProgressScreen(m.width, m.height, style)
-		m.progressScreen.SetStatus(runselect.Announce(m.announceIdentity()), false)
-		m.screen = screenProgress
-		return m, tea.Batch(m.progressScreen.Init(), m.startSession())
+		return m, m.launchSession()
+	}
+	return m, nil
+}
+
+// launchSession wires the session factory with the current config selection and
+// transitions to the progress screen, starting the session in a background goroutine.
+// This is the common terminal step from both updateSetupConfig (non-GHCP-CLI harnesses)
+// and updateSetupGHCPMode (GHCP CLI harness, after mode is resolved).
+func (m *rootModel) launchSession() tea.Cmd {
+	// Reconstruct the session with the harness adapter and resolved config.
+	// This replaces the placeholder session (which used the fake adapter) with
+	// one using the real adapter and all resolved settings.
+	if m.sessionFactory != nil {
+		m.sess = m.sessionFactory(m.selections.runFolder, m.selections.isNewRun, m.selections.orchestratorFile, m.selections.config)
+	}
+
+	// Transition to progress screen and start the session. The chosen run
+	// is stated as the initial status line before dispatch, mirroring the
+	// CLI's stdout announcement.
+	style := stylesFromTheme(m.theme)
+	m.progressScreen = screens.NewProgressScreen(m.width, m.height, style)
+	m.progressScreen.SetStatus(runselect.Announce(m.announceIdentity()), false)
+	m.screen = screenProgress
+	return tea.Batch(m.progressScreen.Init(), m.startSession())
+}
+
+func (m *rootModel) updateSetupGHCPMode(msg tea.Msg) (tea.Model, tea.Cmd) {
+	if m.ghcpModeScreen == nil {
+		// Screen not available; default to blanket and proceed.
+		m.selections.config.GHCPCLIMode = string(screens.GHCPCLIModeBlanket)
+		return m, m.launchSession()
+	}
+	m.ghcpModeScreen.Update(msg)
+	if m.ghcpModeScreen.Back() {
+		m.ghcpModeScreen.Reset()
+		m.screen = screenSetupConfig
+		return m, nil
+	}
+	if m.ghcpModeScreen.Done() {
+		m.selections.config.GHCPCLIMode = string(m.ghcpModeScreen.Mode())
+		m.ghcpModeScreen.Reset()
+		return m, m.launchSession()
 	}
 	return m, nil
 }
@@ -1351,6 +1396,10 @@ func (m *rootModel) View() string {
 		return m.seedInputScreen.View()
 	case screenSetupConfig:
 		return m.configScreen.View()
+	case screenSetupGHCPMode:
+		if m.ghcpModeScreen != nil {
+			return m.ghcpModeScreen.View()
+		}
 	case screenProgress:
 		if m.progressScreen != nil {
 			return m.progressScreen.View()

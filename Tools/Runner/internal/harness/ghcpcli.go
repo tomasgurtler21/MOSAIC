@@ -54,6 +54,7 @@ type GHCPCLIAdapter struct {
 	spawner        commonharness.Spawner
 	sink           commonharness.Sink
 	logger         domain.DebugLogger
+	mode           commonharness.GHCPCLIPermissionMode
 }
 
 // ExecutablePath implements domain.ExecutableRevealer. It returns the
@@ -62,6 +63,12 @@ func (a *GHCPCLIAdapter) ExecutablePath() string { return a.executablePath }
 
 // NewGHCPCLIAdapter creates an adapter with debug logging disabled.
 // A zero timeout means 30 minutes.
+//
+// UNCHANGED SIGNATURE -- existing call sites and tests keep compiling.
+// Defaults to GHCPCLIModeBlanket (--yolo behavior), preserving pre-change
+// behavior for all ~18 call sites in ghcpcli_test.go and ~9 in
+// rawinvoker_test.go. To use a different permission mode, call
+// NewGHCPCLIAdapterWithMode instead.
 func NewGHCPCLIAdapter(executablePath string, timeout time.Duration) *GHCPCLIAdapter {
 	return NewGHCPCLIAdapterWithLogger(executablePath, timeout, nil)
 }
@@ -69,6 +76,11 @@ func NewGHCPCLIAdapter(executablePath string, timeout time.Duration) *GHCPCLIAda
 // NewGHCPCLIAdapterWithLogger creates an adapter that records every
 // invocation's raw stdout, raw stderr and outcome to the debug log. A nil
 // logger is normalised to domain.NopDebugLogger.
+//
+// UNCHANGED SIGNATURE -- existing call sites and tests keep compiling.
+// Defaults to GHCPCLIModeBlanket (--yolo behavior), preserving pre-change
+// behavior for the production call site in main.go:674 (buildAdapter).
+// To use a different permission mode, call NewGHCPCLIAdapterWithMode instead.
 func NewGHCPCLIAdapterWithLogger(executablePath string, timeout time.Duration, logger domain.DebugLogger) *GHCPCLIAdapter {
 	if timeout == 0 {
 		timeout = 30 * time.Minute
@@ -81,7 +93,35 @@ func NewGHCPCLIAdapterWithLogger(executablePath string, timeout time.Duration, l
 		commonharness.WithTimeout(timeout),
 		commonharness.WithSink(sink),
 	)
-	return &GHCPCLIAdapter{executablePath: executablePath, timeout: timeout, spawner: spawner, sink: sink, logger: logger}
+	return &GHCPCLIAdapter{executablePath: executablePath, timeout: timeout, spawner: spawner, sink: sink, logger: logger, mode: commonharness.GHCPCLIModeBlanket}
+}
+
+// NewGHCPCLIAdapterWithMode creates an adapter with an explicit
+// GHCPCLIPermissionMode. The mode is stored on the adapter and consulted on
+// every Invoke/InvokeRaw call: Blanket mode emits --yolo (current behaviour);
+// Partial Allowlist mode extracts --allow-tool entries from the agent's
+// deployed tools frontmatter at invocation time.
+//
+// A nil logger is normalised to domain.NopDebugLogger. A zero timeout
+// defaults to 30 minutes.
+//
+// Stage 4 switches the production buildAdapter call site to this constructor.
+// Until then, NewGHCPCLIAdapter and NewGHCPCLIAdapterWithLogger remain the
+// primary constructors; this constructor is available for tests and future
+// production wiring.
+func NewGHCPCLIAdapterWithMode(executablePath string, timeout time.Duration, logger domain.DebugLogger, mode commonharness.GHCPCLIPermissionMode) *GHCPCLIAdapter {
+	if timeout == 0 {
+		timeout = 30 * time.Minute
+	}
+	if logger == nil {
+		logger = domain.NopDebugLogger{}
+	}
+	sink := &debugLoggerSink{logger: logger}
+	spawner := commonharness.NewGHCPCLI(executablePath,
+		commonharness.WithTimeout(timeout),
+		commonharness.WithSink(sink),
+	)
+	return &GHCPCLIAdapter{executablePath: executablePath, timeout: timeout, spawner: spawner, sink: sink, logger: logger, mode: mode}
 }
 
 // Invoke implements domain.HarnessAdapter.
@@ -111,10 +151,26 @@ func (a *GHCPCLIAdapter) Invoke(ctx context.Context, agent domain.AgentReference
 		},
 		Prompt:       string(reqBytes),
 		OutputFormat: "json",
+		GHCPCLIMode:  a.mode,
 		// SystemPrompt is deliberately left unset for both invocation kinds.
 		// GHCP CLI layers instructions from files it discovers itself; MOSAIC
 		// orchestration context is rendered into the agent's .agent.md profile
 		// at deploy time by Tools/Deployment. No EnvBlock injection is correct.
+	}
+
+	// For Partial Allowlist mode, extract tool names from the agent's deployed
+	// definition file and populate DerivedTools. BuildGHCPCLIArgs reads
+	// DerivedTools to emit --allow-tool entries. In Blanket mode this step is
+	// skipped: --yolo already grants all permissions regardless of tool list.
+	if a.mode == commonharness.GHCPCLIModePartialAllowlist {
+		tools, extractErr := commonharness.ExtractGHCPCLITools(agent.DefinitionPath)
+		if extractErr != nil {
+			a.logger.Log(domain.EventHarnessInvokeError, extractErr.Error(),
+				domain.F("agent", request.AgentInstanceID),
+			)
+			return domain.ProtocolResponse{}, fmt.Errorf("extract GHCP CLI tools for %s: %w", agent.Identifier, extractErr)
+		}
+		spawnReq.DerivedTools = tools
 	}
 
 	resp, err := a.spawner.Spawn(ctx, spawnReq)
@@ -206,6 +262,20 @@ func (a *GHCPCLIAdapter) InvokeRaw(ctx context.Context, agent domain.AgentRefere
 		},
 		Prompt:       string(payload),
 		OutputFormat: "json",
+		GHCPCLIMode:  a.mode,
+	}
+
+	// For Partial Allowlist mode, extract tool names from the agent's deployed
+	// definition file and populate DerivedTools, matching Invoke's behavior.
+	if a.mode == commonharness.GHCPCLIModePartialAllowlist {
+		tools, extractErr := commonharness.ExtractGHCPCLITools(agent.DefinitionPath)
+		if extractErr != nil {
+			a.logger.Log(domain.EventHarnessInvokeError, extractErr.Error(),
+				domain.F("agent", agent.Identifier),
+			)
+			return nil, fmt.Errorf("extract GHCP CLI tools for %s: %w", agent.Identifier, extractErr)
+		}
+		spawnReq.DerivedTools = tools
 	}
 
 	cmd, err := commonharness.ResolveExecutable(a.executablePath)

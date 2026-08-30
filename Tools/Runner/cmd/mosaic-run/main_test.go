@@ -432,7 +432,7 @@ func TestScanFlag_TimeoutFlag_EqualsSeparated(t *testing.T) {
 // is the primary AC3.1 assertion: the right adapter type is instantiated for
 // the real Claude Code CLI.
 func TestBuildAdapter_ClaudeCode_ReturnsClaudeCodeAdapter(t *testing.T) {
-	h := buildAdapter("claude-code", "/custom/claude", 45*time.Minute)
+	h := buildAdapter("claude-code", "/custom/claude", "", 45*time.Minute)
 	if _, ok := h.(*harness.ClaudeCodeAdapter); !ok {
 		t.Errorf("buildAdapter(claude-code) returned %T, want *harness.ClaudeCodeAdapter", h)
 	}
@@ -441,7 +441,7 @@ func TestBuildAdapter_ClaudeCode_ReturnsClaudeCodeAdapter(t *testing.T) {
 // TestBuildAdapter_Fake_ReturnsFakeAdapter verifies that "fake" constructs a
 // *harness.FakeAdapter, confirming backward-compatible default behaviour (AC3.2).
 func TestBuildAdapter_Fake_ReturnsFakeAdapter(t *testing.T) {
-	h := buildAdapter("fake", "", 0)
+	h := buildAdapter("fake", "", "", 0)
 	if _, ok := h.(*harness.FakeAdapter); !ok {
 		t.Errorf("buildAdapter(fake) returned %T, want *harness.FakeAdapter", h)
 	}
@@ -451,7 +451,7 @@ func TestBuildAdapter_Fake_ReturnsFakeAdapter(t *testing.T) {
 // harnessStr falls back to FakeAdapter without panicking. Unknown values are
 // rejected upstream by cli.Run (AC3.8); buildAdapter is a safe fallback.
 func TestBuildAdapter_Unknown_ReturnsFakeAdapter(t *testing.T) {
-	h := buildAdapter("unknown-harness", "", 0)
+	h := buildAdapter("unknown-harness", "", "", 0)
 	if _, ok := h.(*harness.FakeAdapter); !ok {
 		t.Errorf("buildAdapter(unknown-harness) returned %T, want *harness.FakeAdapter", h)
 	}
@@ -462,7 +462,7 @@ func TestBuildAdapter_Unknown_ReturnsFakeAdapter(t *testing.T) {
 // runs) is treated as the 30-minute default, not a zero-timeout adapter. The
 // returned adapter must still be a ClaudeCodeAdapter.
 func TestBuildAdapter_ClaudeCode_ZeroTimeoutDefaultsTo30Min(t *testing.T) {
-	h := buildAdapter("claude-code", "claude", 0)
+	h := buildAdapter("claude-code", "claude", "", 0)
 	if _, ok := h.(*harness.ClaudeCodeAdapter); !ok {
 		t.Errorf("buildAdapter(claude-code, timeout=0) returned %T, want *harness.ClaudeCodeAdapter", h)
 	}
@@ -473,7 +473,7 @@ func TestBuildAdapter_ClaudeCode_ZeroTimeoutDefaultsTo30Min(t *testing.T) {
 // is absent) produces a valid ClaudeCodeAdapter. This closes AC3.4's default
 // propagation gap.
 func TestBuildAdapter_ClaudeCode_DefaultPath(t *testing.T) {
-	h := buildAdapter("claude-code", "claude", 30*time.Minute)
+	h := buildAdapter("claude-code", "claude", "", 30*time.Minute)
 	if _, ok := h.(*harness.ClaudeCodeAdapter); !ok {
 		t.Errorf("buildAdapter(claude-code, claude, 30m) returned %T, want *harness.ClaudeCodeAdapter", h)
 	}
@@ -483,7 +483,7 @@ func TestBuildAdapter_ClaudeCode_DefaultPath(t *testing.T) {
 // executable path and a non-default timeout both produce a ClaudeCodeAdapter.
 // Covers the combined AC3.3 + AC3.4 propagation path.
 func TestBuildAdapter_ClaudeCode_CustomPathAndTimeout(t *testing.T) {
-	h := buildAdapter("claude-code", "/opt/claude/bin/claude", 90*time.Second)
+	h := buildAdapter("claude-code", "/opt/claude/bin/claude", "", 90*time.Second)
 	if _, ok := h.(*harness.ClaudeCodeAdapter); !ok {
 		t.Errorf("buildAdapter(claude-code, custom path/timeout) returned %T, want *harness.ClaudeCodeAdapter", h)
 	}
@@ -494,7 +494,7 @@ func TestBuildAdapter_ClaudeCode_CustomPathAndTimeout(t *testing.T) {
 // primary AC4.3 assertion: the new catalog entry resolves to its own
 // adapter, mirroring TestBuildAdapter_ClaudeCode_ReturnsClaudeCodeAdapter.
 func TestBuildAdapter_OpenCode_ReturnsOpenCodeAdapter(t *testing.T) {
-	h := buildAdapter("opencode", "/custom/opencode", 45*time.Minute)
+	h := buildAdapter("opencode", "/custom/opencode", "", 45*time.Minute)
 	if _, ok := h.(*harness.OpenCodeAdapter); !ok {
 		t.Errorf("buildAdapter(opencode) returned %T, want *harness.OpenCodeAdapter", h)
 	}
@@ -504,7 +504,7 @@ func TestBuildAdapter_OpenCode_ReturnsOpenCodeAdapter(t *testing.T) {
 // timeout for "opencode" is treated as the 30-minute default, mirroring the
 // claude-code case.
 func TestBuildAdapter_OpenCode_ZeroTimeoutDefaultsTo30Min(t *testing.T) {
-	h := buildAdapter("opencode", "opencode", 0)
+	h := buildAdapter("opencode", "opencode", "", 0)
 	if _, ok := h.(*harness.OpenCodeAdapter); !ok {
 		t.Errorf("buildAdapter(opencode, timeout=0) returned %T, want *harness.OpenCodeAdapter", h)
 	}
@@ -515,7 +515,7 @@ func TestBuildAdapter_OpenCode_ZeroTimeoutDefaultsTo30Min(t *testing.T) {
 // an unrecognised value must still fall back to FakeAdapter, and adding the
 // "opencode" case must not have widened the default arm's match.
 func TestBuildAdapter_Unknown_StillReturnsFakeAdapter_AfterOpenCodeAdded(t *testing.T) {
-	h := buildAdapter("still-unknown-harness", "", 0)
+	h := buildAdapter("still-unknown-harness", "", "", 0)
 	if _, ok := h.(*harness.FakeAdapter); !ok {
 		t.Errorf("buildAdapter(still-unknown-harness) returned %T, want *harness.FakeAdapter", h)
 	}
@@ -532,7 +532,7 @@ func TestBuildAdapter_Unknown_StillReturnsFakeAdapter_AfterOpenCodeAdded(t *test
 
 func TestBuildAdapter_CatalogCoverage_EveryEntryResolvesToARealAdapter(t *testing.T) {
 	for _, entry := range commonharness.CLIHarnesses() {
-		h := buildAdapter(entry.ID, "some-path", 5*time.Minute)
+		h := buildAdapter(entry.ID, "some-path", "", 5*time.Minute)
 		if _, isFake := h.(*harness.FakeAdapter); isFake {
 			t.Errorf("buildAdapter(%q) returned *harness.FakeAdapter; every catalog entry must resolve to a real adapter, or this composition root has silently missed a case", entry.ID)
 		}
@@ -2013,7 +2013,7 @@ func requireExecutableRevealer(t *testing.T, h domain.HarnessAdapter) domain.Exe
 // RED: the claude-code case currently passes the override directly without an
 // empty-string guard, so ExecutablePath() returns "" not "claude".
 func TestBuildAdapter_ClaudeCode_NoOverride_ResolvesDefaultClaude(t *testing.T) {
-	h := buildAdapter(commonharness.HarnessIDClaudeCode, "", 30*time.Minute)
+	h := buildAdapter(commonharness.HarnessIDClaudeCode, "", "", 30*time.Minute)
 	rev := requireExecutableRevealer(t, h)
 
 	got := rev.ExecutablePath()
@@ -2028,7 +2028,7 @@ func TestBuildAdapter_ClaudeCode_NoOverride_ResolvesDefaultClaude(t *testing.T) 
 // when no executable override is supplied, buildAdapter resolves the opencode
 // harness to its per-harness default executable "opencode".
 func TestBuildAdapter_OpenCode_NoOverride_ResolvesDefaultOpenCode(t *testing.T) {
-	h := buildAdapter(commonharness.HarnessIDOpenCode, "", 30*time.Minute)
+	h := buildAdapter(commonharness.HarnessIDOpenCode, "", "", 30*time.Minute)
 	rev := requireExecutableRevealer(t, h)
 
 	got := rev.ExecutablePath()
@@ -2042,7 +2042,7 @@ func TestBuildAdapter_OpenCode_NoOverride_ResolvesDefaultOpenCode(t *testing.T) 
 // when no executable override is supplied, buildAdapter resolves the ghcp-cli
 // harness to its per-harness default executable "copilot".
 func TestBuildAdapter_GHCPCli_NoOverride_ResolvesDefaultCopilot(t *testing.T) {
-	h := buildAdapter(commonharness.HarnessIDGHCPCLI, "", 30*time.Minute)
+	h := buildAdapter(commonharness.HarnessIDGHCPCLI, "", "blanket", 30*time.Minute)
 	rev := requireExecutableRevealer(t, h)
 
 	got := rev.ExecutablePath()
@@ -2058,7 +2058,7 @@ func TestBuildAdapter_GHCPCli_NoOverride_ResolvesDefaultCopilot(t *testing.T) {
 // of the reported failure: the GHCP CLI harness was spawning "claude" because
 // the pre-scan injected "claude" as a fallback before buildAdapter was called.
 func TestBuildAdapter_GHCPCli_NoOverride_DoesNotResolveClaude(t *testing.T) {
-	h := buildAdapter(commonharness.HarnessIDGHCPCLI, "", 30*time.Minute)
+	h := buildAdapter(commonharness.HarnessIDGHCPCLI, "", "blanket", 30*time.Minute)
 	rev := requireExecutableRevealer(t, h)
 
 	if got := rev.ExecutablePath(); got == "claude" {
@@ -2072,7 +2072,7 @@ func TestBuildAdapter_GHCPCli_NoOverride_DoesNotResolveClaude(t *testing.T) {
 // cross-harness property for the opencode harness: with no override, it must
 // not resolve to "claude".
 func TestBuildAdapter_OpenCode_NoOverride_DoesNotResolveClaude(t *testing.T) {
-	h := buildAdapter(commonharness.HarnessIDOpenCode, "", 30*time.Minute)
+	h := buildAdapter(commonharness.HarnessIDOpenCode, "", "", 30*time.Minute)
 	rev := requireExecutableRevealer(t, h)
 
 	if got := rev.ExecutablePath(); got == "claude" {
@@ -2100,7 +2100,7 @@ func TestBuildAdapter_OpenCode_NoOverride_DoesNotResolveClaude(t *testing.T) {
 // regardless of the per-harness default.
 func TestBuildAdapter_ClaudeCode_WithOverride_UsesOverride(t *testing.T) {
 	const override = "/opt/custom/claude"
-	h := buildAdapter(commonharness.HarnessIDClaudeCode, override, 30*time.Minute)
+	h := buildAdapter(commonharness.HarnessIDClaudeCode, override, "", 30*time.Minute)
 	rev := requireExecutableRevealer(t, h)
 
 	if got := rev.ExecutablePath(); got != override {
@@ -2114,7 +2114,7 @@ func TestBuildAdapter_ClaudeCode_WithOverride_UsesOverride(t *testing.T) {
 // per-harness default of "opencode".
 func TestBuildAdapter_OpenCode_WithOverride_UsesOverride(t *testing.T) {
 	const override = "/opt/custom/opencode"
-	h := buildAdapter(commonharness.HarnessIDOpenCode, override, 30*time.Minute)
+	h := buildAdapter(commonharness.HarnessIDOpenCode, override, "", 30*time.Minute)
 	rev := requireExecutableRevealer(t, h)
 
 	if got := rev.ExecutablePath(); got != override {
@@ -2128,7 +2128,7 @@ func TestBuildAdapter_OpenCode_WithOverride_UsesOverride(t *testing.T) {
 // per-harness default of "copilot".
 func TestBuildAdapter_GHCPCli_WithOverride_UsesOverride(t *testing.T) {
 	const override = "/opt/custom/copilot"
-	h := buildAdapter(commonharness.HarnessIDGHCPCLI, override, 30*time.Minute)
+	h := buildAdapter(commonharness.HarnessIDGHCPCLI, override, "blanket", 30*time.Minute)
 	rev := requireExecutableRevealer(t, h)
 
 	if got := rev.ExecutablePath(); got != override {
@@ -2152,7 +2152,7 @@ func TestBuildAdapter_AllRealHarnesses_OverrideWinsOverDefault(t *testing.T) {
 	for _, tc := range cases {
 		tc := tc
 		t.Run(tc.harnessID, func(t *testing.T) {
-			h := buildAdapter(tc.harnessID, override, 30*time.Minute)
+			h := buildAdapter(tc.harnessID, override, "", 30*time.Minute)
 			rev := requireExecutableRevealer(t, h)
 			if got := rev.ExecutablePath(); got != override {
 				t.Errorf("buildAdapter(%q, override=%q) ExecutablePath() = %q, want %q; "+
@@ -2206,7 +2206,7 @@ func TestPreScanComposition_GHCPCli_AbsentClaudePath_ResolvesCopilot(t *testing.
 			"scanFlag must not inject a default, only the entry-path fallback code does", claudePath)
 	}
 
-	h := buildAdapter(commonharness.HarnessIDGHCPCLI, claudePath, 30*time.Minute)
+	h := buildAdapter(commonharness.HarnessIDGHCPCLI, claudePath, "blanket", 30*time.Minute)
 	rev := requireExecutableRevealer(t, h)
 
 	if got := rev.ExecutablePath(); got != "copilot" {
@@ -2222,7 +2222,7 @@ func TestPreScanComposition_OpenCode_AbsentClaudePath_ResolvesOpenCode(t *testin
 	args := []string{"run", "--harness", commonharness.HarnessIDOpenCode}
 	claudePath := scanFlag(args, "--claude-path")
 
-	h := buildAdapter(commonharness.HarnessIDOpenCode, claudePath, 30*time.Minute)
+	h := buildAdapter(commonharness.HarnessIDOpenCode, claudePath, "", 30*time.Minute)
 	rev := requireExecutableRevealer(t, h)
 
 	if got := rev.ExecutablePath(); got != "opencode" {
@@ -2241,7 +2241,7 @@ func TestPreScanComposition_ClaudeCode_AbsentClaudePath_ResolvesDefaultClaude(t 
 	args := []string{"run", "--harness", commonharness.HarnessIDClaudeCode}
 	claudePath := scanFlag(args, "--claude-path")
 
-	h := buildAdapter(commonharness.HarnessIDClaudeCode, claudePath, 30*time.Minute)
+	h := buildAdapter(commonharness.HarnessIDClaudeCode, claudePath, "", 30*time.Minute)
 	rev := requireExecutableRevealer(t, h)
 
 	if got := rev.ExecutablePath(); got != "claude" {
@@ -2271,8 +2271,8 @@ func TestPreScanComposition_CLIAndTUI_ProduceSameResolution(t *testing.T) {
 			args := []string{"run", "--harness", tc.harnessID}
 			claudePath := scanFlag(args, "--claude-path")
 
-			cliH := buildAdapter(tc.harnessID, claudePath, 30*time.Minute)
-			tuiH := buildAdapter(tc.harnessID, claudePath, 30*time.Minute)
+			cliH := buildAdapter(tc.harnessID, claudePath, "", 30*time.Minute)
+			tuiH := buildAdapter(tc.harnessID, claudePath, "", 30*time.Minute)
 
 			cliRev := requireExecutableRevealer(t, cliH)
 			tuiRev := requireExecutableRevealer(t, tuiH)
@@ -2311,7 +2311,7 @@ func TestPreScanComposition_CLIAndTUI_ProduceSameResolution(t *testing.T) {
 // existing TestBuildAdapter_Fake_ReturnsFakeAdapter by asserting that Stage 4's
 // changes to buildAdapter have not removed or broken the fake case.
 func TestFakeHarness_RemainsSelectable(t *testing.T) {
-	h := buildAdapter(harness.FakeHarnessID, "", 30*time.Minute)
+	h := buildAdapter(harness.FakeHarnessID, "", "", 30*time.Minute)
 	if _, ok := h.(*harness.FakeAdapter); !ok {
 		t.Errorf("buildAdapter(%q) returned %T, want *harness.FakeAdapter; "+
 			"the fake harness must remain constructible after Stage 4 changes",
@@ -2323,7 +2323,7 @@ func TestFakeHarness_RemainsSelectable(t *testing.T) {
 // adapter does not implement domain.ExecutableRevealer. The fake spawns no
 // process and has no executable path; exposing one would misrepresent it.
 func TestFakeHarness_DoesNotImplementExecutableRevealer(t *testing.T) {
-	h := buildAdapter(harness.FakeHarnessID, "some-path", 30*time.Minute)
+	h := buildAdapter(harness.FakeHarnessID, "some-path", "", 30*time.Minute)
 	if _, ok := h.(domain.ExecutableRevealer); ok {
 		t.Errorf("buildAdapter(%q) implements domain.ExecutableRevealer; "+
 			"the fake adapter spawns no process and must not expose an executable path",
@@ -2337,7 +2337,7 @@ func TestFakeHarness_DoesNotImplementExecutableRevealer(t *testing.T) {
 // is unaffected. This pins the design constraint that buildAdapter's fake case
 // never inspects or stores the override.
 func TestFakeHarness_IgnoresExecutableOverride(t *testing.T) {
-	h := buildAdapter(harness.FakeHarnessID, "should-be-ignored", 30*time.Minute)
+	h := buildAdapter(harness.FakeHarnessID, "should-be-ignored", "", 30*time.Minute)
 	if _, ok := h.(*harness.FakeAdapter); !ok {
 		t.Errorf("buildAdapter(%q, override='should-be-ignored') returned %T, want *harness.FakeAdapter; "+
 			"the fake harness must ignore the executable override",
@@ -2357,6 +2357,139 @@ func TestFakeHarnessID_IsTheCobraFlagDefault(t *testing.T) {
 		t.Errorf("harness.FakeHarnessID = %q, want %q; "+
 			"this constant is the --harness cobra flag default declared in run.go and must not be renamed",
 			harness.FakeHarnessID, wantDefault)
+	}
+}
+
+// ---------------------------------------------------------------------------
+// T4.2: --ghcp-permission-mode CLI flag parsing
+//
+// scanFlag must correctly resolve both "--flag value" and "--flag=value" forms.
+// buildAdapter must map "blanket" and "allowlist" to the correct adapter mode.
+// ---------------------------------------------------------------------------
+
+// TestScanFlag_GHCPPermissionMode_SpaceForm verifies that scanFlag correctly
+// extracts the value of --ghcp-permission-mode in "--flag value" form.
+func TestScanFlag_GHCPPermissionMode_SpaceForm(t *testing.T) {
+	args := []string{"run", "--harness", "ghcp-cli", "--ghcp-permission-mode", "blanket"}
+	got := scanFlag(args, "--ghcp-permission-mode")
+	if got != "blanket" {
+		t.Errorf("scanFlag(--ghcp-permission-mode, space form) = %q; want %q", got, "blanket")
+	}
+}
+
+// TestScanFlag_GHCPPermissionMode_EqualForm verifies that scanFlag correctly
+// extracts the value of --ghcp-permission-mode in "--flag=value" form.
+func TestScanFlag_GHCPPermissionMode_EqualForm(t *testing.T) {
+	args := []string{"run", "--harness=ghcp-cli", "--ghcp-permission-mode=allowlist"}
+	got := scanFlag(args, "--ghcp-permission-mode")
+	if got != "allowlist" {
+		t.Errorf("scanFlag(--ghcp-permission-mode, equals form) = %q; want %q", got, "allowlist")
+	}
+}
+
+// TestScanFlag_GHCPPermissionMode_AbsentFlag verifies that scanFlag returns ""
+// when --ghcp-permission-mode is not present in args.
+func TestScanFlag_GHCPPermissionMode_AbsentFlag(t *testing.T) {
+	args := []string{"run", "--harness", "ghcp-cli"}
+	got := scanFlag(args, "--ghcp-permission-mode")
+	if got != "" {
+		t.Errorf("scanFlag(--ghcp-permission-mode, absent) = %q; want empty string", got)
+	}
+}
+
+// TestBuildAdapter_GHCPCli_BlanketMode_ProducesGHCPCLIAdapter verifies that
+// buildAdapter("ghcp-cli", ..., "blanket", ...) returns a *harness.GHCPCLIAdapter.
+func TestBuildAdapter_GHCPCli_BlanketMode_ProducesGHCPCLIAdapter(t *testing.T) {
+	h := buildAdapter(commonharness.HarnessIDGHCPCLI, "copilot", "blanket", 30*time.Minute)
+	if _, ok := h.(*harness.GHCPCLIAdapter); !ok {
+		t.Errorf("buildAdapter(ghcp-cli, blanket) returned %T; want *harness.GHCPCLIAdapter", h)
+	}
+}
+
+// TestBuildAdapter_GHCPCli_AllowlistMode_ProducesGHCPCLIAdapter verifies that
+// buildAdapter("ghcp-cli", ..., "allowlist", ...) returns a *harness.GHCPCLIAdapter.
+func TestBuildAdapter_GHCPCli_AllowlistMode_ProducesGHCPCLIAdapter(t *testing.T) {
+	h := buildAdapter(commonharness.HarnessIDGHCPCLI, "copilot", "allowlist", 30*time.Minute)
+	if _, ok := h.(*harness.GHCPCLIAdapter); !ok {
+		t.Errorf("buildAdapter(ghcp-cli, allowlist) returned %T; want *harness.GHCPCLIAdapter", h)
+	}
+}
+
+// TestBuildAdapter_GHCPCli_EmptyMode_DefaultsToBlanket verifies that an empty
+// ghcpMode defaults to GHCPCLIModeBlanket inside buildAdapter (backward compatibility).
+func TestBuildAdapter_GHCPCli_EmptyMode_DefaultsToBlanket(t *testing.T) {
+	// Passing "" should produce a GHCPCLIAdapter (not a fake or panic).
+	h := buildAdapter(commonharness.HarnessIDGHCPCLI, "copilot", "", 30*time.Minute)
+	if _, ok := h.(*harness.GHCPCLIAdapter); !ok {
+		t.Errorf("buildAdapter(ghcp-cli, '') returned %T; want *harness.GHCPCLIAdapter (empty mode defaults to blanket)", h)
+	}
+}
+
+// TestBuildAdapter_GHCPCli_UnknownMode_DefaultsToBlanket verifies that an
+// unrecognised ghcpMode value defaults to GHCPCLIModeBlanket.
+func TestBuildAdapter_GHCPCli_UnknownMode_DefaultsToBlanket(t *testing.T) {
+	h := buildAdapter(commonharness.HarnessIDGHCPCLI, "copilot", "not-a-real-mode", 30*time.Minute)
+	if _, ok := h.(*harness.GHCPCLIAdapter); !ok {
+		t.Errorf("buildAdapter(ghcp-cli, 'not-a-real-mode') returned %T; want *harness.GHCPCLIAdapter (unknown mode defaults to blanket)", h)
+	}
+}
+
+// ---------------------------------------------------------------------------
+// T4.3: FR-8 rejection — GHCP CLI run without resolved mode is rejected
+//
+// In CLI mode, the pre-scan block in main() rejects a ghcp-cli run that has no
+// --ghcp-permission-mode flag. These tests verify the flag pre-scan composition
+// path: scanFlag returns "" for an absent flag, which the pre-scan detects and
+// would reject.
+// ---------------------------------------------------------------------------
+
+// TestFR8Rejection_GHCPCli_AbsentMode_FlagReturnsEmpty verifies that scanFlag
+// returns "" when --ghcp-permission-mode is absent from args. This is the
+// precondition for the FR-8 rejection in main(): an empty result from scanFlag
+// causes the pre-scan to reject the run before any adapter is constructed.
+func TestFR8Rejection_GHCPCli_AbsentMode_FlagReturnsEmpty(t *testing.T) {
+	args := []string{"run", "--harness", commonharness.HarnessIDGHCPCLI, "--workflow", "myworkflow"}
+	got := scanFlag(args, "--ghcp-permission-mode")
+	if got != "" {
+		t.Errorf("scanFlag(--ghcp-permission-mode, absent) = %q; want empty string — "+
+			"FR-8 rejection depends on scanFlag returning '' for an absent flag when harness is ghcp-cli", got)
+	}
+}
+
+// TestFR8Rejection_GHCPCli_BlanketMode_FlagNonEmpty verifies that scanFlag
+// returns "blanket" when the flag is present, which satisfies the FR-8 check
+// (run is not rejected).
+func TestFR8Rejection_GHCPCli_BlanketMode_FlagNonEmpty(t *testing.T) {
+	args := []string{"run", "--harness", commonharness.HarnessIDGHCPCLI, "--ghcp-permission-mode", "blanket"}
+	got := scanFlag(args, "--ghcp-permission-mode")
+	if got == "" {
+		t.Errorf("scanFlag(--ghcp-permission-mode=blanket) = \"\"; want non-empty — "+
+			"FR-8 check must not reject a run when --ghcp-permission-mode=blanket is supplied")
+	}
+}
+
+// TestFR8Rejection_GHCPCli_AllowlistMode_FlagNonEmpty verifies that scanFlag
+// returns "allowlist" when the flag is present.
+func TestFR8Rejection_GHCPCli_AllowlistMode_FlagNonEmpty(t *testing.T) {
+	args := []string{"run", "--harness", commonharness.HarnessIDGHCPCLI, "--ghcp-permission-mode=allowlist"}
+	got := scanFlag(args, "--ghcp-permission-mode")
+	if got == "" {
+		t.Errorf("scanFlag(--ghcp-permission-mode=allowlist) = \"\"; want non-empty")
+	}
+}
+
+// TestFR8Rejection_NonGHCPHarness_AbsentMode_NotRejected verifies that the
+// FR-8 rejection check does not fire for non-ghcp-cli harnesses. The pre-scan
+// in main() gates on harnessStr == HarnessIDGHCPCLI before checking the mode.
+// For other harnesses, an absent --ghcp-permission-mode is not an error.
+func TestFR8Rejection_NonGHCPHarness_AbsentMode_NotRejected(t *testing.T) {
+	args := []string{"run", "--harness", commonharness.HarnessIDClaudeCode, "--workflow", "w"}
+	harness := scanFlag(args, "--harness")
+	mode := scanFlag(args, "--ghcp-permission-mode")
+	// Simulate the pre-scan check: rejection applies only when harness is ghcp-cli.
+	if harness == commonharness.HarnessIDGHCPCLI && mode == "" {
+		t.Errorf("FR-8 rejection would fire for harness %q with absent mode, "+
+			"but harness is %q (not ghcp-cli) — the check must be gated on harness identity", harness, harness)
 	}
 }
 

@@ -606,3 +606,216 @@ func TestBuildArgs_Orchestrator_SessionPersistenceOptIn_StdinUnchanged(t *testin
 		t.Errorf("stdin must be identical regardless of SessionPersistence\nwithout opt-in: %q\nwith opt-in:    %q", stdinWithout, stdinWith)
 	}
 }
+
+// ---------------------------------------------------------------------------
+// DerivedTools -- deterministic dontAsk permission mode (T2.1)
+// ---------------------------------------------------------------------------
+
+// TestBuildArgs_DerivedTools_Ordinary_EmitsDontAskMode verifies that when
+// DerivedTools is non-empty, BuildArgs emits --permission-mode dontAsk for
+// ordinary invocations. This is the deterministic permission mode that replaces
+// the hardcoded auto mode for Runner's production paths.
+func TestBuildArgs_DerivedTools_Ordinary_EmitsDontAskMode(t *testing.T) {
+	args, _, err := harness.BuildArgs(harness.SpawnRequest{
+		Agent:        ordinaryAgent(),
+		Prompt:       "x",
+		OutputFormat: "json",
+		DerivedTools: []string{"Read", "Write", "Edit"},
+	})
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if !containsSequence(args, "--permission-mode", "dontAsk") {
+		t.Errorf("want --permission-mode dontAsk when DerivedTools is non-empty, got %v", args)
+	}
+}
+
+// TestBuildArgs_DerivedTools_Ordinary_DoesNotEmitAutoMode verifies that when
+// DerivedTools is non-empty, BuildArgs does NOT emit --permission-mode auto for
+// ordinary invocations. The dontAsk mode replaces auto on the deterministic path.
+func TestBuildArgs_DerivedTools_Ordinary_DoesNotEmitAutoMode(t *testing.T) {
+	args, _, err := harness.BuildArgs(harness.SpawnRequest{
+		Agent:        ordinaryAgent(),
+		Prompt:       "x",
+		OutputFormat: "json",
+		DerivedTools: []string{"Read", "Write"},
+	})
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if containsSequence(args, "--permission-mode", "auto") {
+		t.Errorf("want --permission-mode auto absent when DerivedTools is non-empty, got %v", args)
+	}
+}
+
+// TestBuildArgs_DerivedTools_Ordinary_EmitsAllowedToolsForEachTool verifies
+// that when DerivedTools is non-empty, BuildArgs emits one --allowedTools flag
+// per tool name for ordinary invocations. Each tool name is a separate
+// --allowedTools flag rather than a comma-separated value.
+func TestBuildArgs_DerivedTools_Ordinary_EmitsAllowedToolsForEachTool(t *testing.T) {
+	tools := []string{"Read", "Write", "Edit", "Bash"}
+	args, _, err := harness.BuildArgs(harness.SpawnRequest{
+		Agent:        ordinaryAgent(),
+		Prompt:       "x",
+		OutputFormat: "json",
+		DerivedTools: tools,
+	})
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	for _, tool := range tools {
+		if !containsSequence(args, "--allowedTools", tool) {
+			t.Errorf("want --allowedTools %q in args, got %v", tool, args)
+		}
+	}
+}
+
+// TestBuildArgs_DerivedTools_Ordinary_NeverDangerouslySkipPermissions verifies
+// that --dangerously-skip-permissions is still never emitted even when
+// DerivedTools is non-empty and dontAsk mode is selected.
+func TestBuildArgs_DerivedTools_Ordinary_NeverDangerouslySkipPermissions(t *testing.T) {
+	args, _, err := harness.BuildArgs(harness.SpawnRequest{
+		Agent:        ordinaryAgent(),
+		Prompt:       "x",
+		OutputFormat: "json",
+		DerivedTools: []string{"Read", "Write"},
+	})
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if containsArg(args, "--dangerously-skip-permissions") {
+		t.Errorf("--dangerously-skip-permissions must never appear even with DerivedTools set, got %v", args)
+	}
+}
+
+// TestBuildArgs_DerivedTools_Orchestrator_EmitsDontAskMode verifies that when
+// DerivedTools is non-empty, BuildArgs emits --permission-mode dontAsk for
+// orchestrator invocations.
+func TestBuildArgs_DerivedTools_Orchestrator_EmitsDontAskMode(t *testing.T) {
+	args, _, err := harness.BuildArgs(harness.SpawnRequest{
+		Agent:        orchestratorAgent(),
+		Prompt:       "x",
+		OutputFormat: "json",
+		DerivedTools: []string{"Read", "Write", "Edit", "Bash", "Glob", "Grep", "Task", "TaskStop"},
+	})
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if !containsSequence(args, "--permission-mode", "dontAsk") {
+		t.Errorf("want --permission-mode dontAsk when DerivedTools is non-empty, got %v", args)
+	}
+}
+
+// TestBuildArgs_DerivedTools_Orchestrator_DoesNotEmitAutoMode verifies that
+// when DerivedTools is non-empty, BuildArgs does NOT emit --permission-mode auto
+// for orchestrator invocations.
+func TestBuildArgs_DerivedTools_Orchestrator_DoesNotEmitAutoMode(t *testing.T) {
+	args, _, err := harness.BuildArgs(harness.SpawnRequest{
+		Agent:        orchestratorAgent(),
+		Prompt:       "x",
+		OutputFormat: "json",
+		DerivedTools: []string{"Read", "Write"},
+	})
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if containsSequence(args, "--permission-mode", "auto") {
+		t.Errorf("want --permission-mode auto absent when DerivedTools is non-empty, got %v", args)
+	}
+}
+
+// TestBuildArgs_DerivedTools_Orchestrator_EmitsAllowedToolsForEachTool verifies
+// that when DerivedTools is non-empty, BuildArgs emits one --allowedTools flag
+// per tool name for orchestrator invocations.
+func TestBuildArgs_DerivedTools_Orchestrator_EmitsAllowedToolsForEachTool(t *testing.T) {
+	tools := []string{"Read", "Write", "Edit", "Bash", "Glob", "Grep", "Task", "TaskStop", "AskUserQuestion"}
+	args, _, err := harness.BuildArgs(harness.SpawnRequest{
+		Agent:        orchestratorAgent(),
+		Prompt:       "x",
+		OutputFormat: "json",
+		DerivedTools: tools,
+	})
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	for _, tool := range tools {
+		if !containsSequence(args, "--allowedTools", tool) {
+			t.Errorf("want --allowedTools %q in args, got %v", tool, args)
+		}
+	}
+}
+
+// TestBuildArgs_EmptyDerivedTools_FallsBackToAutoMode verifies that when
+// DerivedTools is nil (the zero value), BuildArgs falls back to
+// --permission-mode auto for backward compatibility. This preserves the
+// existing behavior for callers that do not populate DerivedTools, notably
+// AgentTest's SpawnPlan methods.
+func TestBuildArgs_EmptyDerivedTools_FallsBackToAutoMode(t *testing.T) {
+	args, _, err := harness.BuildArgs(harness.SpawnRequest{
+		Agent:        ordinaryAgent(),
+		Prompt:       "x",
+		OutputFormat: "json",
+		// DerivedTools intentionally absent -- simulates AgentTest usage pattern
+	})
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if !containsSequence(args, "--permission-mode", "auto") {
+		t.Errorf("want --permission-mode auto fallback when DerivedTools is nil, got %v", args)
+	}
+}
+
+// TestBuildArgs_EmptyDerivedTools_NoAllowedToolsFlag verifies that when
+// DerivedTools is nil, BuildArgs does not emit any --allowedTools flag.
+// The absence of DerivedTools means the caller did not supply a frontmatter-
+// derived tool list, so no --allowedTools entries are produced.
+func TestBuildArgs_EmptyDerivedTools_NoAllowedToolsFlag(t *testing.T) {
+	args, _, err := harness.BuildArgs(harness.SpawnRequest{
+		Agent:        ordinaryAgent(),
+		Prompt:       "x",
+		OutputFormat: "json",
+		// DerivedTools intentionally absent
+	})
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if containsArg(args, "--allowedTools") {
+		t.Errorf("want no --allowedTools when DerivedTools is nil, got %v", args)
+	}
+}
+
+// TestBuildArgs_EmptyDerivedTools_NoError verifies that nil DerivedTools is
+// not an error condition for BuildArgs. It is a legitimate backward-compatible
+// usage pattern for callers that do not populate DerivedTools.
+func TestBuildArgs_EmptyDerivedTools_NoError(t *testing.T) {
+	_, _, err := harness.BuildArgs(harness.SpawnRequest{
+		Agent:        ordinaryAgent(),
+		Prompt:       "x",
+		OutputFormat: "json",
+		// DerivedTools intentionally absent
+	})
+	if err != nil {
+		t.Errorf("want no error when DerivedTools is nil, got %v", err)
+	}
+}
+
+// TestBuildArgs_AllowedToolsSetDerivedToolsEmpty_NoAllowedToolsEmitted verifies
+// the non-collision constraint: when AllowedTools is populated (AgentTest's
+// field) but DerivedTools is nil, BuildArgs does NOT emit --allowedTools. The
+// --allowedTools flag is sourced exclusively from DerivedTools, never from
+// AllowedTools.
+func TestBuildArgs_AllowedToolsSetDerivedToolsEmpty_NoAllowedToolsEmitted(t *testing.T) {
+	args, _, err := harness.BuildArgs(harness.SpawnRequest{
+		Agent:        ordinaryAgent(),
+		Prompt:       "x",
+		OutputFormat: "json",
+		AllowedTools: []string{"AgentTestTool", "AnotherAgentTestTool"}, // AgentTest's field
+		// DerivedTools: nil -- no frontmatter-derived tool list
+	})
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if containsArg(args, "--allowedTools") {
+		t.Errorf("want no --allowedTools when DerivedTools is nil even if AllowedTools is set (AllowedTools is not read by BuildArgs for --allowedTools), got %v", args)
+	}
+}

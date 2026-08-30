@@ -44,6 +44,7 @@ func RegisterRunFlags(fs *pflag.FlagSet) {
 	fs.String("claude-path", "", "Executable path override for the harness selected by --harness; when absent, each harness uses its own default (claude, opencode, copilot)")
 	fs.String("infra-class", "", "Comma-separated class=agent mappings for non-interactive agent-per-class selection (e.g. checkpoint=checkpoint-manager-git,commit=commit-manager-git)")
 	fs.StringArray("input", nil, "Path to a file or directory to copy into a new run's folder before the first dispatch; repeatable. Not permitted with --run.")
+	fs.String("ghcp-permission-mode", "", "GHCP CLI permission strategy: blanket (--yolo, grants all permissions) or allowlist (per-tool --allow-tool entries from agent frontmatter). Required when --harness=ghcp-cli.")
 }
 
 // RunFlagSpecs returns the arity of every flag mosaic-run accepts: every flag

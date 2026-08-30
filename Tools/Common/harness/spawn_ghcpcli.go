@@ -24,17 +24,36 @@ var ErrGHCPCLIUnsupportedOutputFormat = errors.New("harness: ghcp-cli supports o
 // there is no meaningful argument to build without it.
 var ErrGHCPCLIEmptyPrompt = errors.New("harness: ghcp-cli requires a non-empty prompt")
 
+// ErrGHCPCLIModeUnresolved is returned by BuildGHCPCLIArgs when
+// GHCPCLIMode is zero/unresolved. The caller must resolve a mode (via TUI
+// screen or CLI flag) before building GHCP CLI arguments.
+var ErrGHCPCLIModeUnresolved = errors.New("harness: GHCP CLI permission mode not resolved")
+
+// ErrGHCPCLIAllowlistEmpty is returned by BuildGHCPCLIArgs when
+// GHCPCLIMode is GHCPCLIModePartialAllowlist but DerivedTools is nil or
+// empty. Partial Allowlist mode requires at least one --allow-tool entry;
+// without it, the spawned process would have no tool permissions at all.
+var ErrGHCPCLIAllowlistEmpty = errors.New("harness: GHCP CLI partial allowlist mode requires non-empty DerivedTools")
+
 // BuildGHCPCLIArgs constructs the CLI arguments for one request against the
 // `copilot -p ... --output-format json` single-shot non-interactive contract.
 // Pure: no file, process, clock or environment access on any path.
 //
-// The fixed flags --output-format json, --yolo, and --no-ask-user are always
-// present. --output-format json selects JSONL output (one JSON object per
-// line); the default text mode interleaves model output with UI chrome and is
-// not safely parseable. --yolo grants blanket permission, documented by the
-// CLI as equivalent to --allow-all-tools --allow-all-paths --allow-all-urls;
-// the CLI states blanket tool permission is required for non-interactive mode.
-// --no-ask-user disables the ask_user tool so an unattended run cannot stall.
+// Permission mode is selected via req.GHCPCLIMode, which must be set to a
+// non-zero value before this function is called:
+//
+//   - GHCPCLIModeBlanket: emits --yolo and --no-ask-user, granting blanket
+//     permission (equivalent to --allow-all-tools --allow-all-paths
+//     --allow-all-urls). req.DerivedTools is ignored.
+//   - GHCPCLIModePartialAllowlist: omits --yolo; emits one --allow-tool entry
+//     per element of req.DerivedTools, then --no-ask-user. req.DerivedTools
+//     must be non-empty or ErrGHCPCLIAllowlistEmpty is returned.
+//   - GHCPCLIModeUnresolved (zero value): returns ErrGHCPCLIModeUnresolved
+//     before any args are built.
+//
+// --output-format json is always present. It selects JSONL output (one JSON
+// object per line); the default text mode interleaves model output with UI
+// chrome and is not safely parseable.
 //
 // req.SystemPrompt is deliberately ignored. The CLI layers instructions from
 // files it discovers itself (.github/copilot-instructions.md, .agent.md
@@ -47,8 +66,9 @@ var ErrGHCPCLIEmptyPrompt = errors.New("harness: ghcp-cli requires a non-empty p
 //
 // req.MaxTurns is deliberately ignored. The CLI offers no turn-limit flag.
 //
-// req.AllowedTools is deliberately ignored. --yolo already grants the
-// blanket permission AllowedTools would express.
+// req.AllowedTools is deliberately ignored. Use req.DerivedTools for
+// per-tool permission in Partial Allowlist mode; Blanket mode grants all
+// permissions via --yolo.
 //
 // -s is deliberately not emitted. It was empirically verified that -s
 // alongside --output-format json produces an identical event stream (same
@@ -60,16 +80,22 @@ var ErrGHCPCLIEmptyPrompt = errors.New("harness: ghcp-cli requires a non-empty p
 // invocation creates a fresh session; this is a structural guarantee, not a
 // conditional one.
 //
-// Argument ordering: --output-format json, --yolo, --no-ask-user, then
-// --agent and --model when their values are non-empty, then req.ExtraArgs
-// in caller order, then -p PROMPT last. Keeping -p and its value last ensures
-// a caller-supplied extra argument can never be swallowed as part of the
-// prompt.
+// Argument ordering: --output-format json, permission flags (--yolo
+// --no-ask-user for Blanket; --allow-tool entries then --no-ask-user for
+// Partial Allowlist), then --agent and --model when their values are
+// non-empty, then req.ExtraArgs in caller order, then -p PROMPT last.
+// Keeping -p and its value last ensures a caller-supplied extra argument
+// can never be swallowed as part of the prompt.
 func BuildGHCPCLIArgs(req SpawnRequest) ([]string, error) {
-	// Validation order: output-format check first, then empty-prompt check.
-	// When both conditions hold, the output-format sentinel is returned.
+	// Validation order: output-format check first, then mode check, then
+	// empty-prompt check. When output-format is invalid, that sentinel is
+	// returned regardless of mode. When mode is unresolved and prompt is
+	// also empty, the mode sentinel is returned.
 	if req.OutputFormat != "" && req.OutputFormat != "json" {
 		return nil, ErrGHCPCLIUnsupportedOutputFormat
+	}
+	if req.GHCPCLIMode == GHCPCLIModeUnresolved {
+		return nil, ErrGHCPCLIModeUnresolved
 	}
 	if req.Prompt == "" {
 		return nil, ErrGHCPCLIEmptyPrompt
@@ -77,8 +103,25 @@ func BuildGHCPCLIArgs(req SpawnRequest) ([]string, error) {
 
 	args := []string{
 		"--output-format", "json",
-		"--yolo",
-		"--no-ask-user",
+	}
+
+	switch req.GHCPCLIMode {
+	case GHCPCLIModeBlanket:
+		// Blanket mode: --yolo grants all permissions; --no-ask-user
+		// disables the ask_user tool so an unattended run cannot stall.
+		args = append(args, "--yolo", "--no-ask-user")
+	case GHCPCLIModePartialAllowlist:
+		// Partial Allowlist mode: emit one --allow-tool entry per
+		// DerivedTools element, then --no-ask-user. An empty DerivedTools
+		// slice would leave the spawned process with no tool permissions at
+		// all, which is a configuration error.
+		if len(req.DerivedTools) == 0 {
+			return nil, ErrGHCPCLIAllowlistEmpty
+		}
+		for _, tool := range req.DerivedTools {
+			args = append(args, "--allow-tool", tool)
+		}
+		args = append(args, "--no-ask-user")
 	}
 
 	// --agent is optional: an empty identifier selects the default assistant
@@ -91,9 +134,10 @@ func BuildGHCPCLIArgs(req SpawnRequest) ([]string, error) {
 		args = append(args, "--model", req.Model)
 	}
 
-	// ExtraArgs are appended in caller order, after the fixed flags and before
-	// -p, so a caller-supplied argument can never be swallowed into the prompt.
-	// A fresh copy is made to ensure the returned slice does not alias req.ExtraArgs.
+	// ExtraArgs are appended in caller order, after the permission flags and
+	// before -p, so a caller-supplied argument can never be swallowed into
+	// the prompt. A fresh copy is made to ensure the returned slice does not
+	// alias req.ExtraArgs.
 	if len(req.ExtraArgs) > 0 {
 		extra := make([]string, len(req.ExtraArgs))
 		copy(extra, req.ExtraArgs)
