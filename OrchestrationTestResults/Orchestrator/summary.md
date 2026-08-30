@@ -5,7 +5,7 @@
 
 | Version | Reports |
 |---------|----------|
-| 7.4.1 | 12 |
+| 7.4.1 | 18 |
 
 <!-- /generated:version-overview -->
 
@@ -14,7 +14,9 @@
 
 | Model | Harness | 7.4.1 |
 |-------|--------|--------|
+| claude-sonnet-4-6 | claude-code | 87% |
 | gpt-5.6-luna | opencode | 32% |
+| gpt-5.6-sol | opencode | 99% |
 | gpt-5.6-terra | opencode | 79% |
 
 <!-- /generated:version-comparison -->

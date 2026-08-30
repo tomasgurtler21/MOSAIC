@@ -4,11 +4,11 @@
 ## Overview
 
 - **Version:** 7.4.1
-- **Reports:** 12
-- **Total Tests:** 5188
+- **Reports:** 18
+- **Total Tests:** 7238
 - **Suites:** execution-groups, hitl-gate, infrastructure-triggers, route-back, status-routing, wildcard-expansion
-- **Models:** gpt-5.6-luna, gpt-5.6-terra
-- **Harnesses:** opencode
+- **Models:** claude-sonnet-4-6, gpt-5.6-luna, gpt-5.6-sol, gpt-5.6-terra
+- **Harnesses:** claude-code, opencode
 
 <!-- /generated:overview -->
 
@@ -17,7 +17,9 @@
 
 | Model | Tests | Pass Rate | Cost |
 |-------|-------|-----------|------|
+| claude-sonnet-4-6 | 1451 | 87% | $13.55/100t |
 | gpt-5.6-luna | 2593 | 32% | $0.12/100t |
+| gpt-5.6-sol | 599 | 99% | $2.44/100t |
 | gpt-5.6-terra | 2595 | 79% | $2.66/100t |
 
 <!-- /generated:model-comparison -->
@@ -27,12 +29,22 @@
 
 | Harness | Tests | Pass Rate | Cost |
 |---------|-------|-----------|------|
-| opencode | 5188 | 55% | $1.39/100t |
+| claude-code | 1451 | 87% | $13.55/100t |
+| opencode | 5787 | 60% | $1.50/100t |
 
 <!-- /generated:harness-comparison -->
 
 <!-- generated:model-results -->
 ## Model Results
+
+### claude-sonnet-4-6
+
+| Suite | Harness | Tests | Pass Rate | Cost |
+|-------|---------|-------|-----------|------|
+| execution-groups | claude-code | 300 | 100% | $7.63/100t |
+| hitl-gate | claude-code | 300 | 100% | $6.60/100t |
+| infrastructure-triggers | claude-code | 651 | 99% | $17.73/100t |
+| route-back | claude-code | 200 | 8% | $19.28/100t |
 
 ### gpt-5.6-luna
 
@@ -44,6 +56,13 @@
 | route-back | opencode | 200 | 0% | $0.06/100t |
 | status-routing | opencode | 795 | 38% | $0.13/100t |
 | wildcard-expansion | opencode | 300 | 5% | $0.01/100t |
+
+### gpt-5.6-sol
+
+| Suite | Harness | Tests | Pass Rate | Cost |
+|-------|---------|-------|-----------|------|
+| execution-groups | opencode | 300 | 100% | $2.58/100t |
+| hitl-gate | opencode | 299 | 99% | $2.30/100t |
 
 ### gpt-5.6-terra
 
@@ -63,19 +82,19 @@
 
 | Suite | ID | Test | Best Rate | Best Combo | Worst Rate | Worst Combo | Spread |
 |-------|----|------|-----------|------------|------------|-------------|--------|
-| execution-groups | 50 | impl-first-reorder | 96% | gpt-5.6-terra/opencode | 35% | gpt-5.6-luna/opencode | 61% |
-| execution-groups | 51 | impl-only-skip-tests | 99% | gpt-5.6-terra/opencode | 43% | gpt-5.6-luna/opencode | 56% |
-| execution-groups | 52 | tests-only-skip-impl | 99% | gpt-5.6-terra/opencode | 40% | gpt-5.6-luna/opencode | 59% |
-| hitl-gate | 55 | hitl-plan-stage-all-agents | 86% | gpt-5.6-terra/opencode | 53% | gpt-5.6-luna/opencode | 33% |
-| hitl-gate | 56 | hitl-plan-stage-override | 99% | gpt-5.6-terra/opencode | 33% | gpt-5.6-luna/opencode | 66% |
-| hitl-gate | 57 | hitl-redispatch-unapproved | 74% | gpt-5.6-terra/opencode | 6% | gpt-5.6-luna/opencode | 68% |
-| infrastructure-triggers | 58 | gated-checkpoint-disabled | 61% | gpt-5.6-terra/opencode | 38% | gpt-5.6-luna/opencode | 23% |
-| infrastructure-triggers | 59 | interval-overdue | 50% | gpt-5.6-luna/opencode | 42% | gpt-5.6-terra/opencode | 8% |
-| infrastructure-triggers | 60 | interval-precise-boundary | 100% | gpt-5.6-terra/opencode | 55% | gpt-5.6-luna/opencode | 45% |
-| infrastructure-triggers | 61 | multiple-triggers-same-boundary | 77% | gpt-5.6-terra/opencode | 37% | gpt-5.6-luna/opencode | 40% |
-| infrastructure-triggers | 62 | phase-end-trigger | 98% | gpt-5.6-terra/opencode | 45% | gpt-5.6-luna/opencode | 53% |
-| infrastructure-triggers | 63 | restore-class-exclusion | 53% | gpt-5.6-terra/opencode | 38% | gpt-5.6-luna/opencode | 14% |
-| infrastructure-triggers | 64 | stage-end-checkpoint | 80% | gpt-5.6-terra/opencode | 42% | gpt-5.6-luna/opencode | 38% |
+| execution-groups | 50 | impl-first-reorder | 100% | claude-sonnet-4-6/claude-code | 35% | gpt-5.6-luna/opencode | 65% |
+| execution-groups | 51 | impl-only-skip-tests | 100% | claude-sonnet-4-6/claude-code | 43% | gpt-5.6-luna/opencode | 57% |
+| execution-groups | 52 | tests-only-skip-impl | 100% | claude-sonnet-4-6/claude-code | 40% | gpt-5.6-luna/opencode | 60% |
+| hitl-gate | 55 | hitl-plan-stage-all-agents | 100% | claude-sonnet-4-6/claude-code | 53% | gpt-5.6-luna/opencode | 47% |
+| hitl-gate | 56 | hitl-plan-stage-override | 100% | claude-sonnet-4-6/claude-code | 33% | gpt-5.6-luna/opencode | 67% |
+| hitl-gate | 57 | hitl-redispatch-unapproved | 99% | claude-sonnet-4-6/claude-code | 6% | gpt-5.6-luna/opencode | 93% |
+| infrastructure-triggers | 58 | gated-checkpoint-disabled | 100% | claude-sonnet-4-6/claude-code | 38% | gpt-5.6-luna/opencode | 62% |
+| infrastructure-triggers | 59 | interval-overdue | 94% | claude-sonnet-4-6/claude-code | 42% | gpt-5.6-terra/opencode | 52% |
+| infrastructure-triggers | 60 | interval-precise-boundary | 100% | claude-sonnet-4-6/claude-code | 55% | gpt-5.6-luna/opencode | 45% |
+| infrastructure-triggers | 61 | multiple-triggers-same-boundary | 100% | claude-sonnet-4-6/claude-code | 37% | gpt-5.6-luna/opencode | 63% |
+| infrastructure-triggers | 62 | phase-end-trigger | 100% | claude-sonnet-4-6/claude-code | 45% | gpt-5.6-luna/opencode | 55% |
+| infrastructure-triggers | 63 | restore-class-exclusion | 100% | claude-sonnet-4-6/claude-code | 38% | gpt-5.6-luna/opencode | 62% |
+| infrastructure-triggers | 64 | stage-end-checkpoint | 100% | claude-sonnet-4-6/claude-code | 42% | gpt-5.6-luna/opencode | 58% |
 | route-back | 66 | contracts-routeback-quality-gate | 42% | gpt-5.6-terra/opencode | 0% | gpt-5.6-luna/opencode | 42% |
 | status-routing | 68 | blocked-e101-retry | 93% | gpt-5.6-terra/opencode | 58% | gpt-5.6-luna/opencode | 35% |
 | status-routing | 69 | blocked-e501-retry | 99% | gpt-5.6-terra/opencode | 49% | gpt-5.6-luna/opencode | 49% |
