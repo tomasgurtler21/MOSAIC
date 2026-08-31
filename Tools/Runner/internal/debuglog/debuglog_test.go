@@ -49,6 +49,22 @@ func blockRunnerLogs(t *testing.T, workDir string) string {
 	return blocker
 }
 
+// blockRunFolder places a regular file where RunnerLogs/{runID}/ would be
+// created, causing a replay's os.MkdirAll to fail deterministically. Returns
+// the path of the blocker file.
+func blockRunFolder(t *testing.T, workDir, runID string) string {
+	t.Helper()
+	logDir := filepath.Join(workDir, LogsFolderName)
+	if err := os.MkdirAll(logDir, 0755); err != nil {
+		t.Fatalf("blockRunFolder: MkdirAll(%q): %v", logDir, err)
+	}
+	blocker := filepath.Join(logDir, runID)
+	if err := os.WriteFile(blocker, []byte("blocker"), 0644); err != nil {
+		t.Fatalf("blockRunFolder: WriteFile(%q): %v", blocker, err)
+	}
+	return blocker
+}
+
 // validRunID is a canonical run_id used across tests.
 const validRunID = "20260805T143029Z-9bc0"
 
@@ -155,7 +171,7 @@ func TestLogger_ImplementsDebugLogger(t *testing.T) {
 
 func TestLogger_FileCreatedUnderRunnerLogs_WithRunID(t *testing.T) {
 	// When SetRunID is called before the first Log, the log file must be
-	// at RunnerLogs/{run_id}.log under the supplied working directory.
+	// at RunnerLogs/{run_id}/{run_id}.log under the supplied working directory.
 	workDir := t.TempDir()
 	logger := New(workDir)
 
@@ -163,7 +179,7 @@ func TestLogger_FileCreatedUnderRunnerLogs_WithRunID(t *testing.T) {
 	logger.Log(domain.EventRunnerStart, "starting run")
 	logger.Close()
 
-	wantPath := filepath.Join(workDir, LogsFolderName, validRunID+".log")
+	wantPath := filepath.Join(workDir, LogsFolderName, validRunID, validRunID+".log")
 	if _, err := os.Stat(wantPath); err != nil {
 		t.Errorf("expected log file at %q, but stat failed: %v", wantPath, err)
 	}
@@ -178,7 +194,7 @@ func TestLogger_PathReturnsAbsoluteFilePath_WithRunID(t *testing.T) {
 	logger.Log(domain.EventRunnerStart, "starting run")
 	logger.Close()
 
-	wantPath := filepath.Join(workDir, LogsFolderName, validRunID+".log")
+	wantPath := filepath.Join(workDir, LogsFolderName, validRunID, validRunID+".log")
 	if gotPath := logger.Path(); gotPath != wantPath {
 		t.Errorf("Path() = %q, want %q", gotPath, wantPath)
 	}
@@ -273,9 +289,10 @@ func TestLogger_LogsFolderCreatedDirectlyUnderWorkDir(t *testing.T) {
 	}
 }
 
-func TestLogger_SetRunID_CalledAfterFirstLog_DoesNotRenameFile(t *testing.T) {
-	// When SetRunID is called after the first Log has already been written,
-	// the file name must remain unchanged (fallback name).
+func TestLogger_SetRunID_CalledAfterFirstLog_MovesFileIntoRunFolder(t *testing.T) {
+	// When SetRunID is called after the first Log has already been written
+	// under the fallback name, a replay must move the entries into the run
+	// folder and Path() must report the new location.
 	workDir := t.TempDir()
 	logger := New(workDir)
 
@@ -288,14 +305,21 @@ func TestLogger_SetRunID_CalledAfterFirstLog_DoesNotRenameFile(t *testing.T) {
 	logger.SetRunID(validRunID)
 	pathAfter := logger.Path()
 
-	if pathBefore != pathAfter {
-		t.Errorf("Path() changed after SetRunID: before=%q, after=%q", pathBefore, pathAfter)
+	wantPath := filepath.Join(workDir, LogsFolderName, validRunID, validRunID+".log")
+	if pathAfter != wantPath {
+		t.Errorf("Path() after replay = %q, want %q", pathAfter, wantPath)
 	}
+	if pathAfter == pathBefore {
+		t.Errorf("Path() must change after a successful replay, stayed at %q", pathBefore)
+	}
+
+	logger.Close()
 }
 
-func TestLogger_SetRunID_CalledAfterFirstLog_WritesCorrelationEntry(t *testing.T) {
-	// When SetRunID is called after the first entry, a correlation entry
-	// containing the run_id must be appended so the file can be tied to its run.
+func TestLogger_SetRunID_CalledAfterFirstLog_ReplaysEntriesWithoutCorrelationEntry(t *testing.T) {
+	// A replay must carry the original entries into the run-folder file and
+	// must never write a correlation entry (FR-9 removes that mechanism for
+	// this logger; the replay itself is the correlation).
 	workDir := t.TempDir()
 	logger := New(workDir)
 
@@ -304,8 +328,12 @@ func TestLogger_SetRunID_CalledAfterFirstLog_WritesCorrelationEntry(t *testing.T
 	logger.Close()
 
 	content := readLogFile(t, logger)
-	if !strings.Contains(content, validRunID) {
-		t.Errorf("log file must contain run_id %q as a correlation entry\ncontent:\n%s", validRunID, content)
+	if !strings.Contains(content, "early entry") {
+		t.Errorf("replayed file must contain the original entry\ncontent:\n%s", content)
+	}
+	if strings.Contains(content, domain.EventRunnerRunID) {
+		t.Errorf("replayed file must not contain a correlation entry (%q)\ncontent:\n%s",
+			domain.EventRunnerRunID, content)
 	}
 }
 
@@ -365,9 +393,251 @@ func TestLogger_SetRunID_OnlyFirstEffectiveCallNames_TheFile(t *testing.T) {
 	logger.Log(domain.EventRunnerStart, "message")
 	logger.Close()
 
-	wantPath := filepath.Join(workDir, LogsFolderName, firstID+".log")
+	wantPath := filepath.Join(workDir, LogsFolderName, firstID, firstID+".log")
 	if _, err := os.Stat(wantPath); err != nil {
 		t.Errorf("expected file named after first run_id %q, stat failed: %v", wantPath, err)
+	}
+}
+
+// ============================================================
+// Buffer-and-replay (T1.1)
+// ============================================================
+
+func TestLogger_Replay_MovesBufferedEntriesVerbatim_InOriginalOrder(t *testing.T) {
+	// Entries logged before identity is known must be replayed into the run
+	// folder in original order, byte-identical to how they were originally
+	// rendered (same formatting, same timestamps) — never re-rendered.
+	workDir := t.TempDir()
+	logger := New(workDir)
+
+	logger.Log(domain.EventRunnerStart, "first entry")
+	logger.Log(domain.EventSessionDispatchStart, "second entry")
+	logger.Log(domain.EventRunnerStart, "third entry")
+
+	outOfRunPath := logger.Path()
+	if outOfRunPath == "" {
+		t.Fatal("Path() empty after pre-identity logs")
+	}
+	bufferedContent, err := os.ReadFile(outOfRunPath)
+	if err != nil {
+		t.Fatalf("os.ReadFile(%q): %v", outOfRunPath, err)
+	}
+
+	logger.SetRunID(validRunID)
+	logger.Close()
+
+	replayedContent := readLogFile(t, logger)
+	if replayedContent != string(bufferedContent) {
+		t.Errorf("replayed content does not match the original buffered bytes verbatim\noriginal:\n%s\nreplayed:\n%s",
+			bufferedContent, replayedContent)
+	}
+}
+
+func TestLogger_Replay_RemovesOutOfRunFile_AfterSuccess(t *testing.T) {
+	// A successful replay must leave exactly one file on disk: the
+	// out-of-run file must no longer exist once entries are in the run folder.
+	workDir := t.TempDir()
+	logger := New(workDir)
+
+	logger.Log(domain.EventRunnerStart, "pre-identity entry")
+	outOfRunPath := logger.Path()
+
+	logger.SetRunID(validRunID)
+	logger.Close()
+
+	if _, err := os.Stat(outOfRunPath); !os.IsNotExist(err) {
+		t.Errorf("out-of-run file %q must be removed after a successful replay; stat err = %v", outOfRunPath, err)
+	}
+}
+
+func TestLogger_SetRunID_BeforeFirstLog_NeverCreatesOutOfRunFile(t *testing.T) {
+	// The common case: identity is known before the first entry, so no
+	// out-of-run file is ever created and no replay is needed — only a
+	// loose file directly under RunnerLogs/ would indicate one was.
+	workDir := t.TempDir()
+	logger := New(workDir)
+
+	logger.SetRunID(validRunID)
+	logger.Log(domain.EventRunnerStart, "message")
+	logger.Close()
+
+	logDir := filepath.Join(workDir, LogsFolderName)
+	entries, err := os.ReadDir(logDir)
+	if err != nil {
+		t.Fatalf("ReadDir(%q): %v", logDir, err)
+	}
+	for _, e := range entries {
+		if !e.IsDir() {
+			t.Errorf("no loose file must exist directly under %q when identity is known upfront; found %q",
+				logDir, e.Name())
+		}
+	}
+}
+
+func TestLogger_Replay_FailsWhenRunFolderBlocked_LeavesOutOfRunFileIntact(t *testing.T) {
+	// When the run folder cannot be created, the out-of-run file and its
+	// entries must be left exactly as they were, and Path() must keep
+	// reporting the out-of-run location.
+	workDir := t.TempDir()
+	logger := New(workDir)
+
+	logger.Log(domain.EventRunnerStart, "entry before blocked replay")
+	outOfRunPath := logger.Path()
+	originalContent, err := os.ReadFile(outOfRunPath)
+	if err != nil {
+		t.Fatalf("os.ReadFile(%q): %v", outOfRunPath, err)
+	}
+
+	blockRunFolder(t, workDir, validRunID)
+	logger.SetRunID(validRunID)
+
+	if gotPath := logger.Path(); gotPath != outOfRunPath {
+		t.Errorf("Path() after failed replay = %q, want unchanged %q", gotPath, outOfRunPath)
+	}
+	currentContent, err := os.ReadFile(outOfRunPath)
+	if err != nil {
+		t.Fatalf("out-of-run file must survive a failed replay: os.ReadFile(%q): %v", outOfRunPath, err)
+	}
+	if string(currentContent) != string(originalContent) {
+		t.Errorf("out-of-run file content changed after a failed replay\nbefore:\n%s\nafter:\n%s",
+			originalContent, currentContent)
+	}
+
+	logger.Close()
+}
+
+func TestLogger_Replay_Fails_SubsequentEntriesKeepAppendingToOutOfRunFile(t *testing.T) {
+	// After a failed replay, every later entry must continue to append to
+	// the same out-of-run file for the rest of the process (FR-10a) — never
+	// split, never lost, never attempted against the unavailable run folder.
+	// This must be distinguishable from the old (pre-replay) correlation-entry
+	// behavior: a genuine replay attempt never writes a correlation entry and
+	// never leaves a partial file behind at the blocked run-folder path, so
+	// this test must fail against code that has not implemented the replay
+	// attempt at all (old code just appends a correlation entry to the
+	// existing file and never touches the run-folder path).
+	workDir := t.TempDir()
+	logger := New(workDir)
+
+	logger.Log(domain.EventRunnerStart, "entry before blocked replay")
+	outOfRunPath := logger.Path()
+
+	blockerPath := blockRunFolder(t, workDir, validRunID)
+	logger.SetRunID(validRunID)
+
+	logger.Log(domain.EventSessionDispatchStart, "entry after failed replay")
+	logger.Close()
+
+	if gotPath := logger.Path(); gotPath != outOfRunPath {
+		t.Errorf("Path() after failed replay + more logging = %q, want unchanged %q", gotPath, outOfRunPath)
+	}
+	content := readLogFile(t, logger)
+	if !strings.Contains(content, "entry before blocked replay") {
+		t.Error("out-of-run file must retain entries logged before the failed replay")
+	}
+	if !strings.Contains(content, "entry after failed replay") {
+		t.Error("entries logged after a failed replay must append to the same out-of-run file")
+	}
+	if strings.Contains(content, domain.EventRunnerRunID) {
+		t.Errorf("a failed replay attempt must never write a correlation entry (%q); the replay branch, not the old correlation branch, must be what runs\ncontent:\n%s",
+			domain.EventRunnerRunID, content)
+	}
+
+	info, err := os.Stat(blockerPath)
+	if err != nil {
+		t.Fatalf("blocker file %q must remain in place after a failed replay: Stat: %v", blockerPath, err)
+	}
+	if info.IsDir() {
+		t.Errorf("run-folder path %q must never be created (still blocked by a regular file) after a failed replay", blockerPath)
+	}
+}
+
+func TestLogger_Replay_DoesNotPanic_WhenRunFolderBlocked(t *testing.T) {
+	// A blocked run folder must degrade silently: no panic, no error
+	// surfaced, and logging must continue to work afterward.
+	workDir := t.TempDir()
+	logger := New(workDir)
+	defer logger.Close()
+
+	logger.Log(domain.EventRunnerStart, "pre-identity")
+	blockRunFolder(t, workDir, validRunID)
+
+	logger.SetRunID(validRunID) // must not panic
+	logger.Log(domain.EventSessionDispatchStart, "post-attempt")
+}
+
+func TestLogger_Replay_FailsMidWrite_LeavesOutOfRunFileIntact(t *testing.T) {
+	// A replay can also fail after the run folder is successfully created, if
+	// writing the buffered entries into the run-folder file itself fails. This
+	// must degrade exactly like an os.MkdirAll failure: the out-of-run file
+	// and its entries are left untouched, no partially-written file is left
+	// at the run-folder path, and Path() keeps reporting the out-of-run
+	// location. Simulated by pre-creating the run folder successfully (so
+	// MkdirAll no-ops) but placing a directory at the exact path the replay
+	// would open for writing, so the open/write itself fails deterministically
+	// on both Windows and POSIX.
+	workDir := t.TempDir()
+	logger := New(workDir)
+
+	logger.Log(domain.EventRunnerStart, "entry before mid-write failure")
+	outOfRunPath := logger.Path()
+	originalContent, err := os.ReadFile(outOfRunPath)
+	if err != nil {
+		t.Fatalf("os.ReadFile(%q): %v", outOfRunPath, err)
+	}
+
+	runDir := filepath.Join(workDir, LogsFolderName, validRunID)
+	runFilePath := filepath.Join(runDir, validRunID+".log")
+	if err := os.MkdirAll(runFilePath, 0755); err != nil {
+		t.Fatalf("MkdirAll(%q): %v", runFilePath, err)
+	}
+
+	logger.SetRunID(validRunID)
+
+	if gotPath := logger.Path(); gotPath != outOfRunPath {
+		t.Errorf("Path() after mid-write replay failure = %q, want unchanged %q", gotPath, outOfRunPath)
+	}
+	currentContent, err := os.ReadFile(outOfRunPath)
+	if err != nil {
+		t.Fatalf("out-of-run file must survive a mid-write replay failure: os.ReadFile(%q): %v", outOfRunPath, err)
+	}
+	if string(currentContent) != string(originalContent) {
+		t.Errorf("out-of-run file content changed after a mid-write replay failure\nbefore:\n%s\nafter:\n%s",
+			originalContent, currentContent)
+	}
+	if info, err := os.Stat(runFilePath); err != nil || !info.IsDir() {
+		t.Errorf("run-folder file path %q must remain untouched (still a directory) after a mid-write replay failure", runFilePath)
+	}
+
+	logger.Log(domain.EventSessionDispatchStart, "entry after mid-write failure")
+	logger.Close()
+
+	content := readLogFile(t, logger)
+	if !strings.Contains(content, "entry after mid-write failure") {
+		t.Error("entries logged after a mid-write replay failure must append to the same out-of-run file")
+	}
+}
+
+func TestLogger_NeverResolvesRunID_AllEntriesRemainInOutOfRunFile(t *testing.T) {
+	// A process that never resolves a valid run_id leaves its out-of-run
+	// file, with every entry, on disk — unchanged from current behavior.
+	workDir := t.TempDir()
+	logger := New(workDir)
+
+	messages := []string{"entry one", "entry two", "entry three"}
+	for _, m := range messages {
+		logger.Log(domain.EventRunnerStart, m)
+	}
+	logger.Close()
+
+	content := readLogFile(t, logger)
+	for _, m := range messages {
+		if !strings.Contains(content, m) {
+			t.Errorf("out-of-run file missing entry %q\ncontent:\n%s", m, content)
+		}
+	}
+	if base := filepath.Base(logger.Path()); !strings.HasPrefix(base, "startup-") {
+		t.Errorf("Path() base = %q, want startup- prefix (never replayed)", base)
 	}
 }
 
@@ -739,8 +1009,8 @@ func TestLogger_WorksWithNoOrchestrationFolder_Present(t *testing.T) {
 }
 
 func TestLogger_LogFile_IsInsideRunnerLogs_NotOrchestrationFolder(t *testing.T) {
-	// The log file must be inside RunnerLogs/, not inside any
-	// Orchestration-{run_id} folder.
+	// The log file must be somewhere under RunnerLogs/ (its run subfolder,
+	// under the new layout), never inside any Orchestration-{run_id} folder.
 	workDir := t.TempDir()
 
 	logger := New(workDir)
@@ -754,13 +1024,14 @@ func TestLogger_LogFile_IsInsideRunnerLogs_NotOrchestrationFolder(t *testing.T) 
 	}
 
 	// The log path must not contain any "Orchestration-" segment.
-	dir := filepath.Dir(logPath)
-	if strings.Contains(dir, "Orchestration-") {
+	if strings.Contains(logPath, "Orchestration-") {
 		t.Errorf("log file is inside an Orchestration-* folder: %q", logPath)
 	}
-	// The parent directory must be RunnerLogs/.
-	if filepath.Base(dir) != LogsFolderName {
-		t.Errorf("log file parent dir = %q, want %q", filepath.Base(dir), LogsFolderName)
+	// The log path must be somewhere under RunnerLogs/.
+	logsRoot := filepath.Join(workDir, LogsFolderName)
+	rel, err := filepath.Rel(logsRoot, logPath)
+	if err != nil || strings.HasPrefix(rel, "..") {
+		t.Errorf("log file %q must be located under %q", logPath, logsRoot)
 	}
 }
 
@@ -820,7 +1091,7 @@ func TestLogger_LogFile_ExistsAfterLoggingWithoutOrchestrationMd(t *testing.T) {
 	logger.Log(domain.EventRunnerStart, "no orchestration.md needed")
 	logger.Close()
 
-	logPath := filepath.Join(workDir, LogsFolderName, validRunID+".log")
+	logPath := filepath.Join(workDir, LogsFolderName, validRunID, validRunID+".log")
 	if _, err := os.Stat(logPath); err != nil {
 		t.Errorf("log file must exist at %q without Orchestration.md: %v", logPath, err)
 	}

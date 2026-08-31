@@ -237,9 +237,11 @@ type DispatchLogger interface {
 	LogError(agentInstanceID string, errText string)
 
 	// SetRunID associates the log with a run_id. Called before the first
-	// write, it names the file "{run_id}.log"; called after, it records a
-	// correlation entry. An invalid or empty runID is silently ignored.
-	// Safe to call more than once; only the first effective call names the file.
+	// write, it creates the file at RunnerLogs/{run_id}/{run_id}-dispatch.log;
+	// called after, it records a correlation entry into the existing
+	// out-of-run file (RunnerLogs/startup-{timestamp}-dispatch.log). An invalid
+	// or empty runID is silently ignored. Safe to call more than once; only the
+	// first effective call names the file.
 	SetRunID(runID string)
 
 	// Close permanently disables the logger. No further entries are written.

@@ -1,8 +1,9 @@
 // Package dispatchlog provides the file-backed implementation of domain.DispatchLogger.
 //
 // One Logger corresponds to one process/run and owns exactly one log file
-// located at {workingDir}/DispatchLogs/{run_id}.log (or a startup-timestamped
-// fallback when no run_id is known at first write).
+// located at {workingDir}/RunnerLogs/{run_id}/{run_id}-dispatch.log (or a
+// RunnerLogs/startup-{timestamp}-dispatch.log fallback when no run_id is
+// known at first write).
 //
 // Each LogRequest, LogResponse, and LogError call serialises its envelope
 // struct to a single JSON line (JSONL format) and appends it to the file.
@@ -26,7 +27,7 @@ import (
 
 // LogsFolderName is the folder that holds dispatch logs, resolved relative
 // to the supplied working directory.
-const LogsFolderName = "DispatchLogs"
+const LogsFolderName = "RunnerLogs"
 
 // Logger is the file-backed domain.DispatchLogger. One Logger corresponds to
 // one process/run and owns exactly one log file.
@@ -88,9 +89,10 @@ func New(workingDir string) *Logger {
 // SetRunID associates the log with a run_id.
 //
 // Called before the first entry is written, the log file is named
-// "{run_id}.log". Called afterwards (the file already exists under its
-// fallback name), the name is left alone and a correlation entry is recorded
-// instead, so the file can still be tied to its run.
+// "{run_id}-dispatch.log" inside a run subfolder. Called afterwards (the file
+// already exists under its fallback name), the name is left alone and a
+// correlation entry is recorded instead, so the file can still be tied to
+// its run.
 //
 // A runID that fails domain.IsValidRunID (including the empty string) is
 // ignored entirely. Safe to call more than once; only the first effective
@@ -218,27 +220,29 @@ func (l *Logger) Path() string {
 	return l.path
 }
 
-// initFileLocked resolves the log file path and creates the DispatchLogs/
-// directory. Must be called with l.mu held. On any error, sets l.disabled =
-// true and returns. The file itself is not kept open; initFileLocked only
-// creates the directory and records the target path.
+// initFileLocked resolves the log file path and creates the RunnerLogs/
+// directory (and, when a run_id is known, its run subfolder). Must be called
+// with l.mu held. On any error, sets l.disabled = true and returns. The file
+// itself is not kept open; initFileLocked only creates the directory and
+// records the target path.
 func (l *Logger) initFileLocked() {
 	l.opened = true
 
-	logDir := filepath.Join(l.workingDir, LogsFolderName)
-	if err := os.MkdirAll(logDir, 0755); err != nil {
-		l.disabled = true
-		return
-	}
-
-	var filename string
+	var logDir, filename string
 	if l.runIDSet && l.runID != "" {
-		filename = l.runID + ".log"
+		logDir = filepath.Join(l.workingDir, LogsFolderName, l.runID)
+		filename = l.runID + "-dispatch.log"
 	} else {
+		logDir = filepath.Join(l.workingDir, LogsFolderName)
 		// Fallback: startup-{timestamp} — cannot match the run_id pattern
 		// ^\d{8}T\d{6}Z-[0-9a-f]{4}$ because it begins with "startup-".
 		ts := time.Now().UTC().Format("20060102T150405.000000000Z")
-		filename = "startup-" + ts + ".log"
+		filename = "startup-" + ts + "-dispatch.log"
+	}
+
+	if err := os.MkdirAll(logDir, 0755); err != nil {
+		l.disabled = true
+		return
 	}
 
 	l.path = filepath.Join(logDir, filename)

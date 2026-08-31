@@ -3,7 +3,7 @@
 // seams are accessible when the implementation is added.
 //
 // Every test that touches the filesystem resolves its working directory from
-// t.TempDir() so that no test can create DispatchLogs/ in the repository root.
+// t.TempDir() so that no test can create RunnerLogs/ in the repository root.
 package dispatchlog
 
 import (
@@ -44,9 +44,11 @@ func readLogLines(t *testing.T, logger *Logger) []string {
 	return lines
 }
 
-// blockDispatchLogs places a regular file where DispatchLogs/ would be created,
-// causing os.MkdirAll to fail on both Windows and POSIX. Returns the path of
-// the blocker file.
+// blockDispatchLogs places a regular file where RunnerLogs/ would be created,
+// causing os.MkdirAll to fail on both Windows and POSIX (including for the
+// nested RunnerLogs/{run_id}/ subfolder, since MkdirAll cannot create a
+// directory under a path component that is already a regular file). Returns
+// the path of the blocker file.
 func blockDispatchLogs(t *testing.T, workDir string) string {
 	t.Helper()
 	blocker := filepath.Join(workDir, LogsFolderName)
@@ -188,9 +190,10 @@ func TestLogger_ImplementsDispatchLogger(t *testing.T) {
 // File creation and naming
 // ============================================================
 
-func TestLogger_FileCreatedUnderDispatchLogs_WithRunID(t *testing.T) {
+func TestLogger_FileCreatedUnderRunnerLogs_WithRunID(t *testing.T) {
 	// When SetRunID is called before the first log call, the log file must be
-	// at DispatchLogs/{run_id}.log under the supplied working directory.
+	// at RunnerLogs/{run_id}/{run_id}-dispatch.log under the supplied working
+	// directory.
 	workDir := t.TempDir()
 	logger := New(workDir)
 
@@ -198,7 +201,7 @@ func TestLogger_FileCreatedUnderDispatchLogs_WithRunID(t *testing.T) {
 	logger.LogRequest(sampleRequest())
 	logger.Close()
 
-	wantPath := filepath.Join(workDir, LogsFolderName, validRunID+".log")
+	wantPath := filepath.Join(workDir, LogsFolderName, validRunID, validRunID+"-dispatch.log")
 	if _, err := os.Stat(wantPath); err != nil {
 		t.Errorf("expected log file at %q, but stat failed: %v", wantPath, err)
 	}
@@ -213,7 +216,7 @@ func TestLogger_PathReturnsAbsoluteFilePath_WithRunID(t *testing.T) {
 	logger.LogRequest(sampleRequest())
 	logger.Close()
 
-	wantPath := filepath.Join(workDir, LogsFolderName, validRunID+".log")
+	wantPath := filepath.Join(workDir, LogsFolderName, validRunID, validRunID+"-dispatch.log")
 	if gotPath := logger.Path(); gotPath != wantPath {
 		t.Errorf("Path() = %q, want %q", gotPath, wantPath)
 	}
@@ -231,14 +234,14 @@ func TestLogger_PathReturnsEmpty_BeforeFirstLog(t *testing.T) {
 }
 
 func TestLogger_NoFileCreated_BeforeFirstLog(t *testing.T) {
-	// DispatchLogs/ must not be created until the first log call.
+	// RunnerLogs/ must not be created until the first log call.
 	workDir := t.TempDir()
 	logger := New(workDir)
 	defer logger.Close()
 
 	logDir := filepath.Join(workDir, LogsFolderName)
 	if _, err := os.Stat(logDir); !os.IsNotExist(err) {
-		t.Errorf("DispatchLogs/ must not exist before first log call; stat(%q) err = %v", logDir, err)
+		t.Errorf("RunnerLogs/ must not exist before first log call; stat(%q) err = %v", logDir, err)
 	}
 }
 
@@ -253,7 +256,7 @@ func TestLogger_LazyCreation_TriggeredByLogRequest(t *testing.T) {
 
 	logDir := filepath.Join(workDir, LogsFolderName)
 	if _, err := os.Stat(logDir); err != nil {
-		t.Errorf("DispatchLogs/ must be created after LogRequest: %v", err)
+		t.Errorf("RunnerLogs/ must be created after LogRequest: %v", err)
 	}
 }
 
@@ -268,7 +271,7 @@ func TestLogger_LazyCreation_TriggeredByLogResponse(t *testing.T) {
 
 	logDir := filepath.Join(workDir, LogsFolderName)
 	if _, err := os.Stat(logDir); err != nil {
-		t.Errorf("DispatchLogs/ must be created after LogResponse: %v", err)
+		t.Errorf("RunnerLogs/ must be created after LogResponse: %v", err)
 	}
 }
 
@@ -283,7 +286,7 @@ func TestLogger_LazyCreation_TriggeredByLogError(t *testing.T) {
 
 	logDir := filepath.Join(workDir, LogsFolderName)
 	if _, err := os.Stat(logDir); err != nil {
-		t.Errorf("DispatchLogs/ must be created after LogError: %v", err)
+		t.Errorf("RunnerLogs/ must be created after LogError: %v", err)
 	}
 }
 
@@ -302,7 +305,7 @@ func TestLogger_FallbackFileName_StartsWithStartup_WhenNoRunID(t *testing.T) {
 		t.Fatalf("ReadDir(%q): %v", logDir, err)
 	}
 	if len(entries) == 0 {
-		t.Fatal("no log file created in DispatchLogs/ after first log call")
+		t.Fatal("no log file created in RunnerLogs/ after first log call")
 	}
 
 	name := entries[0].Name()
@@ -311,9 +314,34 @@ func TestLogger_FallbackFileName_StartsWithStartup_WhenNoRunID(t *testing.T) {
 	}
 }
 
+func TestLogger_FallbackFileName_HasDispatchSuffix_WhenNoRunID(t *testing.T) {
+	// The fallback filename must carry the "-dispatch" suffix so it is
+	// distinguishable from debuglog's own out-of-run fallback filename, which
+	// uses the plain "startup-{timestamp}.log" form.
+	workDir := t.TempDir()
+	logger := New(workDir)
+
+	logger.LogRequest(sampleRequest())
+	logger.Close()
+
+	logDir := filepath.Join(workDir, LogsFolderName)
+	entries, err := os.ReadDir(logDir)
+	if err != nil {
+		t.Fatalf("ReadDir(%q): %v", logDir, err)
+	}
+	if len(entries) == 0 {
+		t.Fatal("no log file created in RunnerLogs/ after first log call")
+	}
+
+	name := entries[0].Name()
+	if !strings.HasSuffix(name, "-dispatch.log") {
+		t.Errorf("fallback filename = %q, want suffix \"-dispatch.log\"", name)
+	}
+}
+
 func TestLogger_FallbackFileName_IsNotAValidRunID(t *testing.T) {
-	// The fallback filename base (without .log) must not satisfy domain.IsValidRunID,
-	// keeping the two naming schemes distinguishable.
+	// The fallback filename base (without the -dispatch.log suffix) must not
+	// satisfy domain.IsValidRunID, keeping the two naming schemes distinguishable.
 	workDir := t.TempDir()
 	logger := New(workDir)
 
@@ -329,7 +357,7 @@ func TestLogger_FallbackFileName_IsNotAValidRunID(t *testing.T) {
 		t.Fatal("no log file created")
 	}
 
-	baseName := strings.TrimSuffix(entries[0].Name(), ".log")
+	baseName := strings.TrimSuffix(entries[0].Name(), "-dispatch.log")
 	if domain.IsValidRunID(baseName) {
 		t.Errorf("fallback filename base %q must not satisfy IsValidRunID, but it does", baseName)
 	}
@@ -437,14 +465,15 @@ func TestLogger_SetRunID_OnlyFirstEffectiveCallNames_TheFile(t *testing.T) {
 	logger.LogRequest(sampleRequest())
 	logger.Close()
 
-	wantPath := filepath.Join(workDir, LogsFolderName, firstID+".log")
+	wantPath := filepath.Join(workDir, LogsFolderName, firstID, firstID+"-dispatch.log")
 	if _, err := os.Stat(wantPath); err != nil {
 		t.Errorf("expected file named after first run_id %q, stat failed: %v", wantPath, err)
 	}
 }
 
-func TestLogger_DispatchLogsFolderCreatedDirectlyUnderWorkDir(t *testing.T) {
-	// DispatchLogs/ must be a direct child of the supplied working directory.
+func TestLogger_RunnerLogsFolderCreatedDirectlyUnderWorkDir(t *testing.T) {
+	// RunnerLogs/ must be a direct child of the supplied working directory
+	// (the fallback-name case: no run subfolder is involved).
 	workDir := t.TempDir()
 	logger := New(workDir)
 
@@ -454,10 +483,45 @@ func TestLogger_DispatchLogsFolderCreatedDirectlyUnderWorkDir(t *testing.T) {
 	logDir := filepath.Join(workDir, LogsFolderName)
 	fi, err := os.Stat(logDir)
 	if err != nil {
-		t.Fatalf("DispatchLogs/ not created at %q: %v", logDir, err)
+		t.Fatalf("RunnerLogs/ not created at %q: %v", logDir, err)
 	}
 	if !fi.IsDir() {
 		t.Errorf("%q must be a directory", logDir)
+	}
+}
+
+func TestLogger_NoDispatchLogsFolderEverCreated(t *testing.T) {
+	// The retired DispatchLogs/ folder name must never be created by any code
+	// path in this package, whether or not a run_id is known at first write.
+	workDir := t.TempDir()
+	logger := New(workDir)
+
+	logger.SetRunID(validRunID)
+	logger.LogRequest(sampleRequest())
+	logger.Close()
+
+	if _, err := os.Stat(filepath.Join(workDir, "DispatchLogs")); !os.IsNotExist(err) {
+		t.Errorf("DispatchLogs/ must never be created; stat err = %v", err)
+	}
+}
+
+func TestLogger_RunSubfolderNestsInsideRunnerLogs(t *testing.T) {
+	// The run_id subfolder must nest one level inside RunnerLogs/, not sit
+	// directly at the RunnerLogs/ root.
+	workDir := t.TempDir()
+	logger := New(workDir)
+
+	logger.SetRunID(validRunID)
+	logger.LogRequest(sampleRequest())
+	logger.Close()
+
+	runDir := filepath.Join(workDir, LogsFolderName, validRunID)
+	fi, err := os.Stat(runDir)
+	if err != nil {
+		t.Fatalf("run subfolder not created at %q: %v", runDir, err)
+	}
+	if !fi.IsDir() {
+		t.Errorf("%q must be a directory", runDir)
 	}
 }
 
@@ -1240,7 +1304,7 @@ func TestLogger_FlushPerEntry_EntryPresentBeforeClose(t *testing.T) {
 // ============================================================
 
 func TestLogger_FailSilent_LogRequest_WhenFolderBlocked(t *testing.T) {
-	// When DispatchLogs/ cannot be created, LogRequest must return without panicking.
+	// When RunnerLogs/ cannot be created, LogRequest must return without panicking.
 	workDir := t.TempDir()
 	blockDispatchLogs(t, workDir)
 
@@ -1251,7 +1315,7 @@ func TestLogger_FailSilent_LogRequest_WhenFolderBlocked(t *testing.T) {
 }
 
 func TestLogger_FailSilent_LogResponse_WhenFolderBlocked(t *testing.T) {
-	// When DispatchLogs/ cannot be created, LogResponse must return without panicking.
+	// When RunnerLogs/ cannot be created, LogResponse must return without panicking.
 	workDir := t.TempDir()
 	blockDispatchLogs(t, workDir)
 
@@ -1262,7 +1326,7 @@ func TestLogger_FailSilent_LogResponse_WhenFolderBlocked(t *testing.T) {
 }
 
 func TestLogger_FailSilent_LogError_WhenFolderBlocked(t *testing.T) {
-	// When DispatchLogs/ cannot be created, LogError must return without panicking.
+	// When RunnerLogs/ cannot be created, LogError must return without panicking.
 	workDir := t.TempDir()
 	blockDispatchLogs(t, workDir)
 
