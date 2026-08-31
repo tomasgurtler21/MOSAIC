@@ -16,6 +16,7 @@
 .github/chatmodes/
 .cursor/
 .aider*
+.mosaic/
 
 # Harness runtime/session state
 .claude/settings.local.json
@@ -39,6 +40,8 @@ Orchestration-*/
 OrchestrationLogs/
 Orchestration.md
 !Orchestration.template.md
+RunnerLogs/
+DispatchLogs/
 
 # Log capture output (optional enhancement tier)
 *.jsonl
@@ -47,16 +50,6 @@ logs/
 # Cost / execution analyzer output
 CostReports/
 *.cost.json
-
-
-# ---------------------------------------------------------------------------
-# Private planning material — MUST NEVER BE PUBLISHED
-# ---------------------------------------------------------------------------
-# Anything referencing the predecessor workspace, provenance rationale, or the
-# content classification inventory. See the containment rule in Roadmap.md.
-
-Private/
-Roadmap.md
 
 
 # ---------------------------------------------------------------------------
