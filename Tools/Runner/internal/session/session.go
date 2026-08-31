@@ -806,6 +806,31 @@ func (s *sessionImpl) Start(ctx context.Context, config domain.RunConfig) (outco
 					s.deps.Debug.Log(domain.EventSessionDeviationUnresolved, msg)
 					return domain.RunOutcome{Status: domain.RunDeviationUnresolved, Message: msg}, nil
 				}
+				// Persist a record of the failed dispatch attempt so the execution
+				// log captures every attempt, including those that fail before
+				// returning a response. This follows the HITL-rejected-attempt
+				// pattern: IsInfrastructure=true leaves current_state unchanged so
+				// resume detection works correctly, and OutputArtifacts is omitted
+				// to avoid polluting the artifact registry. Only persisted when a
+				// routing consultant is configured (i.e., when the deviation will be
+				// handled rather than left unresolved with no artifact trace).
+				failedAttemptStep := domain.CompletedStep{
+					Seq:              state.GlobalSequence + 1,
+					AgentInstance:    step.Request.AgentInstanceID,
+					Phase:            step.Phase,
+					Stage:            step.Stage,
+					Status:           domain.StatusBLOCKED,
+					Summary:          invokeErr.Error(),
+					Timestamp:        s.deps.Clock.Now(),
+					Inputs:           formatInputs(step.Request.InputArtifacts),
+					IsInfrastructure: true,
+				}
+				state, err = s.deps.Store.Apply(ctx, state, failedAttemptStep)
+				if err != nil {
+					s.deps.Debug.Log(domain.EventSessionApplyFailed, err.Error())
+					return domain.RunOutcome{Status: domain.RunFailed, Message: err.Error()}, err
+				}
+				seq = state.GlobalSequence
 				done, outcome, outErr := s.consultRoute(ctx, &deviationInfo, &state, &seq,
 					&lastResponse, &prevWorkflowStep, &refreshedStages, &stages,
 					table, agents, config, declaredInfraAgents, admitted, &antiLoop)
@@ -823,9 +848,12 @@ func (s *sessionImpl) Start(ctx context.Context, config domain.RunConfig) (outco
 			// execution log has a complete record of every dispatch attempt.
 			//
 			// hitlAttemptSeq tracks the sequence number assigned to each attempt.
-			// It starts at seq+1 (the slot the engine reserved for this step)
-			// and increments for each automatic redispatch.
-			hitlAttemptSeq := seq + 1
+			// It starts at state.GlobalSequence+1 (the next available slot) so
+			// that the auto-routed step Seq always derives from the same counter
+			// that consultRoute uses, preventing duplicate Seq values when a
+			// preceding consultRoute call consumed additional sequence slots via
+			// HITL redispatches or infrastructure records.
+			hitlAttemptSeq := state.GlobalSequence + 1
 			hitlRedispatchUsed := false
 			hitlStep := step
 			hitlResponse := response
@@ -1441,8 +1469,29 @@ func (s *sessionImpl) consultRoute(
 	dispInstr := instr.Dispatch
 
 	// Look up the routing table row early so its phase name is available for
-	// the consultation log entry and for subsequent field resolution.
-	row, _ := rowAtIndex(table, dispInstr.RowIndex)
+	// the consultation log entry and for subsequent field resolution. When the
+	// consultant dispatches to a conceptual expanded row index that does not
+	// exist in the physical routing table (e.g. because the table uses
+	// [StageNumber] templates and the consultant uses conceptual stage-expanded
+	// indices), fall back to the deviation's physical row so artifact templates
+	// and phase metadata are still available for resolution.
+	row, found := rowAtIndex(table, dispInstr.RowIndex)
+	if !found && deviation != nil {
+		row, _ = rowAtIndex(table, deviation.CurrentRow)
+	}
+
+	// Derive the stage for all CompletedSteps produced in this consultRoute
+	// call. When responding to a deviation and the target row is staged, use
+	// the deviation's CurrentStage rather than state.CurrentState.Stage
+	// (entryStage) to prevent prior-stage values from being stamped on rows
+	// dispatched in a different stage.
+	effectiveStage := entryStage
+	if deviation != nil && row.PhaseParsed.IsStaged {
+		_, stageNum, stageOK := domain.ParseStageValue(deviation.CurrentStage)
+		if stageOK {
+			effectiveStage = domain.FormatStageValue(row.PhaseParsed.Group, stageNum)
+		}
+	}
 
 	// Record the consultation as an infrastructure-flagged Execution Log row.
 	// The row consumes a global_sequence slot so the log has no duplicate
@@ -1452,7 +1501,7 @@ func (s *sessionImpl) consultRoute(
 		Seq:              consultSeq,
 		AgentInstance:    s.orchRef.Identifier + "#" + strconv.Itoa(consultSeq),
 		Phase:            row.PhaseParsed.Name,
-		Stage:            entryStage,
+		Stage:            effectiveStage,
 		Status:           domain.StatusSUCCESS,
 		Summary:          dispInstr.TaskDescription,
 		Timestamp:        s.deps.Clock.Now(),
@@ -1498,6 +1547,23 @@ func (s *sessionImpl) consultRoute(
 		outputArts = *dispInstr.OutputArtifacts
 	} else {
 		outputArts = row.OutputArtifacts
+	}
+
+	// Resolve artifact template tokens ({StageNumber}) for consultant-routed
+	// dispatches. Without this, rows whose declared artifact paths use the
+	// {StageNumber} template pass unresolved tokens into the ProtocolRequest
+	// and the persisted CompletedStep. Use the same stage context derived
+	// above so the resolved paths match the target row's actual stage.
+	if row.PhaseParsed.IsStaged && effectiveStage != "" {
+		_, artStageNum, stageOK := domain.ParseStageValue(effectiveStage)
+		if stageOK {
+			if resolved, resolveErr := engine.ResolveArtifacts(inputArts, artStageNum, effectiveStage, *stages, *refreshedStages, true); resolveErr == nil {
+				inputArts = resolved
+			}
+			if resolved, resolveErr := engine.ResolveArtifacts(outputArts, artStageNum, effectiveStage, *stages, *refreshedStages, false); resolveErr == nil {
+				outputArts = resolved
+			}
+		}
 	}
 
 	effectiveHITL := row.HITL
@@ -1564,7 +1630,7 @@ func (s *sessionImpl) consultRoute(
 	s.deps.Interact.Notify(ctx, interaction.Notice{
 		Level:   interaction.NoticeInfo,
 		Title:   agentReq.AgentInstanceID,
-		Message: fmt.Sprintf("phase=%s stage=%q status=running", phase, entryStage),
+		Message: fmt.Sprintf("phase=%s stage=%q status=running", phase, effectiveStage),
 	})
 
 	// Graceful-stop checkpoint: the consultation record above is already
@@ -1662,7 +1728,7 @@ hitlLoop:
 				Seq:              (*state).GlobalSequence + 1,
 				AgentInstance:    fmt.Sprintf("%s#%d", agentRef.Identifier, currentAttemptSeq),
 				Phase:            phase,
-				Stage:            entryStage,
+				Stage:            effectiveStage,
 				Status:           finalResponse.StatusCode,
 				ErrorCode:        finalResponse.ErrorCode,
 				Summary:          finalResponse.StatusMessage,
@@ -1740,7 +1806,7 @@ hitlLoop:
 				Seq:              (*state).GlobalSequence + 1,
 				AgentInstance:    fmt.Sprintf("%s#%d", agentRef.Identifier, currentAttemptSeq),
 				Phase:            phase,
-				Stage:            entryStage,
+				Stage:            effectiveStage,
 				Status:           finalResponse.StatusCode,
 				ErrorCode:        finalResponse.ErrorCode,
 				Summary:          finalResponse.StatusMessage,
@@ -1777,7 +1843,7 @@ hitlLoop:
 		Seq:             workflowSeq,
 		AgentInstance:   finalAgentInstanceID,
 		Phase:           phase,
-		Stage:           entryStage,
+		Stage:           effectiveStage,
 		Status:          finalResponse.StatusCode,
 		ErrorCode:       finalResponse.ErrorCode,
 		Summary:         finalResponse.StatusMessage,
@@ -1798,7 +1864,7 @@ hitlLoop:
 	s.deps.Interact.Notify(ctx, interaction.Notice{
 		Level:   interaction.NoticeInfo,
 		Title:   finalAgentInstanceID,
-		Message: fmt.Sprintf("phase=%s stage=%q status=%s", phase, entryStage, string(finalResponse.StatusCode)),
+		Message: fmt.Sprintf("phase=%s stage=%q status=%s", phase, effectiveStage, string(finalResponse.StatusCode)),
 	})
 
 	// Infrastructure-agent trigger evaluation.

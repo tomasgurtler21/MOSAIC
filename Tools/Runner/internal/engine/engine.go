@@ -152,6 +152,27 @@ func Next(in NextInput) domain.EngineDecision {
 				// resolved list are not duplicated.
 				step.Request.InputArtifacts = injectReviewArtifacts(
 					step.Request.InputArtifacts, in.LastOutputArtifacts)
+				// Inject the creator agent's own previously-produced output artifacts
+				// from the registry. The comparison is against step.Request.OutputArtifacts
+				// (resolved paths from buildDispatchStep), not against raw row.OutputArtifacts
+				// (which may contain unresolved template tokens). This ensures injection
+				// fires correctly for rows with templated output artifact paths.
+				if len(in.ArtifactRegistry) > 0 {
+					outputArtSet := make(map[string]bool, len(step.Request.OutputArtifacts))
+					for _, oa := range step.Request.OutputArtifacts {
+						outputArtSet[oa] = true
+					}
+					var creatorArts []string
+					for _, entry := range in.ArtifactRegistry {
+						if outputArtSet[entry.Artifact] {
+							creatorArts = append(creatorArts, entry.Artifact)
+						}
+					}
+					if len(creatorArts) > 0 {
+						step.Request.InputArtifacts = injectReviewArtifacts(
+							step.Request.InputArtifacts, creatorArts)
+					}
+				}
 				return domain.EngineDecision{Dispatch: &domain.DispatchDecision{
 					Steps: []domain.DispatchStep{step},
 				}}
@@ -305,7 +326,20 @@ func ResumePoint(
 		return domain.ResumeInfo{}, fmt.Errorf("resume: %w", advErr)
 	}
 
-	if adv.Complete || adv.RowIndex < 0 {
+	if adv.Complete {
+		return domain.ResumeInfo{
+			RowIndex:    len(workflow.Table.Rows),
+			Phase:       "",
+			Stage:       "",
+			StageNumber: 0,
+			GroupIndex:  -1,
+			Seq:         state.GlobalSequence,
+			RerunLast:   false,
+		}, nil
+	}
+	// Defense-in-depth: unreachable after RowNotInGroupError replaced the -1
+	// sentinel in computeNextFromExecution. Retained as a defensive guard only.
+	if adv.RowIndex < 0 {
 		return domain.ResumeInfo{
 			RowIndex:    len(workflow.Table.Rows),
 			Phase:       "",
@@ -614,7 +648,12 @@ func computeNextFromExecution(
 		}
 	}
 	if currentGroupIdx < 0 {
-		return executionAdvance{RowIndex: -1}, nil
+		return executionAdvance{}, &domain.RowNotInGroupError{
+			WorkflowID: workflow.Table.Info.ID,
+			RowIndex:   currentRowIdx,
+			Stage:      currentStageNum,
+			Groups:     ordGroups,
+		}
 	}
 
 	group := ordGroups[currentGroupIdx]
@@ -687,11 +726,11 @@ func buildDispatchStep(
 	effectiveHITL := rowHITL || stageHITL
 
 	// Resolve artifact paths.
-	inputArts, err := resolveArtifacts(row.InputArtifacts, stageNum, stageStr, stages, refreshedStages, true)
+	inputArts, err := ResolveArtifacts(row.InputArtifacts, stageNum, stageStr, stages, refreshedStages, true)
 	if err != nil {
 		return domain.DispatchStep{}, err
 	}
-	outputArts, err := resolveArtifacts(row.OutputArtifacts, stageNum, stageStr, stages, refreshedStages, false)
+	outputArts, err := ResolveArtifacts(row.OutputArtifacts, stageNum, stageStr, stages, refreshedStages, false)
 	if err != nil {
 		return domain.DispatchStep{}, err
 	}
@@ -724,10 +763,15 @@ func buildDispatchStep(
 	}, nil
 }
 
-// resolveArtifacts expands template variables in artifact paths.
-// For input artifacts: {StageNumber} is substituted and Stage-* is expanded per stage.
-// For output artifacts: {StageNumber} is substituted and Stage-* is passed through unexpanded.
-func resolveArtifacts(
+// ResolveArtifacts expands template variables in artifact paths.
+// For input artifacts (isInput=true): {StageNumber} is substituted and
+// Stage-* is expanded per stage.
+// For output artifacts (isInput=false): {StageNumber} is substituted and
+// Stage-* is passed through unexpanded.
+//
+// This is the existing resolveArtifacts function, exported by rename only.
+// No signature or logic change.
+func ResolveArtifacts(
 	arts []string,
 	stageNum domain.StageNumber,
 	stageStr string,

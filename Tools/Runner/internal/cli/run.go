@@ -7,6 +7,7 @@ import (
 	"io"
 	"os"
 	"path/filepath"
+	"runtime/debug"
 	"strings"
 	"time"
 
@@ -90,6 +91,21 @@ func Run(ctx context.Context, args []string, store domain.ArtifactStore, identit
 		SilenceErrors: true,
 		SilenceUsage:  true,
 		RunE: func(cmd *cobra.Command, _ []string) error {
+			// Recover from any panic in sess.Start so that a session-layer crash
+			// surfaces as a diagnostic error message rather than a silent process
+			// termination. The panic value and a truncated stack trace are written to
+			// errOut so the operator can diagnose the failure.
+			defer func() {
+				if p := recover(); p != nil {
+					stack := debug.Stack()
+					if len(stack) > 4096 {
+						stack = stack[:4096]
+					}
+					fmt.Fprintf(errOut, "error: panic in session: %v\n%s\n", p, stack)
+					exitCode = ExitFailure
+				}
+			}()
+
 			// Read all flag values from the parsed FlagSet. RegisterRunFlags
 			// registered every flag onto runCmd.Flags(), so cobra has already
 			// populated them before RunE is called. GetString/GetBool/GetStringArray
