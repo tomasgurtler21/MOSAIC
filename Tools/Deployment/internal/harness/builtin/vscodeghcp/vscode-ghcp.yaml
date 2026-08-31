@@ -140,6 +140,12 @@ frontmatter:
   add:
     - key: "disable-model-invocation"
       value: false
+    - key: "user-invocable"
+      value_by_role:
+        subagent: false
+        orchestrator: true
+        utility: true
+        standalone: true
   drop:
     - "recommended_tier"
     - "tier_rationale"
@@ -154,6 +160,7 @@ frontmatter:
     - "model"
     - "tools"
     - "disable-model-invocation"
+    - "user-invocable"
 
 hooks:
   supported: true
