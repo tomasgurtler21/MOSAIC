@@ -12,6 +12,8 @@
 
 <!-- /generated:overview -->
 
+**IMPORTANT** - Model comparison is wrong until listed models execute same suites (Tests count more or less matches across models)
+
 <!-- generated:model-comparison -->
 ## Model Comparison
 
@@ -24,6 +26,8 @@
 | gpt-5.6-terra | 2595 | 79% | $2.66/100t |
 
 <!-- /generated:model-comparison -->
+
+**IMPORTANT** - Harnes comparison is WIP, currently comparison does not make much sense
 
 <!-- generated:harness-comparison -->
 ## Harness Comparison

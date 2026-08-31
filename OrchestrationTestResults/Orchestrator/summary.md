@@ -9,6 +9,8 @@
 
 <!-- /generated:version-overview -->
 
+**IMPORTANT** - Version comparison can not be used for model until listed models execute same suites (Tests count more or less matches across models)
+
 <!-- generated:version-comparison -->
 ## Version Comparison
 
