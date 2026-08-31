@@ -641,6 +641,12 @@ type ConfigScreen struct {
 	infraClassQueue []infraClassEntry
 	// infraClassIdx is the index into infraClassQueue for the current prompt.
 	infraClassIdx int
+
+	// Run-mode awareness for the conditional version-drift prompt.
+	isNewRun         bool   // true: new run; false: resumed run
+	recordedVersion  string // workflow version from artifact frontmatter (empty if not available)
+	currentVersion   string // workflow version from current orchestrator file (empty if not available)
+	versionsInjected bool   // true once SetVersionDriftInfo has supplied both versions
 }
 
 // NewConfigScreen creates the configuration screen.
@@ -671,13 +677,16 @@ func NewConfigScreen(width, height int, styles Styles) *ConfigScreen {
 		return nil
 	})
 	return &ConfigScreen{
-		step:   configStepMode,
-		cursor: -1, // mode step starts with no option preselected
-		sel:    ConfigSelection{},
-		width:        width,
-		height:       height,
-		styles:       styles,
-		timeoutInput: timeoutInput,
+		step:            configStepMode,
+		cursor:          -1, // mode step starts with no option preselected
+		sel:             ConfigSelection{},
+		width:           width,
+		height:          height,
+		styles:          styles,
+		timeoutInput:    timeoutInput,
+		isNewRun:        true, // safe default
+		recordedVersion: "",
+		currentVersion:  "",
 	}
 }
 
@@ -705,7 +714,11 @@ func (s *ConfigScreen) Update(msg tea.Msg) tea.Cmd {
 				s.sel.Timeout = 30 * time.Minute
 			}
 			s.timeoutInput.Reset()
-			s.step = configStepVersionDrift
+			if s.showsVersionDrift() {
+				s.step = configStepVersionDrift
+			} else {
+				s.step = configStepCheckpoints
+			}
 			s.cursor = 0
 			return nil
 		}
@@ -911,7 +924,10 @@ func (s *ConfigScreen) prevStepAndCursor() (configStep, int) {
 		// but if we reach here via Esc on version-drift, go to timeout.
 		return configStepHarnessTimeout, 0
 	case configStepCheckpoints:
-		return configStepVersionDrift, 0
+		if s.showsVersionDrift() {
+			return configStepVersionDrift, 0
+		}
+		return configStepHarnessTimeout, 0
 	case configStepCommits:
 		return configStepCheckpoints, 0
 	case configStepCommitBranch:
@@ -1008,9 +1024,13 @@ func (s *ConfigScreen) View() string {
 	case configStepHarnessTimeout:
 		body.WriteString(s.timeoutInput.View())
 	case configStepVersionDrift:
-		body.WriteString(s.styles.Body.Width(s.width).Render("Allow workflow version drift:") + "\n")
-		body.WriteString(s.renderOption(0, "Yes"))
-		body.WriteString(s.renderOption(1, "No (default)"))
+		// Defense in depth: the step machine never lands here unless the prompt is
+		// meaningful, but never render it if it somehow does.
+		if s.showsVersionDrift() {
+			body.WriteString(s.styles.Body.Width(s.width).Render("Allow workflow version drift:") + "\n")
+			body.WriteString(s.renderOption(0, "Yes"))
+			body.WriteString(s.renderOption(1, "No (default)"))
+		}
 	case configStepCheckpoints:
 		body.WriteString(s.styles.Body.Width(s.width).Render("Checkpoints:") + "\n")
 		body.WriteString(s.renderOption(0, "Disabled (default)"))
@@ -1114,4 +1134,40 @@ func (s *ConfigScreen) SetDeclaredAgents(agents []domain.DeclaredInfraAgent) {
 func (s *ConfigScreen) SetPreselectedHarness(id string) {
 	s.sel.Harness = id
 	s.harnessPreselected = true
+}
+
+// SetIsNewRun injects the run-mode flag before setup wizard begins.
+// Must be called by rootModel before any screen transitions occur.
+// isNew=true indicates a new run; false indicates a resumed run.
+func (s *ConfigScreen) SetIsNewRun(isNew bool) {
+	s.isNewRun = isNew
+}
+
+// SetVersionDriftInfo injects version information before setup wizard begins.
+// Must be called by rootModel after loading artifact state and after workflow is resolved,
+// but before any screen transitions occur.
+// recordedVersion: workflow version from artifact frontmatter (empty if not available)
+// currentVersion: workflow version from current orchestrator file (empty if not available)
+func (s *ConfigScreen) SetVersionDriftInfo(recordedVersion, currentVersion string) {
+	s.recordedVersion = recordedVersion
+	s.currentVersion = currentVersion
+	s.versionsInjected = true
+}
+
+// showsVersionDrift reports whether the version-drift prompt is meaningful for
+// this run, and so whether the step machine visits it in either direction.
+//
+// A new run has no recorded version to drift from, so the question is never
+// asked. A resumed run is asked only when the recorded version differs from the
+// version the current orchestrator file declares; a missing value on one side
+// only counts as a difference, so an unknown version errs towards asking.
+//
+// A caller that never supplied the versions gets the prompt: without them the
+// screen cannot tell a genuine match from two absent values, and asking a
+// redundant question is safer than silently defaulting the answer to "no".
+func (s *ConfigScreen) showsVersionDrift() bool {
+	if !s.versionsInjected {
+		return true
+	}
+	return !s.isNewRun && s.recordedVersion != s.currentVersion
 }

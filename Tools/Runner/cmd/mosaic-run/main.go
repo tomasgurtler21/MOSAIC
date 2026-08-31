@@ -323,6 +323,7 @@ func runTUIMode(args []string) {
 		ScanResult:             identity.ScanResult,
 		ResolvedRunID:          identity.RunID,
 		IsNewRun:               identity.IsNewRun,
+		RecordedWorkflowID:     domain.WorkflowID(identity.Workflow),
 		InitialRunFolder:       identity.RunFolder,
 		SessionFactory:         sessFactory,
 		MintRunIdentity:        minter,

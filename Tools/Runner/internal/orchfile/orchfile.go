@@ -268,6 +268,16 @@ func parseInfraAgentTable(name, version string, content []byte) (domain.Declared
 	return agent, nil
 }
 
+// WorkflowNotFoundReason returns the Reason carried by the *domain.RefusalError
+// GetWorkflow produces when the file declares no workflow with the given
+// identifier. Callers that must tell that refusal apart from the other ways
+// reading the file can fail compare against this: several of those failures
+// (a missing version attribute, a duplicate identifier) name the same
+// component and the same resource, so the reason is what distinguishes them.
+func WorkflowNotFoundReason(id string) string {
+	return fmt.Sprintf("workflow identifier %q not found in file", id)
+}
+
 // GetWorkflow returns the workflow region with the given identifier from the
 // file at path.
 //
@@ -288,6 +298,6 @@ func GetWorkflow(path string, id string) (domain.WorkflowRegion, error) {
 	return domain.WorkflowRegion{}, &domain.RefusalError{
 		Component: "orchfile",
 		Resource:  id,
-		Reason:    fmt.Sprintf("workflow identifier %q not found in file", id),
+		Reason:    WorkflowNotFoundReason(id),
 	}
 }

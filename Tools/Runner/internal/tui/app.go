@@ -97,6 +97,17 @@ type Options struct {
 	// IsNewRun is true when --new-run was given or the scan yielded zero candidates.
 	IsNewRun bool
 
+	// RecordedWorkflowID is the workflow a resumed run recorded when it was
+	// created, for the entry points that settle run identity before the TUI
+	// launches (--run <run_id>). Runs chosen on the run-select screen adopt
+	// their recorded workflow there instead, and never need this.
+	//
+	// It exists because the setup sequence skips the workflow question on a
+	// resumed run: a run that arrives pre-resolved with nothing here reaches
+	// the session with no workflow at all and is refused, however well its
+	// artifact records one. Always "" for a new run.
+	RecordedWorkflowID domain.WorkflowID
+
 	// InitialRunFolder is the resolved run-scoped folder path when --run or
 	// single-candidate auto-resume resolved run identity before TUI launch.
 	// It is carried into m.selections.runFolder so that readArtifactContent
@@ -409,6 +420,13 @@ func newRootModel(ctx context.Context, sess session.Session, opts Options) *root
 		m.selections.runID = preRunID
 		m.selections.isNewRun = preIsNewRun
 	}
+	// A run resolved before launch never reaches the run-select screen, which is
+	// where a chosen run adopts its recorded workflow. Since the setup sequence
+	// no longer asks a resumed run which workflow to run, the recorded value has
+	// to enter here or not at all.
+	if !preIsNewRun && opts.RecordedWorkflowID != "" {
+		m.selections.workflowID = opts.RecordedWorkflowID
+	}
 
 	return m
 }
@@ -683,18 +701,39 @@ func (m *rootModel) updateRunSelect(msg tea.Msg) (tea.Model, tea.Cmd) {
 				mint = func() (string, string) { return "", "" }
 			}
 			id, err := runselect.Answer(*m.runSelectQuestion, choiceID, runselect.Minter(mint))
-			if err == nil {
-				m.selections.runID = id.RunID
-				m.selections.runFolder = id.RunFolder
-				m.selections.isNewRun = false
-				// Reconstruct the session with the correct run-scoped store if a factory is available.
-				// Harness config is not yet known (config screen has not run); defaults to fake adapter.
-				if m.sessionFactory != nil {
-					m.sess = m.sessionFactory(id.RunFolder, false, "", screens.ConfigSelection{})
-				}
-				if m.onRunIDResolved != nil && m.selections.runID != "" {
-					m.onRunIDResolved(m.selections.runID)
-				}
+			if err != nil {
+				// The screen should never offer a choice Answer cannot
+				// resolve, so this is a defect rather than a user mistake --
+				// and it must be shown rather than swallowed. Falling through
+				// would leave the run, its folder and its workflow all empty
+				// while isNewRun stayed false, which the setup flow reads as a
+				// resumed run and walks past every remaining question with
+				// nothing selected.
+				style := stylesFromTheme(m.theme)
+				m.doneScreen = screens.NewDoneScreen(
+					domain.RunOutcome{Status: domain.RunRefused, Message: err.Error()},
+					"", m.width, m.height, style,
+				)
+				m.screen = screenDone
+				m.runSelectScreen.Reset()
+				return m, nil
+			}
+			m.selections.runID = id.RunID
+			m.selections.runFolder = id.RunFolder
+			m.selections.isNewRun = false
+			// The chosen run brings its workflow with it. Adopting it here
+			// is what makes skipping the workflow question safe: the value
+			// is settled the moment the run is, not dropped and asked for
+			// again. A run that recorded none carries none, and the
+			// session layer refuses it rather than setup substituting one.
+			m.selections.workflowID = domain.WorkflowID(id.Workflow)
+			// Reconstruct the session with the correct run-scoped store if a factory is available.
+			// Harness config is not yet known (config screen has not run); defaults to fake adapter.
+			if m.sessionFactory != nil {
+				m.sess = m.sessionFactory(id.RunFolder, false, "", screens.ConfigSelection{})
+			}
+			if m.onRunIDResolved != nil && m.selections.runID != "" {
+				m.onRunIDResolved(m.selections.runID)
 			}
 		}
 		// When "new run" is selected, the session factory is called with the minted
@@ -791,10 +830,40 @@ func (m *rootModel) updateSetupHarness(msg tea.Msg) (tea.Model, tea.Cmd) {
 
 		style := stylesFromTheme(m.theme)
 		m.workflowScreen = screens.NewWorkflowSelectScreen(regions, m.width, m.height, style)
+
+		// A resumed run is asked neither which workflow to run nor what its
+		// task is. Both were settled when the run was created and both are
+		// recorded in its artifact, so asking again only invites an answer that
+		// contradicts the run being resumed. The harness question is the last
+		// one such a run is asked; from here it goes straight to configuration,
+		// carrying whatever workflow it recorded -- including none, which the
+		// session layer refuses rather than setup papering over.
+		if !m.selections.isNewRun {
+			m.prepareConfigScreen()
+			m.screen = screenSetupConfig
+			return m, nil
+		}
+
 		m.screen = screenSetupWorkflow
 		return m, nil
 	}
 	return m, nil
+}
+
+// prepareConfigScreen tells the configuration screen which run mode it is in
+// and how the version the selected workflow declares compares with the one the
+// run recorded, so it can decide whether to ask about version drift.
+//
+// Both facts become knowable only once the workflow is settled, and that
+// happens at a different point on each path: at the user's answer for a new
+// run, and at the harness question for a resumed one, which never reaches the
+// workflow screen at all.
+func (m *rootModel) prepareConfigScreen() {
+	m.configScreen.SetIsNewRun(m.selections.isNewRun)
+	m.configScreen.SetVersionDriftInfo(
+		string(m.recordedWorkflowVersion()),
+		string(m.selectedWorkflowVersion()),
+	)
 }
 
 func (m *rootModel) updateSetupFile(msg tea.Msg) (tea.Model, tea.Cmd) {
@@ -853,6 +922,11 @@ func (m *rootModel) updateSetupWorkflow(msg tea.Msg) (tea.Model, tea.Cmd) {
 		selectedID := m.workflowScreen.SelectedID()
 		m.selections.workflowID = domain.WorkflowID(selectedID)
 
+		// The version-drift question is only meaningful once both versions are
+		// known, and the selected workflow's version is only known here. A new
+		// run has no recorded version, so it is never asked.
+		m.prepareConfigScreen()
+
 		m.workflowScreen.Reset()
 		m.screen = screenSetupTask
 		return m, m.taskScreen.InputInit()
@@ -904,8 +978,12 @@ func (m *rootModel) updateSetupConfig(msg tea.Msg) (tea.Model, tea.Cmd) {
 			m.screen = screenSetupSeedInput
 			return m, m.seedInputScreen.InputInit()
 		}
-		m.screen = screenSetupTask
-		return m, m.taskScreen.InputInit()
+		// Back returns the user to the last question they were actually asked.
+		// A resumed run was never asked for its workflow or its task, so that
+		// question is the harness one; routing back to a skipped screen would
+		// put the very question the forward path exists to suppress.
+		m.screen = screenSetupHarness
+		return m, nil
 	}
 	if m.configScreen.Done() {
 		m.selections.config = m.configScreen.Selection()
@@ -965,6 +1043,37 @@ func (m *rootModel) updateSetupGHCPMode(msg tea.Msg) (tea.Model, tea.Cmd) {
 		return m, m.launchSession()
 	}
 	return m, nil
+}
+
+// recordedWorkflowVersion returns the workflow version recorded in the run's
+// artifact frontmatter, or the empty version when there is nothing to read: a
+// new run has no prior artifact, and a resumed run whose artifact is missing,
+// unreadable, or unparseable has no recorded version to compare against.
+func (m *rootModel) recordedWorkflowVersion() domain.WorkflowVersion {
+	if m.selections.isNewRun || m.selections.runFolder == "" {
+		return ""
+	}
+	data, err := os.ReadFile(filepath.Join(m.selections.runFolder, "Orchestration.md"))
+	if err != nil {
+		return ""
+	}
+	state, err := artifact.Parse(data)
+	if err != nil {
+		return ""
+	}
+	return state.WorkflowVersion
+}
+
+// selectedWorkflowVersion returns the version declared by the workflow region
+// the user selected, or the empty version when the orchestrator file declares
+// none for it.
+func (m *rootModel) selectedWorkflowVersion() domain.WorkflowVersion {
+	for _, wf := range m.workflows {
+		if wf.Info.ID == m.selections.workflowID {
+			return wf.Info.Version
+		}
+	}
+	return ""
 }
 
 // announceIdentity builds the runselect.Identity used to render the

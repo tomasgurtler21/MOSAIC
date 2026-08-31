@@ -288,17 +288,44 @@ func TestCreateSnapshot_SourceDirNotExist_ReturnsRefusalError(t *testing.T) {
 	assertRefusalError(t, err, "snapshot")
 }
 
-func TestCreateSnapshot_TargetAlreadyExists_ReturnsRefusalError(t *testing.T) {
+func TestCreateSnapshot_TargetAlreadyExists_RecreatesSnapshot(t *testing.T) {
 	src := t.TempDir()
-	dst := t.TempDir() // already exists
+	base := t.TempDir()
+	dst := filepath.Join(base, "snapshot") // will be created then removed then recreated
 
+	// Create the destination directory with a marker file.
+	if err := os.MkdirAll(dst, 0o755); err != nil {
+		t.Fatalf("create dst: %v", err)
+	}
+	markerFile := filepath.Join(dst, "old-marker.txt")
+	if err := os.WriteFile(markerFile, []byte("old"), 0o644); err != nil {
+		t.Fatalf("write marker: %v", err)
+	}
+
+	// Write source file.
 	writeFile(t, filepath.Join(src, "agent.md"), []byte("# Agent\n"))
 
+	// CreateSnapshot should remove the old directory and recreate it from source.
 	err := snapshot.CreateSnapshot(src, dst, nil)
-	if err == nil {
-		t.Fatal("expected error when target dir already exists, got nil")
+	if err != nil {
+		t.Fatalf("CreateSnapshot: %v", err)
 	}
-	assertRefusalError(t, err, "snapshot")
+
+	// The new snapshot should exist.
+	if _, err := os.Stat(dst); err != nil {
+		t.Errorf("snapshot directory does not exist: %v", err)
+	}
+
+	// The old marker file should be gone (directory was removed and recreated).
+	if _, err := os.Stat(markerFile); !errors.Is(err, os.ErrNotExist) {
+		t.Errorf("old marker file should not exist after recreation: %v", err)
+	}
+
+	// The new snapshot should contain the source files.
+	agentPath := filepath.Join(dst, "agent.md")
+	if _, err := os.Stat(agentPath); err != nil {
+		t.Errorf("agent.md not found in snapshot: %v", err)
+	}
 }
 
 func TestCreateSnapshot_SourceDirNotExist_TargetNotCreated(t *testing.T) {

@@ -145,6 +145,11 @@ func TestHarnessScreen_Enter_DiscoveryFailure_TransitionsToDoneScreen(t *testing
 // that when OrchestratorDiscoverer returns a valid orchestrator path, pressing
 // Enter on the harness screen transitions to screenSetupWorkflow and populates
 // selections.orchestratorFile (AC3.2, TUI side integration).
+//
+// This is a new-run test: the workflow screen is only ever shown to a run that
+// has recorded no workflow of its own. The subject here is orchestrator
+// discovery, not run-mode routing, so the run mode is set explicitly rather
+// than left at its zero value -- which now means "resumed".
 func TestHarnessScreen_Enter_DiscoverySuccess_TransitionsToWorkflowScreen(t *testing.T) {
 	// Write a minimal orchestrator file with one workflow region so that
 	// orchfile.EnumerateWorkflows returns successfully.
@@ -166,6 +171,7 @@ func TestHarnessScreen_Enter_DiscoverySuccess_TransitionsToWorkflowScreen(t *tes
 		return orchFilePath, nil
 	}
 	m := newTestModelWithDiscoverer(succeedDiscoverer)
+	m.selections.isNewRun = true
 
 	if m.screen != screenSetupHarness {
 		t.Fatalf("precondition: screen = %v, want screenSetupHarness", m.screen)
@@ -518,8 +524,11 @@ func TestNavigation_AskTextQuestion_EnterSendsTextAnswer(t *testing.T) {
 
 // TestNavigation_WorkflowScreen_EscReturnsToHarnessScreen verifies that pressing Esc on the
 // workflow selection screen transitions back to the harness selection screen.
+//
+// This is a new-run test: the workflow screen is only ever reached by a run that
+// has no recorded workflow, so a resumed run has no back-navigation out of it.
 func TestNavigation_WorkflowScreen_EscReturnsToHarnessScreen(t *testing.T) {
-	m := newTestModel()
+	m := newTestModelNewRun()
 	style := stylesFromTheme(m.theme)
 	m.workflowScreen = screens.NewWorkflowSelectScreen(
 		[]domain.WorkflowRegion{{Info: domain.WorkflowInfo{ID: "wf1"}}},
@@ -536,8 +545,11 @@ func TestNavigation_WorkflowScreen_EscReturnsToHarnessScreen(t *testing.T) {
 
 // TestNavigation_TaskScreen_EscReturnsToWorkflowScreen verifies that pressing Esc on the
 // task description screen transitions back to the workflow selection screen.
+//
+// This is a new-run test: both screens belong to the new-run path, and a resumed
+// run is shown neither.
 func TestNavigation_TaskScreen_EscReturnsToWorkflowScreen(t *testing.T) {
-	m := newTestModel()
+	m := newTestModelNewRun()
 	m.screen = screenSetupTask
 
 	sendKey(m, tea.KeyEsc)
@@ -547,51 +559,34 @@ func TestNavigation_TaskScreen_EscReturnsToWorkflowScreen(t *testing.T) {
 	}
 }
 
-// TestNavigation_ConfigScreen_EscReturnsToTaskScreen verifies that pressing Esc on the
-// first configuration prompt transitions back to the task description screen.
-func TestNavigation_ConfigScreen_EscReturnsToTaskScreen(t *testing.T) {
-	m := newTestModel()
-	m.screen = screenSetupConfig
-
-	sendKey(m, tea.KeyEsc)
-
-	if m.screen != screenSetupTask {
-		t.Errorf("screen = %v after Esc from config screen, want screenSetupTask (%v)", m.screen, screenSetupTask)
-	}
-}
+// Back-navigation out of the configuration screen is covered per run mode
+// elsewhere: TestNavigation_ConfigScreen_NewRun_EscReturnsToSeedScreen in
+// seed_nav_test.go for a new run, and
+// TestSetupFlow_ResumedRun_BackFromConfiguration_ReturnsToTheHarnessQuestion in
+// resume_skip_test.go for a resumed one. There is no run-mode-independent
+// answer to state here: the two paths pass through different screens on the way
+// in and must return to different screens on the way out.
 
 // ---------------------------------------------------------------------------
 // Setup sequence: forward navigation
 // ---------------------------------------------------------------------------
 
-// TestSetupSequence_ForwardNavigation_ReachesProgressScreen verifies the complete
-// forward-navigation path: workflow selection → task entry → configuration → progress
-// screen. The file-selection step is bypassed by pre-populating the model's workflow
-// list and jumping directly to the workflow screen.
-func TestSetupSequence_ForwardNavigation_ReachesProgressScreen(t *testing.T) {
-	m := newTestModel()
-	style := stylesFromTheme(m.theme)
+// TestSetupSequence_ResumedRun_ForwardNavigation_ReachesProgressScreen verifies
+// the complete forward-navigation path for a resumed run:
+// harness → configuration → progress screen. The workflow and task screens are
+// not steps on this path; a resumed run brings both values with it.
+//
+// This is the resumed-run counterpart of
+// TestSetupSequence_NewRun_ForwardNavigation_ReachesProgressScreen in
+// seed_nav_test.go, which walks the longer new-run path.
+func TestSetupSequence_ResumedRun_ForwardNavigation_ReachesProgressScreen(t *testing.T) {
+	m := newResumedRunModel(t)
 
-	// Bypass file selection: directly populate workflow regions and transition to
-	// the workflow screen, replicating what updateSetupFile would do after loading.
-	testWorkflows := []domain.WorkflowRegion{
-		{Info: domain.WorkflowInfo{ID: "test-workflow"}},
-	}
-	m.workflows = testWorkflows
-	m.workflowScreen = screens.NewWorkflowSelectScreen(testWorkflows, m.width, m.height, style)
-	m.screen = screenSetupWorkflow
-
-	// Select the first (and only) workflow.
-	m.Update(tea.KeyMsg{Type: tea.KeyEnter})
-	if m.screen != screenSetupTask {
-		t.Fatalf("after workflow selection: screen = %v, want screenSetupTask", m.screen)
-	}
-
-	// Type one character to satisfy the non-empty task validator, then confirm.
-	m.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'T'}})
-	m.Update(tea.KeyMsg{Type: tea.KeyEnter})
+	// Answer the harness question. A resumed run has nothing further to answer
+	// before configuration.
+	sendKey(m, tea.KeyEnter)
 	if m.screen != screenSetupConfig {
-		t.Fatalf("after task entry: screen = %v, want screenSetupConfig", m.screen)
+		t.Fatalf("after the harness question on a resumed run: screen = %v, want screenSetupConfig", m.screen)
 	}
 
 	// Accept all configuration prompts.  The timeout step is always present
@@ -624,11 +619,12 @@ func TestSetupSequence_ForwardNavigation_ReachesProgressScreen(t *testing.T) {
 	if m.progressScreen == nil {
 		t.Error("progressScreen = nil after reaching progress screen; must be constructed")
 	}
-	if m.selections.workflowID != domain.WorkflowID("test-workflow") {
-		t.Errorf("workflowID = %q, want %q", m.selections.workflowID, "test-workflow")
+	if m.selections.workflowID != domain.WorkflowID(recordedWorkflowID) {
+		t.Errorf("workflowID = %q, want %q", m.selections.workflowID, recordedWorkflowID)
 	}
-	if m.selections.task != "T" {
-		t.Errorf("task = %q, want %q", m.selections.task, "T")
+	if m.selections.task != "" {
+		t.Errorf("task = %q, want empty; a resumed run reads its task from its own artifact "+
+			"and must not collect one during setup", m.selections.task)
 	}
 }
 
@@ -681,6 +677,22 @@ func newModelWithScan(candidates []runscan.RunCandidate) *rootModel {
 	return newRootModel(context.Background(), sess, Options{
 		Theme:      tuicommon.DefaultTheme(),
 		ScanResult: scanResult,
+	})
+}
+
+// newModelWithScanAndDiscoverer creates a rootModel that both starts on the
+// run-selection screen and can discover an orchestrator file, so a test can walk
+// the whole path from choosing a run through to the setup screens.
+func newModelWithScanAndDiscoverer(
+	candidates []runscan.RunCandidate,
+	discoverer func(workDir, harnessID string) (string, error),
+) *rootModel {
+	sess := &stubNavSession{outcome: domain.RunOutcome{Status: domain.RunCompleted, Message: "ok"}}
+	scanResult := &runscan.ScanResult{Candidates: candidates}
+	return newRootModel(context.Background(), sess, Options{
+		Theme:                  tuicommon.DefaultTheme(),
+		ScanResult:             scanResult,
+		OrchestratorDiscoverer: discoverer,
 	})
 }
 

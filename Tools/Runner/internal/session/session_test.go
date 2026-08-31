@@ -9180,29 +9180,64 @@ func TestSession_Start_CLIHarness_SnapshotDeletedOnRunStopped(t *testing.T) {
 	}
 }
 
-// TestSession_Start_CLIHarness_SnapshotCreationFailure_RefusesRun verifies
-// that when snapshot creation fails (here: the snapshot directory already
-// exists at the expected path, simulating a stale artifact from a prior run),
-// session.Start refuses the run with RunRefused and a nil error.
-func TestSession_Start_CLIHarness_SnapshotCreationFailure_RefusesRun(t *testing.T) {
+// TestSession_Start_CLIHarness_SnapshotRecreatedOnPreExisting verifies
+// that when the snapshot directory already exists at the expected path
+// (simulating a stale artifact from a prior run), CreateSnapshot removes it
+// and recreates it fresh from source files. The run proceeds normally with
+// RunCompleted (not refused).
+func TestSession_Start_CLIHarness_SnapshotRecreatedOnPreExisting(t *testing.T) {
 	const runID = "testsnap-collision-01"
 	_, orchPath, snapshotDir := writeCLIHarnessDir(t, runID)
 
-	// Pre-create the snapshot directory to trigger CreateSnapshot's collision
-	// guard ("snapshot directory already exists").
+	// Pre-create the snapshot directory to simulate a stale snapshot from a
+	// prior run. CreateSnapshot should remove and recreate it.
 	if err := os.MkdirAll(snapshotDir, 0o755); err != nil {
 		t.Fatalf("pre-create snapshot dir: %v", err)
 	}
 
+	// Write a marker file to the pre-existing snapshot directory so we can
+	// verify it was actually removed and recreated.
+	markerFile := filepath.Join(snapshotDir, "marker.txt")
+	if err := os.WriteFile(markerFile, []byte("stale"), 0o644); err != nil {
+		t.Fatalf("write marker file: %v", err)
+	}
+
+	f := harness.NewFakeAdapter()
+	// Script both agents to return SUCCESS so the workflow completes.
+	f.Queue("agent-a", harness.ScriptedEntry{Response: &domain.ProtocolResponse{
+		AgentInstanceID: "agent-a#1",
+		StatusCode:      domain.StatusSUCCESS,
+		StatusMessage:   "snapshot recreated successfully",
+	}})
+	f.Queue("agent-b", harness.ScriptedEntry{Response: &domain.ProtocolResponse{
+		AgentInstanceID: "agent-b#2",
+		StatusCode:      domain.StatusSUCCESS,
+		StatusMessage:   "workflow complete",
+	}})
+
 	ses := session.New(session.Deps{
-		Harness:  harness.NewFakeAdapter(),
+		Harness:  f,
 		Store:    &memStore{},
 		Clock:    fixedClock{t: epoch},
 		Interact: &noopInteraction{},
 	})
 
 	got, err := ses.Start(context.Background(), baseCLIHarnessConfig(orchPath, runID))
-	requireRefused(t, got, err)
+	requireRunStatus(t, got, err, domain.RunCompleted)
+
+	// The snapshot directory should be deleted (terminal outcome cleanup).
+	// This confirms the snapshot was successfully created and then cleaned up normally.
+	// The key is that the run completed (not refused), which proves the snapshot was
+	// recreated successfully from the pre-existing stale directory.
+	if _, statErr := os.Stat(snapshotDir); !errors.Is(statErr, os.ErrNotExist) {
+		t.Errorf("snapshot directory %q should be deleted after terminal outcome (RunCompleted)", snapshotDir)
+	}
+
+	// The marker file should NOT exist either (confirming both the original
+	// snapshot was removed and the new one was cleaned up).
+	if _, statErr := os.Stat(markerFile); !errors.Is(statErr, os.ErrNotExist) {
+		t.Errorf("marker file %q should not exist after cleanup", markerFile)
+	}
 }
 
 // TestSession_Start_CLIHarness_CleanupFailureIsNonFatal verifies that when

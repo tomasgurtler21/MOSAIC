@@ -12,8 +12,8 @@ import (
 // applies the given transformation rules to every copied file's YAML
 // frontmatter.
 //
-// srcDir must exist and contain .md files. dstDir must not already exist;
-// CreateSnapshot creates it.
+// srcDir must exist and contain .md files. If dstDir already exists, it is
+// removed completely and recreated from source files (no collision guard).
 //
 // Only regular files are copied. Subdirectories in srcDir are ignored (the
 // agents directory is flat by convention, matching agentresolve.ResolveAll's
@@ -21,18 +21,21 @@ import (
 //
 // Returns *domain.RefusalError with Component "snapshot" if:
 //   - srcDir does not exist or cannot be read
-//   - dstDir already exists (collision guard)
 //   - any file copy or transformation fails
+//
+// Returns other errors if removal or creation of dstDir fails (filesystem or
+// system errors, not business-logic refusals).
 //
 // On any error, CreateSnapshot attempts to remove a partially-created dstDir
 // (best-effort cleanup of partial state).
 func CreateSnapshot(srcDir, dstDir string, rules []TransformRule) error {
-	// Guard against collisions: dstDir must not already exist.
+	// If snapshot already exists, remove it completely before recreating.
+	// This enables recovery from prior failed runs without blocking on collision.
+	// Best-effort: if removal fails, return error (not RefusalError) so caller
+	// treats it as a system/filesystem error, not a business-logic refusal.
 	if _, err := os.Stat(dstDir); err == nil {
-		return &domain.RefusalError{
-			Component: "snapshot",
-			Resource:  dstDir,
-			Reason:    fmt.Sprintf("snapshot directory already exists: %s (stale from prior run?)", dstDir),
+		if rmErr := os.RemoveAll(dstDir); rmErr != nil {
+			return fmt.Errorf("failed to remove stale snapshot directory %s: %w", dstDir, rmErr)
 		}
 	}
 
@@ -48,11 +51,7 @@ func CreateSnapshot(srcDir, dstDir string, rules []TransformRule) error {
 
 	// Create the snapshot directory.
 	if err := os.MkdirAll(dstDir, 0o755); err != nil {
-		return &domain.RefusalError{
-			Component: "snapshot",
-			Resource:  dstDir,
-			Reason:    fmt.Sprintf("cannot create snapshot directory: %v", err),
-		}
+		return fmt.Errorf("failed to create snapshot directory %s: %w", dstDir, err)
 	}
 
 	// Copy only regular .md files; skip subdirectories and non-.md files.

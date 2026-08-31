@@ -270,8 +270,20 @@ func (s *sessionImpl) Start(ctx context.Context, config domain.RunConfig) (outco
 	// =========================================================================
 
 	// Step 1: Load orchestrator file and get the selected workflow region.
+	//
+	// A resumed run is never asked for its workflow again, so an absent or
+	// undeclared one is a condition to name rather than a selection to redo.
+	// Both are refused by name, because they send the user to different
+	// places: a workflow that has gone missing to the orchestrator file, a run
+	// that carries none to its own artifact.
+	if !config.IsNewRun && config.WorkflowID == "" {
+		return s.resumeRecordedNoWorkflowRefusal(config.RunID), nil
+	}
 	region, err := orchfile.GetWorkflow(config.OrchestratorFilePath, string(config.WorkflowID))
 	if err != nil {
+		if !config.IsNewRun && isWorkflowNotFound(err, string(config.WorkflowID)) {
+			return s.resumeWorkflowGoneRefusal(config.RunID, string(config.WorkflowID)), nil
+		}
 		return s.refusal(err.Error()), nil
 	}
 
@@ -1259,6 +1271,59 @@ func (s *sessionImpl) refusal(message string) domain.RunOutcome {
 		Status:  domain.RunRefused,
 		Message: message,
 	}
+}
+
+// isWorkflowNotFound reports whether err is orchfile's "this identifier is not
+// declared here" refusal for the given workflow ID, as opposed to any other way
+// reading the orchestrator file can fail. Component and resource alone do not
+// settle it: a workflow region missing its version attribute and a duplicated
+// identifier both refuse under the same component naming the same workflow, and
+// reporting either of those as a workflow that has gone missing sends the user
+// looking for something that is sitting in the file where they expect it. The
+// reason is what separates them, so that is what is matched.
+func isWorkflowNotFound(err error, workflowID string) bool {
+	var refErr *domain.RefusalError
+	return errors.As(err, &refErr) &&
+		refErr.Component == "orchfile" &&
+		refErr.Resource == workflowID &&
+		refErr.Reason == orchfile.WorkflowNotFoundReason(workflowID)
+}
+
+// resumeWorkflowGoneRefusal refuses a resumed run whose workflow the
+// orchestrator file does not declare. The message names both halves of the
+// problem -- which workflow is missing and which run is stranded by its absence
+// -- because a workspace holds many runs and naming only one of the two leaves
+// the user unable to tell whether to fix the file or abandon the run. It says
+// nothing about where the identifier came from: the TUI carries it from the
+// run's own artifact, but a CLI resume takes it from --workflow, and telling a
+// user who has just mistyped that flag to go inspect the run's history sends
+// them away from the mistake rather than towards it.
+func (s *sessionImpl) resumeWorkflowGoneRefusal(runID, workflowID string) domain.RunOutcome {
+	reason := fmt.Sprintf("workflow %q for run %s is not declared in the current "+
+		"orchestrator file; it may have been renamed or removed", workflowID, runID)
+	return s.refusalCaused(reason, &domain.RefusalError{
+		Component: "workflow",
+		Resource:  runID,
+		Reason:    reason,
+	})
+}
+
+// resumeRecordedNoWorkflowRefusal refuses a resumed run that carries no
+// workflow at all. The message says exactly that rather than reporting a lookup
+// that failed for an identifier the user never sees: there is no workflow to go
+// looking for, and implying otherwise sends them somewhere with nothing to
+// find. The causes are listed as possibilities rather than as a diagnosis --
+// the artifact may be missing or unreadable, but it may equally be present and
+// well-formed while recording no workflow, and the caller does not tell the
+// three apart.
+func (s *sessionImpl) resumeRecordedNoWorkflowRefusal(runID string) domain.RunOutcome {
+	reason := fmt.Sprintf("run %s records no workflow, so there is nothing to resume it as; "+
+		"its artifact may be missing, unreadable, or may record no workflow", runID)
+	return s.refusalCaused(reason, &domain.RefusalError{
+		Component: "workflow",
+		Resource:  runID,
+		Reason:    reason,
+	})
 }
 
 // refusalCaused is like refusal but also carries an error cause in the

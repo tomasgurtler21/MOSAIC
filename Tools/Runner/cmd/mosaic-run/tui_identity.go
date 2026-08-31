@@ -7,8 +7,10 @@ package main
 import (
 	"errors"
 	"fmt"
+	"os"
 	"path/filepath"
 
+	"mosaic-run/internal/artifact"
 	"mosaic-run/internal/domain"
 	"mosaic-run/internal/runscan"
 	"mosaic-run/internal/runselect"
@@ -32,6 +34,14 @@ type tuiRunIdentity struct {
 	// from it directly, so the run-select screen is not a second copy of
 	// the question-building rules.
 	Selection *runselect.Question
+
+	// Workflow is the workflow ID a resumed run recorded when it was
+	// created, read from the run's own artifact. It is carried here because
+	// the resolved shape bypasses the run-select screen, which is where a
+	// chosen run picks its recorded workflow up. Empty for the new-run and
+	// deferred shapes, and for a resumed run whose artifact records no
+	// workflow or cannot be read.
+	Workflow string
 }
 
 // errTUIUsage marks argument-usage errors. The caller reports them on stderr
@@ -63,11 +73,18 @@ func resolveRunIdentityForTUI(args []string, workDir string) (tuiRunIdentity, er
 		if !domain.IsValidRunID(runIDFlag) {
 			return tuiRunIdentity{}, fmt.Errorf("%w: invalid run_id format %q; expected {YYYYMMDD}T{HHMMSS}Z-{4-hex}", errTUIUsage, runIDFlag)
 		}
+		runFolder := filepath.Join(workDir, domain.RunScopedFolder(runIDFlag))
 		return tuiRunIdentity{
 			RunID:      runIDFlag,
-			RunFolder:  filepath.Join(workDir, domain.RunScopedFolder(runIDFlag)),
+			RunFolder:  runFolder,
 			IsNewRun:   false,
 			ScanResult: nil,
+			// This branch bypasses the run-select screen, which is where a
+			// chosen run picks up the workflow it recorded, and the setup
+			// sequence no longer asks a resumed run which workflow to run. So
+			// the workflow is read from the run's own artifact here or it is
+			// never supplied at all.
+			Workflow: recordedWorkflowOf(runFolder),
 		}, nil
 
 	case isNewRunFlag:
@@ -121,6 +138,27 @@ func resolveRunIdentityForTUI(args []string, workDir string) (tuiRunIdentity, er
 			Selection:  dec.Question,
 		}, nil
 	}
+}
+
+// recordedWorkflowOf reads the workflow a run recorded when it was created from
+// the run folder's own artifact. It returns "" when the artifact is missing or
+// unreadable, which is the honest answer: the run does not say. Substituting a
+// plausible workflow would resume the run as something it never was, so the
+// absence travels on and the session layer refuses the run by name.
+func recordedWorkflowOf(runFolder string) string {
+	artifactPath, err := resolveTUIArtifactPath(runFolder)
+	if err != nil {
+		return ""
+	}
+	data, err := os.ReadFile(artifactPath)
+	if err != nil {
+		return ""
+	}
+	state, err := artifact.Parse(data)
+	if err != nil {
+		return ""
+	}
+	return string(state.Workflow)
 }
 
 // resolveTUIArtifactPath returns the artifact path for a resolved run folder.
