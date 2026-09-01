@@ -11,6 +11,7 @@ Informal, hand-maintained list of what's next for this project. Order within eac
 - Add capture of harness system prompt, list of known bugs in harnesses, recommended workarounds.
 - Double check all orchestration test suites execution, some seems to be suspiciously expensive in comparison to others.
 - Update all docs, finalize its organization.
+- Add version to each tool
 
 ## Next (Near Future)
 

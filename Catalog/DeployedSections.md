@@ -119,6 +119,10 @@ One row per bundle version. The reasoning lives in the design document named bes
 
 | Version | Date | Blocks changed | Specified in |
 |---------|------|----------------|--------------|
-| 1.0.0 | 2026-08-05 | All five initial blocks | `Development/Designs/DeploymentBlocks/` — one document per block |
 | 1.3.0 | 2026-08-27 | `ClosingProcedure:Subagent` | HITL presentation must identify the agent by `agent_instance_id` and `run_id` so the user can distinguish concurrent review requests |
 | 1.2.0 | 2026-08-26 | `ProtocolConstraints:Subagent` | Added ASCII-only constraint for orchestration artifacts and JSON responses |
+| 1.1.0 | 2026-08-25 | `ClosingProcedure:Subagent` | Explicit tool-use requirement for HITL presentation. Agents were "presenting" by writing prose in their response, which goes to the orchestrator and breaks the JSON contract. Step 1 now opens with "Use your user interaction tools to present" and a new bullet states the consequence: the response is consumed by the orchestrator, not the user. §4 extended with the failure-mode rationale. |
+| 1.0.0 | 2026-08-05 | All five initial blocks | `Development/Designs/DeploymentBlocks/` — one document per block |
+
+
+
