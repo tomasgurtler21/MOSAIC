@@ -23,6 +23,7 @@ import (
 	"errors"
 	"fmt"
 	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 	"time"
@@ -2159,6 +2160,721 @@ func TestDeploy_SelectionsFile_RemovedAfterCancellation(t *testing.T) {
 	if _, statErr := os.Stat(capturedPath); !os.IsNotExist(statErr) {
 		t.Errorf("selections file at %q still exists after Deploy returned on cancellation; "+
 			"cleanup must be unconditional across all exit paths including caller cancellation", capturedPath)
+	}
+}
+
+// =============================================================================
+// Cleanup: selections file triggered by InfrastructureAgentIDs (not TierModels)
+// =============================================================================
+//
+// The same defer-based cleanup that removes the selections file on success,
+// failure, timeout, and cancellation also covers the code path where
+// InfrastructureAgentIDs (not TierModels) triggered the file. These four
+// tests verify that exit path explicitly so a refactor of the guard or the
+// defer placement cannot regress without turning these tests red.
+
+// TestDeploy_InfraAgentIDs_SelectionsFile_RemovedAfterSuccess asserts that no
+// temporary selections file remains on disk after a successful Deploy call
+// when InfrastructureAgentIDs (and not TierModels) triggered the file write.
+func TestDeploy_InfraAgentIDs_SelectionsFile_RemovedAfterSuccess(t *testing.T) {
+	var capturedPath string
+	req := minimalDeployRequest()
+	req.TierModels = nil
+	req.InfrastructureAgentIDs = []string{} // non-nil empty — the only trigger
+
+	d := newDeployer(agentdeploy.Options{
+		Invoke: func(ctx context.Context, path string, args []string) ([]byte, []byte, int, error) {
+			idx := flagIndex(args, "--selections")
+			if idx >= 0 && idx+1 < len(args) {
+				capturedPath = args[idx+1]
+			}
+			return deploySuccessJSON(agentActionJSON("orchestrator", "/sandbox/.claude/agents/orchestrator.md")), nil, exitSuccess, nil
+		},
+	})
+
+	_, err := d.Deploy(context.Background(), req)
+
+	if err != nil {
+		t.Fatalf("Deploy returned error (want success for this cleanup test): %v", err)
+	}
+	if capturedPath == "" {
+		t.Fatal("--selections path was not captured from CommandRunner; cannot assert file removal")
+	}
+	if _, statErr := os.Stat(capturedPath); !os.IsNotExist(statErr) {
+		t.Errorf("selections file at %q still exists after Deploy returned successfully; "+
+			"cleanup must fire on the InfrastructureAgentIDs-triggered path just as "+
+			"it does on the TierModels-triggered path", capturedPath)
+	}
+}
+
+// TestDeploy_InfraAgentIDs_SelectionsFile_RemovedAfterFailure asserts that no
+// temporary selections file remains on disk after a failed Deploy call when
+// InfrastructureAgentIDs (and not TierModels) triggered the file write.
+func TestDeploy_InfraAgentIDs_SelectionsFile_RemovedAfterFailure(t *testing.T) {
+	var capturedPath string
+	req := minimalDeployRequest()
+	req.TierModels = nil
+	req.InfrastructureAgentIDs = []string{} // non-nil empty — the only trigger
+
+	d := newDeployer(agentdeploy.Options{
+		Invoke: func(ctx context.Context, path string, args []string) ([]byte, []byte, int, error) {
+			idx := flagIndex(args, "--selections")
+			if idx >= 0 && idx+1 < len(args) {
+				capturedPath = args[idx+1]
+			}
+			// Simulate a non-zero exit.
+			return []byte("error: something went wrong"), []byte("something went wrong"), exitFailure, nil
+		},
+	})
+
+	_, err := d.Deploy(context.Background(), req)
+
+	if err == nil {
+		t.Fatal("Deploy returned nil error on exit 1 (want failure for this cleanup test)")
+	}
+	if capturedPath == "" {
+		t.Fatal("--selections path was not captured from CommandRunner; cannot assert file removal")
+	}
+	if _, statErr := os.Stat(capturedPath); !os.IsNotExist(statErr) {
+		t.Errorf("selections file at %q still exists after Deploy returned a failure; "+
+			"cleanup must fire on the InfrastructureAgentIDs-triggered path just as "+
+			"it does on the TierModels-triggered path", capturedPath)
+	}
+}
+
+// TestDeploy_InfraAgentIDs_SelectionsFile_RemovedAfterTimeout asserts that no
+// temporary selections file remains on disk when the port's own timeout fires
+// and InfrastructureAgentIDs (and not TierModels) triggered the file write.
+func TestDeploy_InfraAgentIDs_SelectionsFile_RemovedAfterTimeout(t *testing.T) {
+	var capturedPath string
+	req := minimalDeployRequest()
+	req.TierModels = nil
+	req.InfrastructureAgentIDs = []string{} // non-nil empty — the only trigger
+
+	d := newDeployer(agentdeploy.Options{
+		Timeout: 20 * time.Millisecond,
+		Invoke: func(ctx context.Context, path string, args []string) ([]byte, []byte, int, error) {
+			idx := flagIndex(args, "--selections")
+			if idx >= 0 && idx+1 < len(args) {
+				capturedPath = args[idx+1]
+			}
+			// Block until the port's timeout cancels the context.
+			<-ctx.Done()
+			return nil, nil, 0, ctx.Err()
+		},
+	})
+
+	// The outer context is generous; the port's own timeout fires first.
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+
+	_, err := d.Deploy(ctx, req)
+
+	if err == nil {
+		t.Fatal("Deploy returned nil error on timeout (want ErrTimedOut for this cleanup test)")
+	}
+	if capturedPath == "" {
+		t.Fatal("--selections path was not captured from CommandRunner; cannot assert file removal")
+	}
+	if _, statErr := os.Stat(capturedPath); !os.IsNotExist(statErr) {
+		t.Errorf("selections file at %q still exists after Deploy returned on timeout; "+
+			"cleanup must fire on the InfrastructureAgentIDs-triggered path just as "+
+			"it does on the TierModels-triggered path", capturedPath)
+	}
+}
+
+// TestDeploy_InfraAgentIDs_SelectionsFile_RemovedAfterCancellation asserts
+// that no temporary selections file remains on disk when the caller's context
+// is cancelled and InfrastructureAgentIDs (and not TierModels) triggered the
+// file write.
+func TestDeploy_InfraAgentIDs_SelectionsFile_RemovedAfterCancellation(t *testing.T) {
+	var capturedPath string
+	req := minimalDeployRequest()
+	req.TierModels = nil
+	req.InfrastructureAgentIDs = []string{} // non-nil empty — the only trigger
+
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+
+	d := newDeployer(agentdeploy.Options{
+		Timeout: 10 * time.Second, // much longer than the test will run
+		Invoke: func(ctx context.Context, path string, args []string) ([]byte, []byte, int, error) {
+			idx := flagIndex(args, "--selections")
+			if idx >= 0 && idx+1 < len(args) {
+				capturedPath = args[idx+1]
+			}
+			// Cancel the caller's context now that the path is captured, then
+			// block until the combined (port timeout + caller cancel) context fires.
+			cancel()
+			<-ctx.Done()
+			return nil, nil, 0, ctx.Err()
+		},
+	})
+
+	_, err := d.Deploy(ctx, req)
+
+	if err == nil {
+		t.Fatal("Deploy returned nil error when caller context was cancelled (want an error for this cleanup test)")
+	}
+	if capturedPath == "" {
+		t.Fatal("--selections path was not captured from CommandRunner; cannot assert file removal")
+	}
+	if _, statErr := os.Stat(capturedPath); !os.IsNotExist(statErr) {
+		t.Errorf("selections file at %q still exists after Deploy returned on cancellation; "+
+			"cleanup must fire on the InfrastructureAgentIDs-triggered path just as "+
+			"it does on the TierModels-triggered path", capturedPath)
+	}
+}
+
+// =============================================================================
+// Infrastructure agent IDs: Deploy method guard and selections file content
+// =============================================================================
+
+// TestDeploy_InfrastructureAgentIDsNonNilEmpty_SelectionsFlagPresent asserts
+// that a non-nil empty InfrastructureAgentIDs slice causes --selections to
+// appear in the argument list even when TierModels is nil. The nil/non-nil
+// distinction is the "explicitly none" contract: a non-nil value means the
+// caller has specified a selection and the deploy tool must be told about it,
+// otherwise it fires an interactive prompt that hangs an automated run.
+func TestDeploy_InfrastructureAgentIDsNonNilEmpty_SelectionsFlagPresent(t *testing.T) {
+	var capturedArgs []string
+	req := minimalDeployRequest()
+	req.TierModels = nil
+	req.InfrastructureAgentIDs = []string{} // non-nil empty = explicitly none
+
+	d := newDeployer(agentdeploy.Options{
+		Invoke: func(ctx context.Context, path string, args []string) ([]byte, []byte, int, error) {
+			capturedArgs = append([]string(nil), args...)
+			return deploySuccessJSON(), nil, exitSuccess, nil
+		},
+	})
+
+	_, _ = d.Deploy(context.Background(), req)
+
+	if flagIndex(capturedArgs, "--selections") < 0 {
+		t.Errorf("args = %v, want --selections to be present when InfrastructureAgentIDs is non-nil empty "+
+			"(explicitly none must write a file to prevent an interactive prompt)", capturedArgs)
+	}
+}
+
+// TestDeploy_InfrastructureAgentIDsPopulated_SelectionsFlagPresent asserts that
+// a populated InfrastructureAgentIDs slice causes --selections to appear in the
+// argument list so the deploy tool receives the caller's explicit agent
+// selection.
+func TestDeploy_InfrastructureAgentIDsPopulated_SelectionsFlagPresent(t *testing.T) {
+	var capturedArgs []string
+	req := minimalDeployRequest()
+	req.TierModels = nil
+	req.InfrastructureAgentIDs = []string{"checkpoint-manager-git", "commit-manager-git"}
+
+	d := newDeployer(agentdeploy.Options{
+		Invoke: func(ctx context.Context, path string, args []string) ([]byte, []byte, int, error) {
+			capturedArgs = append([]string(nil), args...)
+			return deploySuccessJSON(), nil, exitSuccess, nil
+		},
+	})
+
+	_, _ = d.Deploy(context.Background(), req)
+
+	if flagIndex(capturedArgs, "--selections") < 0 {
+		t.Errorf("args = %v, want --selections to be present when InfrastructureAgentIDs is populated", capturedArgs)
+	}
+}
+
+// TestDeploy_NilInfrastructureAgentIDs_NilTierModels_NoSelectionsFlag asserts
+// that the selections file is NOT written when both InfrastructureAgentIDs and
+// TierModels are nil. Neither field is specified, so no file is needed and no
+// --selections flag appears.
+func TestDeploy_NilInfrastructureAgentIDs_NilTierModels_NoSelectionsFlag(t *testing.T) {
+	var capturedArgs []string
+	req := minimalDeployRequest()
+	req.TierModels = nil
+	req.InfrastructureAgentIDs = nil // nil = not specified
+
+	d := newDeployer(agentdeploy.Options{
+		Invoke: func(ctx context.Context, path string, args []string) ([]byte, []byte, int, error) {
+			capturedArgs = append([]string(nil), args...)
+			return deploySuccessJSON(), nil, exitSuccess, nil
+		},
+	})
+
+	_, _ = d.Deploy(context.Background(), req)
+
+	if flagIndex(capturedArgs, "--selections") >= 0 {
+		t.Errorf("args = %v, want --selections to be absent when both InfrastructureAgentIDs and TierModels are nil "+
+			"(neither field specifies anything)", capturedArgs)
+	}
+}
+
+// TestDeploy_NonNilEmptyInfrastructureAgentIDs_SelectionsFileHasEmptyList
+// asserts that a non-nil empty InfrastructureAgentIDs produces
+// `infrastructure_agents: []` in the selections file. This is the
+// "explicitly none" signal: the deploy tool reads an empty list, not an absent
+// key, and does not prompt interactively.
+func TestDeploy_NonNilEmptyInfrastructureAgentIDs_SelectionsFileHasEmptyList(t *testing.T) {
+	req := minimalDeployRequest()
+	req.TierModels = nil
+	req.InfrastructureAgentIDs = []string{} // non-nil empty = explicitly none
+
+	var fileContent []byte
+	d := newDeployer(agentdeploy.Options{
+		Invoke: func(ctx context.Context, path string, args []string) ([]byte, []byte, int, error) {
+			idx := flagIndex(args, "--selections")
+			if idx >= 0 && idx+1 < len(args) {
+				fileContent, _ = os.ReadFile(args[idx+1])
+			}
+			return deploySuccessJSON(), nil, exitSuccess, nil
+		},
+	})
+
+	_, _ = d.Deploy(context.Background(), req)
+
+	if len(fileContent) == 0 {
+		t.Fatal("selections file was empty or not readable during the call; cannot assert content")
+	}
+	s := string(fileContent)
+	if !strings.Contains(s, "infrastructure_agents:") {
+		t.Errorf("selections file content = %q, want it to contain \"infrastructure_agents:\" key", s)
+	}
+	// An empty YAML sequence serialises as "infrastructure_agents: []" on a
+	// single line — not as a key with no following items.
+	if !strings.Contains(s, "infrastructure_agents: []") {
+		t.Errorf("selections file content = %q, want \"infrastructure_agents: []\" for a non-nil empty slice "+
+			"(explicitly none; the deploy tool must not prompt for the selection)", s)
+	}
+}
+
+// TestDeploy_PopulatedInfrastructureAgentIDs_SelectionsFileHasAgentIDs asserts
+// that a populated InfrastructureAgentIDs slice produces an
+// infrastructure_agents key in the selections file with each ID as a list
+// item. The deploy tool reads these to pre-answer QInfrastructureAgents.
+func TestDeploy_PopulatedInfrastructureAgentIDs_SelectionsFileHasAgentIDs(t *testing.T) {
+	req := minimalDeployRequest()
+	req.TierModels = nil
+	req.InfrastructureAgentIDs = []string{"checkpoint-manager-git", "commit-manager-git"}
+
+	var fileContent []byte
+	d := newDeployer(agentdeploy.Options{
+		Invoke: func(ctx context.Context, path string, args []string) ([]byte, []byte, int, error) {
+			idx := flagIndex(args, "--selections")
+			if idx >= 0 && idx+1 < len(args) {
+				fileContent, _ = os.ReadFile(args[idx+1])
+			}
+			return deploySuccessJSON(), nil, exitSuccess, nil
+		},
+	})
+
+	_, _ = d.Deploy(context.Background(), req)
+
+	if len(fileContent) == 0 {
+		t.Fatal("selections file was empty or not readable during the call; cannot assert content")
+	}
+	s := string(fileContent)
+	for _, want := range []string{
+		"infrastructure_agents:",
+		"checkpoint-manager-git",
+		"commit-manager-git",
+	} {
+		if !strings.Contains(s, want) {
+			t.Errorf("selections file content = %q, want it to contain %q", s, want)
+		}
+	}
+}
+
+// TestDeploy_PopulatedTierModels_WithNonNilEmptyInfraAgentIDs_SelectionsFileHasBothKeys
+// asserts that both tier_models and infrastructure_agents appear in the
+// selections file when TierModels is populated and InfrastructureAgentIDs is
+// non-nil empty. Neither key suppresses the other.
+func TestDeploy_PopulatedTierModels_WithNonNilEmptyInfraAgentIDs_SelectionsFileHasBothKeys(t *testing.T) {
+	req := minimalDeployRequest()
+	req.TierModels = map[string]string{
+		domain.TierTestSubject: "claude-opus-4-5",
+	}
+	req.InfrastructureAgentIDs = []string{} // non-nil empty
+
+	var fileContent []byte
+	d := newDeployer(agentdeploy.Options{
+		Invoke: func(ctx context.Context, path string, args []string) ([]byte, []byte, int, error) {
+			idx := flagIndex(args, "--selections")
+			if idx >= 0 && idx+1 < len(args) {
+				fileContent, _ = os.ReadFile(args[idx+1])
+			}
+			return deploySuccessJSON(), nil, exitSuccess, nil
+		},
+	})
+
+	_, _ = d.Deploy(context.Background(), req)
+
+	if len(fileContent) == 0 {
+		t.Fatal("selections file was empty or not readable during the call; cannot assert content")
+	}
+	s := string(fileContent)
+	for _, want := range []string{"tier_models:", "infrastructure_agents:"} {
+		if !strings.Contains(s, want) {
+			t.Errorf("selections file content = %q, want it to contain %q "+
+				"(both keys must be present when both fields are set)", s, want)
+		}
+	}
+}
+
+// TestDeploy_NilTierModels_PopulatedInfraAgentIDs_SelectionsFileHasOnlyInfraAgentsKey
+// asserts that when TierModels is nil and InfrastructureAgentIDs is populated,
+// the file contains infrastructure_agents but NOT tier_models. The tier_models
+// key is written only when TierModels is non-empty.
+func TestDeploy_NilTierModels_PopulatedInfraAgentIDs_SelectionsFileHasOnlyInfraAgentsKey(t *testing.T) {
+	req := minimalDeployRequest()
+	req.TierModels = nil
+	req.InfrastructureAgentIDs = []string{"checkpoint-manager-git"}
+
+	var fileContent []byte
+	d := newDeployer(agentdeploy.Options{
+		Invoke: func(ctx context.Context, path string, args []string) ([]byte, []byte, int, error) {
+			idx := flagIndex(args, "--selections")
+			if idx >= 0 && idx+1 < len(args) {
+				fileContent, _ = os.ReadFile(args[idx+1])
+			}
+			return deploySuccessJSON(), nil, exitSuccess, nil
+		},
+	})
+
+	_, _ = d.Deploy(context.Background(), req)
+
+	if len(fileContent) == 0 {
+		t.Fatal("selections file was empty or not readable during the call; cannot assert content")
+	}
+	s := string(fileContent)
+	if strings.Contains(s, "tier_models:") {
+		t.Errorf("selections file content = %q, must not contain tier_models: when TierModels is nil "+
+			"(tier_models is written only when the map is non-empty)", s)
+	}
+	if !strings.Contains(s, "infrastructure_agents:") {
+		t.Errorf("selections file content = %q, want it to contain infrastructure_agents: key", s)
+	}
+}
+
+// =============================================================================
+// DeployRequest.InfrastructureAgentIDs field contract
+// =============================================================================
+
+// TestDeployRequest_InfrastructureAgentIDs_NilIsZeroValue asserts that the
+// InfrastructureAgentIDs field exists on domain.DeployRequest and that its
+// zero value is nil. nil is "not specified" — no selections file key is
+// written and the deploy tool may ask its interactive question.
+func TestDeployRequest_InfrastructureAgentIDs_NilIsZeroValue(t *testing.T) {
+	req := domain.DeployRequest{
+		HarnessID:     "claude-code",
+		WorkspaceRoot: "/sandbox",
+		Workflows:     []string{"brownfield-tdd"},
+	}
+	if req.InfrastructureAgentIDs != nil {
+		t.Errorf("InfrastructureAgentIDs zero value = %v (non-nil), want nil "+
+			"(nil means not-specified, which is the natural zero)", req.InfrastructureAgentIDs)
+	}
+}
+
+// TestDeployRequest_InfrastructureAgentIDs_CanCarryNonNilEmpty asserts that
+// the field accepts a non-nil empty slice and preserves its non-nil property.
+// Non-nil empty is the "explicitly none" sentinel: deploy no infrastructure
+// agents, but write the selections file so the deploy tool receives a
+// pre-answer rather than an interactive prompt.
+func TestDeployRequest_InfrastructureAgentIDs_CanCarryNonNilEmpty(t *testing.T) {
+	req := domain.DeployRequest{
+		HarnessID:              "claude-code",
+		WorkspaceRoot:          "/sandbox",
+		Workflows:              []string{"brownfield-tdd"},
+		InfrastructureAgentIDs: []string{},
+	}
+	if req.InfrastructureAgentIDs == nil {
+		t.Error("InfrastructureAgentIDs set to []string{} is nil, want non-nil "+
+			"(non-nil empty is the explicitly-none sentinel, distinct from nil which means not-specified)")
+	}
+	if len(req.InfrastructureAgentIDs) != 0 {
+		t.Errorf("InfrastructureAgentIDs len = %d, want 0 "+
+			"(non-nil empty means explicitly none, not populated)", len(req.InfrastructureAgentIDs))
+	}
+}
+
+// TestDeployRequest_InfrastructureAgentIDs_CanCarryPopulatedSlice asserts that
+// the field carries a populated slice of infrastructure agent IDs verbatim.
+// The values are forwarded to the deploy tool via the selections file's
+// infrastructure_agents key.
+func TestDeployRequest_InfrastructureAgentIDs_CanCarryPopulatedSlice(t *testing.T) {
+	ids := []string{"checkpoint-manager-git", "commit-manager-git"}
+	req := domain.DeployRequest{
+		HarnessID:              "claude-code",
+		WorkspaceRoot:          "/sandbox",
+		Workflows:              []string{"brownfield-tdd"},
+		InfrastructureAgentIDs: ids,
+	}
+	if len(req.InfrastructureAgentIDs) != 2 {
+		t.Errorf("InfrastructureAgentIDs len = %d, want 2", len(req.InfrastructureAgentIDs))
+	}
+	if req.InfrastructureAgentIDs[0] != "checkpoint-manager-git" {
+		t.Errorf("InfrastructureAgentIDs[0] = %q, want %q",
+			req.InfrastructureAgentIDs[0], "checkpoint-manager-git")
+	}
+	if req.InfrastructureAgentIDs[1] != "commit-manager-git" {
+		t.Errorf("InfrastructureAgentIDs[1] = %q, want %q",
+			req.InfrastructureAgentIDs[1], "commit-manager-git")
+	}
+}
+
+// =============================================================================
+// T8.1 — Per-run log destination on the deploy path; empty-means-omitted
+// =============================================================================
+
+// TestDeploy_LogDirNonEmpty_LogDirFlagPresent asserts that when LogDir is
+// non-empty, --log-dir is present in the deploy argument list. The flag is
+// what routes the delegate's two sink files (latest.log, history.log) away
+// from the shared repository root and into the run's sandbox. Without it,
+// every concurrent attempt truncates the same latest.log.
+func TestDeploy_LogDirNonEmpty_LogDirFlagPresent(t *testing.T) {
+	var capturedArgs []string
+	req := minimalDeployRequest()
+	req.LogDir = "/tmp/run-a/ctl/deploy-logs"
+
+	d := newDeployer(agentdeploy.Options{
+		Invoke: func(ctx context.Context, path string, args []string) ([]byte, []byte, int, error) {
+			capturedArgs = append([]string(nil), args...)
+			return deploySuccessJSON(), nil, exitSuccess, nil
+		},
+	})
+
+	_, _ = d.Deploy(context.Background(), req)
+
+	if flagIndex(capturedArgs, "--log-dir") < 0 {
+		t.Errorf("args = %v, want --log-dir to be present when LogDir is non-empty "+
+			"(needed to redirect the delegate's sink files away from the shared repository root)", capturedArgs)
+	}
+}
+
+// TestDeploy_LogDirNonEmpty_LogDirFlagCarriesCorrectValue asserts that the
+// --log-dir value is the exact path from req.LogDir, not a transformed or
+// reconstructed version. The value is what the deployment tool uses as its
+// log directory; any transformation here would put logs somewhere else.
+func TestDeploy_LogDirNonEmpty_LogDirFlagCarriesCorrectValue(t *testing.T) {
+	var capturedArgs []string
+	const wantLogDir = "/tmp/run-a/ctl/deploy-logs"
+	req := minimalDeployRequest()
+	req.LogDir = wantLogDir
+
+	d := newDeployer(agentdeploy.Options{
+		Invoke: func(ctx context.Context, path string, args []string) ([]byte, []byte, int, error) {
+			capturedArgs = append([]string(nil), args...)
+			return deploySuccessJSON(), nil, exitSuccess, nil
+		},
+	})
+
+	_, _ = d.Deploy(context.Background(), req)
+
+	if !containsFlag(capturedArgs, "--log-dir", wantLogDir) {
+		t.Errorf("args = %v, want --log-dir %q (the LogDir value passed through verbatim)", capturedArgs, wantLogDir)
+	}
+}
+
+// TestDeploy_LogDirEmpty_LogDirFlagAbsent asserts the empty-means-omitted
+// contract: when LogDir is empty (the zero value), --log-dir must be absent
+// from the argument list. An omitted flag lets the deployment tool write to
+// its own default location — the correct behaviour for callers that have not
+// opted into the per-run isolation.
+func TestDeploy_LogDirEmpty_LogDirFlagAbsent(t *testing.T) {
+	var capturedArgs []string
+	req := minimalDeployRequest()
+	req.LogDir = "" // empty = do not override
+
+	d := newDeployer(agentdeploy.Options{
+		Invoke: func(ctx context.Context, path string, args []string) ([]byte, []byte, int, error) {
+			capturedArgs = append([]string(nil), args...)
+			return deploySuccessJSON(), nil, exitSuccess, nil
+		},
+	})
+
+	_, _ = d.Deploy(context.Background(), req)
+
+	if len(capturedArgs) == 0 {
+		t.Fatal("Deploy did not invoke CommandRunner; cannot assert argument absence")
+	}
+	if flagIndex(capturedArgs, "--log-dir") >= 0 {
+		t.Errorf("args = %v, want --log-dir to be absent when LogDir is empty (empty-means-omitted; absent flag lets the tool use its own default)", capturedArgs)
+	}
+}
+
+// TestDeploy_LogDirEmpty_ArgumentListUnchangedFromBaseline pins the
+// backwards-compatibility contract: the argument list produced with LogDir
+// explicitly empty must be byte-identical to the list produced when the field
+// is absent at all. Any deviation would silently alter every pre-existing
+// Deploy call's wire shape — an implicit contract break that surfaces only
+// when the delegate rejects the new argument.
+func TestDeploy_LogDirEmpty_ArgumentListUnchangedFromBaseline(t *testing.T) {
+	req := minimalDeployRequest()
+
+	// Baseline: no LogDir field set (zero value, same as absent).
+	var baselineArgs []string
+	baselineDeployer := agentdeploy.New(agentdeploy.Options{
+		ExecutablePath: "mosaic-deploy",
+		MosaicRoot:     "/opt/mosaic",
+		Invoke: func(ctx context.Context, path string, args []string) ([]byte, []byte, int, error) {
+			baselineArgs = append([]string(nil), args...)
+			return deploySuccessJSON(), nil, exitSuccess, nil
+		},
+	})
+	_, _ = baselineDeployer.Deploy(context.Background(), req)
+
+	// Same request but with LogDir set to the empty string explicitly.
+	// Must produce the identical argument slice.
+	reqWithEmpty := req
+	reqWithEmpty.LogDir = "" // explicit empty — must not alter the argument list
+	var withEmptyArgs []string
+	withEmptyDeployer := agentdeploy.New(agentdeploy.Options{
+		ExecutablePath: "mosaic-deploy",
+		MosaicRoot:     "/opt/mosaic",
+		Invoke: func(ctx context.Context, path string, args []string) ([]byte, []byte, int, error) {
+			withEmptyArgs = append([]string(nil), args...)
+			return deploySuccessJSON(), nil, exitSuccess, nil
+		},
+	})
+	_, _ = withEmptyDeployer.Deploy(context.Background(), reqWithEmpty)
+
+	if len(baselineArgs) != len(withEmptyArgs) {
+		t.Errorf("arg count: baseline = %d, with empty LogDir = %d; want byte-identical argument lists (empty LogDir must not add any argument)",
+			len(baselineArgs), len(withEmptyArgs))
+		return
+	}
+	for i := range baselineArgs {
+		if baselineArgs[i] != withEmptyArgs[i] {
+			t.Errorf("args[%d]: baseline = %q, with empty LogDir = %q; want byte-identical argument lists",
+				i, baselineArgs[i], withEmptyArgs[i])
+		}
+	}
+}
+
+// =============================================================================
+// T8.3 — Deploy invocation writes no file under the shared repository root
+//         outside the run's own location
+// =============================================================================
+
+// TestDeploy_LogDirFlag_NotUnderSharedMosaicRoot asserts the audit property:
+// when the per-run log destination is derived from a sandbox (not from
+// opts.MosaicRoot), the --log-dir argument value is not under the shared
+// repository root. This is the structural guarantee that the deploy path
+// writes its sink files only within the run's own sandbox.
+//
+// The test fails in the RED phase because buildDeployArgs does not yet emit
+// --log-dir, so the flag is absent and the deployment tool would fall back to
+// writing its default location (<mosaicRoot>/MosaicDeploy/logs) on every call.
+func TestDeploy_LogDirFlag_NotUnderSharedMosaicRoot(t *testing.T) {
+	const sharedMosaicRoot = "/opt/mosaic-shared"
+	const sandboxControlDir = "/tmp/runs/run-a/ctl"
+
+	var capturedArgs []string
+	req := minimalDeployRequest()
+	// LogDir is derived from a sandbox: under the sandbox's control dir,
+	// not under sharedMosaicRoot.
+	req.LogDir = sandboxControlDir + "/deploy-logs"
+
+	d := agentdeploy.New(agentdeploy.Options{
+		ExecutablePath: "mosaic-deploy",
+		MosaicRoot:     sharedMosaicRoot,
+		Invoke: func(ctx context.Context, path string, args []string) ([]byte, []byte, int, error) {
+			capturedArgs = append([]string(nil), args...)
+			return deploySuccessJSON(), nil, exitSuccess, nil
+		},
+	})
+
+	_, _ = d.Deploy(context.Background(), req)
+
+	// First: --log-dir must be present — without it the delegate writes to
+	// <sharedMosaicRoot>/MosaicDeploy/logs, which is a shared write.
+	idx := flagIndex(capturedArgs, "--log-dir")
+	if idx < 0 {
+		t.Errorf("args = %v, want --log-dir to be present when LogDir is non-empty "+
+			"(its absence means the delegate writes to the shared root at %q)", capturedArgs, sharedMosaicRoot)
+		return
+	}
+
+	// Second: the --log-dir value must not be under the shared mosaic root.
+	logDir := capturedArgs[idx+1]
+	// Normalise to forward slashes for cross-platform comparison.
+	cleanLogDir := filepath.ToSlash(filepath.Clean(logDir))
+	cleanSharedRoot := filepath.ToSlash(filepath.Clean(sharedMosaicRoot))
+	if strings.HasPrefix(cleanLogDir, cleanSharedRoot+"/") || cleanLogDir == cleanSharedRoot {
+		t.Errorf("--log-dir = %q is under the shared mosaic root %q; the deploy log destination must be within the run's sandbox so concurrent calls cannot overwrite each other's logs", logDir, sharedMosaicRoot)
+	}
+}
+
+// =============================================================================
+// T8.4 — Render path is unaffected: no log destination, no run logging
+// =============================================================================
+
+// TestRender_HasNoLogDirFlag asserts that the render subcommand argument list
+// never contains --log-dir under any circumstances. The render path triggers
+// no run logging in the delegate, so it needs no destination override and
+// adding one would be a contract break against the render subcommand's flag
+// surface.
+func TestRender_HasNoLogDirFlag(t *testing.T) {
+	var capturedArgs []string
+
+	deployer := newDeployer(agentdeploy.Options{
+		Invoke: func(ctx context.Context, path string, args []string) ([]byte, []byte, int, error) {
+			capturedArgs = append([]string(nil), args...)
+			return []byte(successJSON), nil, exitSuccess, nil
+		},
+	})
+
+	_, _ = deployer.Render(context.Background(), minimalRequest())
+
+	if flagIndex(capturedArgs, "--log-dir") >= 0 {
+		t.Errorf("render args = %v, want --log-dir to be absent from the render subcommand argument list "+
+			"(render triggers no run logging and must not receive a log destination override)", capturedArgs)
+	}
+}
+
+// TestRender_WithMosaicRoot_HasNoLogDirFlag asserts that --log-dir remains
+// absent from render args even when MosaicRoot is set. The deploy path and the
+// render path share opts.MosaicRoot, so an incorrect implementation that
+// emitted --log-dir based on opts would affect both — this test catches that.
+func TestRender_WithMosaicRoot_HasNoLogDirFlag(t *testing.T) {
+	var capturedArgs []string
+
+	deployer := agentdeploy.New(agentdeploy.Options{
+		ExecutablePath: "mosaic-deploy",
+		MosaicRoot:     "/opt/mosaic",
+		Invoke: func(ctx context.Context, path string, args []string) ([]byte, []byte, int, error) {
+			capturedArgs = append([]string(nil), args...)
+			return []byte(successJSON), nil, exitSuccess, nil
+		},
+	})
+
+	_, _ = deployer.Render(context.Background(), minimalRequest())
+
+	if flagIndex(capturedArgs, "--log-dir") >= 0 {
+		t.Errorf("render args = %v, want --log-dir to be absent from render args even when MosaicRoot is set "+
+			"(the flag is a deploy-path-only override; it must not appear on the render path)", capturedArgs)
+	}
+}
+
+// TestRender_FirstArgIsRender_NotDeploy asserts that the render path still
+// routes to the "render" subcommand and has not been accidentally changed
+// to "deploy" by stage changes. This is a regression guard: a change that
+// routes render calls to deploy would produce wrong output structure and
+// succeed with garbage that nothing downstream could use.
+func TestRender_FirstArgIsRender_NotDeploy(t *testing.T) {
+	var capturedArgs []string
+
+	deployer := newDeployer(agentdeploy.Options{
+		Invoke: func(ctx context.Context, path string, args []string) ([]byte, []byte, int, error) {
+			capturedArgs = append([]string(nil), args...)
+			return []byte(successJSON), nil, exitSuccess, nil
+		},
+	})
+
+	_, _ = deployer.Render(context.Background(), minimalRequest())
+
+	if len(capturedArgs) == 0 {
+		t.Fatal("Render passed no arguments to CommandRunner; cannot assert subcommand name")
+	}
+	if capturedArgs[0] != "render" {
+		t.Errorf("render args[0] = %q, want %q (must still be the render subcommand after stage changes)", capturedArgs[0], "render")
 	}
 }
 

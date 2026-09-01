@@ -1,5 +1,11 @@
 schema_version: 1
-id: underlying-passes
+name: underlying-passes
+id: 38
+version: 1
+changelog:
+  - version: 1
+    date: "2026-01-01"
+    changes: "Initial."
 description: >
   A negative test declares an artifact that the stub's side effect really
   creates. The underlying artifact_created assertion holds, which a
@@ -10,6 +16,7 @@ negative: true
 subject:
   identity: standin-subject
   agent: standin-subject
+  infrastructure_agents: []
   opening_message: |
     Greet the collaborator and finish.
   invocation_kind: subagent

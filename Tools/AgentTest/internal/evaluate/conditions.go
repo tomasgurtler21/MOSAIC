@@ -50,10 +50,25 @@ func evaluateConditions(ev domain.RunEvidence) []domain.RunCondition {
 		})
 	}
 
-	if !ev.LogsProduced {
+	switch {
+	case !ev.LogsProduced:
+		// Genuine no-logs: nothing was written anywhere in the session tree.
 		out = append(out, domain.RunCondition{
 			Kind:   domain.ConditionNoLogsProduced,
 			Detail: fmt.Sprintf("no logs found under %s", ev.LogRoot),
+		})
+	case ev.FallbackBucketPresent:
+		// Logs exist but landed in the unknown-run fallback bucket, not the
+		// expected per-run folder. The run's identity may not have bound
+		// correctly. Name the fallback bucket so the user knows where to look.
+		out = append(out, domain.RunCondition{
+			Kind: domain.ConditionNoLogsProduced,
+			Detail: fmt.Sprintf(
+				"logs were found in the unknown-run fallback bucket alongside %s — "+
+					"the run's identity may not have bound correctly; "+
+					"check the unknown-run directory for this session's events",
+				ev.LogRoot,
+			),
 		})
 	}
 
@@ -64,7 +79,50 @@ func evaluateConditions(ev domain.RunEvidence) []domain.RunCondition {
 		})
 	}
 
+	for _, r := range ev.Records {
+		if r.Kind == domain.RecordRun && r.Event == domain.RunEventUncorrelatedCompletion {
+			out = append(out, domain.RunCondition{
+				Kind:   domain.ConditionUncorrelatedCompletion,
+				Detail: r.Detail,
+			})
+		}
+	}
+
+	switch {
+	case ev.Residue.Unreadable != "":
+		out = append(out, domain.RunCondition{
+			Kind:   domain.ConditionLeakedRunState,
+			Detail: "run state was unreadable at snapshot time: " + ev.Residue.Unreadable,
+		})
+	case len(ev.Residue.PendingStubs) > 0 || len(ev.Residue.InFlight) > 0:
+		out = append(out, domain.RunCondition{
+			Kind:   domain.ConditionLeakedRunState,
+			Detail: leakedRunStateDetail(ev.Residue),
+		})
+	}
+
 	return out
+}
+
+// leakedRunStateDetail formats the detail string for ConditionLeakedRunState,
+// naming the counts and sequence numbers of each leaked dispatch category.
+func leakedRunStateDetail(r domain.StateResidue) string {
+	var parts []string
+	if len(r.PendingStubs) > 0 {
+		seqs := make([]string, len(r.PendingStubs))
+		for i, d := range r.PendingStubs {
+			seqs[i] = fmt.Sprintf("%d", d.Seq)
+		}
+		parts = append(parts, fmt.Sprintf("%d pending stub(s) unresolved (seq: %s)", len(r.PendingStubs), strings.Join(seqs, ", ")))
+	}
+	if len(r.InFlight) > 0 {
+		seqs := make([]string, len(r.InFlight))
+		for i, d := range r.InFlight {
+			seqs[i] = fmt.Sprintf("%d", d.Seq)
+		}
+		parts = append(parts, fmt.Sprintf("%d in-flight entry(ies) unreleased (seq: %s)", len(r.InFlight), strings.Join(seqs, ", ")))
+	}
+	return strings.Join(parts, "; ")
 }
 
 // subjectNeverStartedCause returns the one-line cause of a spawn failure. It

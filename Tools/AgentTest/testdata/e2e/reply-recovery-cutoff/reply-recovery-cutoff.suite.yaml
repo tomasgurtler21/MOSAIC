@@ -1,0 +1,16 @@
+schema_version: 1
+id: reply-recovery-cutoff-e2e
+description: >
+  End-to-end cutoff scenario for a reply-recovery harness (SupportsReplyRecovery:
+  true, SupportsDirectSubstitution: false). The turn is consumed at the completion
+  phase, not the post phase, and the cutoff must fire at the completion event for
+  the Nth dispatch — both when that dispatch matched a registered stub and when it
+  matched none.
+defaults:
+  timeout: 30s
+  turn_limit: 10
+  repetitions: 1
+  pass_rate: 1.0
+tests:
+  - path: reply-recovery-stubbed.test.yaml
+  - path: reply-recovery-unmatched.test.yaml

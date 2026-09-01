@@ -1,0 +1,16 @@
+{
+  "schema_version": 1,
+  "test_id": "needs-clarification-no-advance",
+  "on_unmatched": "halt",
+  "stubs": [
+    {
+      "match": { "tool": "dispatch", "agent": "planner-tdd-soft", "invocation": 1 },
+      "response": {
+        "agent_instance_id": "planner-tdd-soft#11",
+        "run_id": "{run_id}",
+        "status_code": "SUCCESS",
+        "status_message": "Clarified Stage-1 plan: use diagnostics.Fprintf pattern, not legacy fmt.Fprintf."
+      }
+    }
+  ]
+}

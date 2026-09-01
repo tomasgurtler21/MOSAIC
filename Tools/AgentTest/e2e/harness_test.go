@@ -110,7 +110,7 @@ type Scenario struct {
 	SkipInvokeOnRuns []int
 
 	// SkipInvokeForTestIDs, when non-empty, are test ids (matching
-	// domain.RunKey.TestID) for which the stand-in treats every Invoke turn
+	// domain.RunKey.TestName) for which the stand-in treats every Invoke turn
 	// as a no-op — see standin_test.go's standinScript.SkipInvokeForTestIDs.
 	// Lets a suite's several tests share one Scenario.Script while one of
 	// them dispatches no collaborator at all.
@@ -131,6 +131,16 @@ type Scenario struct {
 	// surface. Overriding replaces the whole argument list; SuitePath is not
 	// re-injected.
 	Args []string
+
+	// MaxConcurrentRuns is the bound the scenario's suite executes under.
+	// Zero selects the suite's own default (DefaultMaxConcurrentRuns), so
+	// existing scenarios that do not set this field are unaffected.
+	MaxConcurrentRuns int
+
+	// Ctx, when non-nil, is the context passed to cli.Execute. When nil,
+	// context.Background() is used. Set to a cancellable context to exercise
+	// cancellation behaviour through the full pipeline.
+	Ctx context.Context
 }
 
 // Outcome is everything one scenario run produced.
@@ -166,7 +176,8 @@ type wireResultDoc struct {
 }
 
 type wireTestReportDoc struct {
-	TestID    string             `json:"test_id"`
+	TestName  string             `json:"test_name"`
+	TestID    int                `json:"test_id"`
 	Aggregate wireAggregateDoc   `json:"aggregate"`
 	Runs      []wireRunReportDoc `json:"runs"`
 }
@@ -179,17 +190,18 @@ type wireAggregateDoc struct {
 }
 
 type wireRunKeyDoc struct {
-	RunID  string `json:"run_id"`
-	TestID string `json:"test_id"`
+	RunID    string `json:"run_id"`
+	TestName string `json:"test_name"`
 }
 
 type wireRunReportDoc struct {
-	Run        wireRunKeyDoc      `json:"run"`
-	Verdict    string             `json:"verdict"`
-	Reasons    []string           `json:"reasons"`
-	Assertions []wireAssertionDoc `json:"assertions"`
-	Conditions []wireConditionDoc `json:"conditions"`
-	Cost       wireCostDoc        `json:"cost"`
+	Run               wireRunKeyDoc      `json:"run"`
+	Verdict           string             `json:"verdict"`
+	Reasons           []string           `json:"reasons"`
+	Assertions        []wireAssertionDoc `json:"assertions"`
+	Conditions        []wireConditionDoc `json:"conditions"`
+	Cost              wireCostDoc        `json:"cost"`
+	TerminationReason string             `json:"termination_reason"`
 }
 
 type wireAssertionDoc struct {
@@ -280,13 +292,14 @@ func RunScenario(t *testing.T, sc Scenario) Outcome {
 		Preflight: preflight.Validate,
 		Suite: func(rc cli.RunConfig) (cli.SuiteRunner, error) {
 			return scenarioSuiteRunner{
-				ws:       workspace.NewManager(rc.WorkspaceRoot, clock),
-				adapter:  adapter,
-				launcher: launcher,
-				fixtures: resolver,
-				effects:  effects,
-				cost:     cost,
-				clock:    clock,
+				ws:                workspace.NewManager(rc.WorkspaceRoot, clock),
+				adapter:           adapter,
+				launcher:          launcher,
+				fixtures:          resolver,
+				effects:           effects,
+				cost:              cost,
+				clock:             clock,
+				maxConcurrentRuns: sc.MaxConcurrentRuns,
 			}, nil
 		},
 		Stdout:         &stdout,
@@ -301,7 +314,11 @@ func RunScenario(t *testing.T, sc Scenario) Outcome {
 		args = []string{"run", filepath.Join(dir, sc.SuitePath), "--format", "json"}
 	}
 
-	exitCode := cli.Execute(context.Background(), args, opts)
+	runCtx := sc.Ctx
+	if runCtx == nil {
+		runCtx = context.Background()
+	}
+	exitCode := cli.Execute(runCtx, args, opts)
 
 	out := Outcome{ExitCode: exitCode, Stdout: stdout.Bytes(), Stderr: stderr.Bytes(), WorkspaceRoot: workspaceRoot}
 	var doc wireResultDoc
@@ -325,13 +342,14 @@ func RunScenario(t *testing.T, sc Scenario) Outcome {
 // because the composition root itself is package main and cannot be
 // imported from outside it.
 type scenarioSuiteRunner struct {
-	ws       workspace.Manager
-	adapter  domain.HarnessAdapter
-	launcher domain.SubjectLauncher
-	fixtures fixtures.Resolver
-	effects  sideeffects.Applier
-	cost     domain.CostProvider
-	clock    domain.Clock
+	ws                workspace.Manager
+	adapter           domain.HarnessAdapter
+	launcher          domain.SubjectLauncher
+	fixtures          fixtures.Resolver
+	effects           sideeffects.Applier
+	cost              domain.CostProvider
+	clock             domain.Clock
+	maxConcurrentRuns int
 }
 
 func (r scenarioSuiteRunner) Run(ctx context.Context, p preflight.Plan, sink domain.ProgressSink) (report.Result, error) {
@@ -346,9 +364,10 @@ func (r scenarioSuiteRunner) Run(ctx context.Context, p preflight.Plan, sink dom
 		Progress:   sink,
 	}
 	s := suite.New(suite.Options{
-		Runner:   scenarioTestRunner{deps: rd},
-		Progress: sink,
-		Clock:    r.clock,
+		Runner:            scenarioTestRunner{deps: rd},
+		Progress:          sink,
+		Clock:             r.clock,
+		MaxConcurrentRuns: r.maxConcurrentRuns,
 	})
 	return s.Run(ctx, p)
 }
@@ -441,17 +460,25 @@ func buildStandinOnPath(t *testing.T) string {
 func writeScriptSidecar(t *testing.T, sc Scenario) string {
 	t.Helper()
 
-	turns := map[string][]sidecarTurn{}
-	for key, ts := range sc.Script.Script {
-		converted := make([]sidecarTurn, 0, len(ts))
-		for _, turn := range ts {
-			st := sidecarTurn{Body: turn.Body, Raw: turn.Raw}
-			if turn.Err != nil {
-				st.ErrMsg = turn.Err.Error()
+	// Preserve nil vs. non-nil Script: a nil Script means "unscripted" and
+	// allows the fake adapter to return empty turns for every completion call,
+	// while a non-nil (even empty) map enforces that no unexpected turns are
+	// consumed. Converting nil to {} would break scenarios that expect
+	// unscripted completion events (e.g. passthrough cutoff scenarios).
+	var turns map[string][]sidecarTurn
+	if sc.Script.Script != nil {
+		turns = make(map[string][]sidecarTurn, len(sc.Script.Script))
+		for key, ts := range sc.Script.Script {
+			converted := make([]sidecarTurn, 0, len(ts))
+			for _, turn := range ts {
+				st := sidecarTurn{Body: turn.Body, Raw: turn.Raw}
+				if turn.Err != nil {
+					st.ErrMsg = turn.Err.Error()
+				}
+				converted = append(converted, st)
 			}
-			converted = append(converted, st)
+			turns[key] = converted
 		}
-		turns[key] = converted
 	}
 
 	sidecar := standinScript{

@@ -1,0 +1,33 @@
+{
+  "schema_version": 1,
+  "test_id": "gated-checkpoint-disabled",
+  "on_unmatched": "halt",
+  "stubs": [
+    {
+      "match": { "tool": "dispatch", "agent": "implementation-review", "invocation": 1 },
+      "response": {
+        "agent_instance_id": "implementation-review#11",
+        "run_id": "{run_id}",
+        "status_code": "SUCCESS",
+        "status_message": "Implementation review passed for stage 1. No findings."
+      },
+      "side_effects": {
+        "create_files": [
+          {
+            "path": "Orchestration-{run_id}/Stage-1/implementation-review.md",
+            "content": "---\nrun_id: {run_id}\ncreated_by: implementation-review#11\nhuman_approved: false\n---\n# Implementation Review — Stage 1\n\nNo findings.\n"
+          }
+        ]
+      }
+    },
+    {
+      "match": { "tool": "dispatch", "agent": "test-writer-tdd", "invocation": 1 },
+      "response": {
+        "agent_instance_id": "test-writer-tdd#12",
+        "run_id": "{run_id}",
+        "status_code": "SUCCESS",
+        "status_message": "Tests written for stage 2."
+      }
+    }
+  ]
+}

@@ -81,7 +81,7 @@ func decodeJSONVerdicts(t *testing.T, data []byte) map[string]string {
 	t.Helper()
 	var doc struct {
 		Tests []struct {
-			TestID    string `json:"test_id"`
+			TestName  string `json:"test_name"`
 			Aggregate struct {
 				Verdict string `json:"verdict"`
 			} `json:"aggregate"`
@@ -92,7 +92,7 @@ func decodeJSONVerdicts(t *testing.T, data []byte) map[string]string {
 	}
 	out := map[string]string{}
 	for _, test := range doc.Tests {
-		out[test.TestID] = test.Aggregate.Verdict
+		out[test.TestName] = test.Aggregate.Verdict
 	}
 	return out
 }

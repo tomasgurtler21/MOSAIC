@@ -65,7 +65,9 @@ func probeDeployedArtifact(workspace, targetPath, modelKey string) domain.Deploy
 
 	// Read injection version from InjectionHarness-class region tag attributes.
 	// Falls back to mosaic_injections_version frontmatter for pre-migration files.
-	state.InjectionsVersion = extractDeployedInjectionVersion(data, "injections_version")
+	// found is true when at least one InjectionHarness-class region was present in the body;
+	// this signal determines whether AgentStaleness should compare InjectionsVersion at all.
+	state.InjectionsVersion, state.HasInjectionRegion = extractDeployedInjectionVersion(data, "injections_version")
 
 	// Extract workflow section markers; nil when none are present.
 	state.Workflows = extractDeployedWorkflows(data)
@@ -97,27 +99,30 @@ func readDeployedStamp(fm *docformat.Frontmatter, legacyKey string) string {
 }
 
 // extractDeployedInjectionVersion parses a deployed agent file and returns the version
-// attribute from the first InjectionHarness-class region found. Returns "" when no such
-// region exists or when the region carries no version attribute.
+// attribute from the first InjectionHarness-class region found, and whether such a region
+// was present at all. found is true whenever at least one InjectionHarness-class region
+// exists in the body, regardless of whether that region carries a version attribute.
 //
 // Falls back to reading the specified frontmatter field for pre-migration files that still
 // carry injection versions in frontmatter rather than tag attributes. The primary path
-// (tag read) takes precedence over the fallback.
+// (tag read) takes precedence over the fallback. The fallback does not set found=true
+// because a frontmatter-only file contains no InjectionHarness region in its body.
 //
 // legacyFrontmatterKey is the agentfields registry key used for the frontmatter fallback
 // (e.g., "injections_version"). The primary path reads the tag version from whichever
 // InjectionHarness-class region it finds first, since all harness regions in a file share
 // the same version value (written by applyHarnessRegion with a single role-selected value).
-func extractDeployedInjectionVersion(data []byte, legacyFrontmatterKey string) string {
+func extractDeployedInjectionVersion(data []byte, legacyFrontmatterKey string) (version string, found bool) {
 	if len(data) == 0 {
-		return ""
+		return "", false
 	}
 	doc, err := docformat.Parse(data)
 	if err != nil {
-		return ""
+		return "", false
 	}
 
 	// Primary path: enumerate all tool-managed regions and find the first InjectionHarness-class one.
+	var foundRegion bool
 	for _, node := range doc.Body().DeployedRegions() {
 		class, classErr := docformat.ClassifyRegion(node.Kind(), node.Name())
 		if classErr != nil {
@@ -126,18 +131,25 @@ func extractDeployedInjectionVersion(data []byte, legacyFrontmatterKey string) s
 		if class == mosaic.InjectionHarness {
 			v := node.Version()
 			if v != "" {
-				return v
+				// Region found with a version attribute: return immediately.
+				return v, true
 			}
-			// Found an InjectionHarness region but it has no version attribute — stop primary path.
+			// Region found but no version attribute on the tag (pre-migration file).
+			// Signal that the region is present but fall through to the frontmatter
+			// fallback to retrieve the version string.
+			foundRegion = true
 			break
 		}
 	}
 
 	// Fallback path: pre-migration files carry the injection version in frontmatter.
+	// When foundRegion is true (injection region present, no tag version), the frontmatter
+	// lookup provides the version string while preserving the HasInjectionRegion signal.
+	// When foundRegion is false (no region found), the fallback populates version only.
 	if doc.Frontmatter().Present() {
-		return readDeployedStamp(doc.Frontmatter(), legacyFrontmatterKey)
+		return readDeployedStamp(doc.Frontmatter(), legacyFrontmatterKey), foundRegion
 	}
-	return ""
+	return "", foundRegion
 }
 
 // probeDeployedHookBundle reports the on-disk state of a hook bundle, whose target path is a
@@ -215,6 +227,22 @@ func probeDeployedState(
 // this preserves the orchestrator's single-read invariant in the update and workflow-update flows.
 //
 // Returns an error if resolveDeployedPath encounters two or more deployed files with the same id.
+// buildParseFailedPaths extracts the target paths of scan matches that have ParseFailed=true.
+// Returns nil when no entries are parse-failed, so the map is only allocated when needed.
+// The implementation agent must call this at the Update flow call site.
+func buildParseFailedPaths(matched []ScannedAgentMatch) map[string]bool {
+	var result map[string]bool
+	for _, m := range matched {
+		if m.ParseFailed {
+			if result == nil {
+				result = make(map[string]bool)
+			}
+			result[m.TargetPath] = true
+		}
+	}
+	return result
+}
+
 func probeDeployedStateWithIndex(
 	workspace string,
 	paths plan.PlannedPaths,
@@ -222,6 +250,7 @@ func probeDeployedStateWithIndex(
 	seed map[string]domain.DeployedArtifactState,
 	index DeployedAgentIndex,
 	agentByKey map[string]domain.Agent,
+	parseFailedPaths map[string]bool,
 ) (map[string]domain.DeployedArtifactState, error) {
 	result := make(map[string]domain.DeployedArtifactState, len(paths))
 
@@ -248,8 +277,20 @@ func probeDeployedStateWithIndex(
 					return nil, err
 				}
 				if resolved == "" {
-					// Agent has a numeric id but no deployed file matches it: not deployed.
-					result[pp.TargetPath] = domain.DeployedArtifactState{Present: false}
+					// Agent has a numeric id but no deployed file matches in the index.
+					// Fallback: probe at the planned path only when the scan flagged this path
+					// as parse-failed. This catches files that exist on disk but could not be
+					// indexed because their frontmatter was unparseable. Files that simply have
+					// a different id (non-matching id-based resolution) still yield Present: false.
+					if parseFailedPaths[pp.TargetPath] {
+						fallback := probeDeployedArtifact(workspace, pp.TargetPath, modelKey)
+						if fallback.Present {
+							fallback.ParseFailed = true
+						}
+						result[pp.TargetPath] = fallback
+					} else {
+						result[pp.TargetPath] = domain.DeployedArtifactState{Present: false}
+					}
 				} else {
 					// Probe at the id-resolved path (may differ from planned path if renamed).
 					result[pp.TargetPath] = probeDeployedArtifact(workspace, resolved, modelKey)

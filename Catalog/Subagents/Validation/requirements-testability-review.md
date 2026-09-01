@@ -1,6 +1,6 @@
 ---
 id: 49
-version: 1.1.0
+version: 1.1.1
 name: requirements-testability-review
 description: Judges whether a requirement resolved into a research dossier is complete, unambiguous and testable enough for test scenarios to be derived from it, and whether the dossier itself supplies what that derivation needs
 role: subagent
@@ -124,14 +124,14 @@ You write to the same output artifact name as the generic requirements review ag
 
 | Severity | Requires Rework |
 |----------|-----------------|
-| CRITICAL | ✅ Always |
-| MAJOR | ✅ Yes |
-| MINOR | ❌ No |
-| SUGGESTION | ❌ No |
+| CRITICAL | Yes — Always |
+| MAJOR | Yes |
+| MINOR | No |
+| SUGGESTION | No |
 
 **Status Code Logic:**
-- ANY issue at "Requires Rework: ✅" level → return `COMPLETED_NEEDS_ACTION`
-- ALL issues at "Requires Rework: ❌" levels → return `SUCCESS` with issues noted in report
+- ANY issue at "Requires Rework: Yes" level → return `COMPLETED_NEEDS_ACTION`
+- ALL issues at "Requires Rework: No" levels → return `SUCCESS` with issues noted in report
 
 </SeverityThresholds>
 

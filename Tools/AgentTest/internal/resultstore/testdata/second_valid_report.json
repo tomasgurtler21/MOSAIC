@@ -1,0 +1,38 @@
+{
+  "schema_version": "1",
+  "suite_id": "edge-cases",
+  "started_at": "2026-08-24T08:30:00Z",
+  "finished_at": "2026-08-24T08:45:00Z",
+  "tests": [
+    {
+      "test_name": "test-two",
+      "test_id": 2,
+      "description": "Test two description",
+      "layer": "orchestrator",
+      "aggregate": {
+        "verdict": "fail",
+        "counted": 1,
+        "passed": 0,
+        "pass_rate": 0.0,
+        "infrastructure_failure": false,
+        "total_cost": { "total_usd": 0.05, "attribution": "direct" }
+      },
+      "runs": [
+        {
+          "subject_version": "v1.2.3",
+          "subject_model": "openai/gpt-4o",
+          "harness_id": "open-code",
+          "verdict": "fail",
+          "duration_ms": 8000,
+          "cost": { "total_usd": 0.05, "attribution": "direct" },
+          "termination_reason": "completed",
+          "conditions": [],
+          "test_version": 1
+        }
+      ]
+    }
+  ],
+  "counts": { "fail": 1 },
+  "total_cost": { "total_usd": 0.05, "attribution": "direct" },
+  "infrastructure_failures": 0
+}

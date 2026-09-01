@@ -37,6 +37,13 @@ type SubjectUnderTest struct {
 	// than inherit a default.
 	Workflows []string
 
+	// InfrastructureAgentIDs pins the infrastructure agent set deployed into
+	// the sandbox. nil means "not specified" (which for this field is a
+	// parse-time error — every test definition must resolve it); non-nil
+	// empty means "explicitly none" (deploy no infrastructure agents).
+	// Same nil/non-nil convention as Workflows.
+	InfrastructureAgentIDs []string
+
 	// DefinitionPath is the definition file's path relative to the sandbox
 	// subject dir. Its meaning is unchanged, but its source is not: it is
 	// resolved during setup from what the deployment port reported it wrote,

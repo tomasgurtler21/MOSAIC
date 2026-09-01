@@ -142,11 +142,18 @@ const validRegistryForDeployTests = `{
 // using the new harness-neutral agent key form.
 const definitionWithSubjectAgent = `
 schema_version: 1
-id: subject-test
+name: subject-test
+id: 1
+version: 1
+changelog:
+  - version: 1
+    date: "2026-01-01"
+    changes: "Initial."
 layer: orchestrator
 subject:
   identity: orchestrator
   agent: orchestrator
+  infrastructure_agents: []
 stub_registry: subject.stubs.json
 `
 
@@ -154,10 +161,17 @@ stub_registry: subject.stubs.json
 // but omits subject.agent entirely — the missing-subject-agent case.
 const definitionWithoutSubjectAgent = `
 schema_version: 1
-id: subject-test
+name: subject-test
+id: 1
+version: 1
+changelog:
+  - version: 1
+    date: "2026-01-01"
+    changes: "Initial."
 layer: orchestrator
 subject:
   identity: orchestrator
+  infrastructure_agents: []
 stub_registry: subject.stubs.json
 `
 
@@ -165,11 +179,18 @@ stub_registry: subject.stubs.json
 // agent and a workflow id that is not in the catalogue.
 const definitionWithBadWorkflows = `
 schema_version: 1
-id: subject-test
+name: subject-test
+id: 1
+version: 1
+changelog:
+  - version: 1
+    date: "2026-01-01"
+    changes: "Initial."
 layer: orchestrator
 subject:
   identity: orchestrator
   agent: orchestrator
+  infrastructure_agents: []
   workflows: [nonexistent-workflow]
 stub_registry: subject.stubs.json
 `
@@ -379,11 +400,18 @@ func TestValidate_StubDefinitionSourcePathMissing_ReportsMissingStubDefinition(t
 		"suite.suite.yaml": validSuiteWithOneTest,
 		"subject.test.yaml": `
 schema_version: 1
-id: subject-test
+name: subject-test
+id: 1
+version: 1
+changelog:
+  - version: 1
+    date: "2026-01-01"
+    changes: "Initial."
 layer: orchestrator
 subject:
   identity: orchestrator
   agent: orchestrator
+  infrastructure_agents: []
 stub_registry: subject.stubs.json
 stub_agents:
   - identity:
@@ -420,10 +448,17 @@ func TestValidate_StubDefinitionRenderFails_ReportsUnrenderableStubDefinition(t 
 		"suite.suite.yaml": validSuiteWithOneTest,
 		"subject.test.yaml": `
 schema_version: 1
-id: subject-test
+name: subject-test
+id: 1
+version: 1
+changelog:
+  - version: 1
+    date: "2026-01-01"
+    changes: "Initial."
 layer: orchestrator
 subject:
   identity: orchestrator
+  infrastructure_agents: []
 stub_registry: subject.stubs.json
 stub_agents:
   - identity:
@@ -543,10 +578,17 @@ func TestValidate_MultipleDeclarationErrors_AllReportedInOnePass(t *testing.T) {
 		"suite.suite.yaml": validSuiteWithOneTest,
 		"subject.test.yaml": `
 schema_version: 1
-id: subject-test
+name: subject-test
+id: 1
+version: 1
+changelog:
+  - version: 1
+    date: "2026-01-01"
+    changes: "Initial."
 layer: orchestrator
 subject:
   identity: orchestrator
+  infrastructure_agents: []
 stub_registry: subject.stubs.json
 stub_agents:
   - identity:
@@ -666,11 +708,18 @@ func TestValidate_StubRegistryCollaboratorWithoutStubAgentsEntry_ReportsUndeclar
 		"suite.suite.yaml": validSuiteWithOneTest,
 		"subject.test.yaml": `
 schema_version: 1
-id: subject-test
+name: subject-test
+id: 1
+version: 1
+changelog:
+  - version: 1
+    date: "2026-01-01"
+    changes: "Initial."
 layer: orchestrator
 subject:
   identity: orchestrator
   agent: orchestrator
+  infrastructure_agents: []
 stub_registry: subject.stubs.json
 `,
 		// stub registry references codebase-research, but stub_agents is absent
@@ -688,6 +737,75 @@ stub_registry: subject.stubs.json
 		t.Errorf("expected diagnostic %q when a stub registry entry names a collaborator "+
 			"with no corresponding stub_agents definition, got: %v",
 			"undeclared-stub-agent", report.Diagnostics)
+	}
+}
+
+// TestValidate_CataloguePathCheckSubjectDeploy_CarriesInfrastructureAgentIDs
+// asserts that preflight's dry-run deploy call propagates InfrastructureAgentIDs
+// from the subject definition into the DeployRequest. Without this wiring the
+// deploy tool's interactive infrastructure-agent question fires during the
+// dry-run validation, hanging the preflight check in an automated run.
+//
+// The test exercises the catalogue path (subject.agent set) with a definition
+// that declares two infrastructure agents, and asserts that the captured
+// DeployRequest carries those IDs verbatim.
+func TestValidate_CataloguePathCheckSubjectDeploy_CarriesInfrastructureAgentIDs(t *testing.T) {
+	const definitionWithInfraAgents = `
+schema_version: 1
+name: subject-test
+id: 1
+version: 1
+changelog:
+  - version: 1
+    date: "2026-01-01"
+    changes: "Initial."
+layer: orchestrator
+subject:
+  identity: orchestrator
+  agent: orchestrator
+  infrastructure_agents:
+    - checkpoint-manager-git
+    - commit-manager-git
+stub_registry: subject.stubs.json
+`
+
+	root := writeTree(t, map[string]string{
+		"suite.suite.yaml":   validSuiteWithOneTest,
+		"subject.test.yaml":  definitionWithInfraAgents,
+		"subject.stubs.json": validRegistryForDeployTests,
+	})
+
+	deployer := &fakeDeployer{}
+
+	preflight.Validate(preflight.Input{
+		SuitePath:   filepath.Join(root, "suite.suite.yaml"),
+		FixtureRoot: filepath.Join(root, "fixtures"),
+		HarnessID:   "claude-code",
+		Deploy:      deployer,
+	})
+
+	if len(deployer.deployCalls) == 0 {
+		t.Fatal("Deploy was never called during preflight; " +
+			"preflight must issue a dry-run deploy call for the subject on the catalogue path")
+	}
+
+	got := deployer.deployCalls[0].InfrastructureAgentIDs
+	want := []string{"checkpoint-manager-git", "commit-manager-git"}
+
+	if len(got) != len(want) {
+		t.Errorf("dry-run DeployRequest.InfrastructureAgentIDs = %v (len %d), want %v (len %d); "+
+			"preflight must propagate InfrastructureAgentIDs from the subject definition "+
+			"into the dry-run deploy request so the deploy tool resolves the infrastructure-agent "+
+			"selection non-interactively rather than hanging on an interactive prompt",
+			got, len(got), want, len(want))
+		return
+	}
+	for i := range want {
+		if got[i] != want[i] {
+			t.Errorf("dry-run DeployRequest.InfrastructureAgentIDs[%d] = %q, want %q; "+
+				"the field must be carried verbatim from the subject definition",
+				i, got[i], want[i])
+		}
 	}
 }
 
@@ -717,11 +835,18 @@ var _ = os.Stat
 // forbidden when subject.agent and a deploy tool are both present.
 const definitionWithCatalogueKeyNoStubAgents = `
 schema_version: 1
-id: subject-test
+name: subject-test
+id: 1
+version: 1
+changelog:
+  - version: 1
+    date: "2026-01-01"
+    changes: "Initial."
 layer: orchestrator
 subject:
   identity: orchestrator
   agent: orchestrator
+  infrastructure_agents: []
 stub_registry: subject.stubs.json
 `
 
@@ -731,10 +856,17 @@ stub_registry: subject.stubs.json
 // below assert only on undeclared-stub-agent.
 const definitionWithNoSubjectAgent = `
 schema_version: 1
-id: subject-test
+name: subject-test
+id: 1
+version: 1
+changelog:
+  - version: 1
+    date: "2026-01-01"
+    changes: "Initial."
 layer: orchestrator
 subject:
   identity: orchestrator
+  infrastructure_agents: []
 stub_registry: subject.stubs.json
 `
 

@@ -701,6 +701,60 @@ func TestUpdate_PlanInputModelsAndContentShareConsistentModelID(t *testing.T) {
 	}
 }
 
+// ---------------------------------------------------------------------------
+// T1.5 — Update R1 conformance: pre-answered AgentModels not persisted as custom IDs
+// ---------------------------------------------------------------------------
+
+// TestUpdate_PreAnsweredAgentModels_CustomIDNotPersisted verifies that when agent models
+// are pre-answered via UpdateRequest.AgentModels, those model IDs do NOT appear in
+// UserConfig.CustomModelIDs after the Update run.
+//
+// This locks in the invariant that Update's persistCustomModelIDs call only persists
+// interactively-resolved custom IDs (the appendCustomID closure is called only from
+// ans.Custom branches in resolveModels, never from the pre-answer merge path). A pre-answered
+// UpdateRequest.AgentModels value bypasses the interactive SelectOne question and therefore
+// never enters the ans.Custom path that feeds accumulatedOptions and persistCustomModelIDs.
+//
+// This is a verification test, not a behavior change: Update already conforms to R1 for
+// custom model IDs by construction. The test locks in this invariant so any future refactor
+// that accidentally routes pre-answered agent models through appendCustomID will be caught.
+func TestUpdate_PreAnsweredAgentModels_CustomIDNotPersisted(t *testing.T) {
+	// Arrange — "pre-answered-update-model-xyz" is supplied as a pre-answer for test-runner
+	// via UpdateRequest.AgentModels. No interaction is scripted for QAgentModel; the
+	// pre-answer is used directly without entering the interactive ans.Custom branch.
+	spy := &spyUserConfig{}
+	stub := interactiontest.NewBuilder().Build()
+	deps, workspace := newBaseDeps(t, stub)
+	deps.UserConfig = spy
+	svc := app.New(deps)
+
+	// Act
+	_, err := svc.Update(context.Background(), app.UpdateRequest{
+		HarnessID:       "stub-harness",
+		WorkspacePath:   workspace,
+		AddWorkflowIDs:  []string{"quick-fix"},
+		SkipAll:         map[domain.QuestionID]bool{domain.QTierModel: true},
+		AgentModels:     map[string]string{"test-runner": "pre-answered-update-model-xyz"},
+		AutoConfirmPlan: true,
+	})
+	if err != nil {
+		t.Fatalf("Update: %v", err)
+	}
+
+	// Assert — "pre-answered-update-model-xyz" must NOT appear in any saved CustomModelIDs.
+	// Pre-answered agent models bypass the interactive ans.Custom branch and must not
+	// contaminate the custom ID set that is passed to persistCustomModelIDs (R1, AC1.4).
+	for i, saved := range spy.saved {
+		ids := saved.CustomModelIDs["stub-harness"]
+		if containsCustomModelID(ids, "pre-answered-update-model-xyz") {
+			t.Errorf("saved[%d].CustomModelIDs[\"stub-harness\"] = %v; "+
+				"want to NOT contain \"pre-answered-update-model-xyz\" which was supplied as a "+
+				"pre-answer via UpdateRequest.AgentModels — only custom model IDs entered "+
+				"interactively (via ans.Custom) are eligible for persistence (R1, AC1.4)", i, ids)
+		}
+	}
+}
+
 // Ensure the plan package is used (it is referenced transitively via spyPlanner, which is
 // defined in probe_wiring_test.go and uses plan.Input). This blank import guard keeps the
 // compiler from complaining if a future refactor removes the indirect use.

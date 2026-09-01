@@ -11,9 +11,11 @@ import (
 
 // PreToolUsePayload is the pre-invocation hook payload. ToolUseID is the
 // harness's own dispatch-scoped identifier for this tool call; it is the
-// same value the harness will send on the PostToolUse and SubagentStop events
-// that correspond to this dispatch, and is the correlation token this adapter
-// uses on all three phases.
+// same value the harness will send on the PostToolUse event that corresponds
+// to this dispatch, and is the correlation token this adapter uses on the
+// pre- and post-invocation phases. The completion event (SubagentStop) carries
+// no tool_use_id; see CompletionPayload and correlation.go for the completion
+// correlation mechanism.
 type PreToolUsePayload struct {
 	HookEventName string          `json:"hook_event_name"`
 	SessionID     string          `json:"session_id"`
@@ -39,16 +41,33 @@ type PostToolUsePayload struct {
 // hook), fired when a dispatched collaborator finishes. It carries the
 // collaborator's real reply directly (LastAssistantMessage), which is what
 // makes reply recovery possible on a harness whose post-invocation point
-// fires at launch rather than at completion. ToolUseID is the same identifier
-// the harness sent on the originating PreToolUse event; this is how the
-// completion event is correlated back to the dispatch that produced it (see
-// translateCompletion for the mechanism basis documentation).
+// fires at launch. It carries NO dispatch identifier. The field is absent
+// from the payload entirely — not merely empty — on every firing observed
+// against harness version 2.1.240, under both the default and a relocated
+// configuration home. AgentID is the only identifier on this event that
+// distinguishes one dispatch from another, and it is what this adapter
+// correlates on. See correlation.go for the mechanism and the captured
+// evidence it rests on.
 type CompletionPayload struct {
 	HookEventName        string `json:"hook_event_name"`
 	SessionID            string `json:"session_id"`
 	AgentID              string `json:"agent_id"`
-	ToolUseID            string `json:"tool_use_id,omitempty"`
 	LastAssistantMessage string `json:"last_assistant_message"`
+}
+
+// AgentStartPayload is the harness's in-session agent-start signal (its
+// SubagentStart hook). It fires after the dispatch is issued and before the
+// completion event for the same collaborator, carries the agent identifier
+// the completion event will later carry, and requires no disk read.
+//
+// It carries no dispatch identifier either, which is why the association it
+// establishes rests on dispatch ordering rather than on a shared field: the
+// dispatch is recorded at the pre-invocation point and claimed here.
+type AgentStartPayload struct {
+	HookEventName string `json:"hook_event_name"`
+	SessionID     string `json:"session_id"`
+	AgentID       string `json:"agent_id"`
+	AgentType     string `json:"agent_type"`
 }
 
 // TaskToolInput is the dispatch tool's input. SubagentType is where the

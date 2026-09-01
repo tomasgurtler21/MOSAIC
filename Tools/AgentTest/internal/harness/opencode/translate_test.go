@@ -62,7 +62,7 @@ func TestTranslateCall_PreSubagentDispatch_ProducesCompositeIdentity(t *testing.
 		t.Fatalf("TranslateCall: %v", err)
 	}
 
-	want := domain.CollaboratorIdentity{ToolName: "task", AgentIdentity: "Worker"}
+	want := domain.CollaboratorIdentity{ToolName: domain.DispatchToolName, AgentIdentity: "Worker"}
 	if call.Identity != want {
 		t.Errorf("TranslateCall: Identity = %+v, want %+v", call.Identity, want)
 	}
@@ -111,6 +111,31 @@ func TestTranslateCall_CarriesCapabilityFlags(t *testing.T) {
 
 	if !reflect.DeepEqual(call.Capabilities, a.Capabilities()) {
 		t.Errorf("TranslateCall: Capabilities = %+v, want the adapter's own declared capabilities %+v", call.Capabilities, a.Capabilities())
+	}
+}
+
+// TestTranslateCall_Pre_UnrecognisedNativeDispatchToolName_IsHandleableError
+// pins the failure mode named in the normalization contract: an unrecognised
+// native dispatch-tool name must be returned as a translation error, never
+// passed through silently. Silent pass-through is how a vendor's next rename
+// would become another invisible defect.
+func TestTranslateCall_Pre_UnrecognisedNativeDispatchToolName_IsHandleableError(t *testing.T) {
+	a := newTestAdapter()
+
+	call, err := a.TranslateCall(domain.PhasePre, payloadFixture(t, "pre_unknown_dispatch_tool.json"))
+	if err == nil {
+		t.Errorf("TranslateCall: expected an error for an unrecognised native dispatch-tool name, got call=%+v", call)
+	}
+}
+
+// TestTranslateCall_Post_UnrecognisedNativeDispatchToolName_IsHandleableError
+// is the same obligation on the post-invocation path.
+func TestTranslateCall_Post_UnrecognisedNativeDispatchToolName_IsHandleableError(t *testing.T) {
+	a := newTestAdapter()
+
+	call, err := a.TranslateCall(domain.PhasePost, payloadFixture(t, "post_unknown_dispatch_tool.json"))
+	if err == nil {
+		t.Errorf("TranslateCall(post): expected an error for an unrecognised native dispatch-tool name, got call=%+v", call)
 	}
 }
 
@@ -680,5 +705,307 @@ func TestTranslateCall_Post_NeverMintsToken(t *testing.T) {
 
 	if call.CorrelationToken != "" {
 		t.Errorf("TranslateCall(PhasePost): CorrelationToken = %q, want empty; the post phase must not use the NewToken seam — minting belongs exclusively to the pre phase", call.CorrelationToken)
+	}
+}
+
+// ---------------------------------------------------------------------------
+// extractOutput: XML envelope handling
+//
+// OpenCode wraps the subagent response in an XML envelope of the form
+//   <task><task_result>...JSON payload...</task_result></task>
+// when reporting the tool result in a post-invocation hook event. The
+// extractOutput function must strip this envelope and return the inner
+// payload so that echo fidelity comparisons operate on the actual response,
+// not the XML wrapper.
+//
+// All tests in this section drive extractOutput indirectly through
+// TranslateCall at the post phase, which calls translatePost which calls
+// extractOutput on payload.Output. The output field is a JSON-encoded string
+// whose value is the XML envelope (or a non-XML string for unchanged-behavior
+// cases). This matches the realistic wire format: OpenCode places the tool
+// result as a JSON string value in the "output" field of the after-hook event.
+//
+// Tests that assert new XML extraction behavior are expected to FAIL against
+// the current extractOutput implementation, which returns the full XML string
+// via the bare-JSON-string fallback. They will pass once extractOutput gains
+// XML detection and task_result extraction.
+// ---------------------------------------------------------------------------
+
+// buildPostPayloadWithJSONStringOutput creates a raw tool.execute.after payload
+// where the output field is a JSON-encoded string (not wrapped in a
+// {"output":"..."} object). This matches the format used when OpenCode delivers
+// the tool result directly as a bare JSON string value — which may be an XML
+// envelope on its content.
+func buildPostPayloadWithJSONStringOutput(t *testing.T, tool string, args opencode.TaskToolArgs, output string) []byte {
+	t.Helper()
+	rawArgs, err := json.Marshal(args)
+	if err != nil {
+		t.Fatalf("buildPostPayloadWithJSONStringOutput: marshaling args: %v", err)
+	}
+	rawOutput, err := json.Marshal(output) // encodes output as a JSON string value
+	if err != nil {
+		t.Fatalf("buildPostPayloadWithJSONStringOutput: marshaling output string: %v", err)
+	}
+	payload := opencode.ToolAfterPayload{
+		HookEventName: "tool.execute.after",
+		Tool:          tool,
+		Args:          rawArgs,
+		Output:        rawOutput,
+	}
+	b, err := json.Marshal(payload)
+	if err != nil {
+		t.Fatalf("buildPostPayloadWithJSONStringOutput: marshaling payload: %v", err)
+	}
+	return b
+}
+
+// TestTranslateCall_Post_XMLEnvelope_ExtractsJSONFromTaskResult asserts that
+// when the output field contains an XML-wrapped response, TranslateCall
+// extracts the JSON payload from inside the <task_result> tags rather than
+// returning the full XML wrapper string.
+//
+// This test is expected to FAIL against the current extractOutput
+// implementation: without XML detection, the bare-JSON-string fallback returns
+// the entire XML string, which is not the actual agent response.
+func TestTranslateCall_Post_XMLEnvelope_ExtractsJSONFromTaskResult(t *testing.T) {
+	a := opencode.New(opencode.Options{})
+	args := opencode.TaskToolArgs{SubagentType: "Worker", Prompt: "do the work"}
+
+	xmlEnvelope := `<task><task_result>{"status_code":"SUCCESS","status_message":"done"}</task_result></task>`
+	native := buildPostPayloadWithJSONStringOutput(t, "task", args, xmlEnvelope)
+
+	call, err := a.TranslateCall(domain.PhasePost, native)
+	if err != nil {
+		t.Fatalf("TranslateCall(PhasePost, XML envelope): %v", err)
+	}
+
+	want := `{"status_code":"SUCCESS","status_message":"done"}`
+	if call.ObservedResponse != want {
+		t.Errorf("TranslateCall(PhasePost, XML envelope): ObservedResponse = %q, want %q; XML-wrapped responses must have the JSON payload extracted from inside <task_result> tags, not returned as the raw XML string", call.ObservedResponse, want)
+	}
+}
+
+// TestTranslateCall_Post_XMLEnvelope_WhitespaceAroundPayload_Trimmed asserts
+// that whitespace between the <task_result> tags and the inner JSON payload is
+// trimmed, so the extracted content matches the literal JSON the agent wrote.
+//
+// This test is expected to FAIL against the current extractOutput
+// implementation.
+func TestTranslateCall_Post_XMLEnvelope_WhitespaceAroundPayload_Trimmed(t *testing.T) {
+	a := opencode.New(opencode.Options{})
+	args := opencode.TaskToolArgs{SubagentType: "Worker", Prompt: "do the work"}
+
+	// Whitespace on both sides of the payload inside task_result.
+	xmlEnvelope := "<task><task_result>\n  {\"status_code\":\"SUCCESS\"}\n</task_result></task>"
+	native := buildPostPayloadWithJSONStringOutput(t, "task", args, xmlEnvelope)
+
+	call, err := a.TranslateCall(domain.PhasePost, native)
+	if err != nil {
+		t.Fatalf("TranslateCall(PhasePost, XML envelope with whitespace): %v", err)
+	}
+
+	want := `{"status_code":"SUCCESS"}`
+	if call.ObservedResponse != want {
+		t.Errorf("TranslateCall(PhasePost, XML envelope with whitespace): ObservedResponse = %q, want %q; whitespace surrounding the JSON payload inside <task_result> must be trimmed", call.ObservedResponse, want)
+	}
+}
+
+// TestTranslateCall_Post_XMLEnvelope_NestedTaskResultTags_ExtractsOutermost
+// asserts that when the content inside <task_result> itself contains nested
+// <task_result> tags (a defensive case for unknown nesting), extractOutput
+// uses the first opening tag and the last closing tag, yielding the outermost
+// span of content.
+//
+// This test is expected to FAIL against the current extractOutput
+// implementation.
+func TestTranslateCall_Post_XMLEnvelope_NestedTaskResultTags_ExtractsOutermost(t *testing.T) {
+	a := opencode.New(opencode.Options{})
+	args := opencode.TaskToolArgs{SubagentType: "Worker", Prompt: "do the work"}
+
+	// Nested task_result: the inner tags are part of the payload content.
+	xmlEnvelope := `<task><task_result>outer<task_result>inner</task_result>more</task_result></task>`
+	native := buildPostPayloadWithJSONStringOutput(t, "task", args, xmlEnvelope)
+
+	call, err := a.TranslateCall(domain.PhasePost, native)
+	if err != nil {
+		t.Fatalf("TranslateCall(PhasePost, nested XML tags): %v", err)
+	}
+
+	want := `outer<task_result>inner</task_result>more`
+	if call.ObservedResponse != want {
+		t.Errorf("TranslateCall(PhasePost, nested XML tags): ObservedResponse = %q, want %q; extractOutput must use first <task_result> and last </task_result> to handle nested occurrences defensively", call.ObservedResponse, want)
+	}
+}
+
+// TestTranslateCall_Post_XMLWithoutTaskResultTags_FallsThrough asserts that
+// XML-looking content that contains no <task_result> tags is returned as-is,
+// without modification. The extraction logic must fall through rather than
+// panic or return an error when the expected tags are absent.
+func TestTranslateCall_Post_XMLWithoutTaskResultTags_FallsThrough(t *testing.T) {
+	a := opencode.New(opencode.Options{})
+	args := opencode.TaskToolArgs{SubagentType: "Worker", Prompt: "do the work"}
+
+	// XML content with no task_result tags — extraction should be a no-op.
+	xmlNoTaskResult := `<task><other_tag>some content here</other_tag></task>`
+	native := buildPostPayloadWithJSONStringOutput(t, "task", args, xmlNoTaskResult)
+
+	call, err := a.TranslateCall(domain.PhasePost, native)
+	if err != nil {
+		t.Fatalf("TranslateCall(PhasePost, XML without task_result): %v", err)
+	}
+
+	// When no <task_result> tags are found, the full XML is returned unchanged.
+	want := xmlNoTaskResult
+	if call.ObservedResponse != want {
+		t.Errorf("TranslateCall(PhasePost, XML without task_result): ObservedResponse = %q, want %q; when <task_result> tags are absent, extraction must fall through and return the content unchanged", call.ObservedResponse, want)
+	}
+}
+
+// TestTranslateCall_Post_BareJSONOutput_UnchangedByXMLExtraction asserts that
+// a non-XML output (a bare JSON object string) continues to be returned as-is
+// after the XML envelope feature is added. This is a regression guard: the
+// new XML path must not alter behavior for non-XML content.
+func TestTranslateCall_Post_BareJSONOutput_UnchangedByXMLExtraction(t *testing.T) {
+	a := opencode.New(opencode.Options{})
+	args := opencode.TaskToolArgs{SubagentType: "Worker", Prompt: "do the work"}
+
+	// A non-XML response — should pass through unchanged.
+	jsonResponse := `{"status_code":"SUCCESS","status_message":"task complete"}`
+	native := buildPostPayloadWithJSONStringOutput(t, "task", args, jsonResponse)
+
+	call, err := a.TranslateCall(domain.PhasePost, native)
+	if err != nil {
+		t.Fatalf("TranslateCall(PhasePost, bare JSON output): %v", err)
+	}
+
+	if call.ObservedResponse != jsonResponse {
+		t.Errorf("TranslateCall(PhasePost, bare JSON output): ObservedResponse = %q, want %q; non-XML responses must be returned unchanged by the XML extraction path", call.ObservedResponse, jsonResponse)
+	}
+}
+
+// ---------------------------------------------------------------------------
+// extractOutput: content-array XML envelope handling
+//
+// When OpenCode wraps its tool result as a JSON content array of the form
+//   {"content":[{"type":"text","text":"<task ...><task_result>...</task_result></task>"}]}
+// the extractOutput function must still strip the XML envelope from the
+// extracted text value and return only the inner payload.
+//
+// The test in this section drives extractOutput indirectly through TranslateCall
+// at the post phase, following the same pattern as the JSON-string XML envelope
+// tests above. The content-array wrapper is synthetically constructed around
+// real envelope text captured from a production run, per the test fixture
+// provenance requirement.
+// ---------------------------------------------------------------------------
+
+// buildPostPayloadWithContentArrayOutput creates a raw tool.execute.after payload
+// where the output field is a JSON content array with a single text entry. This
+// matches the format used when OpenCode delivers the tool result as a content array
+// whose text value may contain an XML envelope.
+func buildPostPayloadWithContentArrayOutput(t *testing.T, tool string, args opencode.TaskToolArgs, outputText string) []byte {
+	t.Helper()
+	rawArgs, err := json.Marshal(args)
+	if err != nil {
+		t.Fatalf("buildPostPayloadWithContentArrayOutput: marshaling args: %v", err)
+	}
+	contentArray := struct {
+		Content []struct {
+			Type string `json:"type"`
+			Text string `json:"text"`
+		} `json:"content"`
+	}{
+		Content: []struct {
+			Type string `json:"type"`
+			Text string `json:"text"`
+		}{{Type: "text", Text: outputText}},
+	}
+	rawOutput, err := json.Marshal(contentArray)
+	if err != nil {
+		t.Fatalf("buildPostPayloadWithContentArrayOutput: marshaling content array: %v", err)
+	}
+	payload := opencode.ToolAfterPayload{
+		HookEventName: "tool.execute.after",
+		Tool:          tool,
+		Args:          rawArgs,
+		Output:        rawOutput,
+	}
+	b, err := json.Marshal(payload)
+	if err != nil {
+		t.Fatalf("buildPostPayloadWithContentArrayOutput: marshaling payload: %v", err)
+	}
+	return b
+}
+
+// TestTranslateCall_Post_ContentArrayOutput_XMLEnvelope_ExtractsInnerPayload
+// asserts that when the output field is a content array whose text entry contains
+// an XML-wrapped response, TranslateCall extracts the JSON payload from inside
+// the <task_result> tags rather than returning the raw XML string.
+//
+// Source: Tools/AgentTest/dist/report-status-routing.suite.yaml-20260824T163459.json,
+// echo_fidelity assertion target "1", run 20260824T163515Z-9739. The realEnvelopeText
+// below is the genuine un-stripped envelope text from that production run. The
+// content-array wrapper is synthetically constructed around it — this is a
+// reconstruction: real envelope text, synthetically constructed content-array
+// wrapper.
+//
+// This test is expected to FAIL against the current extractOutput implementation:
+// the content-array branch extracts and concatenates the text parts but does not
+// apply XML stripping, so the full XML envelope text is returned instead of the
+// inner payload. The fix (I1.1) must apply the shared XML-stripping pass to the
+// text extracted from all container shapes, including content arrays.
+func TestTranslateCall_Post_ContentArrayOutput_XMLEnvelope_ExtractsInnerPayload(t *testing.T) {
+	a := opencode.New(opencode.Options{})
+	args := opencode.TaskToolArgs{SubagentType: "plan-review", Prompt: "review the plan"}
+
+	// Real XML envelope text from report-status-routing.suite.yaml-20260824T163459.json,
+	// echo_fidelity assertion target "1", run 20260824T163515Z-9739. Reconstruction:
+	// genuine envelope text, synthetically constructed content-array wrapper.
+	realEnvelopeText := "<task id=\"ses_fcb5f4d10ffe9i0rGL3NJbKEUB\" state=\"completed\">\n<task_result>\n{\n        \"agent_instance_id\": \"plan-review#5\",\n        \"run_id\": \"20260824T163515Z-9739\",\n        \"status_code\": \"COMPLETED_NEEDS_ACTION\",\n        \"status_message\": \"Plan lacks error handling strategy for pflag parse failures.\"\n      }\n</task_result>\n</task>"
+	native := buildPostPayloadWithContentArrayOutput(t, "task", args, realEnvelopeText)
+
+	call, err := a.TranslateCall(domain.PhasePost, native)
+	if err != nil {
+		t.Fatalf("TranslateCall(PhasePost, content-array XML envelope): %v", err)
+	}
+
+	// The expected value is the content between <task_result> and </task_result>,
+	// with surrounding whitespace trimmed, matching the behavior of the bare-XML
+	// and JSON-string XML envelope tests.
+	want := "{\n        \"agent_instance_id\": \"plan-review#5\",\n        \"run_id\": \"20260824T163515Z-9739\",\n        \"status_code\": \"COMPLETED_NEEDS_ACTION\",\n        \"status_message\": \"Plan lacks error handling strategy for pflag parse failures.\"\n      }"
+	if call.ObservedResponse != want {
+		t.Errorf("TranslateCall(PhasePost, content-array XML envelope): ObservedResponse = %q, want %q; content-array output whose text contains an XML envelope must have the inner payload extracted from <task_result> tags, not returned as the raw XML string", call.ObservedResponse, want)
+	}
+}
+
+// TestTranslateCall_Post_EmptyOutput_UnchangedByXMLExtraction asserts that an
+// empty (zero-length) output continues to produce an empty ObservedResponse.
+// This is a regression guard for the empty-input early-return path.
+func TestTranslateCall_Post_EmptyOutput_UnchangedByXMLExtraction(t *testing.T) {
+	a := opencode.New(opencode.Options{})
+	args := opencode.TaskToolArgs{SubagentType: "Worker", Prompt: "do the work"}
+
+	// Construct a payload with an empty output field (null JSON value).
+	rawArgs, err := json.Marshal(args)
+	if err != nil {
+		t.Fatalf("marshaling args: %v", err)
+	}
+	payload := opencode.ToolAfterPayload{
+		HookEventName: "tool.execute.after",
+		Tool:          "task",
+		Args:          rawArgs,
+		Output:        nil, // no output
+	}
+	native, err := json.Marshal(payload)
+	if err != nil {
+		t.Fatalf("marshaling payload: %v", err)
+	}
+
+	call, err := a.TranslateCall(domain.PhasePost, native)
+	if err != nil {
+		t.Fatalf("TranslateCall(PhasePost, empty output): %v", err)
+	}
+
+	if call.ObservedResponse != "" {
+		t.Errorf("TranslateCall(PhasePost, empty output): ObservedResponse = %q, want empty string; empty output must remain empty after XML extraction is added", call.ObservedResponse)
 	}
 }

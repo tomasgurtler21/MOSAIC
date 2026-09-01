@@ -10,10 +10,11 @@ package app_test
 //   - Each QTierModel question has Subject set to the tier string
 //   - The harness model list is presented as options
 //
-// Persistence (AC18.3):
+// Persistence:
 //   - A tier selection made through Interaction is saved to user config after the run
 //   - Tier selections are saved per-harness: the correct harness id is the key
-//   - Pre-answered tier selections (TierModels in request) are also saved to user config
+//   - Pre-answered tier selections (TierModels in request) are NOT saved to user config;
+//     only interactively-answered selections are eligible for persistence (R1)
 //
 // Skip / skip-all branches (AC18.2):
 //   - SkippedOne for a tier skips only that tier; remaining tiers are still asked
@@ -157,11 +158,20 @@ func TestDeployNew_TierSelection_SavedToUserConfig(t *testing.T) {
 	}
 }
 
-// TestDeployNew_TierPreAnswered_AlsoSavedToUserConfig verifies that pre-answered tier
-// selections (from DeployRequest.TierModels) are also persisted to user config, since the
-// next run should remember them.
-func TestDeployNew_TierPreAnswered_AlsoSavedToUserConfig(t *testing.T) {
-	// Arrange
+// TestDeployNew_TierPreAnswered_NotSavedToUserConfig verifies that pre-answered tier
+// selections (from DeployRequest.TierModels) are NOT persisted to user config. The caller
+// supplied these values as pre-answers for this run only; writing them back would
+// incorrectly treat a one-shot caller override as a permanent user preference. Only
+// selections made interactively through Interaction are eligible for persistence (R1).
+//
+// This test replaces the former TestDeployNew_TierPreAnswered_AlsoSavedToUserConfig, which
+// asserted the old behavior (pre-answered tiers were written back). The old behavior is the
+// primary corruption trigger in AgentTest high-concurrency scenarios: synthetic one-shot
+// pre-answers would be written back on every run, causing concurrent Save races.
+func TestDeployNew_TierPreAnswered_NotSavedToUserConfig(t *testing.T) {
+	// Arrange — pre-answer the "HIGH" tier; no QTierModel interaction scripted.
+	// The spy starts with an empty UserConfig so any tier model that appears in
+	// spy.saved must have been actively persisted by the flow (not pre-loaded from config).
 	stub := interactiontest.NewBuilder().
 		AnswerReview(true).
 		Build()
@@ -184,14 +194,16 @@ func TestDeployNew_TierPreAnswered_AlsoSavedToUserConfig(t *testing.T) {
 		t.Fatalf("DeployNew: %v", err)
 	}
 
-	// Assert
-	if len(spy.saved) == 0 {
-		t.Fatal("UserConfigStore.Save was never called after pre-answered tier selection")
-	}
-	lastSave := spy.saved[len(spy.saved)-1]
-	if lastSave.TierModels["stub-harness"]["HIGH"] != "model-b" {
-		t.Errorf("saved tier mapping: want \"model-b\", got %q",
-			lastSave.TierModels["stub-harness"]["HIGH"])
+	// Assert — "model-b" must NOT appear in any saved config's TierModels. The pre-answered
+	// tier model was supplied by the caller for this run only and must not be written back to
+	// the persistent user config (R1: interactive-only persistence).
+	for i, saved := range spy.saved {
+		if saved.TierModels["stub-harness"]["HIGH"] == "model-b" {
+			t.Errorf("saved[%d].TierModels[\"stub-harness\"][\"HIGH\"] = \"model-b\"; "+
+				"pre-answered tier selections from DeployRequest.TierModels must NOT be "+
+				"persisted to user config — only interactively-answered tier selections are "+
+				"eligible for persistence (R1: interactive-only persistence rule)", i)
+		}
 	}
 }
 
@@ -253,20 +265,20 @@ func TestDeployNew_TierSkipOne_OnlySkipsThatTier(t *testing.T) {
 		Rationale: "General purpose model",
 		AgentKeys: []string{"planner"},
 	})
+	// "planner" must be in the workflow's ReferencedAgents so tier scoping includes MEDIUM.
+	// Without this, the Stage 2 filter excludes MEDIUM (no selected agent uses it) and the
+	// test would never reach the SkippedOne logic it is meant to verify.
+	cat.workflows = []domain.Workflow{{
+		ID:               "quick-fix",
+		Name:             "Quick Fix",
+		Description:      "Fix a quick issue",
+		Hint:             "Use for minor bugs",
+		Version:          "1.0",
+		Category:         "Build",
+		ReferencedAgents: []string{"test-runner", "planner"},
+	}}
 
-	stub := interactiontest.NewBuilder().
-		Build() // SkippedOne is the default for unscripted questions
-	// Script: HIGH skipped (default), MEDIUM answered
-	stub2 := interactiontest.NewBuilder().
-		AnswerSelectOne(domain.QTierModel, "HIGH", "").
-		AnswerSelectOne(domain.QTierModel, "MEDIUM", "model-a").
-		AnswerReview(true).
-		Build()
-	// Override HIGH to be SkippedOne by not scripting it (default)
-	// Override MEDIUM to be answered
-	_ = stub
-
-	deps, workspace := newBaseDeps(t, stub2)
+	deps, workspace := newBaseDeps(t, interactiontest.NewBuilder().Build())
 	deps.Catalog = cat
 	// Force HIGH to return SkippedOne by inserting a custom interaction
 	skipHighStub := &skipOneTierInteraction{
@@ -311,6 +323,18 @@ func TestDeployNew_TierSkipAll_StopsAskingRemainingTiers(t *testing.T) {
 		Rationale: "General purpose model",
 		AgentKeys: []string{"planner"},
 	})
+	// "planner" must be in the workflow's ReferencedAgents so tier scoping includes MEDIUM.
+	// Without this, MEDIUM would be excluded by the Stage 2 filter before SkippedAll even
+	// runs, causing the test to pass for the wrong reason.
+	cat.workflows = []domain.Workflow{{
+		ID:               "quick-fix",
+		Name:             "Quick Fix",
+		Description:      "Fix a quick issue",
+		Hint:             "Use for minor bugs",
+		Version:          "1.0",
+		Category:         "Build",
+		ReferencedAgents: []string{"test-runner", "planner"},
+	}}
 
 	stub := interactiontest.NewBuilder().
 		AnswerSkipAll(domain.QTierModel, "HIGH"). // SkippedAll on first tier

@@ -41,6 +41,10 @@ const (
 	// catalog.Agent. This is the fallback for agents with no numeric id, notably both
 	// orchestrator-role files.
 	MatchByFileNameKey AgentMatchKind = "filename-key"
+	// MatchByFileNameKeyParseFailed indicates the file's frontmatter could not be parsed,
+	// but the filename matched a catalog agent key. The file is identifiable as MOSAIC-managed
+	// despite the parse failure. NumericID is empty when this is the match kind.
+	MatchByFileNameKeyParseFailed AgentMatchKind = "filename-key-parse-failed"
 )
 
 // ScannedAgentMatch is one deployed file the workspace scan resolved to a catalog agent.
@@ -54,10 +58,14 @@ type ScannedAgentMatch struct {
 	// never from the file name, so a renamed deployed file carries its true catalog key.
 	AgentKey string
 	// NumericID is the frontmatter `id` scalar as written in the deployed file, or "" when absent.
+	// NumericID is always "" when ParseFailed is true (the id could not be extracted).
 	NumericID string
 	// MatchedBy records which mechanism resolved the match. Diagnostic and test-facing; it
 	// does not alter downstream behaviour.
 	MatchedBy AgentMatchKind
+	// ParseFailed is true when the file was matched by filename-key after a parse failure.
+	// When true, MatchedBy is MatchByFileNameKeyParseFailed and NumericID is empty.
+	ParseFailed bool
 }
 
 // WorkspaceAgentScan is the result of one classification pass over the harness's
@@ -154,9 +162,24 @@ func scanWorkspaceAgents(workspace, agentsDir string, c catalog.Catalog) Workspa
 			continue
 		}
 
-		// Parse the document. Unparseable bytes are skipped silently.
+		// Parse the document. Unparseable bytes trigger a filename-key fallback before skipping.
 		doc, err := docformat.Parse(data)
 		if err != nil {
+			// Parse failed — attempt filename-key fallback before skipping.
+			// If the filename matches a catalog agent, surface the file as parse-failed
+			// so it can be classified as CONFLICT downstream instead of silently skipped.
+			derivedKey := agentKeyFromFileName(name)
+			if agent, ok := c.Agent(derivedKey); ok {
+				targetPath := filepath.Join(agentsDir, name)
+				matched = append(matched, ScannedAgentMatch{
+					TargetPath:  targetPath,
+					FileName:    name,
+					AgentKey:    agent.Key,
+					NumericID:   "",
+					MatchedBy:   MatchByFileNameKeyParseFailed,
+					ParseFailed: true,
+				})
+			}
 			continue
 		}
 

@@ -53,18 +53,13 @@ func TestMissingRequiredFlags(t *testing.T) {
 		wantErr string
 	}{
 		{
-			name:    "missing orchestrator-file",
-			args:    []string{"run", "--workflow", "w1", "--task", "do work"},
-			wantErr: "--orchestrator-file",
-		},
-		{
 			name:    "missing workflow",
-			args:    []string{"run", "--orchestrator-file", "orch.md", "--task", "do work"},
+			args:    []string{"run", "--task", "do work"},
 			wantErr: "--workflow",
 		},
 		{
 			name:    "missing task",
-			args:    []string{"run", "--orchestrator-file", "orch.md", "--workflow", "w1"},
+			args:    []string{"run", "--workflow", "w1"},
 			wantErr: "--task",
 		},
 	}
@@ -94,7 +89,6 @@ func TestDefaultFlagValues(t *testing.T) {
 	// adds a store.SetPhase call on RunCompleted. A nil store would panic at that point.
 	code, _, _ := runCLIWithStore(t, []string{
 		"run",
-		"--orchestrator-file", "orch.md",
 		"--workflow", "my-workflow",
 		"--task", "do the work",
 		"--mode", "auto",
@@ -109,8 +103,9 @@ func TestDefaultFlagValues(t *testing.T) {
 	}
 
 	cfg := sess.config
-	if cfg.OrchestratorFilePath != "orch.md" {
-		t.Errorf("OrchestratorFilePath = %q, want %q", cfg.OrchestratorFilePath, "orch.md")
+	// HarnessID must default to "fake" (the default --harness value).
+	if cfg.HarnessID != "fake" {
+		t.Errorf("HarnessID = %q, want %q (default harness)", cfg.HarnessID, "fake")
 	}
 	if string(cfg.WorkflowID) != "my-workflow" {
 		t.Errorf("WorkflowID = %q, want %q", cfg.WorkflowID, "my-workflow")
@@ -132,7 +127,6 @@ func TestAllFlagsExplicitlySet(t *testing.T) {
 	sess := &scriptedSession{outcome: domain.RunOutcome{Status: domain.RunCompleted}}
 	code, _, _ := runCLI(t, []string{
 		"run",
-		"--orchestrator-file", "/path/to/orch.md",
 		"--workflow", "greenfield-tdd",
 		"--task", "build the feature",
 		"--allow-version-drift",
@@ -146,9 +140,6 @@ func TestAllFlagsExplicitlySet(t *testing.T) {
 	}
 
 	cfg := sess.config
-	if cfg.OrchestratorFilePath != "/path/to/orch.md" {
-		t.Errorf("OrchestratorFilePath = %q, want %q", cfg.OrchestratorFilePath, "/path/to/orch.md")
-	}
 	if string(cfg.WorkflowID) != "greenfield-tdd" {
 		t.Errorf("WorkflowID = %q, want %q", cfg.WorkflowID, "greenfield-tdd")
 	}
@@ -168,7 +159,6 @@ func TestAllFlagsExplicitlySet(t *testing.T) {
 func TestExitCodeMapping(t *testing.T) {
 	baseArgs := []string{
 		"run",
-		"--orchestrator-file", "orch.md",
 		"--workflow", "w1",
 		"--task", "t1",
 		"--mode", "auto",
@@ -274,7 +264,6 @@ func TestInvalidFlagValues(t *testing.T) {
 			sess := &scriptedSession{}
 			code, _, _ := runCLI(t, []string{
 				"run",
-				"--orchestrator-file", "f",
 				"--workflow", "w",
 				"--task", "t",
 				tt.extraArg, tt.extraVal,
@@ -346,7 +335,7 @@ func TestSessionError(t *testing.T) {
 	sess := &scriptedSession{err: fmt.Errorf("harness unavailable")}
 	code, _, errOut := runCLI(t, []string{
 		"run",
-		"--orchestrator-file", "orch.md",
+
 		"--workflow", "w1",
 		"--task", "t1",
 		"--mode", "auto",
@@ -547,7 +536,7 @@ func TestNewRunFlag_SetsIsNewRunTrue(t *testing.T) {
 	sess := &scriptedSession{outcome: domain.RunOutcome{Status: domain.RunCompleted}}
 	_, _, _ = runCLI(t, []string{
 		"run",
-		"--orchestrator-file", "orch.md",
+
 		"--workflow", "w1",
 		"--task", "do work",
 		"--mode", "auto",
@@ -583,7 +572,7 @@ func TestRunFlag_SetsRunID(t *testing.T) {
 	sess := &scriptedSession{outcome: domain.RunOutcome{Status: domain.RunCompleted}}
 	_, _, _ = runCLI(t, []string{
 		"run",
-		"--orchestrator-file", "orch.md",
+
 		"--workflow", "w1",
 		"--task", "do work",
 		"--mode", "auto",
@@ -616,7 +605,7 @@ func TestRunFlag_SetsIsNewRunFalse(t *testing.T) {
 	sess := &scriptedSession{outcome: domain.RunOutcome{Status: domain.RunCompleted}}
 	_, _, _ = runCLI(t, []string{
 		"run",
-		"--orchestrator-file", "orch.md",
+
 		"--workflow", "w1",
 		"--task", "do work",
 		"--mode", "auto",
@@ -649,7 +638,7 @@ func TestRunFlag_SetsRunFolder(t *testing.T) {
 	sess := &scriptedSession{outcome: domain.RunOutcome{Status: domain.RunCompleted}}
 	_, _, _ = runCLI(t, []string{
 		"run",
-		"--orchestrator-file", "orch.md",
+
 		"--workflow", "w1",
 		"--task", "do work",
 		"--mode", "auto",
@@ -675,7 +664,7 @@ func TestRunAndNewRunFlags_MutuallyExclusive(t *testing.T) {
 	sess := &scriptedSession{}
 	code, _, errOut := runCLI(t, []string{
 		"run",
-		"--orchestrator-file", "orch.md",
+
 		"--workflow", "w1",
 		"--task", "do work",
 		"--run", testRunID,
@@ -700,7 +689,7 @@ func TestExistingArtifactFlag_IsNoLongerRecognized(t *testing.T) {
 	sess := &scriptedSession{outcome: domain.RunOutcome{Status: domain.RunCompleted}}
 	code, _, errOut := runCLI(t, []string{
 		"run",
-		"--orchestrator-file", "orch.md",
+
 		"--workflow", "w1",
 		"--task", "do work",
 		"--existing-artifact", "resume",
@@ -715,12 +704,62 @@ func TestExistingArtifactFlag_IsNoLongerRecognized(t *testing.T) {
 	}
 }
 
+// TestOrchestratorFileFlag_IsNoLongerRecognized verifies that --orchestrator-file
+// is not recognised by the run subcommand after Stage 3 removal. cobra must
+// reject it as an unknown flag (ExitUsage), since orchestrator discovery is now
+// automatic from the harness's agents directory.
+func TestOrchestratorFileFlag_IsNoLongerRecognized(t *testing.T) {
+	sess := &scriptedSession{}
+	code, _, errOut := runCLI(t, []string{
+		"run",
+		"--workflow", "w1",
+		"--task", "do work",
+		"--orchestrator-file", "orch.md",
+	}, sess)
+
+	if code != cli.ExitUsage {
+		t.Errorf("--orchestrator-file: exit code = %d, want ExitUsage (%d) (flag must be removed)",
+			code, cli.ExitUsage)
+	}
+	if !strings.Contains(errOut, "unknown flag") && !strings.Contains(errOut, "orchestrator-file") {
+		t.Errorf("stderr %q does not indicate that --orchestrator-file is unknown", errOut)
+	}
+	if sess.called {
+		t.Error("session.Start must not be called when an unknown flag is supplied")
+	}
+}
+
+// TestHarnessID_InRunConfig verifies that the --harness flag value is propagated
+// to RunConfig.HarnessID so the session layer can use it for discovery and
+// snapshot creation.
+func TestHarnessID_InRunConfig(t *testing.T) {
+	sess := &scriptedSession{outcome: domain.RunOutcome{Status: domain.RunCompleted}}
+	code, _, errOut := runCLIWithStore(t, []string{
+		"run",
+		"--workflow", "w1",
+		"--task", "do work",
+		"--mode", "auto",
+		"--new-run",
+		"--harness", "fake",
+	}, &spyStore{}, sess)
+
+	if code != cli.ExitSuccess {
+		t.Fatalf("exit code = %d, want ExitSuccess; stderr: %q", code, errOut)
+	}
+	if !sess.called {
+		t.Fatal("session.Start was not called")
+	}
+	if sess.config.HarnessID != "fake" {
+		t.Errorf("HarnessID = %q, want %q", sess.config.HarnessID, "fake")
+	}
+}
+
 func TestArtifactLocationFlag_IsNoLongerRecognized(t *testing.T) {
 	// --artifact-location was removed in Stage 5; cobra must reject it as unknown.
 	sess := &scriptedSession{outcome: domain.RunOutcome{Status: domain.RunCompleted}}
 	code, _, errOut := runCLI(t, []string{
 		"run",
-		"--orchestrator-file", "orch.md",
+
 		"--workflow", "w1",
 		"--task", "do work",
 		"--artifact-location", "/some/path",
@@ -799,7 +838,7 @@ func TestRunFlag_TargetingCompletedRun_IsRejected(t *testing.T) {
 	sess := &scriptedSession{}
 	code, _, errOut := runCLI(t, []string{
 		"run",
-		"--orchestrator-file", "orch.md",
+
 		"--workflow", "w1",
 		"--task", "do work",
 		"--run", testRunID,
@@ -821,7 +860,7 @@ func TestRunFlag_InvalidFormat_IsRejected(t *testing.T) {
 	sess := &scriptedSession{}
 	code, _, errOut := runCLI(t, []string{
 		"run",
-		"--orchestrator-file", "orch.md",
+
 		"--workflow", "w1",
 		"--task", "do work",
 		"--run", "not-a-valid-run-id",
@@ -853,7 +892,7 @@ func TestRunFlag_NonExistentRun_IsRejected(t *testing.T) {
 	sess := &scriptedSession{}
 	code, _, errOut := runCLI(t, []string{
 		"run",
-		"--orchestrator-file", "orch.md",
+
 		"--workflow", "w1",
 		"--task", "do work",
 		"--run", testRunID,
@@ -895,7 +934,7 @@ func TestDefaultPath_ZeroCandidates_Refuses(t *testing.T) {
 	sess := &scriptedSession{}
 	code, _, errOut := runCLI(t, []string{
 		"run",
-		"--orchestrator-file", "orch.md",
+
 		"--workflow", "w1",
 		"--task", "do work",
 	}, sess)
@@ -933,7 +972,7 @@ func TestDefaultPath_OneCandidateWithNoFlag_Refuses(t *testing.T) {
 	sess := &scriptedSession{}
 	code, _, errOut := runCLI(t, []string{
 		"run",
-		"--orchestrator-file", "orch.md",
+
 		"--workflow", "w1",
 		"--task", "do work",
 	}, sess)
@@ -972,7 +1011,7 @@ func TestDefaultPath_MultipleCandidates_CLIRejectsWithRunIDList(t *testing.T) {
 	sess := &scriptedSession{}
 	code, _, errOut := runCLI(t, []string{
 		"run",
-		"--orchestrator-file", "orch.md",
+
 		"--workflow", "w1",
 		"--task", "do work",
 	}, sess)
@@ -1012,7 +1051,7 @@ func TestDefaultPath_MultipleCandidates_RefusalMentionsNewRunOption(t *testing.T
 	sess := &scriptedSession{}
 	code, _, errOut := runCLI(t, []string{
 		"run",
-		"--orchestrator-file", "orch.md",
+
 		"--workflow", "w1",
 		"--task", "do work",
 	}, sess)
@@ -1052,7 +1091,7 @@ func TestCOMPLETEDMarker_WrittenWhenRunCompleted(t *testing.T) {
 	}
 	code, _, _ := runCLIWithStore(t, []string{
 		"run",
-		"--orchestrator-file", "orch.md",
+
 		"--workflow", "w1",
 		"--task", "do work",
 		"--mode", "auto",
@@ -1078,7 +1117,7 @@ func TestCOMPLETEDMarker_NotWrittenWhenRunStopped(t *testing.T) {
 	}
 	runCLIWithStore(t, []string{
 		"run",
-		"--orchestrator-file", "orch.md",
+
 		"--workflow", "w1",
 		"--task", "do work",
 	}, spy, sess)
@@ -1096,7 +1135,7 @@ func TestCOMPLETEDMarker_NotWrittenWhenRunDeviationUnresolved(t *testing.T) {
 	}
 	runCLIWithStore(t, []string{
 		"run",
-		"--orchestrator-file", "orch.md",
+
 		"--workflow", "w1",
 		"--task", "do work",
 	}, spy, sess)
@@ -1114,7 +1153,7 @@ func TestCOMPLETEDMarker_NotWrittenWhenRunRefused(t *testing.T) {
 	}
 	runCLIWithStore(t, []string{
 		"run",
-		"--orchestrator-file", "orch.md",
+
 		"--workflow", "w1",
 		"--task", "do work",
 	}, spy, sess)
@@ -1132,7 +1171,7 @@ func TestCOMPLETEDMarker_NotWrittenWhenRunFailed(t *testing.T) {
 	}
 	runCLIWithStore(t, []string{
 		"run",
-		"--orchestrator-file", "orch.md",
+
 		"--workflow", "w1",
 		"--task", "do work",
 	}, spy, sess)
@@ -1156,7 +1195,7 @@ func TestCOMPLETEDMarker_NotWrittenWhenRunStoppedByConsultant(t *testing.T) {
 	}
 	runCLIWithStore(t, []string{
 		"run",
-		"--orchestrator-file", "orch.md",
+
 		"--workflow", "w1",
 		"--task", "do work",
 	}, spy, sess)
@@ -1176,7 +1215,7 @@ func TestCOMPLETEDMarker_NotWrittenWhenRunStoppedByConsultant(t *testing.T) {
 func baseHarnessArgs() []string {
 	return []string{
 		"run",
-		"--orchestrator-file", "orch.md",
+
 		"--workflow", "w1",
 		"--task", "do work",
 		"--mode", "auto",
@@ -1198,9 +1237,40 @@ func TestHarnessFlag_FakeAccepted(t *testing.T) {
 	}
 }
 
+// setupCLIHarnessWorkDir creates a temp working directory with the orchestrator
+// file at the path expected by the given harness, changes the process working
+// directory to it, and registers a cleanup to restore the original directory.
+// Must be called from a test function (not a goroutine).
+func setupCLIHarnessWorkDir(t *testing.T, harnessID string) {
+	t.Helper()
+	entry, ok := commonharness.LookupCLIHarness(harnessID)
+	if !ok {
+		t.Skipf("setupCLIHarnessWorkDir: %q is not a CLI harness", harnessID)
+		return
+	}
+	workDir := t.TempDir()
+	agentsDirFull := filepath.Join(workDir, entry.AgentsDir)
+	if err := os.MkdirAll(agentsDirFull, 0o755); err != nil {
+		t.Fatalf("setupCLIHarnessWorkDir: mkdir %q: %v", agentsDirFull, err)
+	}
+	orchPath := filepath.Join(agentsDirFull, "orchestrator-script.md")
+	if err := os.WriteFile(orchPath, []byte("# orchestrator\n"), 0o644); err != nil {
+		t.Fatalf("setupCLIHarnessWorkDir: write %q: %v", orchPath, err)
+	}
+	origDir, err := os.Getwd()
+	if err != nil {
+		t.Fatalf("setupCLIHarnessWorkDir: getwd: %v", err)
+	}
+	if err := os.Chdir(workDir); err != nil {
+		t.Fatalf("setupCLIHarnessWorkDir: chdir %q: %v", workDir, err)
+	}
+	t.Cleanup(func() { _ = os.Chdir(origDir) })
+}
+
 // TestHarnessFlag_ClaudeCodeAccepted verifies that --harness claude-code is accepted
 // and the session is started normally.
 func TestHarnessFlag_ClaudeCodeAccepted(t *testing.T) {
+	setupCLIHarnessWorkDir(t, "claude-code")
 	sess := &scriptedSession{outcome: domain.RunOutcome{Status: domain.RunCompleted}}
 	args := append(baseHarnessArgs(), "--harness", "claude-code")
 	code, _, errOut := runCLIWithStore(t, args, &spyStore{}, sess)
@@ -1209,6 +1279,40 @@ func TestHarnessFlag_ClaudeCodeAccepted(t *testing.T) {
 	}
 	if !sess.called {
 		t.Error("session.Start was not called for --harness claude-code")
+	}
+}
+
+// TestHarnessFlag_ClaudeCodeRefusedWhenOrchestratorFileAbsent verifies that the
+// CLI refuses with a non-zero exit code when --harness claude-code is used but
+// the expected orchestrator-script.md is absent from the working directory. The
+// error message must name the harness ID or expected file path so the user can
+// diagnose the problem (AC3.4, CLI integration side).
+func TestHarnessFlag_ClaudeCodeRefusedWhenOrchestratorFileAbsent(t *testing.T) {
+	// Use a clean temp directory — no agents directory or orchestrator file created.
+	rootDir := t.TempDir()
+	origDir, err := os.Getwd()
+	if err != nil {
+		t.Fatalf("os.Getwd: %v", err)
+	}
+	if err := os.Chdir(rootDir); err != nil {
+		t.Fatalf("os.Chdir: %v", err)
+	}
+	t.Cleanup(func() { _ = os.Chdir(origDir) })
+
+	sess := &scriptedSession{}
+	args := append(baseHarnessArgs(), "--harness", "claude-code")
+	code, _, errOut := runCLIWithStore(t, args, &spyStore{}, sess)
+
+	if code != cli.ExitRefused && code != cli.ExitUsage {
+		t.Errorf("exit code = %d, want ExitRefused (%d) or ExitUsage (%d) when orchestrator file is absent",
+			code, cli.ExitRefused, cli.ExitUsage)
+	}
+	if !strings.Contains(errOut, "claude-code") && !strings.Contains(errOut, "orchestrator-script") {
+		t.Errorf("stderr %q does not mention the harness ID or expected file; "+
+			"error must be actionable", errOut)
+	}
+	if sess.called {
+		t.Error("session.Start must not be called when the orchestrator file is absent")
 	}
 }
 
@@ -1251,6 +1355,7 @@ func TestHarnessFlag_UnknownRejectsWithUsageError(t *testing.T) {
 // accepted and the session is started normally, mirroring
 // TestHarnessFlag_ClaudeCodeAccepted for the new catalog entry.
 func TestHarnessFlag_OpenCodeAccepted(t *testing.T) {
+	setupCLIHarnessWorkDir(t, "opencode")
 	sess := &scriptedSession{outcome: domain.RunOutcome{Status: domain.RunCompleted}}
 	args := append(baseHarnessArgs(), "--harness", "opencode")
 	code, _, errOut := runCLIWithStore(t, args, &spyStore{}, sess)
@@ -1267,15 +1372,19 @@ func TestHarnessFlag_OpenCodeAccepted(t *testing.T) {
 // addition is accepted here without an edit to this test or to run.go.
 func TestHarnessFlag_EveryCatalogEntryAccepted(t *testing.T) {
 	for _, entry := range commonharness.CLIHarnesses() {
-		sess := &scriptedSession{outcome: domain.RunOutcome{Status: domain.RunCompleted}}
-		args := append(baseHarnessArgs(), "--harness", entry.ID)
-		code, _, errOut := runCLIWithStore(t, args, &spyStore{}, sess)
-		if code != cli.ExitSuccess {
-			t.Errorf("--harness %s: exit code = %d, want ExitSuccess (%d); stderr: %q", entry.ID, code, cli.ExitSuccess, errOut)
-		}
-		if !sess.called {
-			t.Errorf("--harness %s: session.Start was not called", entry.ID)
-		}
+		entry := entry
+		t.Run(entry.ID, func(t *testing.T) {
+			setupCLIHarnessWorkDir(t, entry.ID)
+			sess := &scriptedSession{outcome: domain.RunOutcome{Status: domain.RunCompleted}}
+			args := append(baseHarnessArgs(), "--harness", entry.ID)
+			code, _, errOut := runCLIWithStore(t, args, &spyStore{}, sess)
+			if code != cli.ExitSuccess {
+				t.Errorf("--harness %s: exit code = %d, want ExitSuccess (%d); stderr: %q", entry.ID, code, cli.ExitSuccess, errOut)
+			}
+			if !sess.called {
+				t.Errorf("--harness %s: session.Start was not called", entry.ID)
+			}
+		})
 	}
 }
 
@@ -1492,7 +1601,7 @@ func TestInputFlag_ZeroOccurrences_SeedInputsIsNil(t *testing.T) {
 	sess := &scriptedSession{outcome: domain.RunOutcome{Status: domain.RunCompleted}}
 	code, _, _ := runCLIWithStore(t, []string{
 		"run",
-		"--orchestrator-file", "orch.md",
+
 		"--workflow", "w1",
 		"--task", "do work",
 		"--mode", "auto",
@@ -1517,7 +1626,7 @@ func TestInputFlag_OneOccurrence_SingleValueReachesSeedInputs(t *testing.T) {
 	sess := &scriptedSession{outcome: domain.RunOutcome{Status: domain.RunCompleted}}
 	code, _, errOut := runCLIWithStore(t, []string{
 		"run",
-		"--orchestrator-file", "orch.md",
+
 		"--workflow", "w1",
 		"--task", "do work",
 		"--mode", "auto",
@@ -1545,7 +1654,7 @@ func TestInputFlag_MultipleOccurrences_AllValuesReachSeedInputsInOrder(t *testin
 	sess := &scriptedSession{outcome: domain.RunOutcome{Status: domain.RunCompleted}}
 	code, _, errOut := runCLIWithStore(t, []string{
 		"run",
-		"--orchestrator-file", "orch.md",
+
 		"--workflow", "w1",
 		"--task", "do work",
 		"--mode", "auto",
@@ -1580,7 +1689,7 @@ func TestInputFlag_PathWithSpaces_PreservedVerbatim(t *testing.T) {
 	sess := &scriptedSession{outcome: domain.RunOutcome{Status: domain.RunCompleted}}
 	code, _, errOut := runCLIWithStore(t, []string{
 		"run",
-		"--orchestrator-file", "orch.md",
+
 		"--workflow", "w1",
 		"--task", "do work",
 		"--mode", "auto",
@@ -1609,7 +1718,7 @@ func TestInputFlag_PathWithComma_PreservedVerbatim(t *testing.T) {
 	sess := &scriptedSession{outcome: domain.RunOutcome{Status: domain.RunCompleted}}
 	code, _, errOut := runCLIWithStore(t, []string{
 		"run",
-		"--orchestrator-file", "orch.md",
+
 		"--workflow", "w1",
 		"--task", "do work",
 		"--mode", "auto",
@@ -1661,7 +1770,7 @@ func TestInputAndRunFlags_MutuallyExclusive_RejectsWithUsageError(t *testing.T) 
 	sess := &scriptedSession{}
 	code, _, errOut := runCLI(t, []string{
 		"run",
-		"--orchestrator-file", "orch.md",
+
 		"--workflow", "w1",
 		"--task", "do work",
 		"--input", "/some/seed.md",
@@ -1688,7 +1797,7 @@ func TestInputAndRunFlags_MutuallyExclusive_ErrorNamesInputFlag(t *testing.T) {
 	sess := &scriptedSession{}
 	_, _, errOut := runCLI(t, []string{
 		"run",
-		"--orchestrator-file", "orch.md",
+
 		"--workflow", "w1",
 		"--task", "do work",
 		"--input", "/some/seed.md",
@@ -1715,7 +1824,7 @@ func TestInputAndRunFlags_MutuallyExclusive_ErrorNamesRunFlag(t *testing.T) {
 	sess := &scriptedSession{}
 	_, _, errOut := runCLI(t, []string{
 		"run",
-		"--orchestrator-file", "orch.md",
+
 		"--workflow", "w1",
 		"--task", "do work",
 		"--input", "/some/seed.md",
@@ -1747,7 +1856,7 @@ func TestAnnouncement_NewRun_StatedBeforeDispatch(t *testing.T) {
 	sess := &scriptedSession{outcome: domain.RunOutcome{Status: domain.RunCompleted}}
 	code, stdout, errOut := runCLIWithStore(t, []string{
 		"run",
-		"--orchestrator-file", "orch.md",
+
 		"--workflow", "w1",
 		"--task", "do work",
 		"--mode", "auto",
@@ -1789,7 +1898,7 @@ func TestAnnouncement_ResumedRun_ContainsPosition(t *testing.T) {
 	sess := &scriptedSession{outcome: domain.RunOutcome{Status: domain.RunCompleted}}
 	code, stdout, errOut := runCLIWithStore(t, []string{
 		"run",
-		"--orchestrator-file", "orch.md",
+
 		"--workflow", "w1",
 		"--task", "do work",
 		"--mode", "auto",
@@ -1830,7 +1939,7 @@ func TestAnnouncement_ResumedRun_ContainsPosition(t *testing.T) {
 func newStage7BaseArgs() []string {
 	return []string{
 		"run",
-		"--orchestrator-file", "orch.md",
+
 		"--workflow", "w1",
 		"--task", "do work",
 		"--mode", "auto",
@@ -1847,7 +1956,7 @@ func TestModeFlag_Absent_ProducesRefusal(t *testing.T) {
 	sess := &scriptedSession{}
 	code, _, errOut := runCLI(t, []string{
 		"run",
-		"--orchestrator-file", "orch.md",
+
 		"--workflow", "w1",
 		"--task", "do work",
 		"--new-run",
@@ -1878,7 +1987,7 @@ func TestModeFlag_ValidValues_AreAccepted(t *testing.T) {
 			sess := &scriptedSession{outcome: domain.RunOutcome{Status: domain.RunCompleted}}
 			args := []string{
 				"run",
-				"--orchestrator-file", "orch.md",
+		
 				"--workflow", "w1",
 				"--task", "do work",
 				"--mode", mode,
@@ -1902,7 +2011,7 @@ func TestModeFlag_UnrecognisedValue_ProducesRefusal(t *testing.T) {
 	sess := &scriptedSession{}
 	code, _, errOut := runCLI(t, []string{
 		"run",
-		"--orchestrator-file", "orch.md",
+
 		"--workflow", "w1",
 		"--task", "do work",
 		"--mode", "quick",
@@ -2082,7 +2191,7 @@ func TestModeFlag_Orchestrated_ReachesRunSettings(t *testing.T) {
 	sess := &scriptedSession{outcome: domain.RunOutcome{Status: domain.RunCompleted}}
 	args := []string{
 		"run",
-		"--orchestrator-file", "orch.md",
+
 		"--workflow", "w1",
 		"--task", "do work",
 		"--mode", "orchestrated",
@@ -2103,7 +2212,7 @@ func TestModeFlag_Auto_ReachesRunSettings(t *testing.T) {
 	sess := &scriptedSession{outcome: domain.RunOutcome{Status: domain.RunCompleted}}
 	args := []string{
 		"run",
-		"--orchestrator-file", "orch.md",
+
 		"--workflow", "w1",
 		"--task", "do work",
 		"--mode", "auto",
@@ -2124,7 +2233,7 @@ func TestModeFlag_AutoReview_ReachesRunSettings(t *testing.T) {
 	sess := &scriptedSession{outcome: domain.RunOutcome{Status: domain.RunCompleted}}
 	args := []string{
 		"run",
-		"--orchestrator-file", "orch.md",
+
 		"--workflow", "w1",
 		"--task", "do work",
 		"--mode", "auto-review",
@@ -2195,18 +2304,35 @@ func TestCommitBranchFlag_UserOwn_ReachesRunSettings(t *testing.T) {
 	}
 }
 
-// TestCommitBranchFlag_DefaultIsMOSAICOwned_WhenOmitted verifies that omitting
-// --commit-branch leaves CommitBranchVariant at CommitBranchMOSAICOwned, the
-// documented default.
-func TestCommitBranchFlag_DefaultIsMOSAICOwned_WhenOmitted(t *testing.T) {
+// TestCommitBranchFlag_DefaultIsMOSAICOwned_WhenOmittedAndCommitsEnabled verifies
+// that omitting --commit-branch when --commits enabled leaves CommitBranchVariant
+// at CommitBranchMOSAICOwned, the documented default for commits-enabled runs.
+func TestCommitBranchFlag_DefaultIsMOSAICOwned_WhenOmittedAndCommitsEnabled(t *testing.T) {
 	sess := &scriptedSession{outcome: domain.RunOutcome{Status: domain.RunCompleted}}
-	_, _, _ = runCLI(t, newStage7BaseArgs(), sess)
+	_, _, _ = runCLI(t, append(newStage7BaseArgs(), "--commits", "enabled"), sess)
 	if !sess.called {
 		t.Fatal("session.Start was not called")
 	}
 	if sess.config.CommitBranchVariant != domain.CommitBranchMOSAICOwned {
-		t.Errorf("CommitBranchVariant = %q, want default %q",
+		t.Errorf("CommitBranchVariant = %q, want default %q when --commits enabled and --commit-branch omitted",
 			sess.config.CommitBranchVariant, domain.CommitBranchMOSAICOwned)
+	}
+}
+
+// TestCommitBranchVariant_IsEmpty_WhenCommitsDisabledAndBranchOmitted verifies
+// that when --commits is disabled (or omitted, since disabled is the default)
+// and --commit-branch is not specified, RunSettings.CommitBranchVariant is
+// the zero value (empty string), not mosaic-owned.
+// RED: current implementation defaults to mosaic-owned regardless of --commits.
+func TestCommitBranchVariant_IsEmpty_WhenCommitsDisabledAndBranchOmitted(t *testing.T) {
+	sess := &scriptedSession{outcome: domain.RunOutcome{Status: domain.RunCompleted}}
+	_, _, _ = runCLI(t, append(newStage7BaseArgs(), "--commits", "disabled"), sess)
+	if !sess.called {
+		t.Fatal("session.Start was not called")
+	}
+	if sess.config.CommitBranchVariant != "" {
+		t.Errorf("CommitBranchVariant = %q, want %q (zero value) when --commits disabled and --commit-branch omitted",
+			sess.config.CommitBranchVariant, "")
 	}
 }
 
@@ -2316,7 +2442,7 @@ func TestOnDeviationFlag_IsRejectedAsUnknown(t *testing.T) {
 	sess := &scriptedSession{}
 	code, _, errOut := runCLI(t, []string{
 		"run",
-		"--orchestrator-file", "orch.md",
+
 		"--workflow", "w1",
 		"--task", "do work",
 		"--mode", "auto",
@@ -2483,7 +2609,6 @@ func TestRunFlagSpecs_PreConsultIsBoolean(t *testing.T) {
 // RED: RunFlagSpecs currently panics.
 func TestRunFlagSpecs_KnownArities(t *testing.T) {
 	wantValueBearing := []string{
-		"--orchestrator-file",
 		"--workflow",
 		"--task",
 		"--mode",
@@ -2542,7 +2667,6 @@ func TestRunFlagSpecs_KnownArities(t *testing.T) {
 // RED: ValueBearingFlagNames currently panics.
 func TestValueBearingFlagNames_ContainsExpectedFlags(t *testing.T) {
 	wantPresent := []string{
-		"--orchestrator-file",
 		"--workflow",
 		"--task",
 		"--mode",
@@ -2555,6 +2679,7 @@ func TestValueBearingFlagNames_ContainsExpectedFlags(t *testing.T) {
 		"--claude-path",
 		"--infra-class",
 		"--input",
+		"--ghcp-permission-mode",
 	}
 
 	names := cli.ValueBearingFlagNames()

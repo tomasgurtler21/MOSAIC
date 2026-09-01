@@ -16,7 +16,7 @@ func newSandbox(t *testing.T, dir string) domain.Sandbox {
 	t.Helper()
 
 	sb := domain.Sandbox{
-		Key:        domain.RunKey{RunID: "claudecode-test-run", TestID: "claudecode-test", RunNumber: 1},
+		Key:        domain.RunKey{RunID: "claudecode-test-run", TestName: "claudecode-test", RunNumber: 1},
 		Root:       dir,
 		SubjectDir: filepath.Join(dir, "subject"),
 		ControlDir: filepath.Join(dir, "control"),

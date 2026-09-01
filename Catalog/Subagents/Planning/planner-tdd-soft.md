@@ -1,6 +1,6 @@
 ---
 id: 6
-version: 7.2.0
+version: 7.2.1
 name: planner-tdd-soft
 description: Creates implementation plans with per-stage context isolation (Plan.md routing artifact + Stage-{N}/Plan.md + Stage-{N}/PlanProgress.md) following TDD principles when feasible - breaking down requirements into test-first stages with unique IDs, clear sequencing, and immutable tracking
 role: subagent
@@ -204,7 +204,7 @@ Every task and acceptance criterion MUST have a unique ID.
 ```markdown
 # Plan: [Feature Name]
 
-> ⚠️ **IMMUTABLE ARTIFACT** - This file is READ-ONLY for all agents except Planner.
+> [WARN] **IMMUTABLE ARTIFACT** - This file is READ-ONLY for all agents except Planner.
 > **Exception:** User may modify HITL column during plan review.
 > Detailed stage plans are in Stage-{N}/Plan.md. Progress is tracked in Stage-{N}/PlanProgress.md.
 
@@ -215,10 +215,10 @@ Every task and acceptance criterion MUST have a unique ID.
 
 | Stage | Name | Goal | Depends On | HITL | Approach |
 |-------|------|------|------------|:----:|----------|
-| 1 | [Stage Name] | [One-liner goal] | - | ❌ | TDD |
-| 2 | [Stage Name] | [One-liner goal] | - | ❌ | Implementation-Only |
-| 3 | [Stage Name] | [One-liner goal] | 1 | ✅ | Implementation-First |
-| 4 | [Stage Name] | [One-liner goal] | 2, 3 | ❌ | TDD |
+| 1 | [Stage Name] | [One-liner goal] | - | FALSE | TDD |
+| 2 | [Stage Name] | [One-liner goal] | - | FALSE | Implementation-Only |
+| 3 | [Stage Name] | [One-liner goal] | 1 | TRUE | Implementation-First |
+| 4 | [Stage Name] | [One-liner goal] | 2, 3 | FALSE | TDD |
 
 ## Unresolved Questions
 <!-- Empty = plan is complete. If questions exist, return PARTIALLY_DONE or NEEDS_CLARIFICATION. -->
@@ -227,9 +227,9 @@ Every task and acceptance criterion MUST have a unique ID.
 #### Stage HITL Field
 
 The HITL column in Plan.md's stage table controls human-in-the-loop per stage:
-- Is always set to ❌ by the Planner
-- May be changed to ✅ by the user during plan review (when Planner has HITL enabled)
-- When ✅, triggers human-in-the-loop for ALL agents executing within that stage
+- Is always set to FALSE by the Planner
+- May be changed to TRUE by the user during plan review (when Planner has HITL enabled)
+- When TRUE, triggers human-in-the-loop for ALL agents executing within that stage
 - Is additive with workflow-level HITL (stage HITL can only add oversight, never reduce it)
 - Lives in Plan.md (not per-stage files) so the orchestrator can read it without loading stage details
 
@@ -245,7 +245,7 @@ The "Depends On" column in Plan.md's stage table defines inter-stage dependencie
 ```markdown
 # Stage {N}: [Stage Name]
 
-> ⚠️ **IMMUTABLE ARTIFACT** - This file is READ-ONLY for all agents except Planner.
+> [WARN] **IMMUTABLE ARTIFACT** - This file is READ-ONLY for all agents except Planner.
 > Track progress in Stage-{N}/PlanProgress.md instead.
 > **IDs are orchestration-internal.** Task IDs, AC IDs, and stage numbers are for progress tracking only. Do NOT embed them anywhere in project files.
 
@@ -286,7 +286,7 @@ The "Depends On" column in Plan.md's stage table defines inter-stage dependencie
 ```markdown
 # Stage {N}: [Stage Name]
 
-> ⚠️ **IMMUTABLE ARTIFACT** - This file is READ-ONLY for all agents except Planner.
+> [WARN] **IMMUTABLE ARTIFACT** - This file is READ-ONLY for all agents except Planner.
 > Track progress in Stage-{N}/PlanProgress.md instead.
 > **IDs are orchestration-internal.** Task IDs, AC IDs, and stage numbers are for progress tracking only. Do NOT embed them anywhere in project files.
 
@@ -329,7 +329,7 @@ The "Depends On" column in Plan.md's stage table defines inter-stage dependencie
 ```markdown
 # Stage {N}: [Stage Name]
 
-> ⚠️ **IMMUTABLE ARTIFACT** - This file is READ-ONLY for all agents except Planner.
+> [WARN] **IMMUTABLE ARTIFACT** - This file is READ-ONLY for all agents except Planner.
 > Track progress in Stage-{N}/PlanProgress.md instead.
 > **IDs are orchestration-internal.** Task IDs, AC IDs, and stage numbers are for progress tracking only. Do NOT embed them anywhere in project files.
 
@@ -367,7 +367,7 @@ The "Depends On" column in Plan.md's stage table defines inter-stage dependencie
 ```markdown
 # Stage {N}: [Stage Name]
 
-> ⚠️ **IMMUTABLE ARTIFACT** - This file is READ-ONLY for all agents except Planner.
+> [WARN] **IMMUTABLE ARTIFACT** - This file is READ-ONLY for all agents except Planner.
 > Track progress in Stage-{N}/PlanProgress.md instead.
 > **IDs are orchestration-internal.** Task IDs, AC IDs, and stage numbers are for progress tracking only. Do NOT embed them anywhere in project files.
 
@@ -404,7 +404,7 @@ This template mirrors the Stage-{N}/Plan.md structure with checkboxes. Adapt sec
 ```markdown
 # Stage {N} Progress: [Stage Name]
 
-> ⚠️ **PROGRESS TRACKING** - Only CHECKBOXES are mutable in this file.
+> [WARN] **PROGRESS TRACKING** - Only CHECKBOXES are mutable in this file.
 > Do NOT modify task IDs or descriptions. Reference Stage-{N}/Plan.md for authoritative definitions.
 
 ### Tests

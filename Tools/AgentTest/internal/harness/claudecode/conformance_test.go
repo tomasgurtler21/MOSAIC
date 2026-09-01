@@ -82,6 +82,31 @@ func conformanceNativeCompletion(observed string) []byte {
 	return b
 }
 
+// conformanceNativeAgentStart synthesises a native SubagentStart payload for
+// agentID. This is the in-session agent-start signal the harness fires after a
+// dispatch is issued and before the collaborator finishes.
+func conformanceNativeAgentStart(agentID string) []byte {
+	b, _ := json.Marshal(claudecode.AgentStartPayload{
+		HookEventName: "SubagentStart",
+		AgentID:       agentID,
+		AgentType:     "subagent",
+	})
+	return b
+}
+
+// conformanceNativeCompletionForAgent synthesises a native SubagentStop
+// payload attributed to agentID, carrying observed as the collaborator's real
+// reply. It is distinct from conformanceNativeCompletion, which carries no
+// agent identifier and is used only for the capability-honesty check.
+func conformanceNativeCompletionForAgent(agentID, observed string) []byte {
+	b, _ := json.Marshal(claudecode.CompletionPayload{
+		HookEventName:        "SubagentStop",
+		AgentID:              agentID,
+		LastAssistantMessage: observed,
+	})
+	return b
+}
+
 func conformanceObserve(t *testing.T, native []byte) contract.ObservedEffect {
 	t.Helper()
 	var reply claudecode.HookReply
@@ -116,10 +141,12 @@ func newConformanceConfig() contract.Config {
 		New: func(t *testing.T, dir string) domain.HarnessAdapter {
 			return claudecode.New(claudecode.Options{})
 		},
-		NativePre:        conformanceNativePre,
-		NativePost:       conformanceNativePost,
-		NativeCompletion: conformanceNativeCompletion,
-		Observe:          conformanceObserve,
+		NativePre:                conformanceNativePre,
+		NativePost:               conformanceNativePost,
+		NativeCompletion:         conformanceNativeCompletion,
+		NativeAgentStart:         conformanceNativeAgentStart,
+		NativeCompletionForAgent: conformanceNativeCompletionForAgent,
+		Observe:                  conformanceObserve,
 		Subject: domain.SubjectUnderTest{
 			Identity:       "orchestrator",
 			DefinitionPath: "agents/orchestrator.md",

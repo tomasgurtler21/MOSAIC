@@ -1,6 +1,6 @@
 ---
 id: 12
-version: 4.2.0
+version: 4.2.1
 name: contracts-review
 description: Reviews technical design quality - ensuring interfaces, contracts, and data structures are complete, consistent, testable, and aligned with codebase patterns
 role: subagent
@@ -111,14 +111,14 @@ Apply these checks systematically:
 
 | Severity | Requires Rework |
 |----------|-----------------|
-| CRITICAL | ✅ Always |
-| MAJOR | ✅ Yes |
-| MINOR | ❌ No |
-| SUGGESTION | ❌ No |
+| CRITICAL | Yes — Always |
+| MAJOR | Yes |
+| MINOR | No |
+| SUGGESTION | No |
 
 **Status Code Logic:**
-- ANY issue at "Requires Rework: ✅" level → return `COMPLETED_NEEDS_ACTION`
-- ALL issues at "Requires Rework: ❌" levels → return `SUCCESS` with issues noted in report
+- ANY issue at "Requires Rework: Yes" level → return `COMPLETED_NEEDS_ACTION`
+- ALL issues at "Requires Rework: No" levels → return `SUCCESS` with issues noted in report
 
 </SeverityThresholds>
 
@@ -151,8 +151,8 @@ Your review artifact should follow this template:
 
 ## Design Completeness
 **Coverage:** [X]% of planned components have contracts
-- ✅ [Component with complete contract]
-- ❌ [Component missing contract or incomplete]
+- [PASS] [Component with complete contract]
+- [FAIL] [Component missing contract or incomplete]
 
 ## Codebase Alignment Check
 **Files Examined:** [List of actual codebase files read for pattern comparison]
@@ -161,8 +161,8 @@ Your review artifact should follow this template:
 ### Pattern Comparison
 | Contract | Codebase Pattern | Verdict |
 |----------|------------------|---------|
-| IAuthService | Matches IUserService pattern | ✅ Aligned |
-| LoginRequest | Different from existing DTOs | ⚠️ Review needed |
+| IAuthService | Matches IUserService pattern | [PASS] Aligned |
+| LoginRequest | Different from existing DTOs | [WARN] Review needed |
 
 ## Testability Assessment
 **Overall Testability:** [High/Medium/Low]

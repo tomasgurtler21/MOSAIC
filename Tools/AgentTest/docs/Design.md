@@ -45,7 +45,7 @@ These use cases all require full control over every variable: which orchestrator
 | **Execution & Evaluation** | Complete — sandbox lifecycle, evidence assembly, pure verdict engine, repetitions, pass-rate aggregation | `internal/runner/`, `internal/suite/`, `internal/evaluate/`, `internal/concurrency/`, `internal/protocolcheck/`, `internal/orchstate/`, `internal/cost/` |
 | **Reporting** | Complete — single `report.Result` model, text + JSON renderings | `internal/report/` |
 | **Frontends** | CLI + TUI (bubbletea) | `internal/cli/`, `internal/tui/` |
-| **Deploy Integration** | Partial — `domain.AgentDeployer` port delegates to `mosaic-deploy render` subprocess (works for single-agent rendering). Port needs `--catalog-folder` wiring and a `Deploy` method for single-call catalogue deployment (§6) | `internal/agentdeploy/` |
+| **Deploy Integration** | Partial — `domain.AgentDeployer` port delegates to `mosaic-deploy render` subprocess (works for single-agent rendering). Port needs `--catalog-folder` wiring and a `Deploy` method for single-call catalogue deployment (§7) | `internal/agentdeploy/` |
 | **Architecture Enforcement** | Complete — static import-layer checker | `tools/importcheck/` |
 | **Stub Agent Definitions** | 4 generic-form stubs | `agents/` |
 | **Example Suites** | `examples/` (fake harness, exercised by Go e2e tests), `tests/first-run/` (real claude-code harness) | `examples/`, `tests/first-run/` |
@@ -152,7 +152,11 @@ To test whether an orchestrator handles a specific routing condition correctly:
 
 4. **A stub registry** (`tests/<suite>/<test>.stubs.json`) — declares what each collaborator returns when intercepted. This is where the routing condition is created.
 
-5. **A test definition** (`tests/<suite>/<test>.test.yaml`) — ties everything together: names the subject, the workflow(s), the stub registry, seed files, and assertions.
+5. **A test definition** (`tests/<suite>/<test>.test.yaml`) — ties everything together: names the subject, the workflow(s), the stub registry, seed files, and assertions. Each test definition carries four identity and versioning fields:
+   - `name` (string) — the human-readable display name, also what the stub registry's `test_id` field must match
+   - `id` (integer) — a stable numeric identity, unique across all test definitions in the repository, never reused even if the test is renamed or deleted
+   - `version` (integer) — the content version, starting at `1` and incremented by the author when assertions, stubs, fixtures, or seed files change
+   - `changelog` (list) — version history entries recording when and why `version` was bumped; must contain an entry matching the current `version`
 
 6. **A suite file** (`tests/<suite>/<suite>.suite.yaml`) — groups test definitions with shared defaults (timeout, repetitions, pass rate).
 
@@ -231,11 +235,120 @@ Available assertion classes, all evaluated from the evidence snapshot:
 
 Plus **echo fidelity** — evaluated unconditionally on every run, never declared, never invertible. Every stubbed collaborator's observed response must match the declared stub response exactly.
 
+### 4.4 Task Message Assertions and Artifact Set Semantics
+
+The `task_messages` assertion class inspects individual task invocation messages recorded by the interception pipeline. Each entry targets a specific dispatch (by ordinal position) and can assert on several fields:
+
+| Field | What it checks |
+|-------|---------------|
+| `identity` | The collaborator identity (`tool`/`agent`) matches |
+| `human_in_the_loop` | The HITL flag matches the declared value |
+| `required_input_artifacts` | Every listed artifact must be present in the dispatch's `input_artifacts` |
+| `optional_input_artifacts` | These artifacts may be present but are not required |
+| `required_output_artifacts` | Every listed artifact must be present in the dispatch's `output_artifacts` |
+| `optional_output_artifacts` | These artifacts may be present but are not required |
+| `task_description_contains` | The task description contains all listed substrings |
+
+**Artifact set evaluation is closed.** When `required_input_artifacts` or `optional_input_artifacts` is declared (either one, or both), the evaluator applies closed-set semantics to the observed artifact list. Specifically:
+
+1. Every artifact in the `required` list must appear in the observed list. Any missing required artifact fails the assertion.
+2. Artifacts in the `optional` list may appear in the observed list or not -- neither case affects the outcome.
+3. **Any observed artifact that appears in neither the required nor the optional list fails the assertion.** The observed set is not open-ended; every artifact the orchestrator passes must be accounted for in one of the two declared lists.
+
+This means a test author must anticipate every artifact the orchestrator might reasonably include. Omitting an artifact from both lists does not silently ignore it -- it causes a hard failure with the detail message: `"input artifact(s) in neither the required nor the optional set: {path}"`. When a test is about one specific routing concern (e.g. wildcard expansion) but the dispatch may carry artifacts unrelated to that concern, those artifacts belong in the `optional` list so the test does not fail for reasons outside its scope.
+
+**When neither list is declared** for a given direction (input or output), the evaluator skips that check entirely -- no artifact assertion is produced for that direction, and the orchestrator may pass whatever it wants.
+
+### 4.5 Report Fields for Test Identity and Versioning
+
+The report JSON emitted after a suite run carries the test identity and versioning fields through all levels:
+
+**Per-test aggregate (one entry per test definition in the suite):**
+- `test_name` — the test definition's `name` field (human-readable display name; renamed from `test_id` in prior schema versions)
+- `test_id` — the test definition's numeric `id` (stable numeric identity)
+- `description`, `layer` — unchanged
+
+**Per-run (one entry per repetition of a test):**
+- `run.test_name` — the test definition's `name` (in the run key)
+- `test_version` — the test definition's `version` at the time the run was executed
+- `test_id` (integer) — the test definition's numeric `id`
+
+These fields feed the results storage and summary system. The numeric `test_id` allows the summary generator to track a test across renames (when `test_name` changes but `test_id` stays the same). The `test_version` allows the summary generator to flag stored results that were collected against an older version of a test's assertions.
+
 ---
 
-## 5. Design Decisions
+## 5. Cutoff Semantics and Evidence Boundaries
 
-### 5.1 Test Workflow ↔ Stub Consistency
+### 5.1 What N Counts
+
+`stop_after_invocations: N` counts **completed collaborator dispatches** — specifically, the number of times the interception pipeline has both started and finished handling a collaborator call, delivering the stub reply to the subject. Each call the subject makes and receives a response for increments the counter by one. A call the subject begins but that terminates before reply delivery (because the subject process was already stopped) is not counted.
+
+### 5.2 The Termination Moment
+
+Termination is **immediate on delivery of the Nth reply**. The interception pipeline delivers the Nth stub reply to the subject, then writes the early-exit sentinel file. The supervisor observes the sentinel on its next poll (every 250 ms) and cancels the subject's launch context, ending the subject's process.
+
+There is no grace period. The subject process ends as soon as the supervisor observes the sentinel. It does not wait for the subject to perform any further action — the subject is terminated in the middle of whatever it was doing next.
+
+**Asynchronous completion.** On harnesses whose completion event fires asynchronously (i.e. the harness fires the post-invocation hook at launch time, not when the collaborator finishes), the subject may issue an (N+1)th dispatch before the Nth completion event arrives at the interception pipeline. When that happens:
+
+1. The (N+1)th pre-invocation hook fires first. The pipeline processes it normally — it does not refuse the call or write the sentinel here. The reply for the (N+1)th dispatch is delivered to the subject.
+2. The Nth completion event then arrives. The pipeline detects `seq >= threshold`, writes the sentinel, and records `RunEventEarlyExitTriggered` in the invocation log.
+3. The supervisor observes the sentinel and terminates the subject process.
+
+Termination is therefore guaranteed even under asynchronous completion: the sentinel is written at step 2, not at pre-invocation of the (N+1)th call. The (N+1)th dispatch will appear in the evidence (its start record is written at step 1), but its own completion and any subject bookkeeping it triggers may be absent — the subject is terminated before either can complete.
+
+**No refusal of over-threshold calls.** The interception pipeline never refuses a call at or beyond the threshold at the pre-invocation point solely because the threshold was reached. Refusing at the pre-invocation point would cause the harness to observe a failed hook rather than a valid reply, damaging the run this tool is measuring. The only refusals that occur are those the registered stubs or the unmatched-halt policy already specify, and those fire for the same reasons they would without a threshold. The sentinel, written after the Nth reply is delivered, is the only mechanism that stops the subject — no call is refused for being over-threshold.
+
+### 5.3 What the Evidence Contains
+
+When a run exits via `stop_after_invocations: N`, the evidence snapshot contains:
+
+- **At least N and at most N+1 invocation start records.** On harnesses with synchronous completion, exactly N start records are present. On harnesses with asynchronous completion, the subject may have issued an (N+1)th dispatch before the sentinel was written; that dispatch's start record is present but its end record and any subject bookkeeping for it may be absent.
+- **The orchestration document as it existed when the subject process was terminated** — which may be mid-update if the subject was writing it when the supervisor cancelled it.
+- **Any files the stub side effects created** — these are written by the interception pipeline before the reply is delivered, so they are always present regardless of the cutoff.
+- **No events the subject would have emitted after receiving the Nth reply** — the subject is terminated before it can write output artifacts for that dispatch, log the Nth agent in its execution log, or dispatch a subsequent collaborator (except on asynchronous harnesses where the (N+1)th dispatch may have been issued, as described in §5.2).
+
+### 5.4 Post-Reply Bookkeeping Caveat
+
+Because the subject is terminated immediately after the Nth reply is delivered, any **bookkeeping the subject performs after receiving dispatch N** — writing the Nth dispatch's result to the orchestration document, recording the Nth agent in the execution log, writing the Nth output artifact — may be absent from the evidence. This is expected behaviour, not evidence corruption.
+
+**Practical consequence for test authors:** Do not assert on the subject's own post-reply state for the final dispatch (dispatch N). For a single-dispatch test (`stop_after_invocations: 1`), do not assert `final_state`, `execution_log`, or `artifact_created` for artifacts the subject writes after receiving the reply — these assertions observe the subject's own bookkeeping, which may be incomplete when the cutoff fires. The `invocation_sequence` assertion observes the interception pipeline's own log and is always reliable regardless of cutoff.
+
+### 5.5 What Each Assertion Class Observes
+
+| Assertion | Source | Reliable after cutoff? |
+|-----------|--------|------------------------|
+| `invocation_sequence` | Interception pipeline log | Always reliable — written by the pipeline before the reply is delivered |
+| `task_messages` | Interception pipeline log | Always reliable — messages are recorded when intercepted, before the reply |
+| `echo_fidelity` | Interception pipeline log | Always reliable |
+| `min_concurrency` | Interception pipeline log | Always reliable |
+| `final_state` | Subject's orchestration document | Unreliable for dispatch N — the subject may not have updated it yet |
+| `execution_log` | Subject's orchestration document | Unreliable for dispatch N — same reason |
+| `artifact_created` / `artifact_not_created` | Files in the sandbox | Reliable for files stub side effects create; unreliable for files the subject writes after receiving dispatch N |
+
+The reliable group all observe data the interception pipeline records independently of the subject's own activity. The unreliable group observe the subject's own output, which the cutoff may have interrupted mid-write.
+
+### 5.6 Protocol-Envelope Precondition for Run Identity and Cost Attribution
+
+AgentTest's evidence bucketing and per-run cost attribution depend on the subject being identifiable by the MOSAIC run ID that AgentTest injects at launch. The logger bundle resolves this identity by two mechanisms:
+
+1. Reading the `run_id` field from the first collaborator dispatch the subject makes using the documented protocol envelope.
+2. Falling back to the `MOSAIC_RUN_ID` environment variable that AgentTest injects into the subject's environment before launch.
+
+A subject that **never dispatches a collaborator using the documented protocol envelope** — a misconfigured subject, or a subject that aborts before its first dispatch — produces no extractable run ID from mechanism (1). Mechanism (2) provides the binding via the environment variable for logger-bundle versions that include this fallback.
+
+**Pre-dispatch events:** Any events the subject emits before its first collaborator dispatch may be attributed to the `unknown-run` fallback bucket rather than to the per-run log folder, depending on the timing of the logger bundle's identity resolution. Events emitted before the first dispatch are outside the window where the bundle has confirmed the run identity.
+
+**Practical consequences:**
+- A cost report of `unknown_bucket` means the subject's events landed in the fallback bucket because run identity was not resolved before those events were emitted. This is a run-identity binding failure, not a pricing configuration failure.
+- A cost report of `unavailable` (with "no usage data found") means the logger bundle either did not run or the subject terminated before emitting any events.
+- A subject that dispatches at least one collaborator before the cutoff will generally have its events attributed correctly, because the protocol-envelope binding fires on the first dispatch.
+
+---
+
+## 6. Design Decisions
+
+### 6.1 Test Workflow ↔ Stub Consistency
 
 A test workflow references agent names in its routing table. Those same names must appear in the stub registry (what they return) and in the stub agent definitions (the files that make the dispatch legal). This is a three-way coupling the test author maintains manually.
 
@@ -243,7 +356,7 @@ Preflight validates the deploy calls (agent key exists, workflow ID resolves) bu
 
 **Current position:** Manual consistency is acceptable. The error paths are well-defined and diagnosable. Cross-validation could be added later without changing the authoring format.
 
-### 5.2 Orchestrator Variant Lifecycle
+### 6.2 Orchestrator Variant Lifecycle
 
 Orchestrator variants are experimental files placed in the test catalogue. They have no lifecycle beyond git. After a fix ships, the test should switch to the production orchestrator. Keeping stale variants is the same forking problem the transformation architecture exists to prevent.
 
@@ -251,13 +364,13 @@ Orchestrator variants are experimental files placed in the test catalogue. They 
 
 **Deferred: workbench folder concept.** A possible future enhancement: a `workbench/` folder alongside the test catalogue, holding named orchestrator variants. The test tool could offer a picker dialog letting the user select which variant to test. This would avoid manual file-swapping for interactive variant comparison. Not designed — noted as a direction.
 
-### 5.3 Multiple Variants in One Test Run — Resolved
+### 6.3 Multiple Variants in One Test Run — Resolved
 
 The core use case (§1.2) involves comparing variants. Running the same test against five variants means five test runs, each with a different orchestrator in the catalogue.
 
 **Decision: manual swap.** The test author replaces `catalog/.../orchestrator.md` between runs. Simple, interactive, no tooling needed. Parallelisation is achievable via workspace copies — duplicate the catalogue, put a different variant in each, run simultaneously. Not elegant, but variant comparison is an infrequent interactive activity, not a hot path.
 
-### 5.4 Stub Agents — Resolved
+### 6.4 Stub Agents — Resolved
 
 **Decision: stubs live in the test catalogue.** Placeholder stub agent definitions live at `catalog/Subagents/TestStubs/<name>.md` within the test catalogue. This lets the deploy tool's `deploy` subcommand resolve all agents referenced by the test workflow in a single call — no separate `--source` rendering needed per stub.
 
@@ -267,11 +380,11 @@ The existing `agents/` folder and `stub_agents` mechanism remain available for e
 
 ---
 
-## 6. Deploy Tool Dependency
+## 7. Deploy Tool Dependency
 
 AgentTest uses the deploy tool as a subprocess, through the `domain.AgentDeployer` port. This is a binary dependency, not a library import — the harness isolation boundary forbids importing `mosaic-deploy` directly.
 
-### 6.1 Primary Interface: `deploy` Subcommand
+### 7.1 Primary Interface: `deploy` Subcommand
 
 The primary deployment mechanism is the `deploy` subcommand, which deploys an orchestrator and all agents referenced by selected workflows into a workspace in a single call. This matches the test setup need exactly: one call produces a fully-wired sandbox with the orchestrator and all its stub collaborators.
 
@@ -287,7 +400,7 @@ All required deploy tool capabilities exist:
 
 The remaining work is AgentTest-side: wiring `--catalog-folder` into the `agentdeploy` port and adding a `Deploy` method that calls the `deploy` subcommand.
 
-### 6.2 Secondary Interface: `render` Subcommand
+### 7.2 Secondary Interface: `render` Subcommand
 
 The `render` subcommand (single-agent rendering) remains available for edge cases: subagent-layer tests, rendering from an arbitrary source path, or any test that needs an agent not covered by the workflow-driven deployment. AgentTest's existing `agentdeploy` port already uses `render` — the migration to `deploy` is additive, not a replacement.
 
@@ -301,7 +414,7 @@ The `render` subcommand (single-agent rendering) remains available for edge case
 | Dry-run validation | `render --dry-run` | Exists |
 | JSON output | `render --output json` | Exists |
 
-### 6.3 Implementation Path
+### 7.3 Implementation Path
 
 The deploy tool's `--catalog-folder` is implemented. `catalog.Load(mosaicRoot, catalogFolder)` already separates catalogue loading from protocol/bundle loading.
 
@@ -311,6 +424,86 @@ AgentTest's `agentdeploy` port needs:
 3. The runner's setup phase must call `Deploy` (single call) for catalogue-based tests, falling back to per-agent `Render` for `stub_agents`-based tests.
 
 See `Requirements-agentTest.md` for the full requirement set.
+
+---
+
+---
+
+## 8. Concurrent Execution Model
+
+### 8.1 What the Bound Governs
+
+`MaxConcurrentRuns` is a single bound over the full (test × repetition) matrix produced by a suite run. It limits how many test attempts — each being a unique (test, repetition) pair — execute simultaneously across the entire suite. There is no separate bound per test and no separate bound per repetition level; one number controls both.
+
+The scheduling unit is one repetition of one test. Each unit occupies exactly one slot for its entire lifecycle: sandbox setup, supervised execution, evidence snapshot, and teardown. A slot is not released until teardown completes.
+
+Within a slot, the two raw attempts of one repetition (the initial attempt and, if `NeedsRetry` fires, its retry) execute strictly in order — they are serialised inside their slot regardless of the suite-level bound. Concurrency only applies across slots, never within one.
+
+### 8.2 What a Bound of 1 Guarantees
+
+A bound of `1` is the sequential degenerate case: only one attempt is ever in progress at any moment. The suite processes each (test, repetition) pair in declared plan order, one at a time, completing each attempt's full lifecycle before beginning the next. This reproduces the pre-concurrency behaviour exactly and is guaranteed never to create a second sandbox while the first exists.
+
+A bound of `1` therefore guarantees:
+- At most one sandbox exists on disk at any moment.
+- At most one harness process is running.
+- At most one block of interceptor processes is contending on lock files.
+- No parallelism of any kind within a suite run.
+
+This is the right choice for inspecting a single run's diagnostic output interactively, for running on a machine with very limited resources, or for comparing against a concurrent run to verify identical behaviour.
+
+### 8.3 How Ordering and Identity Are Preserved Under Concurrency
+
+**Report ordering.** `suite.Run` schedules attempts in declared plan order and collects results into the same fixed-length slice. Concurrent completion of results does not affect the order in which they appear in the report — each result is written to its pre-allocated position in the plan-ordered slice regardless of when it finished. The report always reflects the declared suite order.
+
+**Run identity.** Each attempt receives a UUID-based run ID generated at slot-acquisition time, before the slot's lifecycle begins. The run ID is passed through the sandbox name, the subject environment (`MOSAIC_RUN_ID`), the interception pipeline's run-state file, and the evidence snapshot. Every component of one attempt uses the same ID and no other attempt's ID — identity is established before any I/O begins and never shared.
+
+**Evidence isolation.** Each attempt runs in its own sandbox directory, named `<suiteRunID>-<testID>-<runNumber>`. The interception pipeline acquires a lock file inside that sandbox before writing any run-state; the lock is unique to the directory and cannot be acquired by a concurrent attempt. The invocation log, orchestration document, and diagnostic output are all written inside the sandbox, so no concurrent attempt can observe or corrupt them.
+
+---
+
+## 9. Resource Cost of a Chosen Bound
+
+The concurrency bound directly multiplies the resources AgentTest holds simultaneously. This section states what each resource is, how many exist at a given bound, and how sandbox retention changes the figures.
+
+### 9.1 Per-Attempt Resources
+
+Each attempt in flight — one slot of the bound — creates and holds:
+
+| Resource | Description | Approximate size |
+|----------|-------------|-----------------|
+| **Sandbox directory** | Root directory under `<workspaceRoot>/`; named `<suiteRunID>-<testID>-<runNumber>` | 1 entry in the filesystem; the container for everything below |
+| **Deployed agent tree** (`subject/`) | The subject orchestrator and all its stub collaborators, as rendered by the deploy tool into the sandbox's `subject/` subdirectory | Proportional to the catalogue agents referenced by the test — typically a few hundred KB of text files |
+| **Relocated harness configuration tree** (`subject/<harness-config-dir>/`) | The harness's own configuration directory (e.g. `.claude/` for `claude-code`), relocated into the sandbox so the harness process sees per-run configuration rather than the user's real configuration | Session transcript tree plus hook files; on an observed live run this was several MB including the transcript |
+| **Interception control directory** (`control/`) | The stub registry file, the parallel-group document, the run-state lock file, the early-exit sentinel file, and the invocation log, all written by the interception pipeline during the run | A few KB per attempt; the invocation log grows with each intercepted dispatch but stays small for typical test suites |
+| **Deploy log** | One log file written by the deploy tool subprocess during sandbox setup, capturing the rendering trace for the attempt's agents | Tens of KB per attempt; captured in the run's own log folder outside the sandbox |
+| **Diagnostic capture** | The subject process's stdout and stderr, captured to a file by the harness adapter during supervised execution | Tens of KB per attempt for a typical run; grows with the number of dispatches and the verbosity of the subject's output |
+| **Harness process** | The harness CLI process (`claude` or equivalent) running the subject agent | One OS process per slot; each process holds its own open file handles and memory for the session |
+| **Interceptor processes** | Short-lived processes spawned by the harness for each dispatch, converging on the slot's lock file | Several per dispatch; they exit immediately after delivering the stub reply |
+
+### 9.2 Total Resources at a Given Bound N
+
+At a bound of N, at steady state (all N slots occupied):
+
+- **N sandboxes** exist simultaneously on disk.
+- **N deployed agent trees** (subject + stubs) occupy disk.
+- **N relocated harness configuration trees** occupy disk, each potentially several MB.
+- **N diagnostic capture files** are being written simultaneously.
+- **N deploy logs** were written during setup (one per attempt, not N simultaneously — setup is sequential within a slot, so they are written one per slot start, not all at once at the same instant).
+- **N harness processes** run simultaneously.
+- Up to **N × (dispatches per turn)** interceptor processes may overlap, each short-lived.
+
+All of these are released when a slot completes teardown. Teardown always runs, so resources do not accumulate beyond the bound under normal operation.
+
+### 9.3 Multiplication Under Sandbox Retention
+
+When retention is set to `OnFailure` or `Always`, teardown deliberately skips sandbox removal for the matching runs. This breaks the resource-release guarantee:
+
+- With `Always`: every completed attempt leaves its sandbox, deployed agent tree, harness configuration tree, diagnostic capture, and invocation log on disk permanently until the user deletes them manually. A suite of T tests × R repetitions at bound N retains T × R complete sandboxes after the suite run ends. For a suite with 2 tests × 50 repetitions, this is 100 retained sandboxes, each potentially several MB.
+- With `OnFailure`: only failing runs retain their sandboxes. The number of retained sandboxes equals the number of failing attempts, which depends on the subject's behaviour.
+
+The deploy log is written outside the sandbox (in the log store) and is not subject to sandbox retention policy — it persists regardless of the retention setting until the user clears the log store.
+
+**Practical consequence:** Do not set `Always` retention for large-repetition suite runs without first estimating the total disk footprint. For a typical suite with a moderate harness configuration tree (a few MB per sandbox), a 50-repetition suite with `Always` retention can easily retain several hundred MB of sandboxes. `OnFailure` is the practical default for diagnostic workflows: it retains evidence exactly where it is needed and discards the rest.
 
 ---
 

@@ -92,6 +92,51 @@ package session_test
 //   - A stage set already derived earlier in the run survives a later failed
 //     re-read (triggered by a further Stage-* output): EXECUTION is still
 //     reached and dispatched, not stopped.
+//
+//   Run-start snapshot integration (step 5a): [RED]
+//   - CLI harness run: every dispatched AgentReference.DefinitionPath points
+//     into the run-scoped snapshot directory, not the original agents dir.
+//   - CLI harness run with RunCompleted: snapshot directory is deleted after
+//     the run finishes.
+//   - CLI harness run with RunStopped: snapshot directory is also deleted on
+//     graceful stop.
+//   - Snapshot collision (snapshot dir pre-exists): run is refused before any
+//     dispatch.
+//   - Cleanup failure is non-fatal: Start returns RunCompleted with nil error
+//     even when cleanup encounters an error.
+//   - Non-CLI harness (HarnessID empty): snapshot step is skipped, agents
+//     resolve from the original dir (no "agents-runner-" path segment).
+//
+//   Execution-Log Integrity: [RED]
+//   - HITL-rejected dispatches are persisted as distinct execution log entries
+//     with HITLRejected=true and IsInfrastructure=true, in both the auto-mode
+//     hitlCheckLoop and the orchestrated-mode hitlLoop (consultRoute) paths.
+//     Rejected entries must carry nil OutputArtifacts to avoid polluting the
+//     artifact registry with non-compliant paths.
+//   - Sequence numbers across all persisted dispatches -- including rejected
+//     steps, consultation steps, and final accepted steps -- are strictly
+//     increasing and never reused within a run.
+//   - In the full redispatch-escalate-consultant-reroute scenario, no two
+//     dispatched agent instance IDs share the same "#N" numeric suffix.
+//   - After a HITL rejection cycle, the number of persisted Apply calls
+//     accounts for the rejected dispatch as a distinct entry.
+//   - Resuming from a state where a rejected-step Apply was the last logged
+//     entry correctly identifies the step as interrupted and re-dispatches it,
+//     rather than treating it as a completed step to skip.
+//
+//   ConsultRoute stage context preservation: [RED]
+//   - A consultant-routed dispatch in a multi-stage workflow preserves
+//     current_state.stage: after the dispatch completes the artifact's stage
+//     field matches the stage that was in force when the consultation was
+//     triggered. Without the fix, consultRoute omits Stage from CompletedStep,
+//     causing Store.Apply to overwrite current_state.stage with "".
+//   - The non-infrastructure CompletedStep produced by consultRoute carries
+//     the captured entry stage, not an empty string.
+//   - Notification messages emitted by consultRoute contain the correct stage
+//     value rather than the hardcoded "" in the pre-fix format strings.
+//   - When consultRoute recurses (e.g., on harness error), the recursive call
+//     independently reads state.CurrentState.Stage at its own entry and
+//     propagates it to the CompletedStep it applies.
 
 import (
 	"context"
@@ -243,6 +288,55 @@ func (h *callbackHarness) Invoke(ctx context.Context, agent domain.AgentReferenc
 		h.onInvoke(agent.Identifier)
 	}
 	return resp, err
+}
+
+// ---- orchRefCaptureConsultant ----
+
+// orchRefCaptureConsultant is a test-only domain.RoutingConsultant that also
+// implements domain.RunContextBinder. Every time the session calls
+// BindRunContext, the consultant records the supplied orchestrator reference.
+// After session.Start returns, lastBoundOrchRef returns the most-recently
+// recorded reference, which should be the snapshot-resolved one if step 5a
+// ran and re-bound consultants correctly.
+type orchRefCaptureConsultant struct {
+	mu    sync.Mutex
+	bound []domain.RunContext
+}
+
+// BindRunContext implements domain.RunContextBinder.
+func (c *orchRefCaptureConsultant) BindRunContext(rc domain.RunContext) {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	c.bound = append(c.bound, rc)
+}
+
+// ConsultRouting implements domain.RoutingConsultant. It returns an error so
+// that any unexpected consultation call surfaces immediately as a test failure
+// rather than hanging or panicking.
+func (c *orchRefCaptureConsultant) ConsultRouting(_ context.Context, _ domain.ConsultationRequest) (domain.RoutingInstruction, error) {
+	return domain.RoutingInstruction{}, &domain.ConsultationError{
+		Failure: domain.ConsultFailTransport,
+		Detail:  "orchRefCaptureConsultant: ConsultRouting called unexpectedly in this test",
+	}
+}
+
+// lastBoundOrchRef returns the orchestrator reference from the most recent
+// BindRunContext call, or a zero AgentReference if BindRunContext was never
+// called.
+func (c *orchRefCaptureConsultant) lastBoundOrchRef() domain.AgentReference {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	if len(c.bound) == 0 {
+		return domain.AgentReference{}
+	}
+	return c.bound[len(c.bound)-1].Orchestrator
+}
+
+// bindCallCount returns how many times BindRunContext was called.
+func (c *orchRefCaptureConsultant) bindCallCount() int {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	return len(c.bound)
 }
 
 // ---- test helpers ----
@@ -434,7 +528,7 @@ func TestSession_Start_AdmissionFailure_ReturnsRefusal(t *testing.T) {
 
 | Phase | Subagent | HITL | Input | Output |
 |-------|----------|:----:|-------|--------|
-| PLANNING | agent-a(mode) | ❌ | - | out.md |
+| PLANNING | agent-a(mode) | FALSE | - | out.md |
 </Workflow>
 `
 	orchPath := filepath.Join(dir, "refused-orch.md")
@@ -615,8 +709,8 @@ func TestSession_Start_OnFindings_LoopBack_HarnessInvokedNotDeviation(t *testing
 
 | Phase | Subagent | HITL | On Success | On Findings | Input | Output |
 |-------|----------|:----:|------------|-------------|-------|--------|
-| PLANNING | agent-a | ❌ | agent-b | agent-a | - | plan.md |
-| PLANNING | agent-b | ❌ | COMPLETE | - | plan.md | result.md |
+| PLANNING | agent-a | FALSE | agent-b | agent-a | - | plan.md |
+| PLANNING | agent-b | FALSE | COMPLETE | - | plan.md | result.md |
 </Workflow>
 `
 	orchPath := filepath.Join(dir, "loopback-orch.md")
@@ -698,8 +792,8 @@ func TestSession_Start_StageStarOutput_TriggersStageSetRederivation(t *testing.T
 
 | Stage | Name | Goal | Depends On | HITL |
 |-------|------|------|------------|:----:|
-| 1 | Stage One | First | - | ❌ |
-| 2 | Stage Two | Second | 1 | ❌ |
+| 1 | Stage One | First | - | FALSE |
+| 2 | Stage Two | Second | 1 | FALSE |
 `
 	planPath := filepath.Join(dir, "Plan.md")
 	if err := os.WriteFile(planPath, []byte(planContent), 0600); err != nil {
@@ -779,8 +873,8 @@ func TestSession_Start_Deviation_ReturnsDeviationUnresolved(t *testing.T) {
 
 | Phase | Subagent | HITL | On Success | Input | Output |
 |-------|----------|:----:|------------|-------|--------|
-| PLANNING | agent-a | ❌ | agent-b | - | plan.md |
-| PLANNING | agent-b | ❌ | COMPLETE | plan.md | result.md |
+| PLANNING | agent-a | FALSE | agent-b | - | plan.md |
+| PLANNING | agent-b | FALSE | COMPLETE | plan.md | result.md |
 </Workflow>
 `
 	orchPath := filepath.Join(dir, "deviation-orch.md")
@@ -1070,7 +1164,7 @@ func TestSession_Start_StagedWorkflow_Completes(t *testing.T) {
 
 | Stage | Name | Goal | Depends On | HITL |
 |-------|------|------|------------|:----:|
-| 1 | Stage One | The only stage | - | ❌ |
+| 1 | Stage One | The only stage | - | FALSE |
 `), 0600); err != nil {
 		t.Fatalf("write Plan.md: %v", err)
 	}
@@ -1131,7 +1225,7 @@ func TestSession_Start_PlanFile_ResolvedFromRunFolder_StagesApplied(t *testing.T
 
 | Stage | Name | Goal | Depends On | HITL |
 |-------|------|------|------------|:----:|
-| 1 | Stage One | The only stage | - | ❌ |
+| 1 | Stage One | The only stage | - | FALSE |
 `), 0600); err != nil {
 		t.Fatalf("write Plan.md: %v", err)
 	}
@@ -1191,7 +1285,7 @@ func TestSession_Start_PlanFile_InOrchestratorDir_NotPickedUp(t *testing.T) {
 
 | Stage | Name | Goal | Depends On | HITL |
 |-------|------|------|------------|:----:|
-| 1 | Stage One | The only stage | - | ❌ |
+| 1 | Stage One | The only stage | - | FALSE |
 `), 0600); err != nil {
 		t.Fatalf("write Plan.md: %v", err)
 	}
@@ -1479,8 +1573,8 @@ func TestSession_Start_StageStarRederivation_ResolvesFromRunFolder(t *testing.T)
 
 | Stage | Name | Goal | Depends On | HITL |
 |-------|------|------|------------|:----:|
-| 1 | Stage One | First | - | ❌ |
-| 2 | Stage Two | Second | 1 | ❌ |
+| 1 | Stage One | First | - | FALSE |
+| 2 | Stage Two | Second | 1 | FALSE |
 `
 	planPath := filepath.Join(runFolder, "Plan.md")
 	if err := os.WriteFile(planPath, []byte(planContent), 0600); err != nil {
@@ -1663,8 +1757,8 @@ func TestSession_Start_Deviation_ResolverStop_ReturnsDeviationUnresolved(t *test
 
 | Phase | Subagent | HITL | On Success | Input | Output |
 |-------|----------|:----:|------------|-------|--------|
-| PLANNING | agent-a | ❌ | agent-b | - | plan.md |
-| PLANNING | agent-b | ❌ | COMPLETE | plan.md | result.md |
+| PLANNING | agent-a | FALSE | agent-b | - | plan.md |
+| PLANNING | agent-b | FALSE | COMPLETE | plan.md | result.md |
 </Workflow>
 `
 	orchPath := filepath.Join(dir, "deviation-stop-orch.md")
@@ -2019,8 +2113,8 @@ func TestSession_Start_Dispatch_ResolvesInputArtifacts_ToRunScopedForm(t *testin
 
 | Phase | Subagent | HITL | Input | Output |
 |-------|----------|:----:|-------|--------|
-| PLANNING | agent-a | ❌ | Plan.md | Progress.md |
-| PLANNING | agent-b | ❌ | Progress.md | Result.md |
+| PLANNING | agent-a | FALSE | Plan.md | Progress.md |
+| PLANNING | agent-b | FALSE | Progress.md | Result.md |
 </Workflow>
 `
 	orchPath := filepath.Join(dir, "resolve-orch.md")
@@ -2093,8 +2187,8 @@ func TestSession_Start_Dispatch_ResolvesOutputArtifacts_ToRunScopedForm(t *testi
 
 | Phase | Subagent | HITL | Input | Output |
 |-------|----------|:----:|-------|--------|
-| PLANNING | agent-a | ❌ | - | Progress.md |
-| PLANNING | agent-b | ❌ | Progress.md | Result.md |
+| PLANNING | agent-a | FALSE | - | Progress.md |
+| PLANNING | agent-b | FALSE | Progress.md | Result.md |
 </Workflow>
 `
 	orchPath := filepath.Join(dir, "resolve-out-orch.md")
@@ -2180,7 +2274,7 @@ func TestSession_Start_Dispatch_DoesNotDoublePrefixAlreadyScopedPaths(t *testing
 
 | Phase | Subagent | HITL | Input | Output |
 |-------|----------|:----:|-------|--------|
-| PLANNING | agent-a | ❌ | ` + scopedPrefix + `Plan.md | ` + scopedPrefix + `Progress.md |
+| PLANNING | agent-a | FALSE | ` + scopedPrefix + `Plan.md | ` + scopedPrefix + `Progress.md |
 </Workflow>
 `
 	orchPath := filepath.Join(dir, "already-scoped-orch.md")
@@ -2270,7 +2364,7 @@ func TestSession_Start_Dispatch_EmptyRunID_PathsNotPrefixed(t *testing.T) {
 
 | Phase | Subagent | HITL | Input | Output |
 |-------|----------|:----:|-------|--------|
-| PLANNING | agent-a | ❌ | Plan.md | Progress.md |
+| PLANNING | agent-a | FALSE | Plan.md | Progress.md |
 </Workflow>
 `
 	orchPath := filepath.Join(dir, "no-runid-orch.md")
@@ -2960,8 +3054,8 @@ func newStageEndStagedSession(t *testing.T) (ses session.Session, f *harness.Fak
 
 | Stage | Name | Goal | Depends On | HITL |
 |-------|------|------|------------|:----:|
-| 1 | Stage One | First stage | - | ❌ |
-| 2 | Stage Two | Second stage | 1 | ❌ |
+| 1 | Stage One | First stage | - | FALSE |
+| 2 | Stage Two | Second stage | 1 | FALSE |
 `
 	planPath := filepath.Join(filepath.Dir(orchPath), "Plan.md")
 	if err := os.WriteFile(planPath, []byte(planContent), 0600); err != nil {
@@ -3210,7 +3304,7 @@ func TestSession_Start_TriggerEval_STAGE_END_DoesNotFireWithinSameStage(t *testi
 
 | Stage | Name | Goal | Depends On | HITL |
 |-------|------|------|------------|:----:|
-| 1 | Stage One | The only stage | - | ❌ |
+| 1 | Stage One | The only stage | - | FALSE |
 `
 	if err := os.WriteFile(filepath.Join(dir, "Plan.md"), []byte(singleStagePlan), 0600); err != nil {
 		t.Fatalf("write Plan.md: %v", err)
@@ -3274,7 +3368,7 @@ func TestSession_Start_TriggerEval_STAGE_END_DoesNotFireOnFirstWorkflowStep(t *t
 
 | Stage | Name | Goal | Depends On | HITL |
 |-------|------|------|------------|:----:|
-| 1 | Stage One | The only stage | - | ❌ |
+| 1 | Stage One | The only stage | - | FALSE |
 `
 	if err := os.WriteFile(filepath.Join(dir, "Plan.md"), []byte(singleStagePlan), 0600); err != nil {
 		t.Fatalf("write Plan.md: %v", err)
@@ -4635,8 +4729,8 @@ func buildDeviationWorkflowSession(
 
 | Phase | Subagent | HITL | On Success | Input | Output |
 |-------|----------|:----:|------------|-------|--------|
-| PLANNING | agent-a | ❌ | agent-b | - | plan.md |
-| PLANNING | agent-b | ❌ | COMPLETE | plan.md | result.md |
+| PLANNING | agent-a | FALSE | agent-b | - | plan.md |
+| PLANNING | agent-b | FALSE | COMPLETE | plan.md | result.md |
 </Workflow>
 `
 	orchPath = filepath.Join(dir, "deviate-log-orch.md")
@@ -4852,7 +4946,7 @@ func TestSession_Start_StageStarOutputPrecedesStagedExecution_EntersExecution(t 
 
 | Stage | Name | Goal | Depends On | HITL |
 |-------|------|------|------------|:----:|
-| 1 | Stage One | The only stage | - | ❌ |
+| 1 | Stage One | The only stage | - | FALSE |
 `
 	planPath := filepath.Join(runFolder, "Plan.md")
 
@@ -4991,7 +5085,7 @@ func TestSession_Start_FailedStageStarRederivation_RetainsExistingStageSet(t *te
 
 | Stage | Name | Goal | Depends On | HITL |
 |-------|------|------|------------|:----:|
-| 1 | Stage One | The only stage | - | ❌ |
+| 1 | Stage One | The only stage | - | FALSE |
 `
 	planPath := filepath.Join(runFolder, "Plan.md")
 
@@ -6421,10 +6515,23 @@ func (s *scriptedRoutingConsultant) queueDispatchWithOutputs(agent, taskDesc str
 func (s *scriptedRoutingConsultant) queueDispatchWithHITL(agent, taskDesc string, rowIndex int, hitlOverride *bool) {
 	s.instructions = append(s.instructions, domain.RoutingInstruction{
 		Dispatch: &domain.DispatchInstruction{
-			Agent:        agent,
-			RowIndex:     rowIndex,
+			Agent:           agent,
+			RowIndex:        rowIndex,
 			TaskDescription: taskDesc,
-			HITLOverride: hitlOverride,
+			HITLOverride:    hitlOverride,
+		},
+	})
+	s.errors = append(s.errors, nil)
+}
+
+func (s *scriptedRoutingConsultant) queueDispatchWithHITLAndOutputs(agent, taskDesc string, rowIndex int, hitlOverride *bool, outputs *[]string) {
+	s.instructions = append(s.instructions, domain.RoutingInstruction{
+		Dispatch: &domain.DispatchInstruction{
+			Agent:           agent,
+			RowIndex:        rowIndex,
+			TaskDescription: taskDesc,
+			HITLOverride:    hitlOverride,
+			OutputArtifacts: outputs,
 		},
 	})
 	s.errors = append(s.errors, nil)
@@ -6467,6 +6574,27 @@ func (r *perPathApprovalReader) ReadApproval(_ context.Context, path string) dom
 		return v
 	}
 	return r.fallback
+}
+
+// switchingApprovalReader returns firstApproval on the first ReadApproval call
+// and restApproval for all subsequent calls. Used in HITL tests to simulate an
+// initially non-compliant artifact that becomes compliant after one redispatch,
+// so the session exercises exactly one rejection before accepting.
+type switchingApprovalReader struct {
+	mu            sync.Mutex
+	calls         int
+	firstApproval domain.HumanApproval
+	restApproval  domain.HumanApproval
+}
+
+func (r *switchingApprovalReader) ReadApproval(_ context.Context, _ string) domain.HumanApproval {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	r.calls++
+	if r.calls == 1 {
+		return r.firstApproval
+	}
+	return r.restApproval
 }
 
 // applyBeforeConsultConsultant wraps a scriptedRoutingConsultant and records,
@@ -6549,6 +6677,73 @@ func newHITLLinearSession(t *testing.T, consultant domain.RoutingConsultant, app
 		Interact:  &noopInteraction{},
 	})
 	return
+}
+
+// newAutoHITLSession builds a session backed by the hitl-linear-orch.md fixture
+// running in auto-execution mode, using the supplied ApprovalReader. An optional
+// RoutingConsultant may be wired for tests that exercise the HITL escalation path
+// (which internally calls consultRoute).
+func newAutoHITLSession(t *testing.T, approvals domain.ApprovalReader, consultant domain.RoutingConsultant) (
+	ses session.Session, f *harness.FakeAdapter, store *memStore, orchPath string,
+) {
+	t.Helper()
+	dir := t.TempDir()
+	orchPath = copyOrchestratorFile(t, dir, "hitl-linear-orch.md")
+	writeAgentFile(t, dir, "agent-a")
+	writeAgentFile(t, dir, "agent-b")
+
+	f = harness.NewFakeAdapter()
+	store = &memStore{}
+	ses = session.New(session.Deps{
+		Harness:   f,
+		Store:     store,
+		Routing:   consultant,
+		Approvals: approvals,
+		Clock:     fixedClock{t: epoch},
+		Interact:  &noopInteraction{},
+	})
+	return
+}
+
+// requireHITLRejectedSteps asserts that store.Applied contains at least one step
+// with HITLRejected=true, that every such step carries IsInfrastructure=true and
+// nil OutputArtifacts, and that all Applied Seq values are strictly increasing.
+// This is the primary RED-phase assertion for execution-log integrity tests.
+func requireHITLRejectedSteps(t *testing.T, store *memStore) {
+	t.Helper()
+
+	var rejected []domain.CompletedStep
+	for _, s := range store.Applied {
+		if s.HITLRejected {
+			rejected = append(rejected, s)
+		}
+	}
+	if len(rejected) == 0 {
+		t.Errorf("want at least one HITLRejected=true step in store.Applied, got none; "+
+			"HITL-rejected dispatches must be persisted to the execution log before redispatch")
+	}
+	for _, s := range rejected {
+		if !s.IsInfrastructure {
+			t.Errorf("HITLRejected step %q: want IsInfrastructure=true, got false; "+
+				"rejected steps must not update current_state.LastAgent",
+				s.AgentInstance)
+		}
+		if s.OutputArtifacts != nil {
+			t.Errorf("HITLRejected step %q: want OutputArtifacts=nil, got %v; "+
+				"rejected steps must not pollute the artifact registry with non-compliant paths",
+				s.AgentInstance, s.OutputArtifacts)
+		}
+	}
+
+	// All Applied Seq values must be strictly increasing, regardless of whether
+	// steps are workflow, infrastructure, or rejected.
+	for i := 1; i < len(store.Applied); i++ {
+		if store.Applied[i].Seq <= store.Applied[i-1].Seq {
+			t.Errorf("store.Applied[%d].Seq=%d is not greater than Applied[%d].Seq=%d; "+
+				"sequence numbers must be strictly increasing across all persisted dispatches",
+				i, store.Applied[i].Seq, i-1, store.Applied[i-1].Seq)
+		}
+	}
 }
 
 // ===== Mode-driven routing decision =====
@@ -6740,8 +6935,8 @@ func TestSession_AutoReviewMode_CNAWithUnambiguousHint_EngineAutoRoutes(t *testi
 
 | Phase | Subagent | HITL | On Success | On Findings | Input | Output |
 |-------|----------|:----:|------------|-------------|-------|--------|
-| PLANNING | agent-a | ❌ | agent-b | agent-a | - | plan.md |
-| PLANNING | agent-b | ❌ | COMPLETE | - | plan.md | result.md |
+| PLANNING | agent-a | FALSE | agent-b | agent-a | - | plan.md |
+| PLANNING | agent-b | FALSE | COMPLETE | - | plan.md | result.md |
 </Workflow>
 `
 	orchPath := filepath.Join(dir, "loopback-orch.md")
@@ -8777,5 +8972,2258 @@ func TestSession_RunStart_IncapableApprovalReader_NoHITLWorkflow_Proceeds(t *tes
 	if got.Status == domain.RunRefused {
 		t.Errorf("want run NOT refused when workflow has no human-review rows, "+
 			"even with an incapable approval reader; got RunRefused (message: %q)", got.Message)
+	}
+}
+
+// ===== Run-start snapshot integration (step 5a) =====
+
+// writeCLIHarnessDir creates a temp directory following the claude-code
+// harness agents-directory convention (.claude/agents/) and populates it with
+// the linear workflow orchestrator file and both agent definition files.
+//
+// Returns the work directory root, the orchestrator file path (inside the
+// agents dir), and the expected snapshot directory path for the given run ID.
+// The snapshot path is computed using the same convention as
+// harness.SnapshotDirPath for the "claude-code" harness:
+//
+//	filepath.Join(workDir, ".claude", "agents-runner-"+runID)
+func writeCLIHarnessDir(t *testing.T, runID string) (workDir, orchPath, snapshotDir string) {
+	t.Helper()
+	workDir = t.TempDir()
+	agentsDir := filepath.Join(workDir, ".claude", "agents")
+	if err := os.MkdirAll(agentsDir, 0o755); err != nil {
+		t.Fatalf("writeCLIHarnessDir: create agents dir: %v", err)
+	}
+
+	data, err := os.ReadFile(orchFilePath("linear-orch.md"))
+	if err != nil {
+		t.Fatalf("writeCLIHarnessDir: read linear-orch.md: %v", err)
+	}
+	orchPath = filepath.Join(agentsDir, "orchestrator.md")
+	if err := os.WriteFile(orchPath, data, 0o600); err != nil {
+		t.Fatalf("writeCLIHarnessDir: write orchestrator: %v", err)
+	}
+
+	writeAgentFile(t, agentsDir, "agent-a")
+	writeAgentFile(t, agentsDir, "agent-b")
+
+	// Snapshot dir is a sibling of the agents dir, following SnapshotDirPath:
+	//   filepath.Join(workDir, filepath.Dir(agentsDir_relative), filepath.Base(agentsDir_relative)+"-runner-"+runID)
+	// For claude-code, agentsDir_relative = ".claude/agents", so:
+	snapshotDir = filepath.Join(workDir, ".claude", "agents-runner-"+runID)
+	return
+}
+
+// baseCLIHarnessConfig returns a RunConfig for the linear workflow with the
+// claude-code harness identity and an explicit run ID, so that step 5a
+// activates and writes to a predictable snapshot directory path.
+func baseCLIHarnessConfig(orchPath, runID string) domain.RunConfig {
+	return domain.RunConfig{
+		OrchestratorFilePath: orchPath,
+		WorkflowID:           "linear",
+		Task:                 "snapshot integration test",
+		IsNewRun:             true,
+		RunID:                runID,
+		RunSettings:          domain.RunSettings{Mode: domain.ExecutionModeAuto},
+		HarnessID:            "claude-code",
+	}
+}
+
+// containsSnapshotPathSegment reports whether path contains the run-scoped
+// snapshot directory name component for the given run ID.
+func containsSnapshotPathSegment(path, runID string) bool {
+	return strings.Contains(filepath.ToSlash(path), "agents-runner-"+runID)
+}
+
+// TestSession_Start_CLIHarness_AgentDefinitionPathsInSnapshot verifies that
+// after step 5a creates the snapshot, every harness invocation receives an
+// AgentReference whose DefinitionPath is inside the snapshot directory, not
+// the original agents directory.
+func TestSession_Start_CLIHarness_AgentDefinitionPathsInSnapshot(t *testing.T) {
+	const runID = "testsnap-paths-01"
+	_, orchPath, _ := writeCLIHarnessDir(t, runID)
+
+	f := harness.NewFakeAdapter()
+	f.Queue("agent-a", harness.ScriptedEntry{Response: &domain.ProtocolResponse{
+		AgentInstanceID: "agent-a#1",
+		StatusCode:      domain.StatusSUCCESS,
+		StatusMessage:   "done",
+	}})
+	f.Queue("agent-b", harness.ScriptedEntry{Response: &domain.ProtocolResponse{
+		AgentInstanceID: "agent-b#2",
+		StatusCode:      domain.StatusSUCCESS,
+		StatusMessage:   "done",
+	}})
+
+	ses := session.New(session.Deps{
+		Harness:  f,
+		Store:    &memStore{},
+		Clock:    fixedClock{t: epoch},
+		Interact: &noopInteraction{},
+	})
+
+	got, err := ses.Start(context.Background(), baseCLIHarnessConfig(orchPath, runID))
+	requireRunStatus(t, got, err, domain.RunCompleted)
+
+	invs := f.Invocations()
+	if len(invs) == 0 {
+		t.Fatal("want at least one harness invocation, got none")
+	}
+	for _, inv := range invs {
+		if !containsSnapshotPathSegment(inv.Agent.DefinitionPath, runID) {
+			t.Errorf("agent %q: DefinitionPath %q does not contain snapshot path segment %q; "+
+				"agents must be re-resolved from the snapshot directory after step 5a",
+				inv.Agent.Identifier, inv.Agent.DefinitionPath, "agents-runner-"+runID)
+		}
+	}
+}
+
+// TestSession_Start_CLIHarness_SnapshotDeletedOnRunCompleted verifies that
+// when a CLI-harness run completes (RunCompleted), the run-scoped snapshot
+// directory created at step 5a is deleted.
+func TestSession_Start_CLIHarness_SnapshotDeletedOnRunCompleted(t *testing.T) {
+	const runID = "testsnap-cleanup-complete-01"
+	_, orchPath, snapshotDir := writeCLIHarnessDir(t, runID)
+
+	f := harness.NewFakeAdapter()
+	f.Queue("agent-a", harness.ScriptedEntry{Response: &domain.ProtocolResponse{
+		AgentInstanceID: "agent-a#1",
+		StatusCode:      domain.StatusSUCCESS,
+		StatusMessage:   "done",
+	}})
+	f.Queue("agent-b", harness.ScriptedEntry{Response: &domain.ProtocolResponse{
+		AgentInstanceID: "agent-b#2",
+		StatusCode:      domain.StatusSUCCESS,
+		StatusMessage:   "done",
+	}})
+
+	ses := session.New(session.Deps{
+		Harness:  f,
+		Store:    &memStore{},
+		Clock:    fixedClock{t: epoch},
+		Interact: &noopInteraction{},
+	})
+
+	got, err := ses.Start(context.Background(), baseCLIHarnessConfig(orchPath, runID))
+	requireRunStatus(t, got, err, domain.RunCompleted)
+
+	// Agents must have been dispatched from inside the snapshot directory,
+	// confirming the snapshot was actually created during the run.
+	for _, inv := range f.Invocations() {
+		if !containsSnapshotPathSegment(inv.Agent.DefinitionPath, runID) {
+			t.Errorf("agent %q: DefinitionPath %q does not contain snapshot path segment "+
+				"(snapshot was not created or step 5a did not run)",
+				inv.Agent.Identifier, inv.Agent.DefinitionPath)
+		}
+	}
+
+	// After RunCompleted, the snapshot directory must be deleted.
+	if _, statErr := os.Stat(snapshotDir); !errors.Is(statErr, os.ErrNotExist) {
+		t.Errorf("snapshot directory %q must be deleted after RunCompleted, stat returned: %v",
+			snapshotDir, statErr)
+	}
+}
+
+// TestSession_Start_CLIHarness_SnapshotDeletedOnRunStopped verifies that
+// when a CLI-harness run is gracefully stopped (RunStopped), the snapshot
+// directory is also deleted (cleanup applies to RunStopped as well as
+// RunCompleted).
+func TestSession_Start_CLIHarness_SnapshotDeletedOnRunStopped(t *testing.T) {
+	const runID = "testsnap-cleanup-stop-01"
+	_, orchPath, snapshotDir := writeCLIHarnessDir(t, runID)
+
+	f := harness.NewFakeAdapter()
+	ctx, cancel := context.WithCancel(context.Background())
+
+	// Cancel the context after agent-a finishes to trigger a graceful stop.
+	// Only agent-a is queued; the session stops after agent-a's dispatch.
+	cbHarness := &callbackHarness{
+		delegate: f,
+		onInvoke: func(agentID string) {
+			if agentID == "agent-a" {
+				cancel()
+			}
+		},
+	}
+	f.Queue("agent-a", harness.ScriptedEntry{Response: &domain.ProtocolResponse{
+		AgentInstanceID: "agent-a#1",
+		StatusCode:      domain.StatusSUCCESS,
+		StatusMessage:   "done",
+	}})
+
+	ses := session.New(session.Deps{
+		Harness:  cbHarness,
+		Store:    &memStore{},
+		Clock:    fixedClock{t: epoch},
+		Interact: &noopInteraction{},
+	})
+
+	got, err := ses.Start(ctx, baseCLIHarnessConfig(orchPath, runID))
+	requireRunStatus(t, got, err, domain.RunStopped)
+
+	// The dispatched invocation must have used the snapshot directory,
+	// confirming the snapshot was created before dispatching began.
+	invs := f.Invocations()
+	if len(invs) == 0 {
+		t.Fatal("want at least one invocation before graceful stop, got none")
+	}
+	if !containsSnapshotPathSegment(invs[0].Agent.DefinitionPath, runID) {
+		t.Errorf("agent %q: DefinitionPath %q does not contain snapshot path segment "+
+			"(step 5a did not run or re-resolved agents from original dir)",
+			invs[0].Agent.Identifier, invs[0].Agent.DefinitionPath)
+	}
+
+	// Snapshot directory must also be deleted on RunStopped.
+	if _, statErr := os.Stat(snapshotDir); !errors.Is(statErr, os.ErrNotExist) {
+		t.Errorf("snapshot directory %q must be deleted after RunStopped, stat returned: %v",
+			snapshotDir, statErr)
+	}
+}
+
+// TestSession_Start_CLIHarness_SnapshotRecreatedOnPreExisting verifies
+// that when the snapshot directory already exists at the expected path
+// (simulating a stale artifact from a prior run), CreateSnapshot removes it
+// and recreates it fresh from source files. The run proceeds normally with
+// RunCompleted (not refused).
+func TestSession_Start_CLIHarness_SnapshotRecreatedOnPreExisting(t *testing.T) {
+	const runID = "testsnap-collision-01"
+	_, orchPath, snapshotDir := writeCLIHarnessDir(t, runID)
+
+	// Pre-create the snapshot directory to simulate a stale snapshot from a
+	// prior run. CreateSnapshot should remove and recreate it.
+	if err := os.MkdirAll(snapshotDir, 0o755); err != nil {
+		t.Fatalf("pre-create snapshot dir: %v", err)
+	}
+
+	// Write a marker file to the pre-existing snapshot directory so we can
+	// verify it was actually removed and recreated.
+	markerFile := filepath.Join(snapshotDir, "marker.txt")
+	if err := os.WriteFile(markerFile, []byte("stale"), 0o644); err != nil {
+		t.Fatalf("write marker file: %v", err)
+	}
+
+	f := harness.NewFakeAdapter()
+	// Script both agents to return SUCCESS so the workflow completes.
+	f.Queue("agent-a", harness.ScriptedEntry{Response: &domain.ProtocolResponse{
+		AgentInstanceID: "agent-a#1",
+		StatusCode:      domain.StatusSUCCESS,
+		StatusMessage:   "snapshot recreated successfully",
+	}})
+	f.Queue("agent-b", harness.ScriptedEntry{Response: &domain.ProtocolResponse{
+		AgentInstanceID: "agent-b#2",
+		StatusCode:      domain.StatusSUCCESS,
+		StatusMessage:   "workflow complete",
+	}})
+
+	ses := session.New(session.Deps{
+		Harness:  f,
+		Store:    &memStore{},
+		Clock:    fixedClock{t: epoch},
+		Interact: &noopInteraction{},
+	})
+
+	got, err := ses.Start(context.Background(), baseCLIHarnessConfig(orchPath, runID))
+	requireRunStatus(t, got, err, domain.RunCompleted)
+
+	// The snapshot directory should be deleted (terminal outcome cleanup).
+	// This confirms the snapshot was successfully created and then cleaned up normally.
+	// The key is that the run completed (not refused), which proves the snapshot was
+	// recreated successfully from the pre-existing stale directory.
+	if _, statErr := os.Stat(snapshotDir); !errors.Is(statErr, os.ErrNotExist) {
+		t.Errorf("snapshot directory %q should be deleted after terminal outcome (RunCompleted)", snapshotDir)
+	}
+
+	// The marker file should NOT exist either (confirming both the original
+	// snapshot was removed and the new one was cleaned up).
+	if _, statErr := os.Stat(markerFile); !errors.Is(statErr, os.ErrNotExist) {
+		t.Errorf("marker file %q should not exist after cleanup", markerFile)
+	}
+}
+
+// TestSession_Start_CLIHarness_CleanupFailureIsNonFatal verifies that when
+// cleanup of the snapshot directory fails, Start still returns RunCompleted
+// with a nil error, and the failure is recorded as an EventSnapshotCleanupFailed
+// debug log entry instead of being surfaced as a returned error or a changed
+// run outcome.
+//
+// To force cleanup to fail the test holds the snapshot directory open while
+// session.Start runs:
+//   - On Windows: an open file handle inside the directory prevents os.RemoveAll.
+//   - On Linux/Mac: making the parent directory read-only (0o555) prevents
+//     os.Remove from unlinking the snapshot directory.
+//
+// Both mechanisms are applied so the test is reliably cross-platform.
+func TestSession_Start_CLIHarness_CleanupFailureIsNonFatal(t *testing.T) {
+	const runID = "testsnap-cleanup-nonfatal-01"
+	_, orchPath, snapshotDir := writeCLIHarnessDir(t, runID)
+	parentDir := filepath.Dir(snapshotDir)
+
+	logger := &sessionRecordingLogger{}
+	f := harness.NewFakeAdapter()
+	f.Queue("agent-a", harness.ScriptedEntry{Response: &domain.ProtocolResponse{
+		AgentInstanceID: "agent-a#1",
+		StatusCode:      domain.StatusSUCCESS,
+		StatusMessage:   "done",
+	}})
+	f.Queue("agent-b", harness.ScriptedEntry{Response: &domain.ProtocolResponse{
+		AgentInstanceID: "agent-b#2",
+		StatusCode:      domain.StatusSUCCESS,
+		StatusMessage:   "done",
+	}})
+
+	// openedFile holds an open handle to a file inside the snapshot directory.
+	// It is set inside onInvoke (after step 5a creates the snapshot) and kept
+	// open while session.Start's deferred cleanup runs so that os.RemoveAll
+	// fails on Windows. The handle is closed after ses.Start returns so that
+	// t.TempDir can remove the directory in test cleanup.
+	var openedFile *os.File
+
+	// t.Cleanup ensures permissions and the file handle are restored even if
+	// the test fails before the explicit restore below.
+	t.Cleanup(func() {
+		if openedFile != nil {
+			openedFile.Close()
+		}
+		// Restore the parent directory so t.TempDir cleanup can remove it.
+		os.Chmod(parentDir, 0o755) //nolint:errcheck
+	})
+
+	cbHarness := &callbackHarness{
+		delegate: f,
+		onInvoke: func(agentID string) {
+			// Only arm the failure mechanism once, after the first dispatch.
+			// By the time onInvoke fires, step 5a has already created the
+			// snapshot directory, so the directory and its contents exist.
+			if agentID != "agent-a" {
+				return
+			}
+			// Windows: open a file inside the snapshot dir to lock it.
+			if fh, err := os.Open(filepath.Join(snapshotDir, "agent-a.md")); err == nil {
+				openedFile = fh
+			}
+			// Linux/Mac: make the parent directory read-only so os.Remove
+			// cannot unlink the snapshot directory from it.
+			os.Chmod(parentDir, 0o555) //nolint:errcheck
+		},
+	}
+
+	ses := session.New(session.Deps{
+		Harness:  cbHarness,
+		Store:    &memStore{},
+		Clock:    fixedClock{t: epoch},
+		Interact: &noopInteraction{},
+		Debug:    logger,
+	})
+
+	got, err := ses.Start(context.Background(), baseCLIHarnessConfig(orchPath, runID))
+
+	// Restore access before any further assertions so that the test directory
+	// can be cleaned up by t.TempDir regardless of outcome.
+	if openedFile != nil {
+		openedFile.Close()
+		openedFile = nil
+	}
+	os.Chmod(parentDir, 0o755) //nolint:errcheck
+
+	// Cleanup failure must not surface as a returned error.
+	if err != nil {
+		t.Fatalf("want nil error (cleanup failure must be non-fatal), got %v", err)
+	}
+	// Cleanup failure must not change the run outcome.
+	if got.Status != domain.RunCompleted {
+		t.Errorf("want RunCompleted (cleanup failure must not change run outcome), got %q (message: %q)",
+			got.Status, got.Message)
+	}
+	// Cleanup failure must be recorded as a debug log event.
+	if !logger.eventLogged(domain.EventSnapshotCleanupFailed) {
+		t.Error("want EventSnapshotCleanupFailed debug event logged when snapshot cleanup fails, " +
+			"but the event was not found in the debug log; " +
+			"the implementation must log cleanup failures rather than silently ignore or surface them")
+	}
+}
+
+// TestSession_Start_CLIHarness_OrchestratorRefPointsIntoSnapshot verifies that
+// step 5a re-resolves the orchestrator reference from the snapshot directory
+// and re-binds consultants with the snapshot-resolved reference. After Start
+// returns, any consultant that implements domain.RunContextBinder must have
+// received an orchRef whose DefinitionPath is inside the snapshot directory
+// (not the original agents directory), with InvocationKind ==
+// InvocationOrchestrator.
+//
+// This test wires an orchRefCaptureConsultant as the Routing dependency. The
+// consultant implements RunContextBinder so it captures every orchRef the
+// session hands to it. The last captured orchRef -- after step 5a runs the
+// second bindRunContext call -- must contain the snapshot path segment.
+func TestSession_Start_CLIHarness_OrchestratorRefPointsIntoSnapshot(t *testing.T) {
+	const runID = "testsnap-orchref-01"
+	_, orchPath, _ := writeCLIHarnessDir(t, runID)
+
+	f := harness.NewFakeAdapter()
+	f.Queue("agent-a", harness.ScriptedEntry{Response: &domain.ProtocolResponse{
+		AgentInstanceID: "agent-a#1",
+		StatusCode:      domain.StatusSUCCESS,
+		StatusMessage:   "done",
+	}})
+	f.Queue("agent-b", harness.ScriptedEntry{Response: &domain.ProtocolResponse{
+		AgentInstanceID: "agent-b#2",
+		StatusCode:      domain.StatusSUCCESS,
+		StatusMessage:   "done",
+	}})
+
+	// capture records every BindRunContext call the session makes so we can
+	// inspect the orchRef that step 5a supplies after re-resolving from the
+	// snapshot directory.
+	capture := &orchRefCaptureConsultant{}
+
+	ses := session.New(session.Deps{
+		Harness:  f,
+		Store:    &memStore{},
+		Clock:    fixedClock{t: epoch},
+		Interact: &noopInteraction{},
+		Routing:  capture,
+	})
+
+	got, err := ses.Start(context.Background(), baseCLIHarnessConfig(orchPath, runID))
+	requireRunStatus(t, got, err, domain.RunCompleted)
+
+	// Step 5a must call bindRunContext a second time (after re-resolving from
+	// the snapshot dir). The first call happens before step 5a with the
+	// original orchRef; the second call inside step 5a supplies the snapshot
+	// orchRef. We expect at least 2 bindings.
+	if capture.bindCallCount() < 2 {
+		t.Fatalf("want BindRunContext called at least twice (once before step 5a, "+
+			"once after re-resolution), got %d call(s); step 5a may have omitted "+
+			"the re-bind of consultants with the snapshot orchestrator reference",
+			capture.bindCallCount())
+	}
+
+	// The last-bound orchRef must point into the snapshot directory.
+	orchRef := capture.lastBoundOrchRef()
+	if !containsSnapshotPathSegment(orchRef.DefinitionPath, runID) {
+		t.Errorf("orchRef.DefinitionPath %q does not contain snapshot path segment %q; "+
+			"step 5a must re-resolve the orchestrator from the snapshot directory and "+
+			"re-bind consultants so that consultation uses the snapshot copy of the "+
+			"orchestrator script rather than the original",
+			orchRef.DefinitionPath, "agents-runner-"+runID)
+	}
+	// The re-resolved orchRef must retain InvocationOrchestrator kind.
+	if orchRef.InvocationKind != domain.InvocationOrchestrator {
+		t.Errorf("orchRef.InvocationKind: want %q, got %q; "+
+			"ResolveOrchestrator must set InvocationKind to InvocationOrchestrator",
+			domain.InvocationOrchestrator, orchRef.InvocationKind)
+	}
+}
+
+// TestSession_Start_CLIHarness_SnapshotRetainedOnDeviationUnresolved verifies
+// that when Start returns a non-terminal outcome (RunDeviationUnresolved), the
+// snapshot directory is NOT deleted. Non-terminal outcomes leave the run in a
+// resumable state; deleting the snapshot would remove the agent files needed
+// for a future resume dispatch.
+//
+// The deviation is produced by having agent-a return PARTIALLY_DONE in the
+// linear workflow (which has no On Findings column), with no routing consultant
+// wired. The engine cannot route automatically, so the session returns
+// RunDeviationUnresolved.
+func TestSession_Start_CLIHarness_SnapshotRetainedOnDeviationUnresolved(t *testing.T) {
+	const runID = "testsnap-nonterminal-01"
+	_, orchPath, snapshotDir := writeCLIHarnessDir(t, runID)
+
+	f := harness.NewFakeAdapter()
+	// agent-a returns PARTIALLY_DONE; the linear workflow has On Findings "-",
+	// so the engine cannot route automatically. Without a routing consultant,
+	// the session returns RunDeviationUnresolved.
+	f.Queue("agent-a", harness.ScriptedEntry{Response: &domain.ProtocolResponse{
+		AgentInstanceID: "agent-a#1",
+		StatusCode:      domain.StatusPARTIALLY_DONE,
+		StatusMessage:   "partially done, needs more work",
+	}})
+
+	ses := session.New(session.Deps{
+		Harness:  f,
+		Store:    &memStore{},
+		Clock:    fixedClock{t: epoch},
+		Interact: &noopInteraction{},
+		// No Routing consultant wired: deviation terminates with RunDeviationUnresolved.
+	})
+
+	got, err := ses.Start(context.Background(), baseCLIHarnessConfig(orchPath, runID))
+	requireRunStatus(t, got, err, domain.RunDeviationUnresolved)
+
+	// Step 5a must have run and agents must have been dispatched from the
+	// snapshot directory. This confirms the snapshot was actually created.
+	invs := f.Invocations()
+	if len(invs) == 0 {
+		t.Fatal("want at least one harness invocation, got none")
+	}
+	if !containsSnapshotPathSegment(invs[0].Agent.DefinitionPath, runID) {
+		t.Errorf("agent %q: DefinitionPath %q does not contain snapshot path segment %q; "+
+			"step 5a must run before the first dispatch so that agent files are "+
+			"resolved from the snapshot directory",
+			invs[0].Agent.Identifier, invs[0].Agent.DefinitionPath, "agents-runner-"+runID)
+	}
+
+	// The snapshot directory must still exist after RunDeviationUnresolved.
+	// Cleanup must NOT run on non-terminal outcomes; the snapshot remains
+	// available for run resumption.
+	if _, statErr := os.Stat(snapshotDir); errors.Is(statErr, os.ErrNotExist) {
+		t.Errorf("snapshot directory %q must NOT be deleted when Start returns "+
+			"RunDeviationUnresolved; non-terminal outcomes leave the run resumable "+
+			"and the snapshot must persist so that agent files are available on resume",
+			snapshotDir)
+	}
+}
+
+// TestSession_Start_NonCLIHarness_SnapshotStepSkipped verifies that when
+// HarnessID is empty (not a known CLI harness), the snapshot step is skipped:
+// agents are resolved from the original agents directory and no snapshot path
+// segment appears in any DefinitionPath.
+func TestSession_Start_NonCLIHarness_SnapshotStepSkipped(t *testing.T) {
+	ses, f, _, orchPath := newLinearSession(t)
+
+	f.Queue("agent-a", harness.ScriptedEntry{Response: &domain.ProtocolResponse{
+		AgentInstanceID: "agent-a#1",
+		StatusCode:      domain.StatusSUCCESS,
+		StatusMessage:   "done",
+	}})
+	f.Queue("agent-b", harness.ScriptedEntry{Response: &domain.ProtocolResponse{
+		AgentInstanceID: "agent-b#2",
+		StatusCode:      domain.StatusSUCCESS,
+		StatusMessage:   "done",
+	}})
+
+	// HarnessID is "" (default from newLinearSession) — not a CLI harness.
+	cfg := baseLinearConfig(orchPath)
+
+	got, err := ses.Start(context.Background(), cfg)
+	requireRunStatus(t, got, err, domain.RunCompleted)
+
+	// Agents must NOT have been dispatched from a snapshot directory.
+	for _, inv := range f.Invocations() {
+		if strings.Contains(filepath.ToSlash(inv.Agent.DefinitionPath), "agents-runner-") {
+			t.Errorf("agent %q: DefinitionPath %q contains snapshot path segment but no "+
+				"snapshot should be created when HarnessID is not a CLI harness",
+				inv.Agent.Identifier, inv.Agent.DefinitionPath)
+		}
+	}
+}
+
+// ===== Anti-loop guard (Stage 2) =====
+//
+// The anti-loop guard prevents the same agent from being consecutively
+// dispatched for the same step more than four times. On the fifth would-be
+// dispatch, the guard escalates to the routing consultant instead of
+// dispatching. The guard applies regardless of what triggered the redispatch
+// (HITL rejection, HITL escalation, or consultant re-routing) and regardless
+// of the agent's status code (PARTIALLY_DONE does not bypass the guard).
+
+// TestSession_AntiLoopGuard_OrchestratedMode_EscalatesAfterFourConsecutiveDispatches
+// verifies that in orchestrated-mode HITL loops, when the routing consultant
+// repeatedly dispatches the same agent for the same step, the anti-loop guard
+// fires after four total dispatches and escalates instead of performing a
+// fifth dispatch.
+//
+// Without the guard the test setup produces six agent-a invocations: each of
+// the three consultant dispatch instructions triggers one initial dispatch plus
+// one automatic HITL redispatch before escalating back to the consultant. With
+// the guard in place, only four dispatches occur (the first two pairs of
+// initial + HITL-redispatch), and the third consultant instruction sees the
+// guard fire so it receives an escalation deviation and terminates the run
+// with a stop instruction.
+func TestSession_AntiLoopGuard_OrchestratedMode_EscalatesAfterFourConsecutiveDispatches(t *testing.T) {
+	consultant := &scriptedRoutingConsultant{}
+	// Three dispatch instructions produce six agent-a invocations without the
+	// guard (each pair: initial + HITL auto-redispatch). The guard must block
+	// the fifth invocation so that only four occur before the stop.
+	consultant.queueDispatch("agent-a", "attempt", 0)
+	consultant.queueDispatch("agent-a", "attempt", 0)
+	consultant.queueDispatch("agent-a", "attempt", 0)
+	// After the guard fires on the fifth would-be dispatch, the consultant is
+	// called with an escalation deviation; it terminates the run here.
+	consultant.queueStop("run terminated by anti-loop guard")
+
+	// ApprovalFalse keeps HITL non-compliant on every check, driving the full
+	// auto-redispatch -> escalation cycle.
+	ses, f, _, orchPath := newHITLLinearSession(t, consultant, &fixedApprovalReader{domain.ApprovalFalse})
+
+	// Queue more responses than the guard allows so the test is not bounded by
+	// the harness queue rather than by the guard logic.
+	for i := 0; i < 8; i++ {
+		f.Queue("agent-a", harness.ScriptedEntry{Response: &domain.ProtocolResponse{
+			AgentInstanceID: fmt.Sprintf("agent-a#%d", i+1),
+			StatusCode:      domain.StatusSUCCESS,
+			StatusMessage:   "done",
+		}})
+	}
+
+	ses.Start(context.Background(), baseOrchestratedConfig(orchPath)) //nolint:errcheck
+
+	totalA := 0
+	for _, inv := range f.Invocations() {
+		if inv.Agent.Identifier == "agent-a" {
+			totalA++
+		}
+	}
+	if totalA > 4 {
+		t.Errorf("anti-loop guard (orchestrated): want at most 4 consecutive agent-a dispatches for the same step, got %d; "+
+			"the guard must prevent the 5th dispatch and escalate to the consultant instead",
+			totalA)
+	}
+	if totalA < 4 {
+		t.Errorf("anti-loop guard (orchestrated): must allow at least four dispatches before escalating, got %d; "+
+			"the guard is firing too early",
+			totalA)
+	}
+}
+
+// TestSession_AntiLoopGuard_AutoMode_EscalatesAfterFourConsecutiveDispatches
+// verifies that in auto-mode HITL loops (hitlCheckLoop), when the routing
+// consultant repeatedly dispatches the same agent after HITL escalation, the
+// anti-loop guard fires after four total dispatches.
+//
+// In auto mode the engine dispatches agent-a directly (dispatch 1). The
+// HITL check triggers one automatic redispatch (dispatch 2), then escalates
+// to the consultant. Without the guard the consultant's two dispatch
+// instructions each produce two more invocations (dispatches 3-4 and 5-6).
+// With the guard the fifth invocation is blocked: after dispatches 1-4 the
+// counter is at four and the second consultant call receives an escalation
+// deviation, causing it to stop the run.
+func TestSession_AntiLoopGuard_AutoMode_EscalatesAfterFourConsecutiveDispatches(t *testing.T) {
+	consultant := &scriptedRoutingConsultant{}
+	// Two dispatch instructions produce four additional agent-a invocations
+	// without the guard (on top of the two from the engine-driven hitlCheckLoop
+	// path), totalling six. With the guard, only two additional invocations are
+	// allowed before the guard fires on the second consultant call.
+	consultant.queueDispatch("agent-a", "attempt", 0)
+	consultant.queueDispatch("agent-a", "attempt", 0)
+	// After the guard fires, the consultant receives an escalation and stops.
+	consultant.queueStop("run terminated by anti-loop guard")
+
+	ses, f, _, orchPath := newHITLLinearSession(t, consultant, &fixedApprovalReader{domain.ApprovalFalse})
+
+	for i := 0; i < 8; i++ {
+		f.Queue("agent-a", harness.ScriptedEntry{Response: &domain.ProtocolResponse{
+			AgentInstanceID: fmt.Sprintf("agent-a#%d", i+1),
+			StatusCode:      domain.StatusSUCCESS,
+			StatusMessage:   "done",
+		}})
+	}
+
+	cfg := domain.RunConfig{
+		OrchestratorFilePath: orchPath,
+		WorkflowID:           "linear",
+		Task:                 "test task",
+		IsNewRun:             true,
+		RunSettings: domain.RunSettings{
+			Mode: domain.ExecutionModeAuto,
+		},
+	}
+
+	ses.Start(context.Background(), cfg) //nolint:errcheck
+
+	totalA := 0
+	for _, inv := range f.Invocations() {
+		if inv.Agent.Identifier == "agent-a" {
+			totalA++
+		}
+	}
+	if totalA > 4 {
+		t.Errorf("anti-loop guard (auto): want at most 4 consecutive agent-a dispatches for the same step, got %d; "+
+			"the guard must fire after the 4th dispatch and escalate rather than performing a 5th",
+			totalA)
+	}
+	if totalA < 4 {
+		t.Errorf("anti-loop guard (auto): must allow at least four dispatches before escalating, got %d; "+
+			"the guard is firing too early",
+			totalA)
+	}
+}
+
+// TestSession_AntiLoopGuard_PartiallyDoneAppliesGuard verifies that the
+// anti-loop guard has no status-based exceptions: an agent that repeatedly
+// returns PARTIALLY_DONE is subject to the same four-dispatch cap as an agent
+// that fails HITL compliance checks.
+//
+// In orchestrated mode with HITL disabled, a PARTIALLY_DONE result causes the
+// outer dispatch loop to call the consultant again for the next routing
+// decision. Without the guard, the consultant's five dispatch instructions
+// each produce one agent-a invocation (no HITL redispatch occurs for
+// non-SUCCESS status), totalling five. With the guard, the fifth would-be
+// dispatch is blocked after four successful invocations and the consultant
+// receives an escalation that terminates the run.
+func TestSession_AntiLoopGuard_PartiallyDoneAppliesGuard(t *testing.T) {
+	consultant := &scriptedRoutingConsultant{}
+	// Five dispatch instructions each produce one agent-a invocation (no HITL
+	// redispatch for PARTIALLY_DONE). Without the guard: five dispatches total.
+	// With the guard: four dispatches, then the fifth is blocked.
+	for i := 0; i < 5; i++ {
+		consultant.queueDispatch("agent-a", "attempt", 0)
+	}
+	// After the guard fires on the fifth would-be dispatch, the consultant
+	// receives an escalation deviation and terminates the run.
+	consultant.queueStop("run terminated by anti-loop guard")
+
+	// Use linear-orch.md (HITL=false) so no HITL redispatch occurs; each
+	// consultant dispatch results in exactly one agent-a invocation.
+	ses, f, _, orchPath := newOrchestratedSession(t, consultant)
+
+	for i := 0; i < 6; i++ {
+		f.Queue("agent-a", harness.ScriptedEntry{Response: &domain.ProtocolResponse{
+			AgentInstanceID: fmt.Sprintf("agent-a#%d", i+1),
+			StatusCode:      domain.StatusPARTIALLY_DONE,
+			StatusMessage:   "partially done",
+		}})
+	}
+
+	ses.Start(context.Background(), baseOrchestratedConfig(orchPath)) //nolint:errcheck
+
+	totalA := 0
+	for _, inv := range f.Invocations() {
+		if inv.Agent.Identifier == "agent-a" {
+			totalA++
+		}
+	}
+	if totalA > 4 {
+		t.Errorf("anti-loop guard (PARTIALLY_DONE): want at most 4 consecutive agent-a dispatches for the same step, got %d; "+
+			"PARTIALLY_DONE must not bypass the guard -- no status-based exceptions",
+			totalA)
+	}
+	if totalA < 4 {
+		t.Errorf("anti-loop guard (PARTIALLY_DONE): must allow at least four dispatches before escalating, got %d; "+
+			"the guard is firing too early",
+			totalA)
+	}
+}
+
+// TestSession_ConsultStep_PhaseFieldIsNonEmpty verifies that the consultation
+// infrastructure row written to the execution log by consultRoute carries a
+// non-empty Phase field. The Phase is derived from the workflow row at the
+// dispatched rowIndex and must match the phase declared in the orchestrator
+// file (e.g. "PLANNING" for the hitl-linear fixture).
+//
+// In the current implementation the consultStep struct literal omits the Phase
+// field, leaving it as an empty string. The fix adds Phase: phase so the row
+// correctly records which workflow phase the consultation covered.
+func TestSession_ConsultStep_PhaseFieldIsNonEmpty(t *testing.T) {
+	consultant := &scriptedRoutingConsultant{}
+	consultant.queueDispatch("agent-a", "do the work", 0)
+	consultant.queueStop("done")
+
+	// Use ApprovalTrue so HITL passes without cycling; the test focuses on
+	// the consultStep row, not on HITL redispatch behavior.
+	ses, f, store, orchPath := newHITLLinearSession(t, consultant, &fixedApprovalReader{domain.ApprovalTrue})
+
+	f.Queue("agent-a", harness.ScriptedEntry{Response: &domain.ProtocolResponse{
+		AgentInstanceID: "agent-a#2",
+		StatusCode:      domain.StatusSUCCESS,
+		StatusMessage:   "done",
+	}})
+
+	ses.Start(context.Background(), baseOrchestratedConfig(orchPath)) //nolint:errcheck
+
+	// Confirm the consultation infrastructure row is present.
+	infraCount := 0
+	for _, step := range store.Applied {
+		if step.IsInfrastructure && strings.HasPrefix(step.AgentInstance, "orchestrator#") {
+			infraCount++
+		}
+	}
+	if infraCount == 0 {
+		t.Fatal("want at least one consultStep infrastructure row in the execution log, got 0; " +
+			"cannot verify Phase field without a consultation row")
+	}
+
+	// Every consultStep row must carry the exact Phase declared in the workflow.
+	// The hitl-linear fixture declares both rows as phase "PLANNING", so the
+	// dispatched row (index 0) must produce Phase=="PLANNING", not just any
+	// non-empty string.
+	const wantPhase = "PLANNING"
+	for _, step := range store.Applied {
+		if !step.IsInfrastructure || !strings.HasPrefix(step.AgentInstance, "orchestrator#") {
+			continue
+		}
+		if step.Phase != wantPhase {
+			t.Errorf("consultStep infrastructure row %q has Phase=%q; want %q (the phase declared in the hitl-linear fixture)",
+				step.AgentInstance, step.Phase, wantPhase)
+		}
+	}
+}
+
+// TestSession_AntiLoopGuard_CounterResets_OnDifferentAgentDispatch verifies
+// that the anti-loop guard counter resets when a different agent is dispatched.
+// After three consecutive agent-a dispatches the consultant switches to agent-b
+// for one dispatch, then returns to agent-a. The guard must NOT fire on the
+// first agent-a dispatch after the agent-b break because the different-agent
+// dispatch resets the consecutive-dispatch counter to zero.
+//
+// A buggy implementation that tracks per-agent totals without resetting would
+// carry agent-a's count of three across the agent-b break. The next agent-a
+// dispatch would bring the count to four -- hitting the threshold immediately --
+// and the following agent-a dispatch would be blocked, leaving totalA at four
+// instead of the expected five (three before + two after the reset).
+func TestSession_AntiLoopGuard_CounterResets_OnDifferentAgentDispatch(t *testing.T) {
+	consultant := &scriptedRoutingConsultant{}
+	// Three agent-a dispatches build the consecutive count to three (one below
+	// the max-before-guard-fires threshold of four). The agent-b dispatch must
+	// reset the counter so the two subsequent agent-a dispatches start fresh.
+	consultant.queueDispatch("agent-a", "attempt", 0)
+	consultant.queueDispatch("agent-a", "attempt", 0)
+	consultant.queueDispatch("agent-a", "attempt", 0)
+	// Switching to agent-b must reset the agent-a counter.
+	consultant.queueDispatch("agent-b", "interlude", 0)
+	// Two more agent-a dispatches after the reset; neither should be blocked.
+	consultant.queueDispatch("agent-a", "post-reset attempt 1", 0)
+	consultant.queueDispatch("agent-a", "post-reset attempt 2", 0)
+	consultant.queueStop("done")
+
+	// No HITL on linear-orch.md so each consultant instruction produces exactly
+	// one agent dispatch; PARTIALLY_DONE drives the loop back to the consultant.
+	ses, f, _, orchPath := newOrchestratedSession(t, consultant)
+
+	for i := 0; i < 6; i++ {
+		f.Queue("agent-a", harness.ScriptedEntry{Response: &domain.ProtocolResponse{
+			AgentInstanceID: fmt.Sprintf("agent-a#%d", i+1),
+			StatusCode:      domain.StatusPARTIALLY_DONE,
+			StatusMessage:   "still working",
+		}})
+	}
+	f.Queue("agent-b", harness.ScriptedEntry{Response: &domain.ProtocolResponse{
+		AgentInstanceID: "agent-b#1",
+		StatusCode:      domain.StatusPARTIALLY_DONE,
+		StatusMessage:   "interlude",
+	}})
+
+	ses.Start(context.Background(), baseOrchestratedConfig(orchPath)) //nolint:errcheck
+
+	totalA := 0
+	for _, inv := range f.Invocations() {
+		if inv.Agent.Identifier == "agent-a" {
+			totalA++
+		}
+	}
+	// After the agent-b break, agent-a's counter must have reset. The guard must
+	// allow the two post-reset agent-a dispatches (totalA should reach five:
+	// three before agent-b plus two after). A totalA of four or fewer means the
+	// guard fired prematurely after the agent-b break.
+	if totalA < 5 {
+		t.Errorf("anti-loop guard (different-agent reset): want at least 5 agent-a dispatches "+
+			"(3 before agent-b + 2 after counter reset), got %d; "+
+			"the guard must reset the consecutive-dispatch counter when a different agent is dispatched",
+			totalA)
+	}
+}
+
+// TestSession_AntiLoopGuard_CounterResets_OnNewStep verifies that the anti-loop
+// guard counter resets when a new workflow step begins. Agent-a is dispatched
+// three times (PARTIALLY_DONE) then once (SUCCESS) for step 0, reaching the
+// guard's cap of four without triggering it. When the workflow advances to
+// step 1, agent-a must be dispatchable again from a fresh counter; a premature
+// guard fire on step 1 would indicate the counter was not scoped to the step.
+//
+// The test uses a custom two-row workflow where agent-a appears in both rows.
+// The consultant dispatches agent-a three times at row 0 (all PARTIALLY_DONE),
+// then instructs a SUCCESS response at row 0 to advance to step 1, then
+// dispatches agent-a at row 1. An implementation that scopes the counter
+// globally (not per-step) would fire the guard on the first agent-a dispatch at
+// step 1 because the accumulated count from step 0 carries over.
+func TestSession_AntiLoopGuard_CounterResets_OnNewStep(t *testing.T) {
+	dir := t.TempDir()
+
+	// Two-row workflow with agent-a in both rows (HITL=false so PARTIALLY_DONE
+	// drives consultant re-routing without triggering HITL redispatch).
+	const twoAgentAWorkflow = `<Workflow type="core" name="two-agent-a" version="1.0">
+## Two-Step Agent-A Workflow
+
+| Phase | Subagent | HITL | On Success | On Findings | Input | Output |
+|-------|----------|:----:|------------|-------------|-------|--------|
+| PLANNING | agent-a | FALSE | agent-a | - | - | plan.md |
+| PLANNING | agent-a | FALSE | COMPLETE | - | plan.md | result.md |
+</Workflow>
+`
+	orchPath := filepath.Join(dir, "two-agent-a-orch.md")
+	if err := os.WriteFile(orchPath, []byte(twoAgentAWorkflow), 0600); err != nil {
+		t.Fatalf("write two-agent-a-orch.md: %v", err)
+	}
+	writeAgentFile(t, dir, "agent-a")
+
+	consultant := &scriptedRoutingConsultant{}
+	// Step 0: dispatch agent-a three times (PARTIALLY_DONE each) then once
+	// (SUCCESS) to reach the guard cap of four without triggering it.
+	for i := 0; i < 3; i++ {
+		consultant.queueDispatch("agent-a", "step-0 attempt", 0)
+	}
+	// Advance to step 1 by dispatching agent-a at row 0 with a SUCCESS response.
+	consultant.queueDispatch("agent-a", "step-0 final", 0)
+	// Step 1: agent-a must be dispatchable from a fresh counter; the guard must
+	// not fire on this first dispatch at the new step.
+	consultant.queueDispatch("agent-a", "step-1 attempt", 1)
+	consultant.queueStop("workflow done")
+
+	f := harness.NewFakeAdapter()
+	store := &memStore{}
+	ses := session.New(session.Deps{
+		Harness:  f,
+		Store:    store,
+		Routing:  consultant,
+		Clock:    fixedClock{t: epoch},
+		Interact: &noopInteraction{},
+	})
+
+	// Three PARTIALLY_DONE responses for the step-0 loop, one SUCCESS to advance,
+	// one SUCCESS for step 1.
+	for i := 0; i < 3; i++ {
+		f.Queue("agent-a", harness.ScriptedEntry{Response: &domain.ProtocolResponse{
+			AgentInstanceID: fmt.Sprintf("agent-a#%d", i+1),
+			StatusCode:      domain.StatusPARTIALLY_DONE,
+			StatusMessage:   "still working",
+		}})
+	}
+	f.Queue("agent-a", harness.ScriptedEntry{Response: &domain.ProtocolResponse{
+		AgentInstanceID: "agent-a#4",
+		StatusCode:      domain.StatusSUCCESS,
+		StatusMessage:   "step 0 done",
+	}})
+	f.Queue("agent-a", harness.ScriptedEntry{Response: &domain.ProtocolResponse{
+		AgentInstanceID: "agent-a#5",
+		StatusCode:      domain.StatusSUCCESS,
+		StatusMessage:   "step 1 done",
+	}})
+
+	cfg := domain.RunConfig{
+		OrchestratorFilePath: orchPath,
+		WorkflowID:           "two-agent-a",
+		Task:                 "test task",
+		IsNewRun:             true,
+		RunSettings: domain.RunSettings{
+			Mode: domain.ExecutionModeOrchestrated,
+		},
+	}
+	ses.Start(context.Background(), cfg) //nolint:errcheck
+
+	totalA := 0
+	for _, inv := range f.Invocations() {
+		if inv.Agent.Identifier == "agent-a" {
+			totalA++
+		}
+	}
+	// Step 0 contributes four agent-a dispatches (three PARTIALLY_DONE + one
+	// SUCCESS), reaching the guard cap without triggering it. Step 1 contributes
+	// one more. The guard must not fire on the step-1 dispatch. A totalA of four
+	// or fewer indicates the guard fired prematurely on step 1 because the counter
+	// was not reset when the step changed.
+	if totalA < 5 {
+		t.Errorf("anti-loop guard (new-step reset): want 5 agent-a dispatches "+
+			"(4 at step 0 + 1 at step 1 after counter reset), got %d; "+
+			"the counter must reset when a new workflow step begins",
+			totalA)
+	}
+}
+
+// ===== Execution-Log Integrity =====
+
+// TestSession_HITL_RejectedDispatchPersisted_AutoMode verifies that the
+// hitlCheckLoop (auto-mode dispatch path) persists a HITL-rejected dispatch as a
+// distinct execution log entry with HITLRejected=true and IsInfrastructure=true
+// before redispatching the same agent. The rejected entry must carry nil
+// OutputArtifacts to avoid registering non-compliant artifact paths.
+//
+// Scenario: agent-a's first attempt is non-compliant (ApprovalFalse); after the
+// rejected-step Apply, agent-a is redispatched and the redispatch is compliant
+// (ApprovalTrue). The run then proceeds to agent-b and completes.
+func TestSession_HITL_RejectedDispatchPersisted_AutoMode(t *testing.T) {
+	// First approval call returns False (plan.md on agent-a's initial attempt);
+	// subsequent calls return True so the redispatch is accepted and the run
+	// completes without escalation.
+	approvals := &switchingApprovalReader{
+		firstApproval: domain.ApprovalFalse,
+		restApproval:  domain.ApprovalTrue,
+	}
+	ses, f, store, orchPath := newAutoHITLSession(t, approvals, nil)
+
+	// Queue: original agent-a (rejected), redispatched agent-a (accepted), agent-b.
+	f.Queue("agent-a", harness.ScriptedEntry{Response: &domain.ProtocolResponse{
+		AgentInstanceID: "agent-a#1",
+		StatusCode:      domain.StatusSUCCESS,
+		StatusMessage:   "plan v1",
+	}})
+	f.Queue("agent-a", harness.ScriptedEntry{Response: &domain.ProtocolResponse{
+		AgentInstanceID: "agent-a#2",
+		StatusCode:      domain.StatusSUCCESS,
+		StatusMessage:   "plan v2 approved",
+	}})
+	f.Queue("agent-b", harness.ScriptedEntry{Response: &domain.ProtocolResponse{
+		AgentInstanceID: "agent-b#3",
+		StatusCode:      domain.StatusSUCCESS,
+		StatusMessage:   "done",
+	}})
+
+	cfg := domain.RunConfig{
+		OrchestratorFilePath: orchPath,
+		WorkflowID:           "linear",
+		Task:                 "test task",
+		IsNewRun:             true,
+		RunSettings:          domain.RunSettings{Mode: domain.ExecutionModeAuto},
+	}
+	ses.Start(context.Background(), cfg) //nolint:errcheck
+
+	requireHITLRejectedSteps(t, store)
+}
+
+// TestSession_HITL_RejectedDispatchPersisted_OrchestratedMode verifies the same
+// rejected-dispatch persistence behavior for the hitlLoop (orchestrated-mode
+// consultRoute path). The rejected step must appear in store.Applied with
+// HITLRejected=true before the session proceeds to the redispatch.
+//
+// Scenario: consultant dispatches agent-a; the first attempt is non-compliant so
+// the hitlLoop triggers a redispatch; the redispatch is compliant; consultant then
+// dispatches agent-b and the run completes.
+func TestSession_HITL_RejectedDispatchPersisted_OrchestratedMode(t *testing.T) {
+	approvals := &switchingApprovalReader{
+		firstApproval: domain.ApprovalFalse,
+		restApproval:  domain.ApprovalTrue,
+	}
+	consultant := &scriptedRoutingConsultant{}
+	// Two dispatch instructions: agent-a (first, including its internal HITL
+	// redispatch) and agent-b (second). The HITL redispatch of agent-a happens
+	// inside hitlLoop without consuming a new consultation instruction.
+	consultant.queueDispatch("agent-a", "draft the plan", 0)
+	consultant.queueDispatch("agent-b", "execute the plan", 1)
+
+	ses, f, store, orchPath := newHITLLinearSession(t, consultant, approvals)
+
+	// Queue: original agent-a (rejected by HITL), redispatched agent-a (accepted),
+	// agent-b (accepted).
+	f.Queue("agent-a", harness.ScriptedEntry{Response: &domain.ProtocolResponse{
+		AgentInstanceID: "agent-a#1",
+		StatusCode:      domain.StatusSUCCESS,
+		StatusMessage:   "plan v1",
+	}})
+	f.Queue("agent-a", harness.ScriptedEntry{Response: &domain.ProtocolResponse{
+		AgentInstanceID: "agent-a#2",
+		StatusCode:      domain.StatusSUCCESS,
+		StatusMessage:   "plan v2 approved",
+	}})
+	f.Queue("agent-b", harness.ScriptedEntry{Response: &domain.ProtocolResponse{
+		AgentInstanceID: "agent-b#3",
+		StatusCode:      domain.StatusSUCCESS,
+		StatusMessage:   "done",
+	}})
+
+	ses.Start(context.Background(), baseOrchestratedConfig(orchPath)) //nolint:errcheck
+
+	requireHITLRejectedSteps(t, store)
+}
+
+// TestSession_HITL_SequenceMonotonicity_FullScenario verifies that sequence
+// numbers are strictly monotonically increasing across a complete HITL
+// redispatch-escalation-consultant-reroute cycle, and that no two dispatched
+// agent instance IDs share the same "#N" numeric suffix within a single run.
+//
+// Scenario: orchestrated mode; agent-a's output (plan.md) is always non-compliant,
+// triggering HITLRedispatch on the first check and HITLEscalate on the second. The
+// escalation causes a recursive consultRoute call; the consultant re-routes to
+// agent-b, whose output (result.md) is always compliant.
+//
+// Without persisting rejected-step Applies, the escalation's consultRoute derives
+// its consultSeq from a stale state.GlobalSequence (never incremented for the
+// missing rejected Applies), reusing the same "#1" slot that was already assigned
+// to the original agent-a dispatch. This test catches that reuse.
+func TestSession_HITL_SequenceMonotonicity_FullScenario(t *testing.T) {
+	// plan.md (agent-a output) is never approved; result.md (agent-b output) is
+	// always approved. This drives the full rejection+escalation path for agent-a
+	// while allowing agent-b to complete cleanly.
+	approvals := &perPathApprovalReader{
+		specific: map[string]domain.HumanApproval{
+			"plan.md":   domain.ApprovalFalse,
+			"result.md": domain.ApprovalTrue,
+		},
+		fallback: domain.ApprovalFalse,
+	}
+
+	consultant := &scriptedRoutingConsultant{}
+	// First instruction dispatches agent-a. After two non-compliant results,
+	// HITLEscalate fires and the session calls consultRoute recursively. The
+	// second instruction (agent-b) is consumed by that recursive call.
+	consultant.queueDispatch("agent-a", "draft the plan", 0)
+	consultant.queueDispatch("agent-b", "execute after escalation", 1)
+
+	ses, f, store, orchPath := newHITLLinearSession(t, consultant, approvals)
+
+	// agent-a is dispatched twice: original attempt and HITL redispatch.
+	// agent-b is dispatched once by the recursive consultRoute after escalation.
+	f.Queue("agent-a", harness.ScriptedEntry{Response: &domain.ProtocolResponse{
+		AgentInstanceID: "agent-a#1",
+		StatusCode:      domain.StatusSUCCESS,
+		StatusMessage:   "plan v1",
+	}})
+	f.Queue("agent-a", harness.ScriptedEntry{Response: &domain.ProtocolResponse{
+		AgentInstanceID: "agent-a#2",
+		StatusCode:      domain.StatusSUCCESS,
+		StatusMessage:   "plan v2",
+	}})
+	f.Queue("agent-b", harness.ScriptedEntry{Response: &domain.ProtocolResponse{
+		AgentInstanceID: "agent-b#1",
+		StatusCode:      domain.StatusSUCCESS,
+		StatusMessage:   "done",
+	}})
+
+	ses.Start(context.Background(), baseOrchestratedConfig(orchPath)) //nolint:errcheck
+
+	// All Applied Seq values must be unique and strictly increasing.
+	for i := 1; i < len(store.Applied); i++ {
+		if store.Applied[i].Seq <= store.Applied[i-1].Seq {
+			t.Errorf("store.Applied[%d].Seq=%d is not greater than Applied[%d].Seq=%d; "+
+				"sequence numbers must be strictly increasing across all persisted dispatches",
+				i, store.Applied[i].Seq, i-1, store.Applied[i-1].Seq)
+		}
+	}
+
+	// The full scenario must produce at least two HITLRejected entries: one for
+	// the initial dispatch that triggered HITLRedispatch and one for the redispatch
+	// that triggered HITLEscalate.
+	rejectedCount := 0
+	for _, s := range store.Applied {
+		if s.HITLRejected {
+			rejectedCount++
+		}
+	}
+	if rejectedCount < 2 {
+		t.Errorf("want at least 2 HITLRejected steps in store.Applied "+
+			"(initial dispatch + redispatch, both non-compliant), got %d; "+
+			"both rejected attempts must be persisted before escalating",
+			rejectedCount)
+	}
+
+	// All dispatched agent instance IDs must carry unique "#N" numeric suffixes.
+	// Without persisting rejected steps, state.GlobalSequence is never incremented
+	// for the missed Applies, so the escalation's consultRoute computes the same
+	// dispSeq as the original agent-a dispatch, producing duplicate "#1" suffixes.
+	seenSuffix := make(map[int]string)
+	for _, inv := range f.Invocations() {
+		instanceID := inv.Request.AgentInstanceID
+		idx := strings.LastIndex(instanceID, "#")
+		if idx < 0 {
+			continue
+		}
+		var n int
+		if _, scanErr := fmt.Sscanf(instanceID[idx+1:], "%d", &n); scanErr != nil {
+			continue
+		}
+		if prev, already := seenSuffix[n]; already {
+			t.Errorf("agent instance ID numeric suffix #%d is reused: first seen in %q, reused by %q; "+
+				"every dispatch within a run must carry a unique sequence-derived suffix",
+				n, prev, instanceID)
+		}
+		seenSuffix[n] = instanceID
+	}
+}
+
+// TestSession_HITL_Resume_AfterRejectedDispatch verifies two complementary
+// properties of execution-log integrity after a HITL rejection:
+//
+//  1. (RED phase assertion) After a HITL rejection cycle, the number of persisted
+//     Apply calls must account for the rejected dispatch as a distinct entry.
+//     Without the fix, only the accepted Apply is recorded, understating the run's
+//     progress and leaving the rejected attempt invisible to the execution log.
+//
+//  2. (Behavioral assertion) When a run is interrupted after a rejected-step Apply
+//     but before the redispatch or escalation Apply -- so the last workflow log
+//     entry is the rejected row and current_state.LastAgent is empty (because
+//     IsInfrastructure=true left current_state unchanged) -- resuming the run must
+//     re-dispatch the unresolved step, not skip it as already complete.
+func TestSession_HITL_Resume_AfterRejectedDispatch(t *testing.T) {
+	// --- Part 1: Apply count integrity after one rejection and one acceptance ---
+
+	approvals := &switchingApprovalReader{
+		firstApproval: domain.ApprovalFalse,
+		restApproval:  domain.ApprovalTrue,
+	}
+	ses, f, store, orchPath := newAutoHITLSession(t, approvals, nil)
+
+	f.Queue("agent-a", harness.ScriptedEntry{Response: &domain.ProtocolResponse{
+		AgentInstanceID: "agent-a#1",
+		StatusCode:      domain.StatusSUCCESS,
+		StatusMessage:   "plan v1",
+	}})
+	f.Queue("agent-a", harness.ScriptedEntry{Response: &domain.ProtocolResponse{
+		AgentInstanceID: "agent-a#2",
+		StatusCode:      domain.StatusSUCCESS,
+		StatusMessage:   "plan v2 approved",
+	}})
+	f.Queue("agent-b", harness.ScriptedEntry{Response: &domain.ProtocolResponse{
+		AgentInstanceID: "agent-b#3",
+		StatusCode:      domain.StatusSUCCESS,
+		StatusMessage:   "done",
+	}})
+
+	ses.Start(context.Background(), domain.RunConfig{
+		OrchestratorFilePath: orchPath,
+		WorkflowID:           "linear",
+		Task:                 "test task",
+		IsNewRun:             true,
+		RunSettings:          domain.RunSettings{Mode: domain.ExecutionModeAuto},
+	}) //nolint:errcheck
+
+	// With one HITL rejection and one acceptance for agent-a, plus one acceptance
+	// for agent-b, the execution log must hold 3 distinct Apply rows:
+	//   [1] rejected agent-a (HITLRejected=true)
+	//   [2] accepted agent-a
+	//   [3] accepted agent-b
+	// Without the fix only 2 rows are recorded (the rejected Apply is skipped),
+	// which understates the run's progress and enables sequence-number reuse on
+	// subsequent dispatches or after a resume.
+	const wantApplied = 3
+	if len(store.Applied) != wantApplied {
+		t.Errorf("want %d Applied steps (rejected agent-a + accepted agent-a + agent-b), "+
+			"got %d; the HITL-rejected dispatch must be persisted as a distinct execution log entry",
+			wantApplied, len(store.Applied))
+	}
+
+	// --- Part 2: Resume correctly re-dispatches the unresolved step ---
+	//
+	// Pre-populate a store with the state that should exist when a run is
+	// interrupted after the rejected-step Apply but before the redispatch Apply.
+	// This is the state that the fix produces: GlobalSequence=1, one log entry
+	// for the rejected agent-a row (a workflow participant, so engine.ResumePoint
+	// finds it as the last workflow log entry), and current_state.LastAgent empty
+	// because IsInfrastructure=true left current_state unchanged.
+	//
+	// The engine must detect the mismatch between the last workflow log entry
+	// (agent-a#1) and current_state.LastAgent ("") and set RerunLast=true,
+	// causing agent-a to be re-dispatched rather than skipped.
+	resumeStore := &memStore{
+		state: domain.ArtifactState{
+			Workflow:        "linear",
+			WorkflowVersion: "1.0",
+			Task:            "test task",
+			GlobalSequence:  1,
+			RunSettings:     domain.RunSettings{Mode: domain.ExecutionModeAuto},
+			CurrentState: domain.CurrentState{
+				// IsInfrastructure=true on the rejected Apply means current_state
+				// was not updated; LastAgent remains empty (no prior accepted step).
+				LastAgent:  "",
+				LastStatus: domain.StatusSUCCESS,
+			},
+			ExecutionLog: []domain.ExecutionLogEntry{
+				{
+					Seq:    1,
+					Agent:  "agent-a#1",
+					Phase:  "PLANNING",
+					Status: domain.StatusSUCCESS,
+				},
+			},
+		},
+		exists: true,
+	}
+
+	resumeDir := t.TempDir()
+	resumeOrchPath := copyOrchestratorFile(t, resumeDir, "hitl-linear-orch.md")
+	writeAgentFile(t, resumeDir, "agent-a")
+	writeAgentFile(t, resumeDir, "agent-b")
+
+	f2 := harness.NewFakeAdapter()
+	ses2 := session.New(session.Deps{
+		Harness:   f2,
+		Store:     resumeStore,
+		Approvals: &fixedApprovalReader{domain.ApprovalTrue},
+		Clock:     fixedClock{t: epoch},
+		Interact:  &noopInteraction{},
+	})
+
+	// Only agent-a should be dispatched first (re-run of the interrupted step);
+	// agent-b follows after agent-a completes.
+	f2.Queue("agent-a", harness.ScriptedEntry{Response: &domain.ProtocolResponse{
+		AgentInstanceID: "agent-a#2",
+		StatusCode:      domain.StatusSUCCESS,
+		StatusMessage:   "re-done with approval",
+	}})
+	f2.Queue("agent-b", harness.ScriptedEntry{Response: &domain.ProtocolResponse{
+		AgentInstanceID: "agent-b#3",
+		StatusCode:      domain.StatusSUCCESS,
+		StatusMessage:   "done",
+	}})
+
+	got, err := ses2.Start(context.Background(), domain.RunConfig{
+		OrchestratorFilePath: resumeOrchPath,
+		WorkflowID:           "linear",
+		Task:                 "test task",
+		IsNewRun:             false, // resume: artifact pre-exists with rejected-step log entry
+		RunSettings:          domain.RunSettings{Mode: domain.ExecutionModeAuto},
+	})
+	if err != nil {
+		t.Fatalf("want nil error on resume, got %v", err)
+	}
+	if got.Status != domain.RunCompleted {
+		t.Errorf("want RunCompleted on resume, got %q (message: %q)", got.Status, got.Message)
+	}
+
+	// The first resume invocation must be agent-a (the re-run of the interrupted
+	// rejected-step). The engine detects that the last workflow log entry
+	// (agent-a#1) does not match current_state.LastAgent (""), sets RerunLast=true,
+	// and re-dispatches agent-a rather than advancing to agent-b.
+	invs2 := f2.Invocations()
+	if len(invs2) == 0 {
+		t.Fatal("want at least 1 harness invocation on resume, got 0")
+	}
+	if invs2[0].Agent.Identifier != "agent-a" {
+		t.Errorf("want first resume invocation to re-dispatch agent-a (interrupted rejected step), "+
+			"got %q; the engine must treat the rejected-step log entry as an interrupted step "+
+			"requiring re-dispatch, not as a completed step to advance past",
+			invs2[0].Agent.Identifier)
+	}
+}
+
+// ===== ConsultRoute stage context preservation =====
+
+// noticeCapturingInteraction wraps noopInteraction and records every Notify
+// call. Tests use it to assert that consultRoute notification messages carry
+// the correct stage context rather than the hardcoded "" the pre-fix code
+// produces.
+type noticeCapturingInteraction struct {
+	noopInteraction
+	mu      sync.Mutex
+	Notices []interaction.Notice
+}
+
+func (c *noticeCapturingInteraction) Notify(_ context.Context, n interaction.Notice) {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	c.Notices = append(c.Notices, n)
+}
+
+func (c *noticeCapturingInteraction) allNotices() []interaction.Notice {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	out := make([]interaction.Notice, len(c.Notices))
+	copy(out, c.Notices)
+	return out
+}
+
+// writeConsultStagedPlan writes a Plan.md with Stage-1 and Stage-2 into dir.
+// consult-staged-orch.md uses the EXECUTION.[StageNumber] template, so the
+// session must read Plan.md from RunFolder to expand the routing table to four
+// rows (indices 0-3). This helper satisfies that requirement.
+func writeConsultStagedPlan(t *testing.T, dir string) {
+	t.Helper()
+	const planContent = `# Plan
+
+## Stages
+
+| Stage | Name | Goal | Depends On | HITL |
+|-------|------|------|------------|:----:|
+| 1 | Stage One | First stage | - | FALSE |
+| 2 | Stage Two | Second stage | 1 | FALSE |
+`
+	if err := os.WriteFile(filepath.Join(dir, "Plan.md"), []byte(planContent), 0600); err != nil {
+		t.Fatalf("writeConsultStagedPlan: %v", err)
+	}
+}
+
+// newConsultStagedSession builds a session backed by consult-staged-orch.md
+// in orchestrated mode. The fixture uses EXECUTION.[StageNumber] rows for
+// agent-a and agent-b and requires Plan.md for template expansion; this helper
+// writes Plan.md (Stage-1 and Stage-2) and sets RunFolder = dir so the session
+// finds it. After expansion the routing table has four rows (indices 0-3):
+//
+//	0 = EXECUTION.Stage-1 / agent-a
+//	1 = EXECUTION.Stage-1 / agent-b
+//	2 = EXECUTION.Stage-2 / agent-a
+//	3 = EXECUTION.Stage-2 / agent-b
+//
+// The session uses a no-op interaction. Callers that need notice capture should
+// build the session inline as TestSession_ConsultRoute_PreservesCurrentStateStage
+// does. runFolder is returned so callers can pass it to baseConsultStagedConfig.
+func newConsultStagedSession(t *testing.T, consultant domain.RoutingConsultant) (
+	ses session.Session, f *harness.FakeAdapter, store *memStore, orchPath string, runFolder string,
+) {
+	t.Helper()
+	dir := t.TempDir()
+	orchPath = copyOrchestratorFile(t, dir, "consult-staged-orch.md")
+	writeAgentFile(t, dir, "agent-a")
+	writeAgentFile(t, dir, "agent-b")
+	writeConsultStagedPlan(t, dir)
+	runFolder = dir
+
+	f = harness.NewFakeAdapter()
+	store = &memStore{}
+	ses = session.New(session.Deps{
+		Harness:  f,
+		Store:    store,
+		Routing:  consultant,
+		Clock:    fixedClock{t: epoch},
+		Interact: &noopInteraction{},
+	})
+	return
+}
+
+// baseConsultStagedConfig returns a RunConfig for the consult-staged workflow
+// in orchestrated resume mode (IsNewRun=false, store pre-seeded by caller).
+// runFolder must point to the directory containing Plan.md so the session can
+// expand the EXECUTION.[StageNumber] template rows.
+func baseConsultStagedConfig(orchPath, runFolder string) domain.RunConfig {
+	return domain.RunConfig{
+		OrchestratorFilePath: orchPath,
+		WorkflowID:           "consult-staged",
+		Task:                 "test task",
+		IsNewRun:             false, // resume: store is pre-seeded with Stage-2 state
+		RunFolder:            runFolder,
+		RunSettings: domain.RunSettings{
+			Mode: domain.ExecutionModeOrchestrated,
+		},
+	}
+}
+
+// consultStagedStage2State returns an ArtifactState that simulates a
+// consult-staged-orch.md run having completed Stage-1 (agent-a#1, agent-b#2)
+// and Stage-2/agent-a (agent-a#3), with Stage-2/agent-b still pending.
+// CurrentState.Stage="Stage-2" is the load-bearing value: tests assert that
+// it is preserved (not wiped to "") after a consultant-routed dispatch.
+//
+// The Phase value "EXECUTION.Stage-2" is the expanded form of the
+// EXECUTION.[StageNumber] template row after plan expansion.
+func consultStagedStage2State() domain.ArtifactState {
+	return domain.ArtifactState{
+		Workflow:        "consult-staged",
+		WorkflowVersion: "1.0",
+		Task:            "test task",
+		GlobalSequence:  3,
+		RunSettings:     domain.RunSettings{Mode: domain.ExecutionModeOrchestrated},
+		CurrentState: domain.CurrentState{
+			Phase:      "EXECUTION.Stage-2",
+			Stage:      "Stage-2",
+			LastStatus: domain.StatusSUCCESS,
+			LastAgent:  "agent-a#3",
+		},
+		ExecutionLog: []domain.ExecutionLogEntry{
+			{Seq: 1, Agent: "agent-a#1", Phase: "EXECUTION.Stage-1", Stage: "Stage-1", Status: domain.StatusSUCCESS},
+			{Seq: 2, Agent: "agent-b#2", Phase: "EXECUTION.Stage-1", Stage: "Stage-1", Status: domain.StatusSUCCESS},
+			{Seq: 3, Agent: "agent-a#3", Phase: "EXECUTION.Stage-2", Stage: "Stage-2", Status: domain.StatusSUCCESS},
+		},
+	}
+}
+
+// TestSession_ConsultRoute_PreservesCurrentStateStage verifies that after a
+// consultant-routed dispatch completes in a multi-stage workflow, the
+// artifact's current_state.stage retains the stage value that was in force
+// when the consultation was triggered.
+//
+// The test uses consult-staged-orch.md (explicit Stage-1 and Stage-2 rows)
+// and pre-seeds the store to represent a run that completed Stage-1 and
+// Stage-2/agent-a, leaving Stage-2/agent-b as the next step. Stage="Stage-2"
+// is load-bearing: if consultRoute omits Stage from the CompletedStep,
+// Store.Apply overwrites current_state.stage with "", causing the next
+// engine.Next() call to fail with "stage 0 has no entry in stage set".
+//
+// Secondary assertions verify that the CompletedStep produced by consultRoute
+// carries Stage="Stage-2" and that at least one notification message emitted
+// during the dispatch contains the stage value rather than the hardcoded "".
+func TestSession_ConsultRoute_PreservesCurrentStateStage(t *testing.T) {
+	consultant := &scriptedRoutingConsultant{}
+	// Row 3 is EXECUTION.Stage-2/agent-b after plan expansion (zero-based):
+	// the template rows for agent-a and agent-b expand to indices 0-1 (Stage-1)
+	// and 2-3 (Stage-2) given a Plan.md with Stage-1 and Stage-2.
+	consultant.queueDispatch("agent-b", "complete Stage-2", 3)
+	consultant.queueStop("Stage-2 complete")
+
+	notices := &noticeCapturingInteraction{}
+
+	dir := t.TempDir()
+	orchPath := copyOrchestratorFile(t, dir, "consult-staged-orch.md")
+	writeAgentFile(t, dir, "agent-a")
+	writeAgentFile(t, dir, "agent-b")
+	writeConsultStagedPlan(t, dir) // provides Stage-1 and Stage-2 for template expansion
+
+	f := harness.NewFakeAdapter()
+	store := &memStore{}
+	ses := session.New(session.Deps{
+		Harness:  f,
+		Store:    store,
+		Routing:  consultant,
+		Clock:    fixedClock{t: epoch},
+		Interact: notices,
+	})
+
+	// Pre-seed the store to simulate Stage-1 done and Stage-2/agent-a done,
+	// so Stage="Stage-2" is the value consultRoute must not wipe to "".
+	store.state = consultStagedStage2State()
+	store.exists = true
+
+	f.Queue("agent-b", harness.ScriptedEntry{Response: &domain.ProtocolResponse{
+		AgentInstanceID: "agent-b#4",
+		StatusCode:      domain.StatusSUCCESS,
+		StatusMessage:   "Stage-2 complete",
+	}})
+
+	_, err := ses.Start(context.Background(), baseConsultStagedConfig(orchPath, dir))
+	if err != nil {
+		t.Fatalf("want nil error, got %v", err)
+	}
+
+	// Primary assertion: current_state.stage must remain "Stage-2" after the
+	// consultant-routed dispatch. Without the fix, consultRoute omits Stage
+	// from CompletedStep, and Store.Apply overwrites current_state.stage with
+	// "" because the step is not infrastructure.
+	if store.state.CurrentState.Stage != "Stage-2" {
+		t.Errorf("want current_state.stage=%q after consultant-routed dispatch in Stage-2, got %q; "+
+			"consultRoute must capture state.CurrentState.Stage at entry (entryStage) and "+
+			"populate every CompletedStep with Stage: entryStage so Store.Apply does not "+
+			"wipe the stage context",
+			"Stage-2", store.state.CurrentState.Stage)
+	}
+
+	// Secondary assertion: the non-infrastructure CompletedStep applied by
+	// consultRoute must carry Stage="Stage-2". Find the last workflow step
+	// (non-infrastructure, non-HITLRejected) in store.Applied.
+	var workflowStep *domain.CompletedStep
+	for i := range store.Applied {
+		s := &store.Applied[i]
+		if !s.IsInfrastructure && !s.HITLRejected {
+			workflowStep = s
+		}
+	}
+	if workflowStep == nil {
+		t.Fatal("want at least one non-infrastructure workflow step in store.Applied, got none; "+
+			"the consultant-routed dispatch must produce a CompletedStep recorded via Store.Apply")
+	}
+	if workflowStep.Stage != "Stage-2" {
+		t.Errorf("want CompletedStep.Stage=%q for consultant-routed workflow step, got %q; "+
+			"all CompletedStep literals in consultRoute must include Stage: entryStage",
+			"Stage-2", workflowStep.Stage)
+	}
+
+	// Tertiary assertion: at least one notification emitted by consultRoute
+	// must contain "Stage-2". The dispatch-start and step-done format strings
+	// currently hardcode stage="" and must be updated to use entryStage.
+	found := false
+	for _, n := range notices.allNotices() {
+		if strings.Contains(n.Message, "Stage-2") {
+			found = true
+			break
+		}
+	}
+	if !found {
+		t.Errorf("want at least one notification message containing %q from consultRoute, "+
+			"got none in %d total notifications; "+
+			"consultRoute notification format strings must use entryStage, not hardcoded \"\"",
+			"Stage-2", len(notices.allNotices()))
+	}
+}
+
+// TestSession_ConsultRoute_RecursiveCall_UsesOwnEntryStage verifies that when
+// consultRoute calls itself recursively (here triggered by a harness error that
+// becomes a deviation re-route), the recursive call independently reads
+// state.CurrentState.Stage at its own entry point and propagates that value to
+// the CompletedStep it produces.
+//
+// The test pre-seeds Stage="Stage-2" and causes the first consultant-dispatched
+// agent (agent-a, row 2) to fail at the harness level. consultRoute calls
+// itself with a deviation; the recursive call dispatches agent-b (row 3), which
+// succeeds. The CompletedStep applied by the recursive call must carry
+// Stage="Stage-2" because state.CurrentState.Stage was "Stage-2" at the
+// recursive entry (the parent's consultStep Apply is infrastructure and does
+// not modify CurrentState).
+//
+// This guards against an implementation where the recursive call might receive
+// a stale or zero stage value instead of reading from the current state at its
+// own entry.
+func TestSession_ConsultRoute_RecursiveCall_UsesOwnEntryStage(t *testing.T) {
+	consultant := &scriptedRoutingConsultant{}
+	// First dispatch: agent-a (row 2, Stage-2). Harness returns an error.
+	consultant.queueDispatch("agent-a", "attempt Stage-2 step", 2)
+	// The harness error triggers recursive consultRoute with a deviation.
+	// Recursive dispatch: agent-b (row 3, Stage-2). Harness returns SUCCESS.
+	consultant.queueDispatch("agent-b", "recover from deviation in Stage-2", 3)
+	// After the recursive consultRoute returns, the outer loop resumes and
+	// calls the consultant once more; stop to end the run cleanly.
+	consultant.queueStop("Stage-2 deviation resolved")
+
+	ses, f, store, orchPath, runFolder := newConsultStagedSession(t, consultant)
+
+	// Pre-seed the store: Stage-1 done, Stage-2/agent-a done, Stage="Stage-2".
+	store.state = consultStagedStage2State()
+	store.exists = true
+
+	// agent-a: harness error → consultRoute recurses with a deviation.
+	f.Queue("agent-a", harness.ScriptedEntry{Err: errors.New("simulated harness failure in Stage-2")})
+	// agent-b: dispatched by the recursive consultRoute, returns SUCCESS.
+	f.Queue("agent-b", harness.ScriptedEntry{Response: &domain.ProtocolResponse{
+		AgentInstanceID: "agent-b#4",
+		StatusCode:      domain.StatusSUCCESS,
+		StatusMessage:   "Stage-2 recovered",
+	}})
+
+	_, err := ses.Start(context.Background(), baseConsultStagedConfig(orchPath, runFolder))
+	if err != nil {
+		t.Fatalf("want nil error (harness error is a deviation, not a crash), got %v", err)
+	}
+
+	// The recursive consultRoute applied a CompletedStep for agent-b#4.
+	// Its Stage field must be "Stage-2" because state.CurrentState.Stage was
+	// "Stage-2" when the recursive call entered consultRoute (the parent's
+	// consultStep is IsInfrastructure=true and does not update CurrentState).
+	// Without the fix, the recursive call also omits Stage, setting it to "".
+	var workflowStep *domain.CompletedStep
+	for i := range store.Applied {
+		s := &store.Applied[i]
+		if !s.IsInfrastructure && !s.HITLRejected && s.AgentInstance == "agent-b#4" {
+			workflowStep = s
+		}
+	}
+	if workflowStep == nil {
+		t.Fatal("want agent-b#4 CompletedStep in store.Applied (applied by recursive consultRoute), " +
+			"got none; the recursive consultRoute must apply its accepted step via Store.Apply")
+	}
+	if workflowStep.Stage != "Stage-2" {
+		t.Errorf("want CompletedStep.Stage=%q for the recursive consultRoute's accepted step, got %q; "+
+			"the recursive call must read state.CurrentState.Stage at its own entry and "+
+			"populate Stage: entryStage on its CompletedStep",
+			"Stage-2", workflowStep.Stage)
+	}
+
+	// Also verify the artifact's current_state.stage after the full sequence.
+	if store.state.CurrentState.Stage != "Stage-2" {
+		t.Errorf("want current_state.stage=%q after recursive consultRoute completes, got %q",
+			"Stage-2", store.state.CurrentState.Stage)
+	}
+}
+
+// TestSession_ConsultRoute_HITLRejection_InfrastructureStepsCarryStage verifies
+// that the HITL-rejection CompletedStep records produced inside consultRoute --
+// rlRejStep (HITLRedispatch path) and elRejStep (HITLEscalate path) -- carry
+// Stage="Stage-2" rather than the empty string the pre-fix code emits.
+//
+// The test pre-seeds a Stage-2 run and arranges for the consultant's first
+// dispatch to trigger both a HITL redispatch and a HITL escalation:
+//
+//  1. Consultant dispatches agent-b (row 3) with HITLOverride=true and one
+//     output artifact. fixedApprovalReader always returns ApprovalFalse.
+//  2. First harness response: SUCCESS → ApprovalFalse → HITLRedispatch
+//     rlRejStep (IsInfrastructure=true, HITLRejected=true) is applied;
+//     its Stage field must be "Stage-2".
+//  3. HITL redispatch response: SUCCESS → ApprovalFalse, RedispatchUsed=true
+//     → HITLEscalate. elRejStep (IsInfrastructure=true, HITLRejected=true)
+//     is applied; its Stage field must also be "Stage-2". consultRoute is
+//     then called recursively with the escalation deviation.
+//  4. Recursive consultRoute: consultant dispatches agent-b again without HITL;
+//     third harness response → SUCCESS, HITLAccept → completedStep applied.
+//  5. Outer loop resumes; consultant issues stop to end the run cleanly.
+//
+// This covers the AC1.2 gap: the infrastructure rejection steps were omitted
+// from the original tests, leaving the rlRejStep / elRejStep Stage field
+// unverified. An implementation that only sets Stage on the final completedStep
+// passes the prior tests but still produces "Stage-2" (Stage="") log rows.
+func TestSession_ConsultRoute_HITLRejection_InfrastructureStepsCarryStage(t *testing.T) {
+	hitlTrue := true
+	// A non-empty output list is required so the HITL check has at least one
+	// artifact to evaluate. fixedApprovalReader ignores the path value and
+	// returns ApprovalFalse for every call.
+	outputs := []string{"hitl-output.md"}
+
+	consultant := &scriptedRoutingConsultant{}
+	// Call 1: dispatch agent-b with HITL=true and one output artifact.
+	// Both the initial dispatch and the HITL redispatch return SUCCESS with
+	// ApprovalFalse, causing redispatch then escalation.
+	consultant.queueDispatchWithHITLAndOutputs("agent-b", "complete Stage-2 step with HITL", 3, &hitlTrue, &outputs)
+	// Call 2: dispatched by the recursive consultRoute after HITL escalation.
+	// No HITL override → row.HITL=false → HITLAccept on first attempt.
+	consultant.queueDispatch("agent-b", "recover after HITL escalation", 3)
+	// Call 3: outer dispatch loop resumes after the recursive call returns.
+	consultant.queueStop("Stage-2 HITL recovery complete")
+
+	dir := t.TempDir()
+	orchPath := copyOrchestratorFile(t, dir, "consult-staged-orch.md")
+	writeAgentFile(t, dir, "agent-a")
+	writeAgentFile(t, dir, "agent-b")
+	writeConsultStagedPlan(t, dir)
+
+	f := harness.NewFakeAdapter()
+	store := &memStore{}
+	ses := session.New(session.Deps{
+		Harness:   f,
+		Store:     store,
+		Routing:   consultant,
+		Approvals: &fixedApprovalReader{domain.ApprovalFalse}, // every artifact is non-compliant
+		Clock:     fixedClock{t: epoch},
+		Interact:  &noopInteraction{},
+	})
+
+	// Pre-seed the store: Stage-1 done, Stage-2/agent-a done, Stage-2/agent-b
+	// pending. Stage="Stage-2" is the value rlRejStep and elRejStep must carry.
+	store.state = consultStagedStage2State()
+	store.exists = true
+
+	// Three agent-b responses consumed in order by the HITL flow:
+	//   1. First dispatch  → SUCCESS, ApprovalFalse → HITLRedispatch → rlRejStep
+	//   2. HITL redispatch → SUCCESS, ApprovalFalse, RedispatchUsed → HITLEscalate → elRejStep
+	//   3. Recursive dispatch (HITL=false) → SUCCESS → HITLAccept → completedStep
+	f.Queue("agent-b", harness.ScriptedEntry{Response: &domain.ProtocolResponse{
+		AgentInstanceID: "agent-b#5",
+		StatusCode:      domain.StatusSUCCESS,
+		StatusMessage:   "done (first attempt, HITL will reject)",
+	}})
+	f.Queue("agent-b", harness.ScriptedEntry{Response: &domain.ProtocolResponse{
+		AgentInstanceID: "agent-b#6",
+		StatusCode:      domain.StatusSUCCESS,
+		StatusMessage:   "done (HITL redispatch, HITL will escalate)",
+	}})
+	f.Queue("agent-b", harness.ScriptedEntry{Response: &domain.ProtocolResponse{
+		AgentInstanceID: "agent-b#7",
+		StatusCode:      domain.StatusSUCCESS,
+		StatusMessage:   "done (recursive dispatch after escalation, accepted)",
+	}})
+
+	ses.Start(context.Background(), baseConsultStagedConfig(orchPath, dir)) //nolint:errcheck
+
+	// Primary assertion: every HITLRejected step applied by consultRoute must
+	// carry Stage="Stage-2". Before the fix, rlRejStep and elRejStep omit the
+	// Stage field, leaving it as "". An implementation that only sets Stage on
+	// the final completedStep will fail this assertion.
+	var hitlRejectedSteps []domain.CompletedStep
+	for _, s := range store.Applied {
+		if s.HITLRejected {
+			hitlRejectedSteps = append(hitlRejectedSteps, s)
+		}
+	}
+	if len(hitlRejectedSteps) == 0 {
+		t.Fatal("want at least one HITLRejected=true step in store.Applied, got none; " +
+			"the HITL redispatch and escalate paths must apply rejection steps before " +
+			"redispatching or escalating, so the execution log has a record of every attempt")
+	}
+	for _, s := range hitlRejectedSteps {
+		if s.Stage != "Stage-2" {
+			t.Errorf("HITLRejected step %q: want Stage=%q, got %q; "+
+				"all CompletedStep literals in consultRoute -- including rlRejStep (HITLRedispatch) "+
+				"and elRejStep (HITLEscalate) -- must include Stage: entryStage so the "+
+				"execution log reflects the stage context in force when the step was attempted",
+				s.AgentInstance, "Stage-2", s.Stage)
+		}
+		if !s.IsInfrastructure {
+			t.Errorf("HITLRejected step %q: want IsInfrastructure=true, got false; "+
+				"HITL-rejected steps must not update current_state",
+				s.AgentInstance)
+		}
+	}
+}
+
+// ===== D2: Stage carry-over fix (target row stage) =====
+
+// consultStagedArtsOrchName is the workflow name in consult-staged-artifacts-orch.md.
+const consultStagedArtsOrchName = "consult-staged-arts"
+
+// stage1DoneAutoState returns an ArtifactState that simulates an auto-mode run
+// through consult-staged-orch.md having completed both Stage-1 rows (agent-a#1,
+// agent-b#2). CurrentState.Stage = "1" (FormatStageValue("", 1)) is the
+// load-bearing value for cross-stage deviation tests: it represents the last
+// applied stage and should NOT appear in CompletedSteps for Stage-2 dispatches
+// after the D2 fix.
+func stage1DoneAutoState() domain.ArtifactState {
+	return domain.ArtifactState{
+		Workflow:        "consult-staged",
+		WorkflowVersion: "1.0",
+		Task:            "test task",
+		GlobalSequence:  2,
+		RunSettings:     domain.RunSettings{Mode: domain.ExecutionModeAuto},
+		CurrentState: domain.CurrentState{
+			Phase:      "EXECUTION",
+			Stage:      "1",
+			LastStatus: domain.StatusSUCCESS,
+			LastAgent:  "agent-b#2",
+		},
+		ExecutionLog: []domain.ExecutionLogEntry{
+			{Seq: 1, Agent: "agent-a#1", Phase: "EXECUTION", Stage: "1", Status: domain.StatusSUCCESS},
+			{Seq: 2, Agent: "agent-b#2", Phase: "EXECUTION", Stage: "1", Status: domain.StatusSUCCESS},
+		},
+	}
+}
+
+// stage1DoneAutoStateArts returns a Stage-1-done ArtifactState for the
+// consult-staged-artifacts-orch.md fixture, which has only one agent (agent-a)
+// per stage. Stage-1 has a single row (agent-a), so only one execution log
+// entry is present at GlobalSequence=1 with LastAgent="agent-a#1".
+func stage1DoneAutoStateArts() domain.ArtifactState {
+	return domain.ArtifactState{
+		Workflow:        consultStagedArtsOrchName,
+		WorkflowVersion: "1.0",
+		Task:            "test task",
+		GlobalSequence:  1,
+		RunSettings:     domain.RunSettings{Mode: domain.ExecutionModeAuto},
+		CurrentState: domain.CurrentState{
+			Phase:      "EXECUTION",
+			Stage:      "1",
+			LastStatus: domain.StatusSUCCESS,
+			LastAgent:  "agent-a#1",
+		},
+		ExecutionLog: []domain.ExecutionLogEntry{
+			{Seq: 1, Agent: "agent-a#1", Phase: "EXECUTION", Stage: "1", Status: domain.StatusSUCCESS},
+		},
+	}
+}
+
+// alternatingApprovalReader implements domain.ApprovalReader. It returns
+// first on the first ReadApproval call and rest on all subsequent calls.
+// Used in T2.2 to produce a HITLRedispatch on the first HITL check and a
+// HITLAccept on the second, simulating a human approval that arrives after
+// one redispatch cycle.
+type alternatingApprovalReader struct {
+	mu    sync.Mutex
+	count int
+	first domain.HumanApproval
+	rest  domain.HumanApproval
+}
+
+func (r *alternatingApprovalReader) ReadApproval(_ context.Context, _ string) domain.HumanApproval {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	r.count++
+	if r.count == 1 {
+		return r.first
+	}
+	return r.rest
+}
+
+// TestSession_ConsultRoute_CrossStageDeviation_UsesTargetRowStage verifies that
+// when a harness error triggers consultRoute and the target row is in a
+// different stage than the last applied row, every CompletedStep written by
+// consultRoute carries the stage of the target row, not state.CurrentState.Stage.
+//
+// Setup: consult-staged-orch.md in auto-mode, Stage-1 pre-seeded as complete
+// (CurrentState.Stage = "1"). The engine auto-dispatches Stage-2/agent-a (row 2).
+// The harness returns an error, so consultRoute is called with
+// deviation.CurrentStage = "2" but state.CurrentState.Stage = "1". The
+// consultant re-routes to row 2 (agent-a, Stage-2) and the harness succeeds.
+//
+// With the current code entryStage = state.CurrentState.Stage = "1", so the
+// workflow CompletedStep carries Stage = "1" (wrong). After the fix the stage
+// is derived from the target row using the deviation context, producing Stage = "2".
+func TestSession_ConsultRoute_CrossStageDeviation_UsesTargetRowStage(t *testing.T) {
+	consultant := &scriptedRoutingConsultant{}
+	// Row 2 is EXECUTION.Stage-2/agent-a after plan expansion (zero-based).
+	consultant.queueDispatch("agent-a", "recover Stage-2 after harness failure", 2)
+	consultant.queueStop("Stage-2 step completed after recovery")
+
+	dir := t.TempDir()
+	orchPath := copyOrchestratorFile(t, dir, "consult-staged-orch.md")
+	writeAgentFile(t, dir, "agent-a")
+	writeAgentFile(t, dir, "agent-b")
+	writeConsultStagedPlan(t, dir)
+
+	f := harness.NewFakeAdapter()
+	store := &memStore{}
+	ses := session.New(session.Deps{
+		Harness:  f,
+		Store:    store,
+		Routing:  consultant,
+		Clock:    fixedClock{t: epoch},
+		Interact: &noopInteraction{},
+	})
+
+	// Pre-seed: Stage-1 complete, Stage-2 pending.
+	// CurrentState.Stage = "1" is the load-bearing value: it is the stage of the
+	// last applied row and must NOT appear in CompletedSteps for Stage-2 dispatches.
+	store.state = stage1DoneAutoState()
+	store.exists = true
+
+	// The engine auto-dispatches Stage-2/agent-a (row 2). The harness fails,
+	// triggering consultRoute with deviation.CurrentStage = "2".
+	f.Queue("agent-a", harness.ScriptedEntry{Err: errors.New("simulated harness failure on Stage-2/agent-a")})
+	// The consultant re-routes to row 2 (agent-a). The harness succeeds this time.
+	f.Queue("agent-a", harness.ScriptedEntry{Response: &domain.ProtocolResponse{
+		AgentInstanceID: "agent-a#4",
+		StatusCode:      domain.StatusSUCCESS,
+		StatusMessage:   "Stage-2/agent-a recovered",
+	}})
+
+	cfg := domain.RunConfig{
+		OrchestratorFilePath: orchPath,
+		WorkflowID:           "consult-staged",
+		Task:                 "test task",
+		IsNewRun:             false, // resume from pre-seeded Stage-1-done state
+		RunFolder:            dir,
+		RunSettings:          domain.RunSettings{Mode: domain.ExecutionModeAuto},
+	}
+
+	_, err := ses.Start(context.Background(), cfg)
+	if err != nil {
+		t.Fatalf("want nil error (harness error is a handled deviation), got %v", err)
+	}
+
+	// Find the workflow step applied by consultRoute: non-infrastructure, non-HITLRejected.
+	var workflowStep *domain.CompletedStep
+	for i := range store.Applied {
+		s := &store.Applied[i]
+		if !s.IsInfrastructure && !s.HITLRejected {
+			workflowStep = s
+		}
+	}
+	if workflowStep == nil {
+		t.Fatal("want at least one non-infrastructure workflow step in store.Applied, got none; " +
+			"the consultant-routed dispatch must produce a CompletedStep via Store.Apply")
+	}
+
+	// Primary assertion: the workflow step must carry Stage = "2" (derived from
+	// the target row via deviation.CurrentStage), not Stage = "1" (from
+	// state.CurrentState.Stage). With the current code entryStage captures the
+	// old Stage-1 value and stamps it on the Stage-2 CompletedStep.
+	const wantStage = "2"
+	if workflowStep.Stage != wantStage {
+		t.Errorf("want workflow CompletedStep.Stage = %q (target row stage), got %q; "+
+			"consultRoute must derive the stage from the target row when the target row "+
+			"is in a different stage than state.CurrentState.Stage",
+			wantStage, workflowStep.Stage)
+	}
+
+	// Also verify the consultation record (infrastructure step) carries Stage = "2".
+	// Every CompletedStep produced by consultRoute must reflect the target row's stage.
+	for _, s := range store.Applied {
+		if s.IsInfrastructure && !s.HITLRejected && s.Stage != "" && s.Stage != wantStage {
+			t.Errorf("infrastructure ConsultStep.Stage = %q, want %q; "+
+				"all CompletedSteps in consultRoute must carry the target row stage, "+
+				"not the prior stage from state.CurrentState.Stage",
+				s.Stage, wantStage)
+		}
+	}
+}
+
+// ===== D3: Seq monotonicity across mixed routing paths =====
+
+// TestSession_MixedRoutingPaths_SeqStrictlyMonotonic verifies that a run mixing
+// auto-routed dispatches, consultant-routed dispatches, and HITL-rejected rows
+// produces a strictly increasing Seq column across all persisted CompletedSteps.
+//
+// Sequence:
+//   (a) Stage-1/agent-a auto-dispatched and succeeds (Seq=1). After Apply:
+//       seq=1, GlobalSequence=1.
+//   (b) Stage-1/agent-b auto-dispatch: harness returns an error, triggering
+//       consultRoute. Inside consultRoute:
+//       - consultStep consumed Seq=2; dispSeq = *seq+1 = 1+1 = 2 (same slot as
+//         consultSeq, because *seq was not updated by the consultStep Apply).
+//       - Agent-b is dispatched with HITLOverride=true. First attempt: SUCCESS +
+//         ApprovalFalse -> HITLRedispatch (rlRejStep, Seq=3). After rlRejStep
+//         Apply: *seq=3, currentAttemptSeq++ = 3.
+//       - Second attempt (HITL redispatch): SUCCESS + ApprovalTrue -> HITLAccept
+//         (workflowSeq=4). After workflowStep Apply: GlobalSequence=4.
+//       - consultRoute sets *seq = currentAttemptSeq = 3 (the agent suffix
+//         counter, NOT GlobalSequence). After return: seq=3, GlobalSequence=4.
+//   (c) Stage-2/agent-a auto-dispatched. hitlAttemptSeq = seq+1 = 4.
+//       GlobalSequence is already 4 -> Seq=4 collision with workflowSeq from (b).
+//
+// The test asserts that all Applied[i].Seq values are strictly increasing.
+// With the current code step (c) produces a duplicate Seq=4.
+// After the fix *seq is reconciled to state.GlobalSequence after consultRoute
+// returns, so the next auto-dispatch gets Seq=5.
+func TestSession_MixedRoutingPaths_SeqStrictlyMonotonic(t *testing.T) {
+	hitlOverride := true
+	outputs := []string{"stage-1-b-output.md"}
+
+	consultant := &scriptedRoutingConsultant{}
+	// consultRoute is invoked when Stage-1/agent-b harness fails.
+	// Dispatch row 1 (agent-b) with HITLOverride=true and one output artifact so
+	// the HITL check fires inside consultRoute.
+	// AlternatingApprovalReader: first ReadApproval returns False (HITLRedispatch),
+	// second returns True (HITLAccept). This exercises both the rlRejStep path
+	// and the final workflowStep path within a single consultRoute call.
+	consultant.queueDispatchWithHITLAndOutputs("agent-b", "re-route Stage-1/agent-b", 1, &hitlOverride, &outputs)
+	// After consultRoute returns, the outer auto loop dispatches Stage-2 rows.
+	// No further consultant instructions needed -- the run completes on its own
+	// via auto-routing.
+
+	dir := t.TempDir()
+	orchPath := copyOrchestratorFile(t, dir, "consult-staged-orch.md")
+	writeAgentFile(t, dir, "agent-a")
+	writeAgentFile(t, dir, "agent-b")
+	writeConsultStagedPlan(t, dir)
+
+	f := harness.NewFakeAdapter()
+	store := &memStore{}
+	ses := session.New(session.Deps{
+		Harness:   f,
+		Store:     store,
+		Routing:   consultant,
+		Approvals: &alternatingApprovalReader{first: domain.ApprovalFalse, rest: domain.ApprovalTrue},
+		Clock:     fixedClock{t: epoch},
+		Interact:  &noopInteraction{},
+	})
+
+	// (a) Stage-1/agent-a: auto-routed, succeeds normally (Seq=1).
+	f.Queue("agent-a", harness.ScriptedEntry{Response: &domain.ProtocolResponse{
+		AgentInstanceID: "agent-a#1",
+		StatusCode:      domain.StatusSUCCESS,
+		StatusMessage:   "Stage-1/agent-a done",
+	}})
+	// (b) Stage-1/agent-b: harness error triggers consultRoute.
+	f.Queue("agent-b", harness.ScriptedEntry{Err: errors.New("simulated Stage-1/agent-b harness error")})
+	// Inside consultRoute: first agent-b dispatch (HITLOverride=true).
+	// ApprovalFalse -> HITLRedispatch (rlRejStep applied at Seq=3).
+	f.Queue("agent-b", harness.ScriptedEntry{Response: &domain.ProtocolResponse{
+		AgentInstanceID: "agent-b#2",
+		StatusCode:      domain.StatusSUCCESS,
+		StatusMessage:   "Stage-1/agent-b first attempt",
+	}})
+	// HITL redispatch: ApprovalTrue -> HITLAccept (workflowStep applied at Seq=4).
+	f.Queue("agent-b", harness.ScriptedEntry{Response: &domain.ProtocolResponse{
+		AgentInstanceID: "agent-b#3",
+		StatusCode:      domain.StatusSUCCESS,
+		StatusMessage:   "Stage-1/agent-b accepted after redispatch",
+	}})
+	// (c) Stage-2/agent-a: auto-dispatched after consultRoute returns.
+	// With the bug: hitlAttemptSeq = seq+1 = 4 == GlobalSequence (already used).
+	// With the fix: hitlAttemptSeq = GlobalSequence+1 = 5 (reconciled seq).
+	f.Queue("agent-a", harness.ScriptedEntry{Response: &domain.ProtocolResponse{
+		AgentInstanceID: "agent-a#5",
+		StatusCode:      domain.StatusSUCCESS,
+		StatusMessage:   "Stage-2/agent-a done",
+	}})
+	// Stage-2/agent-b: auto-dispatched to complete the run.
+	f.Queue("agent-b", harness.ScriptedEntry{Response: &domain.ProtocolResponse{
+		AgentInstanceID: "agent-b#6",
+		StatusCode:      domain.StatusSUCCESS,
+		StatusMessage:   "Stage-2/agent-b done",
+	}})
+
+	cfg := domain.RunConfig{
+		OrchestratorFilePath: orchPath,
+		WorkflowID:           "consult-staged",
+		Task:                 "test task",
+		IsNewRun:             true,
+		RunFolder:            dir,
+		RunSettings:          domain.RunSettings{Mode: domain.ExecutionModeAuto},
+	}
+
+	ses.Start(context.Background(), cfg) //nolint:errcheck
+
+	// Primary assertion: every Applied[i].Seq must be strictly greater than
+	// Applied[i-1].Seq. With the current code, the auto-dispatched Stage-2/agent-a
+	// step (c) computes Seq = seq+1 = 4, which duplicates the workflowSeq = 4
+	// that consultRoute applied for Stage-1/agent-b.
+	if len(store.Applied) < 4 {
+		t.Fatalf("want at least 4 applied steps (consult, rlRejStep, workflowStep, "+
+			"Stage-2/agent-a), got %d; the run may have terminated earlier than expected",
+			len(store.Applied))
+	}
+	for i := 1; i < len(store.Applied); i++ {
+		if store.Applied[i].Seq <= store.Applied[i-1].Seq {
+			t.Errorf("store.Applied[%d].Seq=%d is not greater than Applied[%d].Seq=%d; "+
+				"Seq values must be strictly increasing across auto-routed, consultant-routed, "+
+				"and HITL-rejected dispatches (D3 Seq reconciliation bug)",
+				i, store.Applied[i].Seq, i-1, store.Applied[i-1].Seq)
+		}
+	}
+}
+
+// ===== D3b: Template resolution in consultant-routed artifact paths =====
+
+// TestSession_ConsultRoute_FallbackArtifacts_ResolvesTemplateTokens verifies
+// that when a consultant-routed dispatch falls back to a row's declared
+// OutputArtifacts (because the RoutingInstruction does not supply its own),
+// and those declared paths contain the {StageNumber} template token, the
+// dispatched ProtocolRequest and the CompletedStep applied to the store both
+// carry fully resolved paths with no literal {StageNumber} token.
+//
+// The test uses consult-staged-artifacts-orch.md, which declares
+// "Stage-{StageNumber}/Output.md" in the Output column. After plan expansion
+// with Stage-1 and Stage-2, row 1 is EXECUTION.Stage-2/agent-a with
+// OutputArtifacts = ["Stage-{StageNumber}/Output.md"].
+//
+// Setup: Stage-1 pre-seeded as complete (Stage = "1"). The engine auto-dispatches
+// Stage-2/agent-a (row 1). The harness fails, triggering consultRoute with
+// deviation.CurrentStage = "2". The consultant re-routes to row 1 without
+// supplying OutputArtifacts, so consultRoute falls back to row.OutputArtifacts.
+//
+// With the current code, the unresolved "Stage-{StageNumber}/Output.md" is
+// passed directly to the request and CompletedStep. After the D3b fix,
+// engine.ResolveArtifacts is called, yielding "Stage-2/Output.md".
+func TestSession_ConsultRoute_FallbackArtifacts_ResolvesTemplateTokens(t *testing.T) {
+	consultant := &scriptedRoutingConsultant{}
+	// Row 1 is EXECUTION.Stage-2/agent-a after plan expansion.
+	// No OutputArtifacts in the instruction: consultRoute falls back to row.OutputArtifacts.
+	consultant.queueDispatch("agent-a", "re-route Stage-2/agent-a", 1)
+	consultant.queueStop("Stage-2/agent-a completed")
+
+	dir := t.TempDir()
+	orchPath := copyOrchestratorFile(t, dir, "consult-staged-artifacts-orch.md")
+	writeAgentFile(t, dir, "agent-a")
+	writeConsultStagedPlan(t, dir)
+
+	f := harness.NewFakeAdapter()
+	store := &memStore{}
+	ses := session.New(session.Deps{
+		Harness:  f,
+		Store:    store,
+		Routing:  consultant,
+		Clock:    fixedClock{t: epoch},
+		Interact: &noopInteraction{},
+	})
+
+	// Pre-seed: Stage-1 complete, Stage-2 pending.
+	store.state = stage1DoneAutoStateArts()
+	store.exists = true
+
+	// Engine auto-dispatches Stage-2/agent-a (row 1). Harness fails, triggering
+	// consultRoute with deviation.CurrentStage = "2".
+	f.Queue("agent-a", harness.ScriptedEntry{Err: errors.New("simulated harness failure on Stage-2/agent-a")})
+	// Consultant re-routes to row 1 (agent-a). Harness succeeds.
+	f.Queue("agent-a", harness.ScriptedEntry{Response: &domain.ProtocolResponse{
+		AgentInstanceID: "agent-a#4",
+		StatusCode:      domain.StatusSUCCESS,
+		StatusMessage:   "Stage-2/agent-a done",
+	}})
+
+	cfg := domain.RunConfig{
+		OrchestratorFilePath: orchPath,
+		WorkflowID:           consultStagedArtsOrchName,
+		Task:                 "test task",
+		IsNewRun:             false,
+		RunFolder:            dir,
+		RunSettings:          domain.RunSettings{Mode: domain.ExecutionModeAuto},
+	}
+
+	_, err := ses.Start(context.Background(), cfg)
+	if err != nil {
+		t.Fatalf("want nil error, got %v", err)
+	}
+
+	const unresolved = "{StageNumber}"
+
+	// Check the dispatched ProtocolRequest: the consultant-routed invocation
+	// (index 1, after the failed auto-routed attempt at index 0) must not
+	// contain the literal template token in its OutputArtifacts.
+	invocations := f.Invocations()
+	if len(invocations) < 2 {
+		t.Fatalf("want at least 2 harness invocations (failed auto + consultant re-route), got %d",
+			len(invocations))
+	}
+	// The second invocation is the consultant-routed dispatch.
+	consultReq := invocations[1].Request
+
+	// Guard: the consultant-routed request must carry the row's OutputArtifacts.
+	// If this slice is empty, consultRoute either did not fall back to row.OutputArtifacts
+	// or the orchfile parser did not populate the row's OutputArtifacts column. Both are
+	// bugs this test must catch. With the current code this assertion fails (RED) because
+	// the request arrives with no output artifacts.
+	if len(consultReq.OutputArtifacts) == 0 {
+		t.Fatal("want non-empty OutputArtifacts in consultant-routed ProtocolRequest " +
+			"(row declares Stage-{StageNumber}/Output.md), got empty; " +
+			"consultRoute must populate the request from row.OutputArtifacts when the " +
+			"RoutingInstruction does not supply its own artifacts")
+	}
+
+	for _, art := range consultReq.OutputArtifacts {
+		if strings.Contains(art, unresolved) {
+			t.Errorf("consultant-routed ProtocolRequest.OutputArtifacts contains unresolved "+
+				"template token %q in path %q; consultRoute must call engine.ResolveArtifacts "+
+				"on the fallback row.OutputArtifacts before dispatching",
+				unresolved, art)
+		}
+	}
+
+	// Check the CompletedStep applied to the store: the workflow step's
+	// OutputArtifacts (stored from currentOutputArts) must also be resolved.
+	for _, s := range store.Applied {
+		if s.IsInfrastructure || s.HITLRejected {
+			continue
+		}
+		for _, art := range s.OutputArtifacts {
+			if strings.Contains(art, unresolved) {
+				t.Errorf("CompletedStep.OutputArtifacts[%q] contains unresolved "+
+					"template token %q; the CompletedStep must carry resolved artifact paths",
+					art, unresolved)
+			}
+		}
+	}
+}
+
+// ===== D4: Unrecorded consultation cause =====
+
+// TestSession_ConsultRoute_HarnessFailure_PersistsFailedAttemptRecord verifies
+// that when a harness invocation failure triggers a consultation (deviation path),
+// a CompletedStep capturing the failure's status and message is persisted to the
+// store before or around the consultation. This ensures the execution log always
+// has a record of every dispatch attempt, including those that fail before a
+// response is returned.
+//
+// With the current code, consultRoute's consultation record (consultStep)
+// hardcodes Status = domain.StatusSUCCESS and uses the outgoing task description
+// as Summary, discarding the failure information entirely. No separate record
+// of the failed attempt exists in store.Applied.
+//
+// After the D4 fix, a CompletedStep recording the failed attempt is persisted
+// (using the existing HITL-rejected-attempt pattern: IsInfrastructure=true,
+// Status from the deviation's response status, Summary from the deviation's
+// response message) so the execution log has a complete record.
+func TestSession_ConsultRoute_HarnessFailure_PersistsFailedAttemptRecord(t *testing.T) {
+	const errMsg = "simulated invocation failure to verify D4 cause capture"
+
+	consultant := &scriptedRoutingConsultant{}
+	// Row 0 is PLANNING/agent-a in linear-orch.md.
+	// The consultant re-routes to row 0 after the harness failure.
+	consultant.queueDispatch("agent-a", "retry planning after harness failure", 0)
+	consultant.queueStop("planning complete")
+
+	dir := t.TempDir()
+	orchPath := copyOrchestratorFile(t, dir, "linear-orch.md")
+	writeAgentFile(t, dir, "agent-a")
+	writeAgentFile(t, dir, "agent-b")
+
+	f := harness.NewFakeAdapter()
+	store := &memStore{}
+	ses := session.New(session.Deps{
+		Harness:  f,
+		Store:    store,
+		Routing:  consultant,
+		Clock:    fixedClock{t: epoch},
+		Interact: &noopInteraction{},
+	})
+
+	// First invocation: harness error (triggers consultRoute with deviation).
+	f.Queue("agent-a", harness.ScriptedEntry{Err: errors.New(errMsg)})
+	// Second invocation (consultant re-routes to row 0 again): SUCCESS.
+	f.Queue("agent-a", harness.ScriptedEntry{Response: &domain.ProtocolResponse{
+		AgentInstanceID: "agent-a#2",
+		StatusCode:      domain.StatusSUCCESS,
+		StatusMessage:   "planning recovered",
+	}})
+
+	cfg := domain.RunConfig{
+		OrchestratorFilePath: orchPath,
+		WorkflowID:           "linear",
+		Task:                 "test task",
+		IsNewRun:             true,
+		RunSettings:          domain.RunSettings{Mode: domain.ExecutionModeAuto},
+	}
+
+	_, err := ses.Start(context.Background(), cfg)
+	if err != nil {
+		t.Fatalf("want nil error (harness error is a handled deviation), got %v", err)
+	}
+
+	// Primary assertion: store.Applied must contain at least one CompletedStep
+	// that captures the harness failure. This step must have:
+	//   - IsInfrastructure = true (so current_state is not updated by the failed attempt)
+	//   - Status != domain.StatusSUCCESS (the failure status, e.g. BLOCKED)
+	//   - Summary containing the error message (for traceability)
+	//
+	// With the current code, no such step exists: consultRoute writes only a
+	// consultStep with Status=SUCCESS and Summary=task description, discarding
+	// the failure info. The test fails (RED) because the infrastructure step
+	// with non-SUCCESS status is absent from store.Applied.
+	var failedAttemptStep *domain.CompletedStep
+	for i := range store.Applied {
+		s := &store.Applied[i]
+		if s.IsInfrastructure && s.Status != domain.StatusSUCCESS {
+			cp := *s
+			failedAttemptStep = &cp
+			break
+		}
+	}
+	if failedAttemptStep == nil {
+		t.Error("want a CompletedStep in store.Applied with IsInfrastructure=true and " +
+			"Status != SUCCESS capturing the harness failure, got none; " +
+			"D4 fix must persist a record of the failed dispatch attempt before consultation " +
+			"so the execution log has a complete history of every dispatch attempt")
+	} else {
+		if !strings.Contains(failedAttemptStep.Summary, errMsg) {
+			t.Errorf("failed-attempt CompletedStep.Summary = %q; want it to contain "+
+				"the harness error message %q for traceability",
+				failedAttemptStep.Summary, errMsg)
+		}
 	}
 }

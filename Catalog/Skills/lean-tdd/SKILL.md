@@ -1,6 +1,6 @@
 ---
 name: lean-tdd
-version: 1.1.0
+version: 1.1.1
 description: Lean TDD practices that eliminate wasteful testing patterns. Use when writing tests, reviewing test code, or validating RED/GREEN phases. Covers valid RED phase definition, behavioral testing principles, exception assertions, and mocking guidelines. Language-agnostic principles with C# examples.
 ---
 
@@ -26,11 +26,11 @@ Lean TDD eliminates wasteful testing practices while preserving TDD's core value
 
 | Scenario | Valid RED? | Reason |
 |----------|------------|--------|
-| Test compiles, assertion fails | ✅ YES | Ideal RED - behavioral failure |
-| Test compiles, `NotImplementedException` thrown | ✅ YES | Acceptable RED - implementation absent |
-| Test compiles, `NullReferenceException` during setup | ✅ YES | Valid RED - runtime failure |
-| Test does not compile (missing class/method) | ❌ NO | Still in "write test" phase |
-| Test compiles but you haven't run it | ❌ NO | RED requires execution |
+| Test compiles, assertion fails | [PASS] YES | Ideal RED - behavioral failure |
+| Test compiles, `NotImplementedException` thrown | [PASS] YES | Acceptable RED - implementation absent |
+| Test compiles, `NullReferenceException` during setup | [PASS] YES | Valid RED - runtime failure |
+| Test does not compile (missing class/method) | [FAIL] NO | Still in "write test" phase |
+| Test compiles but you haven't run it | [FAIL] NO | RED requires execution |
 
 ### The Critical Insight
 
@@ -185,10 +185,10 @@ public void GetUser_When_NotFound_Exception_Should_Contain_UserId()
 
 | Approach | Verdict | Reason |
 |----------|---------|--------|
-| `Assert.ThrowsException<T>()` | ✅ DO | Tests the contract (exception type) |
-| `StringAssert.Contains(ex.Message, key)` | ✅ DO | Ensures traceability without coupling to format |
-| `Assert.AreEqual(expected, ex.Message)` | ❌ DON'T | Couples test to exact wording |
-| `Assert.AreEqual(value, ex.Property)` | ⚠️ RARELY | Only if property IS the behavior being tested |
+| `Assert.ThrowsException<T>()` | [PASS] DO | Tests the contract (exception type) |
+| `StringAssert.Contains(ex.Message, key)` | [PASS] DO | Ensures traceability without coupling to format |
+| `Assert.AreEqual(expected, ex.Message)` | [FAIL] DON'T | Couples test to exact wording |
+| `Assert.AreEqual(value, ex.Property)` | [WARN] RARELY | Only if property IS the behavior being tested |
 
 ---
 
@@ -242,11 +242,11 @@ public void CreateUser_Should_Return_Created_User_With_Id()
 
 | Practice | Verdict |
 |----------|---------|
-| Mock interfaces only | ✅ DO |
-| Test outputs/return values | ✅ DO |
-| `Verify()` for call occurrence | ⚠️ AVOID |
-| `Verify()` with `Times.Exactly(n)` | ❌ DON'T |
-| Multiple mocks in one test | ⚠️ SMELL - consider integration test |
+| Mock interfaces only | [PASS] DO |
+| Test outputs/return values | [PASS] DO |
+| `Verify()` for call occurrence | [WARN] AVOID |
+| `Verify()` with `Times.Exactly(n)` | [FAIL] DON'T |
+| Multiple mocks in one test | [WARN] SMELL - consider integration test |
 
 ---
 

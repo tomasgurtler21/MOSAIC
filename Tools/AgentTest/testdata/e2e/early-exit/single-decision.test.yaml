@@ -1,5 +1,11 @@
 schema_version: 1
-id: single-decision
+name: single-decision
+id: 29
+version: 1
+changelog:
+  - version: 1
+    date: "2026-01-01"
+    changes: "Initial."
 description: >
   The scripted subject dispatches one collaborator that completes normally,
   then a second whose pre-invocation call arrives after the declared
@@ -11,6 +17,7 @@ negative: false
 subject:
   identity: standin-subject
   agent: standin-subject
+  infrastructure_agents: []
   opening_message: |
     Greet the first collaborator, then attempt a second.
   invocation_kind: subagent
@@ -26,6 +33,17 @@ timeout: 30s
 turn_limit: 5
 stop_after_invocations: 1
 
+seed_files:
+  - path: Orchestration-{run_id}/Orchestration.md
+    ref: orchestration.md
+
 assertions:
   artifact_created:
     - greeting.txt
+  invocation_sequence:
+    exact: true
+    steps:
+      - { tool: dispatch, agent: greeter }
+  final_state:
+    phase: EXECUTION
+    last_status: SUCCESS

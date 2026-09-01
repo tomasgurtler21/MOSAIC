@@ -27,16 +27,17 @@ type tickMsg time.Time
 //   - 'a' -> requests artifact inspection (ArtifactView() becomes true)
 //   - ctrl+c -> forced cancel (handled at root level)
 type ProgressScreen struct {
-	rows         []ProgressRow
-	runningIdx   int // index of currently running row, or -1
-	startTime    time.Time
-	stopRequest  bool
-	artifactView bool
-	status       string
-	statusErr    bool
-	width        int
-	height       int
-	styles       Styles
+	rows           []ProgressRow
+	runningIdx     int // index of currently running row, or -1
+	startTime      time.Time
+	stopRequest    bool
+	confirmPending bool
+	artifactView   bool
+	status         string
+	statusErr      bool
+	width          int
+	height         int
+	styles         Styles
 }
 
 // NewProgressScreen creates a new progress screen.
@@ -81,11 +82,21 @@ func (s *ProgressScreen) SetStatus(msg string, isError bool) {
 func (s *ProgressScreen) Update(msg tea.Msg) tea.Cmd {
 	switch msg := msg.(type) {
 	case tea.KeyMsg:
-		switch msg.String() {
-		case "s", "S":
-			s.stopRequest = true
-		case "a", "A", "i", "I":
-			s.artifactView = true
+		if s.confirmPending {
+			switch msg.String() {
+			case "y", "Y":
+				s.stopRequest = true
+			}
+			s.confirmPending = false
+		} else {
+			switch msg.String() {
+			case "s", "S":
+				if !s.stopRequest {
+					s.confirmPending = true
+				}
+			case "a", "A", "i", "I":
+				s.artifactView = true
+			}
 		}
 	case tickMsg:
 		return tea.Every(time.Second, func(t time.Time) tea.Msg {
@@ -156,7 +167,10 @@ func (s *ProgressScreen) View() string {
 	help := s.styles.Help.Width(s.width).Render("s graceful-stop  a artifact-view  ctrl+c force-quit")
 
 	parts := []string{title, statusLine, border, rowsBuilder.String()}
-	if s.stopRequest {
+	if s.confirmPending {
+		confirmPrompt := s.styles.Warning.Width(s.width).Render("Stop after current step? (y/n)")
+		parts = append(parts, confirmPrompt)
+	} else if s.stopRequest {
 		stopNotice := s.styles.Warning.Width(s.width).Render("Stopping after current step completes…")
 		parts = append(parts, stopNotice)
 	}
@@ -166,6 +180,13 @@ func (s *ProgressScreen) View() string {
 
 // GracefulStop reports whether the user requested a graceful stop.
 func (s *ProgressScreen) GracefulStop() bool { return s.stopRequest }
+
+// ConfirmPending reports whether the screen is currently showing the
+// "stop after current step?" confirmation prompt (i.e. 's'/'S' was pressed
+// and no response has been given yet). Distinct from GracefulStop(): this is
+// true only in the intermediate state, before either an affirmative or a
+// cancelling key is pressed.
+func (s *ProgressScreen) ConfirmPending() bool { return s.confirmPending }
 
 // ArtifactViewRequested reports whether the user requested artifact inspection.
 func (s *ProgressScreen) ArtifactViewRequested() bool { return s.artifactView }

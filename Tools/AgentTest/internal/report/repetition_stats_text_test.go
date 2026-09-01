@@ -195,10 +195,10 @@ func TestRenderText_RepetitionStats_ReadFromModel_NoRendererCalculation(t *testi
 		FinishedAt:    fixtureFinished(),
 		Tests: []report.TestReport{
 			{
-				TestID: "from-model-test",
+				TestName: "from-model-test",
 				Layer:  domain.LayerSubagent,
 				Aggregate: domain.AggregateResult{
-					TestID:           "from-model-test",
+					TestName:           "from-model-test",
 					Verdict:          domain.VerdictFail,
 					Counted:          7,
 					Passed:           3,
@@ -250,11 +250,11 @@ func fixtureResultWithRepetitionStats(passed, counted int, passRate, requiredPas
 		FinishedAt:    fixtureFinished(),
 		Tests: []report.TestReport{
 			{
-				TestID:      "repetition-stats-test",
+				TestName:      "repetition-stats-test",
 				Description: "repetition statistics appear in the per-test line",
 				Layer:       domain.LayerSubagent,
 				Aggregate: domain.AggregateResult{
-					TestID:           "repetition-stats-test",
+					TestName:           "repetition-stats-test",
 					Verdict:          verdict,
 					Counted:          counted,
 					Passed:           passed,
@@ -266,7 +266,7 @@ func fixtureResultWithRepetitionStats(passed, counted int, passRate, requiredPas
 				},
 				Runs: []report.RunReport{
 					{
-						Key:      domain.RunKey{RunID: "run-001", TestID: "repetition-stats-test", RunNumber: 1},
+						Key:      domain.RunKey{RunID: "run-001", TestName: "repetition-stats-test", RunNumber: 1},
 						Verdict:  verdict,
 						Duration: 1 * time.Second,
 						Cost: domain.CostReport{
@@ -294,11 +294,11 @@ func fixtureResultWithAllExcludedRepetitions() report.Result {
 		FinishedAt:    fixtureFinished(),
 		Tests: []report.TestReport{
 			{
-				TestID:      "always-excluded-test",
+				TestName:      "always-excluded-test",
 				Description: "every repetition excluded for state integrity",
 				Layer:       domain.LayerSubagent,
 				Aggregate: domain.AggregateResult{
-					TestID:                "always-excluded-test",
+					TestName:                "always-excluded-test",
 					Verdict:               domain.VerdictFail,
 					Reasons:               []domain.FailureReason{domain.ReasonInfrastructure},
 					Counted:               0,
@@ -312,14 +312,14 @@ func fixtureResultWithAllExcludedRepetitions() report.Result {
 				},
 				Runs: []report.RunReport{
 					{
-						Key:      domain.RunKey{RunID: "run-001", TestID: "always-excluded-test", RunNumber: 1},
+						Key:      domain.RunKey{RunID: "run-001", TestName: "always-excluded-test", RunNumber: 1},
 						Verdict:  domain.VerdictFail,
 						Reasons:  []domain.FailureReason{domain.ReasonStateIntegrity},
 						Duration: 500 * time.Millisecond,
 						Cost:     domain.CostReport{Attribution: domain.AttributionAttributed},
 					},
 					{
-						Key:      domain.RunKey{RunID: "run-001", TestID: "always-excluded-test", RunNumber: 2},
+						Key:      domain.RunKey{RunID: "run-001", TestName: "always-excluded-test", RunNumber: 2},
 						Verdict:  domain.VerdictFail,
 						Reasons:  []domain.FailureReason{domain.ReasonStateIntegrity},
 						Duration: 500 * time.Millisecond,

@@ -18,7 +18,7 @@ artifacts:
 
 | Phase | Subagent | HITL | On Success | On Findings | Input | Output |
 |-------|----------|:----:|------------|-------------|-------|--------|
-| RESEARCH | mosaictest-scripted | ❌ | COMPLETE | - | MosaicTestScript/smoke-success.md | - |
+| RESEARCH | mosaictest-scripted | FALSE | COMPLETE | - | MosaicTestScript/smoke-success.md | - |
 
 **Notes:**
 - Non-staged. With zero staged rows, workflow admission short-circuits, so none of the staged-shape conditions apply.
@@ -50,7 +50,7 @@ That last property is why the row declares an input artifact but no output. The 
 ## Open Ideas / Dead Ends
 
 **Ideas under consideration:**
-- A variant with `HITL ✅` to assert the `BLOCKED`/`E503` path, which `mosaictest-scripted` returns by design since it declares no user-interaction tool.
+- A variant with `HITL TRUE` to assert the `BLOCKED`/`E503` path, which `mosaictest-scripted` returns by design since it declares no user-interaction tool.
 
 **Dead ends (tried and rejected):**
 - (none yet)

@@ -112,7 +112,7 @@ func ReadStages(path string, needsApproach bool) (domain.StageSet, error) {
 
 		// Parse HITL.
 		hitlStr := strings.TrimSpace(row[hitlCol])
-		hitl := hitlStr == "✅"
+		hitl := strings.EqualFold(hitlStr, "TRUE")
 
 		// Parse Depends On.
 		dependsStr := strings.TrimSpace(row[dependsCol])

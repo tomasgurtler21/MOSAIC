@@ -5,11 +5,12 @@ package claudecode_test
 // whose post-invocation point fires at launch and cannot be used for echo
 // fidelity.
 //
-// The correlation mechanism is tool_use_id: the harness sends a dispatch-
-// scoped identifier on both the originating PreToolUse event and the
-// SubagentStop completion event. An absent tool_use_id is a legitimate
-// outcome for an un-stubbed dispatch (CorrelationToken comes back empty,
-// never an error). See correlation.go for the full mechanism basis.
+// The completion event carries NO dispatch identifier (tool_use_id is absent
+// from SubagentStop entirely on every observed firing against harness version
+// 2.1.240). CorrelationToken is therefore always empty at this phase — not a
+// degradation, the normal outcome. Completion correlation is recovered via
+// agent_id through the agent-start association. See correlation.go for the
+// full mechanism basis and the captured evidence it rests on.
 
 import (
 	"errors"
@@ -21,11 +22,13 @@ import (
 	"mosaic-agent-test/internal/harness/claudecode"
 )
 
-// TestTranslateCall_Completion_ValidPayload_CapturesObservedResponseAndToken
-// asserts the primary guarantee of the completion mechanism: a SubagentStop
-// payload carrying both last_assistant_message and tool_use_id produces a
-// call with both the real reply and the correlation token populated.
-func TestTranslateCall_Completion_ValidPayload_CapturesObservedResponseAndToken(t *testing.T) {
+// TestTranslateCall_Completion_ValidPayload_CapturesObservedResponse asserts
+// the primary guarantee of the completion mechanism: a SubagentStop payload
+// carrying last_assistant_message produces a call with the real reply
+// populated and an empty CorrelationToken. SubagentStop carries no tool_use_id
+// — the field is absent from every observed payload against harness version
+// 2.1.240 — so CorrelationToken is always empty at this phase.
+func TestTranslateCall_Completion_ValidPayload_CapturesObservedResponse(t *testing.T) {
 	a := claudecode.New(claudecode.Options{})
 
 	call, err := a.TranslateCall(domain.PhaseCompletion, payloadFixture(t, "completion_valid.json"))
@@ -39,10 +42,9 @@ func TestTranslateCall_Completion_ValidPayload_CapturesObservedResponseAndToken(
 	if call.ObservedResponse == "" {
 		t.Errorf("TranslateCall: ObservedResponse is empty; the completion payload's recovered reply must be captured")
 	}
-	// The fixture carries tool_use_id "tu-pre-valid-1".
-	const wantToken = "tu-pre-valid-1"
-	if call.CorrelationToken != wantToken {
-		t.Errorf("TranslateCall: CorrelationToken = %q, want %q (from fixture tool_use_id)", call.CorrelationToken, wantToken)
+	// SubagentStop carries no tool_use_id; CorrelationToken is always empty.
+	if call.CorrelationToken != "" {
+		t.Errorf("TranslateCall: CorrelationToken = %q, want empty — SubagentStop carries no tool_use_id", call.CorrelationToken)
 	}
 }
 
@@ -60,23 +62,23 @@ func TestTranslateCall_Completion_CarriesCapabilityFlags(t *testing.T) {
 	}
 }
 
-// TestTranslateCall_Completion_NoToolUseID_SucceedsWithEmptyToken asserts
-// degradation: a SubagentStop payload without tool_use_id is a legitimate
-// un-stubbed dispatch. The call still carries the observed reply; it just
-// has no correlation token to key an echo comparison by.
-func TestTranslateCall_Completion_NoToolUseID_SucceedsWithEmptyToken(t *testing.T) {
+// TestTranslateCall_Completion_SucceedsWithEmptyTokenAndCapturedReply asserts
+// the normal completion outcome: CorrelationToken is empty (SubagentStop
+// carries no tool_use_id on any dispatch, not merely un-stubbed ones), and
+// ObservedResponse is populated from last_assistant_message. An empty token
+// must not prevent the reply from being captured.
+func TestTranslateCall_Completion_SucceedsWithEmptyTokenAndCapturedReply(t *testing.T) {
 	a := claudecode.New(claudecode.Options{})
 
-	// completion_no_transcript_path.json has no tool_use_id.
 	call, err := a.TranslateCall(domain.PhaseCompletion, payloadFixture(t, "completion_no_transcript_path.json"))
 	if err != nil {
-		t.Fatalf("TranslateCall(PhaseCompletion, no tool_use_id): unexpected error for a legitimate un-stubbed dispatch: %v", err)
+		t.Fatalf("TranslateCall(PhaseCompletion): %v", err)
 	}
 	if call.CorrelationToken != "" {
-		t.Errorf("TranslateCall: CorrelationToken = %q, want empty — no tool_use_id means no token to correlate by", call.CorrelationToken)
+		t.Errorf("TranslateCall: CorrelationToken = %q, want empty — SubagentStop carries no tool_use_id", call.CorrelationToken)
 	}
 	if call.ObservedResponse == "" {
-		t.Errorf("TranslateCall: ObservedResponse is empty; the reply must still be captured for an un-stubbed dispatch")
+		t.Errorf("TranslateCall: ObservedResponse is empty; the reply must be captured from last_assistant_message")
 	}
 }
 

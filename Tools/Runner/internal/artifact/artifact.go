@@ -191,10 +191,13 @@ func Parse(data []byte) (domain.ArtifactState, error) {
 			return refuse("invalid 'commit_branch_variant' value: " + err.Error())
 		}
 		state.CommitBranchVariant = variant
-	} else {
-		// Absent key defaults to mosaic-owned (the recommended variant).
+	} else if state.Commits {
+		// When commits are enabled and the key is absent, default to the
+		// recommended variant (preserves behavior for pre-fix artifacts).
 		state.CommitBranchVariant = domain.CommitBranchMOSAICOwned
 	}
+	// When commits are disabled and the key is absent, CommitBranchVariant
+	// remains its zero value (empty string), as it is meaningless in that case.
 	if v, ok := topLevel["commit_branch"]; ok {
 		state.CommitBranch = v
 	}
@@ -315,11 +318,13 @@ func Render(state domain.ArtifactState) ([]byte, error) {
 	} else {
 		buf.WriteString("commits: disabled\n")
 	}
-	commitVariant := state.CommitBranchVariant
-	if commitVariant == "" {
-		commitVariant = domain.CommitBranchMOSAICOwned
+	if state.Commits {
+		commitVariant := state.CommitBranchVariant
+		if commitVariant == "" {
+			commitVariant = domain.CommitBranchMOSAICOwned
+		}
+		buf.WriteString("commit_branch_variant: " + string(commitVariant) + "\n")
 	}
-	buf.WriteString("commit_branch_variant: " + string(commitVariant) + "\n")
 	if state.CommitBranch != "" {
 		buf.WriteString("commit_branch: " + state.CommitBranch + "\n")
 	}

@@ -11,6 +11,27 @@ Has no bundle dependencies (stdlib only).
 
 import hashlib
 import json
+import os
+import sys
+
+
+# ---------------------------------------------------------------------------
+# Windows long-path helper
+# ---------------------------------------------------------------------------
+
+def _long_path_safe(path_str):
+    """Return a path string safe for use with open() on Windows paths > 260 chars.
+
+    On Windows, prepends the \\?\\ extended-path prefix so that the OS skips
+    the MAX_PATH limit. Normalizes to an absolute backslash path first via
+    os.path.abspath() so that \\?\\ is accepted. Paths already carrying the
+    prefix are returned unchanged. On non-Windows platforms this is a no-op.
+    """
+    if sys.platform != "win32":
+        return path_str
+    if path_str.startswith("\\\\?\\"):
+        return path_str
+    return "\\\\?\\" + os.path.abspath(path_str)
 
 
 # ---------------------------------------------------------------------------
@@ -92,7 +113,7 @@ def read_last_assistant_facts(transcript_path):
         last_facts = TurnFacts()
 
         try:
-            with open(transcript_path, "r", encoding="utf-8", errors="replace") as f:
+            with open(_long_path_safe(transcript_path), "r", encoding="utf-8", errors="replace") as f:
                 for raw_line in f:
                     line = raw_line.strip()
                     if not line:
@@ -250,7 +271,7 @@ def read_assistant_records(transcript_path):
         results = []
 
         try:
-            with open(transcript_path, "r", encoding="utf-8", errors="replace") as f:
+            with open(_long_path_safe(transcript_path), "r", encoding="utf-8", errors="replace") as f:
                 record_index = 0
                 for raw_line in f:
                     line = raw_line.strip()

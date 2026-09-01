@@ -41,6 +41,7 @@ func minimalGHCPCLISpawnRequest(agent harness.AgentRef) harness.SpawnRequest {
 		Agent:        agent,
 		Prompt:       "do the thing",
 		OutputFormat: "json",
+		GHCPCLIMode:  harness.GHCPCLIModeBlanket,
 	}
 }
 

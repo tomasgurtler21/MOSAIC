@@ -44,6 +44,19 @@ type RunConfig struct {
 	// and domain.RetainAlways for --keep-sandbox alone or both together (the
 	// stronger policy wins; specifying both is not an error).
 	Retention domain.RetentionPolicy
+
+	// MaxConcurrentRuns is the value of --max-concurrent-runs, threaded into
+	// suite.Options.MaxConcurrentRuns at suite construction time. Zero means
+	// no flag was supplied and the composition root must apply
+	// suite.DefaultMaxConcurrentRuns.
+	MaxConcurrentRuns int
+
+	// HarnessID is the harness selected for this invocation, from the
+	// --harness flag or Options.DefaultHarness. The composition root's
+	// SuiteFactory resolves the per-harness adapter, decoder, and environment
+	// from this value, ensuring validation and execution use the same harness
+	// by construction.
+	HarnessID string
 }
 
 // WriteFileFunc writes data to path, creating the file or truncating an
@@ -110,12 +123,36 @@ type Options struct {
 	Models []commonharness.ModelCatalog
 
 	// DefaultReportPath is the JSON report file location used when
-	// --report-path is absent. Resolved by the composition root so both
-	// frontends default to the same place.
+	// --report-path is absent and ReportPathFor is nil. Resolved by the
+	// composition root so both frontends default to the same place.
 	DefaultReportPath string
+
+	// ReportPathFor, when non-nil, is called with the suite path from the
+	// parsed invocation to compute the default report file location. It takes
+	// precedence over DefaultReportPath so the composition root can supply a
+	// function that encodes the suite name and current timestamp in the filename,
+	// making each run's report uniquely identifiable without a fixed-name
+	// override. When nil, DefaultReportPath is used as the fallback.
+	ReportPathFor func(suitePath string) string
 
 	// WriteFile writes the JSON report file. See WriteFileFunc.
 	WriteFile WriteFileFunc
+
+	// Store processes report files into OrchestrationTestResults/. Nil means the
+	// store command is unavailable (wiring omission is surfaced as an
+	// error, not silently skipped).
+	Store StoreFunc
+
+	// Summary generates summary Markdown. Nil means the summary command
+	// is unavailable.
+	Summary SummaryFunc
+
+	// TestResultsRoot is the absolute path to the OrchestrationTestResults/ directory,
+	// resolved by the composition root as filepath.Join(MosaicRoot, "OrchestrationTestResults").
+	// Passed through to StoreFunc/SummaryFunc by the composition root's
+	// wiring; the CLI itself does not use it directly but may display it
+	// in output messages.
+	TestResultsRoot string
 }
 
 // Execute runs the command line and returns the process exit code. It

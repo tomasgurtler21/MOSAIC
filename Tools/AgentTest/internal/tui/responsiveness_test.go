@@ -52,9 +52,9 @@ func TestResponsiveness_InputHandledWhileSuiteRuns(t *testing.T) {
 	runner := newFakeSuiteRunner().blocking()
 	m := NewModel(newFixtureOptions([]string{"suite-a.yaml"}, runner))
 
-	m, startCmd := safeUpdate(t, m, keyMsg("\r"))
+	m, startCmd := startSuiteFromSuiteSelect(t, m)
 	if startCmd == nil {
-		t.Fatalf("selecting a suite produced no command to start the run")
+		t.Fatalf("startSuiteFromSuiteSelect produced no command to start the run")
 	}
 	go func() { _ = startCmd() }() // the suite is now running and blocked
 
@@ -120,7 +120,10 @@ func TestResponsiveness_QuitReturnsImmediatelyDuringRun(t *testing.T) {
 	runner := newFakeSuiteRunner().blocking()
 	m := NewModel(newFixtureOptions([]string{"suite-a.yaml"}, runner))
 
-	m, startCmd := safeUpdate(t, m, keyMsg("\r"))
+	m, startCmd := startSuiteFromSuiteSelect(t, m)
+	if startCmd == nil {
+		t.Fatalf("startSuiteFromSuiteSelect produced no command to start the run")
+	}
 	go func() { _ = startCmd() }()
 	defer runner.releaseRun()
 

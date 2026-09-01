@@ -1,5 +1,11 @@
 schema_version: 1
-id: task-message-pass
+name: task-message-pass
+id: 28
+version: 1
+changelog:
+  - version: 1
+    date: "2026-01-01"
+    changes: "Initial."
 description: >
   The first invocation's task description really contains the declared phrase.
 layer: subagent
@@ -8,6 +14,7 @@ negative: false
 subject:
   identity: standin-subject
   agent: standin-subject
+  infrastructure_agents: []
   opening_message: |
     Greet the collaborator, then have the helper assist without creating files.
   invocation_kind: subagent

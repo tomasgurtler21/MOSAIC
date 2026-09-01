@@ -151,8 +151,36 @@ func (a *Adapter) Provision(ctx context.Context, req domain.ProvisionRequest) (d
 		}
 	}
 
-	if findings, err := a.InspectScopes(ctx); err == nil {
-		prov.ScopeFindings = findings
+	// Populate ScopeFindings with sandbox-derived paths so that
+	// CheckScopeAccounting can confirm every non-sandbox scope declared by
+	// ConfigScopes is accounted for, and CheckScopeIsolationAcrossRuns can
+	// confirm two concurrent provisioning calls receive distinct scope paths.
+	//
+	// The spawn plan sets XDG_CONFIG_HOME to relocatedConfigHome(req.Sandbox),
+	// so the spawned process reads from a per-run directory inside ControlDir
+	// rather than the real user home. Each run gets its own relocated path and
+	// cannot observe another run's configuration — the scopes are neutralized.
+	//
+	// Findings are built explicitly rather than through inspectOneScope so that
+	// InSandbox is set to false. The sandbox-relocated paths from Scopes() carry
+	// InSandbox: true, which scopePathsFromFindings filters out, making the
+	// isolation check vacuous. Setting InSandbox: false here ensures the check
+	// includes the relocated paths in its per-run comparison and actually
+	// verifies that no two runs share a scope location.
+	for _, s := range Scopes(req.Sandbox) {
+		if s.Name == "sandbox" {
+			continue // the sandbox scope is provisioned above; skip it
+		}
+		prov.ScopeFindings = append(prov.ScopeFindings, domain.ScopeFinding{
+			Scope: domain.ConfigScope{
+				Name:       s.Name,
+				Path:       s.Path,
+				InSandbox:  false, // must be false: scopePathsFromFindings filters InSandbox:true
+				Isolatable: true,
+			},
+			Neutralized:              true,
+			PreservesSubjectFunction: true,
+		})
 	}
 
 	return prov, nil

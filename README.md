@@ -6,6 +6,12 @@ Multi-agent Orchestration System for AI Coding — a platform-agnostic framework
 
 ```
 MOSAIC/
+├── docs/                             # User-facing guides for the deployed system
+│   ├── AgentCustomizationGuide.md
+│   ├── DeploymentGuide.md
+│   ├── OrchestrationGuide.md
+│   └── RunnerGuide.md
+│
 ├── Catalog/                         # Deployable content — agents, workflows, skills, hooks
 │   ├── Orchestrator/                # The primary orchestration agent (exactly one)
 │   │   └── orchestrator.md
@@ -44,8 +50,11 @@ MOSAIC/
 │
 ├── Tools/                           # Go-based CLI tooling
 │   ├── Deployment/                  # mosaic-deploy — assembles and deploys agents to target projects
+│   │   └── docs/                    # CLI reference, config, descriptor schema, external protocol, harness contributor guide
 │   ├── Runner/                      # mosaic-run — starts orchestration runs
+│   │   └── docs/                    # Design, running tests, script/orchestrator contract, test catalog design
 │   ├── AgentTest/                   # mosaic-agent-test — test harness for agents
+│   │   └── docs/                    # Design, launch guide, test authoring guide, test results design
 │   ├── LogAnalyzer/                 # Post-run log analysis
 │   └── Common/                      # Shared Go packages
 │

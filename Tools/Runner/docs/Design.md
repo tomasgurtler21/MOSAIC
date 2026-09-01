@@ -2,7 +2,7 @@
 
 > **Status:** Draft
 > **Created:** 2026-08-15
-> **Last Updated:** 2026-08-16
+> **Last Updated:** 2026-08-26
 > **Scope:** The design of `mosaic-run`, the CLI tool that executes orchestration workflows without a human orchestrator in the loop. Covers execution modes (how much routing intelligence the Runner handles autonomously versus delegating to a script-mode orchestrator agent), the architectural layers that implement those modes, the dispatch loop lifecycle, and the contract boundaries between the Runner and the systems it drives (harness adapters, orchestrator agents, the orchestration artifact).
 
 ---
@@ -185,7 +185,7 @@ Note: the real orchestrator already maintains Orchestration.md in real time duri
 
 The orchestrator does lose cached attention state between invocations — a multi-step recovery plan held in KV cache is discarded. But this is minor: when the orchestrator reads the updated artifact next time, the execution log shows what it already tried, and it will near-certainly derive the same continuation. If it doesn't, it's because the intermediate result genuinely changed the picture.
 
-The multi-step resolution model is documented as a dead end in §6.4.
+The multi-step resolution model is documented as a dead end in §7.4.
 
 ### 2.7 Mode Selection
 
@@ -421,11 +421,69 @@ Infrastructure agents (checkpoint, commit, restore) are dispatched automatically
 
 ---
 
-## 6. Dead Ends
+## 6. Runner Agent Snapshot
+
+Regular orchestration and Runner execution have different deployment requirements. In regular orchestration, the orchestrator agent (`mode: primary`) spawns subagents via the harness's task/subagent tool, and the subagent's `mode: subagent` frontmatter enforces isolation. The Runner invokes every agent via the harness CLI (`opencode run --agent <id>`, `claude --agent <path>`, etc.), and some harnesses block CLI invocation of agents marked `mode: subagent`. OpenCode is the first harness with this constraint, but others may follow.
+
+### 6.1 The Problem
+
+The deployed agents directory (e.g., `.opencode/agents/`) serves both interactive orchestration and the Runner. These two execution models have conflicting requirements for the same agent files. The Runner cannot modify the shared directory because: (a) a crash mid-modification leaves corrupted agents for interactive orchestration, (b) interactive orchestration may be running in parallel, and (c) reverting after the run adds failure modes.
+
+### 6.2 Runner-Owned Snapshot
+
+At run start, before the first dispatch, the Runner creates a **snapshot** of the deployed agents in a runner-owned directory alongside the regular one:
+
+| Harness | Regular directory | Runner snapshot |
+|---------|------------------|-----------------|
+| OpenCode | `.opencode/agents/` | `.opencode/agents-runner-{run_id}/` |
+| Claude Code | `.claude/agents/` | `.claude/agents-runner-{run_id}/` |
+| GitHub Copilot CLI | `.github/agents/` | `.github/agents-runner-{run_id}/` |
+
+The snapshot directory is **scoped to the run ID**, so parallel Runner executions each get their own isolated snapshot. At run start, the Runner creates a fresh copy from the current regular directory. At run end (successful completion or graceful stop), the Runner deletes its own snapshot directory. Cleanup failure is non-fatal -- an orphaned snapshot directory is harmless and never interferes with other runs.
+
+This guarantees:
+
+- **No drift.** The snapshot always reflects the current state of the regular directory, including any project-specific content the user has filled into injection regions.
+- **Crash safety.** If the Runner crashes mid-run, an orphaned snapshot sits harmlessly on disk. It is scoped to the crashed run's ID and does not interfere with subsequent runs.
+- **Parallel safety.** Interactive orchestration reads from the regular directory. Each Runner instance reads from its own run-scoped snapshot. Multiple concurrent Runner executions never interfere with each other or with interactive orchestration.
+
+### 6.3 Snapshot Transformations
+
+After copying, the Runner applies harness-specific transformations to make the snapshot compatible with CLI invocation:
+
+| Harness | Field | Regular value | Runner value | Reason |
+|---------|-------|---------------|--------------|--------|
+| OpenCode | `mode` | `subagent` | `primary` | `mode: subagent` blocks `opencode run --agent` CLI invocation |
+
+This table is expected to grow as new harness-specific constraints are discovered. The transformation set is hardcoded per harness in the Runner's harness adapter layer.
+
+### 6.4 Orchestrator Resolution
+
+The Runner derives the script-mode orchestrator path from the harness convention -- it looks for `orchestrator-script` in the regular agents directory (e.g., `.opencode/agents/orchestrator-script.md`). The `--orchestrator-file` flag is removed; the path is fully determined by harness selection. If the orchestrator is not found at the expected path, the Runner refuses to start with a clear error indicating the workspace is not properly deployed.
+
+This requires the deploy tool to place the script-mode orchestrator in the regular agents directory alongside all other agents. The regular orchestrator and script-mode orchestrator coexist in the same directory -- the regular orchestrator is used by interactive orchestration, the script-mode orchestrator is used by the Runner.
+
+### 6.5 Run-Start Integration
+
+The snapshot step is inserted into the Run-Start Sequence (SS4) between step 5 (agent resolution) and step 6 (stage set reading):
+
+| Step | What | Failure |
+|------|------|---------|
+| 5 | Resolve every agent identifier to a definition file | Refusal |
+| **5a** | **Create run-scoped snapshot: copy agents to `agents-runner-{run_id}/`, apply transformations** | **Refusal** |
+| 6 | Read stage set from Plan.md (if present) | Refusal if parse error |
+
+Agent resolution at step 5 validates that all required agents exist in the regular directory. Step 5a then creates the run-scoped snapshot and rewrites the resolved paths to point into the snapshot directory. All subsequent steps (and the dispatch loop) use the snapshot paths.
+
+**Cleanup:** On run completion (successful or graceful stop), the Runner deletes its snapshot directory. Cleanup failure is logged but does not change the run's exit code -- the run itself succeeded. Crashed runs leave orphaned snapshot directories that the user can delete manually; they do not interfere with anything.
+
+---
+
+## 7. Dead Ends
 
 Approaches considered and rejected during implementation:
 
-### 6.1 Engine as a Stateful Object
+### 7.1 Engine as a Stateful Object
 
 Early designs had the engine as a struct holding mutable state (current row index, stage counter, pending deviations). This was replaced by the pure-function design because:
 - Mutable state made the engine hard to test (required setup/teardown)
@@ -434,18 +492,18 @@ Early designs had the engine as a struct holding mutable state (current row inde
 
 The pure function receives everything as parameters and returns a decision. The session manages all mutable state.
 
-### 6.2 Single Deviation Mode
+### 7.2 Single Deviation Mode
 
 The original `--on-deviation` flag had only `stop`. The `delegate` mode (calling the script-mode orchestrator) was added because stopping on every deviation was too disruptive for real workflows — review agents returning `COMPLETED_NEEDS_ACTION` is normal operation, not an error. The current three-mode system formalizes this spectrum further.
 
-### 6.3 Orchestrator as HTTP Service
+### 7.3 Orchestrator as HTTP Service
 
 Briefly considered having the script-mode orchestrator run as a persistent service that the Runner calls via HTTP. Rejected because:
 - The orchestrator agent runs in the same harness (Claude Code, etc.) as subagents — there is no separate service infrastructure
 - Statefulness would require session management between the Runner and orchestrator
 - The current approach (invoke-and-parse) is simpler and uses the same harness adapter as everything else
 
-### 6.4 Multi-Step Deviation Resolution
+### 7.4 Multi-Step Deviation Resolution
 
 The initial deviation resolver design had the orchestrator resolve an entire deviation chain in a single invocation: the Runner hands off the deviation, the orchestrator invokes however many agents it needs internally (updating Orchestration.md along the way), and returns only when it can rejoin the happy path. Rejected in favor of the single-decision principle (§2.6) because:
 - **Context growth:** The orchestrator's context grows with each internal agent invocation during the chain — the same unbounded cost problem the Runner exists to solve. A complex deviation chain (research → re-design → re-test) inside one orchestrator session accumulates all intermediate tool calls and responses.
@@ -458,7 +516,7 @@ The single-decision model has the orchestrator make one routing decision per inv
 
 ---
 
-## 7. Open Items
+## 8. Open Items
 
 No open design items remain. All items from the initial draft have been resolved — see below.
 
@@ -488,8 +546,9 @@ No open design items remain. All items from the initial draft have been resolved
 
 ---
 
-## 8. Changelog
+## 9. Changelog
 
 | Version | Date | Summary |
 |---------|------|---------|
 | 0.1 | 2026-08-16 | Initial design. Three execution modes (Orchestrated, Auto, Auto-review) with cost model and dispatch intelligence gap as central tensions. Single-decision principle. Two-action orchestrator contract (dispatch + stop) with free table navigation. Dispatch instruction carries optional artifact/constraint overrides (table row defaults, orchestrator overrides on re-invocations). Mode 3 engine injects review artifact on CNA auto-route back. Pre-consultation for environment plumbing (Modes 2/3). Run-start sequence with run configuration (checkpoints, commits, branch variant, commit setup dispatch). Stop-action UX: CLI terminal, TUI offers retry + manual dispatch. Infrastructure agent triggers. All open items resolved. |
+| 0.2 | 2026-08-26 | Runner Agent Snapshot (SS6). Runner creates a run-ID-scoped snapshot of deployed agents (`agents-runner-{run_id}/`) at every run start, with harness-specific transformations applied (e.g., `mode: primary` for OpenCode). Run-scoped directories enable safe parallel execution. Snapshot cleaned up on run completion; orphaned snapshots from crashes are harmless. Orchestrator file auto-discovered from harness convention, `--orchestrator-file` flag removed. Snapshot step inserted into Run-Start Sequence as step 5a. |

@@ -1,5 +1,11 @@
 schema_version: 1
-id: single-decision
+name: single-decision
+id: 2
+version: 1
+changelog:
+  - version: 1
+    date: "2026-01-01"
+    changes: "Initial reference example."
 description: >
   Reference example of a single-decision subagent-layer test: it starts
   mid-workflow by seeding a pre-run file resolved via a $ref into the
@@ -10,6 +16,7 @@ negative: false
 subject:
   identity: planner
   agent: planner
+  infrastructure_agents: []
   opening_message: |
     Continue the workflow using the seeded orchestration state.
   invocation_kind: subagent

@@ -113,7 +113,8 @@ package artifact_test
 //   Parse — defaults when configuration keys are absent:
 //   - Absent mode key: Mode is ExecutionModeUnset (no error).
 //   - Absent commits key: Commits is false (no error).
-//   - Absent commit_branch_variant key: CommitBranchVariant is CommitBranchMOSAICOwned.
+//   - Absent commit_branch_variant key when commits enabled: CommitBranchVariant is CommitBranchMOSAICOwned.
+//   - Absent commit_branch_variant key when commits disabled: CommitBranchVariant is "" (zero value, no error).
 //   - Absent commit_branch key: CommitBranch is "" (no error).
 //   - Absent pre_consultation key: PreConsultation is false (no error).
 //   - Absent manual_resolution key: ManualResolution is false (no error).
@@ -137,7 +138,8 @@ package artifact_test
 //   Render — new configuration keys:
 //   - mode key is emitted when Mode is non-empty.
 //   - commits key reflects the actual Commits value (not hardcoded "disabled").
-//   - commit_branch_variant key is emitted.
+//   - commit_branch_variant key is emitted when commits are enabled.
+//   - commit_branch_variant key is NOT emitted when commits are disabled.
 //   - commit_branch key is emitted when CommitBranch is non-empty.
 //   - commit_branch key is NOT emitted when CommitBranch is empty.
 //   - pre_consultation key is emitted.
@@ -2792,11 +2794,11 @@ func TestParse_AbsentCommitsKey_DefaultsToFalse(t *testing.T) {
 	}
 }
 
-func TestParse_AbsentCommitBranchVariantKey_DefaultsToMOSAICOwned(t *testing.T) {
-	// When the commit_branch_variant key is absent, CommitBranchVariant defaults
-	// to CommitBranchMOSAICOwned — the documented recommended variant.
-	// RED canary: zero value is "" but default must be "mosaic-owned".
-	data := minimalArtifactWithConfigBytes(standardConfigLines)
+func TestParse_AbsentCommitBranchVariantKey_WhenCommitsEnabled_DefaultsToMOSAICOwned(t *testing.T) {
+	// When commits is enabled and the commit_branch_variant key is absent,
+	// CommitBranchVariant defaults to CommitBranchMOSAICOwned — the documented
+	// recommended variant for commits-enabled runs.
+	data := minimalArtifactWithConfigBytes("checkpoints: disabled\ncommits: enabled\n")
 
 	state, err := artifact.Parse(data)
 
@@ -2804,8 +2806,26 @@ func TestParse_AbsentCommitBranchVariantKey_DefaultsToMOSAICOwned(t *testing.T) 
 		t.Fatalf("Parse: unexpected error: %v", err)
 	}
 	if state.CommitBranchVariant != domain.CommitBranchMOSAICOwned {
-		t.Errorf("CommitBranchVariant: want %q (default when key absent), got %q",
+		t.Errorf("CommitBranchVariant: want %q (default when commits enabled and key absent), got %q",
 			domain.CommitBranchMOSAICOwned, state.CommitBranchVariant)
+	}
+}
+
+func TestParse_AbsentCommitBranchVariantKey_WhenCommitsDisabled_YieldsEmpty(t *testing.T) {
+	// When commits is disabled and the commit_branch_variant key is absent,
+	// CommitBranchVariant must be the zero value (empty string). The mosaic-owned
+	// default only applies when commits are enabled.
+	// RED: current implementation defaults to mosaic-owned regardless of commits.
+	data := minimalArtifactWithConfigBytes(standardConfigLines) // commits: disabled
+
+	state, err := artifact.Parse(data)
+
+	if err != nil {
+		t.Fatalf("Parse: unexpected error: %v", err)
+	}
+	if state.CommitBranchVariant != "" {
+		t.Errorf("CommitBranchVariant: want %q (zero value when commits disabled and key absent), got %q",
+			"", state.CommitBranchVariant)
 	}
 }
 
@@ -3080,12 +3100,13 @@ func TestRender_CommitsEnabled_EmitsEnabled(t *testing.T) {
 	}
 }
 
-func TestRender_CommitBranchVariantKey_Emitted(t *testing.T) {
-	// commit_branch_variant must appear in the rendered output.
+func TestRender_CommitBranchVariantKey_EmittedWhenCommitsEnabled(t *testing.T) {
+	// When commits is enabled, commit_branch_variant must appear in the rendered
+	// output with the correct value.
 	state := domain.ArtifactState{
 		Type:        "orchestration-artifact",
 		Workflow:    "test",
-		RunSettings: domain.RunSettings{CommitBranchVariant: domain.CommitBranchUserOwn},
+		RunSettings: domain.RunSettings{Commits: true, CommitBranchVariant: domain.CommitBranchUserOwn},
 	}
 
 	got, err := artifact.Render(state)
@@ -3094,8 +3115,29 @@ func TestRender_CommitBranchVariantKey_Emitted(t *testing.T) {
 		t.Fatalf("Render: unexpected error: %v", err)
 	}
 	if !strings.Contains(string(got), "commit_branch_variant: user-own") {
-		t.Errorf("Render: want frontmatter to contain %q, got:\n%s",
+		t.Errorf("Render: want frontmatter to contain %q when Commits=true, got:\n%s",
 			"commit_branch_variant: user-own", got)
+	}
+}
+
+func TestRender_CommitBranchVariantKey_OmittedWhenCommitsDisabled(t *testing.T) {
+	// When commits is disabled, commit_branch_variant must NOT appear in the
+	// rendered output, regardless of the CommitBranchVariant field value.
+	// RED: current implementation unconditionally emits the key.
+	state := domain.ArtifactState{
+		Type:        "orchestration-artifact",
+		Workflow:    "test",
+		RunSettings: domain.RunSettings{Commits: false, CommitBranchVariant: domain.CommitBranchUserOwn},
+	}
+
+	got, err := artifact.Render(state)
+
+	if err != nil {
+		t.Fatalf("Render: unexpected error: %v", err)
+	}
+	if strings.Contains(string(got), "commit_branch_variant:") {
+		t.Errorf("Render: want frontmatter to NOT contain %q when Commits=false, got:\n%s",
+			"commit_branch_variant:", got)
 	}
 }
 
@@ -3227,6 +3269,40 @@ func TestRoundTrip_AllConfigFields_ParsedBack(t *testing.T) {
 	}
 }
 
+func TestRoundTrip_CommitsDisabled_CommitBranchVariantPreservedAsEmpty(t *testing.T) {
+	// Render an ArtifactState with Commits=false and empty CommitBranchVariant,
+	// then Parse the output back. CommitBranchVariant must come back as empty
+	// (not defaulted to mosaic-owned). This validates the resumed-run scenario
+	// where a commits-disabled orchestration file is re-parsed.
+	// RED: current Parse defaults absent key to mosaic-owned regardless of Commits.
+	original := domain.ArtifactState{
+		Type:     "orchestration-artifact",
+		Workflow: "test",
+		RunSettings: domain.RunSettings{
+			Commits:             false,
+			CommitBranchVariant: "",
+		},
+	}
+
+	rendered, err := artifact.Render(original)
+	if err != nil {
+		t.Fatalf("Render: unexpected error: %v", err)
+	}
+
+	parsed, err := artifact.Parse(rendered)
+	if err != nil {
+		t.Fatalf("Parse rendered bytes: unexpected error: %v", err)
+	}
+
+	if parsed.CommitBranchVariant != "" {
+		t.Errorf("CommitBranchVariant after round-trip: want %q (empty, commits disabled), got %q",
+			"", parsed.CommitBranchVariant)
+	}
+	if parsed.Commits {
+		t.Error("Commits after round-trip: want false, got true")
+	}
+}
+
 func TestRoundTrip_CommitBranch_Empty_SurvivesRoundTrip(t *testing.T) {
 	// commit_branch is omitted when empty; re-parsing must yield "" not an error.
 	original := domain.ArtifactState{
@@ -3299,9 +3375,13 @@ func TestApply_RunSettings_CommitsPersistsOnDisk(t *testing.T) {
 
 func TestApply_RunSettings_CommitBranchVariantPersistsOnDisk(t *testing.T) {
 	// After Apply and a subsequent Read, CommitBranchVariant must equal the
-	// value that was in the state passed to Apply.
+	// value that was in the state passed to Apply when commits are enabled.
+	// CommitBranchVariant is only meaningful when Commits=true; Render omits
+	// the key when commits are disabled so this test must enable commits to
+	// exercise the meaningful round-trip case.
 	store, state := mustCreateStore(t)
 	ctx := context.Background()
+	state.Commits = true
 	state.CommitBranchVariant = domain.CommitBranchUserOwn
 	step := makeStep(1, "planner#1", "PLANNING", "", domain.StatusSUCCESS, time.Now(), nil)
 

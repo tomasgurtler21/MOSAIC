@@ -1,5 +1,11 @@
 schema_version: 1
-id: final-state-last-status-fail
+name: final-state-last-status-fail
+id: 21
+version: 1
+changelog:
+  - version: 1
+    date: "2026-01-01"
+    changes: "Initial."
 description: >
   The seeded orchestration document's last_status is SUCCESS, not the declared FAILURE, so final_state.last_status must fail by name. Phase is left undeclared so this test isolates last_status as the only evaluated subfield.
 layer: subagent
@@ -8,6 +14,7 @@ negative: false
 subject:
   identity: standin-subject
   agent: standin-subject
+  infrastructure_agents: []
   opening_message: |
     Greet the collaborator, then have the helper assist without creating files.
   invocation_kind: subagent

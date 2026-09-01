@@ -10,6 +10,13 @@ type RunConfig struct {
 	AllowVersionDrift    bool          // override version check
 	IsNewRun             bool          // true = create new artifact; false = resume existing
 
+	// HarnessID is the stable harness identity selected by the user
+	// (e.g. "opencode", "claude-code", "ghcp-cli", "fake"). Populated by
+	// the CLI from the --harness flag value and by the TUI from the harness
+	// selection screen. Used by the session layer for snapshot creation and
+	// orchestrator auto-discovery.
+	HarnessID string
+
 	// RunSettings holds every run-configuration decision that is settled at run
 	// start, immutable for the run, and persisted in the artifact frontmatter so
 	// a resumed run reads it back instead of re-asking. Embedding promotes all

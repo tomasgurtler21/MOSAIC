@@ -18,7 +18,7 @@ artifacts:
 
 | Phase | Subagent | HITL | On Success | On Findings | Input | Output |
 |-------|----------|:----:|------------|-------------|-------|--------|
-| RESEARCH | mosaictest-scripted | ❌ | COMPLETE | - | MosaicTestScript/deviation-stop-fail.md | - |
+| RESEARCH | mosaictest-scripted | FALSE | COMPLETE | - | MosaicTestScript/deviation-stop-fail.md | - |
 
 **Notes:**
 - **Run this workflow in Auto mode.**

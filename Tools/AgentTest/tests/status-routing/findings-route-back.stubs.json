@@ -1,0 +1,41 @@
+{
+  "schema_version": 1,
+  "test_id": "findings-route-back",
+  "on_unmatched": "halt",
+  "stubs": [
+    {
+      "match": { "tool": "dispatch", "agent": "plan-review", "invocation": 1 },
+      "response": {
+        "agent_instance_id": "plan-review#5",
+        "run_id": "{run_id}",
+        "status_code": "COMPLETED_NEEDS_ACTION",
+        "status_message": "Plan lacks error handling strategy for pflag parse failures."
+      },
+      "side_effects": {
+        "create_files": [
+          {
+            "path": "Orchestration-{run_id}/plan-review.md",
+            "content": "---\nrun_id: {run_id}\ncreated_by: plan-review#5\nhuman_approved: false\n---\n# Plan Review\n\n## Findings\n\n1. No error handling strategy for pflag parse failures\n2. Stage 1 missing rollback approach if diagnostics integration fails\n"
+          }
+        ]
+      }
+    },
+    {
+      "match": { "tool": "dispatch", "agent": "planner-tdd-soft", "invocation": 1 },
+      "response": {
+        "agent_instance_id": "planner-tdd-soft#6",
+        "run_id": "{run_id}",
+        "status_code": "SUCCESS",
+        "status_message": "Plan updated with error handling strategy and rollback approach."
+      },
+      "side_effects": {
+        "create_files": [
+          {
+            "path": "Orchestration-{run_id}/Plan.md",
+            "content": "---\nrun_id: {run_id}\ncreated_by: planner-tdd-soft#6\nhuman_approved: true\n---\n# Plan\n\n## Stage Table\n\n| Stage | Description | Approach | HITL | Depends On |\n|-------|-------------|----------|------|------------|\n| 1 | Add --verbose flag parsing and wire to diagnostics | TDD | No | - |\n| 2 | Per-item diagnostic output in list command | TDD | No | 1 |\n\n## Error Handling\n\nPflag parse failures return exit code 2 with usage hint.\n"
+          }
+        ]
+      }
+    }
+  ]
+}

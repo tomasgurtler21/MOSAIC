@@ -20,8 +20,8 @@ artifacts:
 
 | Phase | Subagent | HITL | On Success | On Findings | Input | Output |
 |-------|----------|:----:|------------|-------------|-------|--------|
-| EXECUTION.[StageNumber] | mosaictest-scripted | ❌ | - | - | MosaicTestScript/stage-write.md | Stage-{StageNumber}/MosaicTestStage.md |
-| EXECUTION.[StageNumber] | mosaictest-scripted | ❌ | - | - | MosaicTestScript/stage-echo.md, Stage-{StageNumber}/MosaicTestStage.md | - |
+| EXECUTION.[StageNumber] | mosaictest-scripted | FALSE | - | - | MosaicTestScript/stage-write.md | Stage-{StageNumber}/MosaicTestStage.md |
+| EXECUTION.[StageNumber] | mosaictest-scripted | FALSE | - | - | MosaicTestScript/stage-echo.md, Stage-{StageNumber}/MosaicTestStage.md | - |
 
 **EXECUTION Stages:** Loop per stage (stages defined in Plan.md). Both rows run for every stage, in table order.
 
@@ -59,7 +59,7 @@ The second row takes the first row's output as its input. That chains the stage 
 
 **Ideas under consideration:**
 - A three-stage variant to check that stage progression is not hardcoded to two.
-- Setting stage 2's HITL to ✅ in the fixture plan to assert per-stage HITL resolution (effective HITL is the row flag OR the stage flag).
+- Setting stage 2's HITL to TRUE in the fixture plan to assert per-stage HITL resolution (effective HITL is the row flag OR the stage flag).
 
 **Dead ends (tried and rejected):**
 - Declaring `Stage-{StageNumber}/Plan.md` as a row input. It would require per-stage plan files in the fixture tree for no added coverage — `{StageNumber}` substitution is already proven by the output path.

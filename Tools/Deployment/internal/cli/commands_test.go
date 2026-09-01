@@ -963,6 +963,176 @@ func TestRun_WorkflowsSubcommand_WorkflowsFlag_TrimsWhitespace(t *testing.T) {
 	}
 }
 
+// ---------------------------------------------------------------------------
+// deploy --selections flag: infrastructure_agents forwarding (T1.3)
+// ---------------------------------------------------------------------------
+
+// TestRun_DeploySubcommand_SelectionsFile_InfrastructureAgents_Populated_ForwardedToRequest
+// verifies that when a --selections file contains infrastructure_agents with values, the
+// deploy request's InfrastructureAgentIDs field is populated with those values.
+//
+// RED: the current deployCmd.RunE block forwards sf.UtilityAgents and sf.Hooks into the
+// request but does not forward sf.InfrastructureAgents. This test fails until
+// `req.InfrastructureAgentIDs = sf.InfrastructureAgents` is added to the block.
+func TestRun_DeploySubcommand_SelectionsFile_InfrastructureAgents_Populated_ForwardedToRequest(t *testing.T) {
+	// Arrange
+	workspace := t.TempDir()
+	svc := &spyService{deployResp: successSummary(workspace)}
+	selectionsPath := writeTempYAML(t, "infrastructure_agents:\n  - checkpoint-manager-git\n")
+
+	// Act
+	code := cli.Run(context.Background(),
+		[]string{"deploy",
+			"--harness", "stub-harness",
+			"--workspace", workspace,
+			"--selections", selectionsPath,
+			"--auto-confirm",
+		},
+		svc, &bytes.Buffer{}, &bytes.Buffer{})
+
+	// Assert
+	if code != cli.ExitSuccess {
+		t.Fatalf("exit code = %d, want %d (ExitSuccess)", code, cli.ExitSuccess)
+	}
+	if svc.deployReq == nil {
+		t.Fatal("DeployNew was not called")
+	}
+	want := []string{"checkpoint-manager-git"}
+	got := svc.deployReq.InfrastructureAgentIDs
+	if len(got) != len(want) {
+		t.Fatalf("InfrastructureAgentIDs = %v, want %v; "+
+			"infrastructure_agents from the selections file must be forwarded into "+
+			"DeployRequest.InfrastructureAgentIDs", got, want)
+	}
+	if got[0] != want[0] {
+		t.Errorf("InfrastructureAgentIDs[0] = %q, want %q", got[0], want[0])
+	}
+}
+
+// TestRun_DeploySubcommand_SelectionsFile_InfrastructureAgents_Empty_ForwardedAsNonNilEmpty
+// verifies that `infrastructure_agents: []` in a --selections file produces a non-nil
+// empty slice in DeployRequest.InfrastructureAgentIDs. A non-nil empty slice is the
+// "explicitly deploy none" signal that prevents the deploy tool from asking an interactive
+// question. A nil value (absent key) would still allow an interactive prompt.
+//
+// RED: the current deployCmd.RunE block does not forward sf.InfrastructureAgents at all,
+// so InfrastructureAgentIDs is nil after this test's selections file is read.
+func TestRun_DeploySubcommand_SelectionsFile_InfrastructureAgents_Empty_ForwardedAsNonNilEmpty(t *testing.T) {
+	// Arrange
+	workspace := t.TempDir()
+	svc := &spyService{deployResp: successSummary(workspace)}
+	selectionsPath := writeTempYAML(t, "infrastructure_agents: []\n")
+
+	// Act
+	code := cli.Run(context.Background(),
+		[]string{"deploy",
+			"--harness", "stub-harness",
+			"--workspace", workspace,
+			"--selections", selectionsPath,
+			"--auto-confirm",
+		},
+		svc, &bytes.Buffer{}, &bytes.Buffer{})
+
+	// Assert
+	if code != cli.ExitSuccess {
+		t.Fatalf("exit code = %d, want %d (ExitSuccess)", code, cli.ExitSuccess)
+	}
+	if svc.deployReq == nil {
+		t.Fatal("DeployNew was not called")
+	}
+	got := svc.deployReq.InfrastructureAgentIDs
+	if got == nil {
+		t.Fatal("InfrastructureAgentIDs is nil; 'infrastructure_agents: []' in the " +
+			"selections file must produce a non-nil empty slice so the deploy tool treats " +
+			"it as \"deploy none\" rather than triggering an interactive question")
+	}
+	if len(got) != 0 {
+		t.Errorf("InfrastructureAgentIDs = %v, want empty slice; "+
+			"an explicit empty list must not add any IDs to the request", got)
+	}
+}
+
+// TestRun_DeploySubcommand_SelectionsFile_InfrastructureAgents_Absent_FieldIsNil verifies
+// that when a --selections file does not contain an infrastructure_agents key, the deploy
+// request's InfrastructureAgentIDs field remains nil. A nil value preserves the existing
+// "ask interactively" behavior.
+func TestRun_DeploySubcommand_SelectionsFile_InfrastructureAgents_Absent_FieldIsNil(t *testing.T) {
+	// Arrange — selections file with only utility_agents; no infrastructure_agents key.
+	workspace := t.TempDir()
+	svc := &spyService{deployResp: successSummary(workspace)}
+	selectionsPath := writeTempYAML(t, "utility_agents:\n  - some-agent\n")
+
+	// Act
+	code := cli.Run(context.Background(),
+		[]string{"deploy",
+			"--harness", "stub-harness",
+			"--workspace", workspace,
+			"--selections", selectionsPath,
+			"--auto-confirm",
+		},
+		svc, &bytes.Buffer{}, &bytes.Buffer{})
+
+	// Assert
+	if code != cli.ExitSuccess {
+		t.Fatalf("exit code = %d, want %d (ExitSuccess)", code, cli.ExitSuccess)
+	}
+	if svc.deployReq == nil {
+		t.Fatal("DeployNew was not called")
+	}
+	if svc.deployReq.InfrastructureAgentIDs != nil {
+		t.Errorf("InfrastructureAgentIDs = %v (non-nil), want nil; "+
+			"an absent infrastructure_agents key must leave InfrastructureAgentIDs nil "+
+			"so the deploy tool's interactive question remains active",
+			svc.deployReq.InfrastructureAgentIDs)
+	}
+}
+
+// TestRun_DeploySubcommand_SelectionsFile_InfrastructureAgents_MultipleIDs_AllForwarded
+// verifies that multiple infrastructure_agents IDs in the selections file are all forwarded
+// into DeployRequest.InfrastructureAgentIDs without truncation or reordering.
+//
+// RED: same as the populated single-ID test — forwarding is not implemented yet.
+func TestRun_DeploySubcommand_SelectionsFile_InfrastructureAgents_MultipleIDs_AllForwarded(t *testing.T) {
+	// Arrange
+	workspace := t.TempDir()
+	svc := &spyService{deployResp: successSummary(workspace)}
+	selectionsPath := writeTempYAML(t,
+		"infrastructure_agents:\n  - checkpoint-manager-git\n  - commit-manager-git\n")
+
+	// Act
+	code := cli.Run(context.Background(),
+		[]string{"deploy",
+			"--harness", "stub-harness",
+			"--workspace", workspace,
+			"--selections", selectionsPath,
+			"--auto-confirm",
+		},
+		svc, &bytes.Buffer{}, &bytes.Buffer{})
+
+	// Assert
+	if code != cli.ExitSuccess {
+		t.Fatalf("exit code = %d, want %d (ExitSuccess)", code, cli.ExitSuccess)
+	}
+	if svc.deployReq == nil {
+		t.Fatal("DeployNew was not called")
+	}
+	want := []string{"checkpoint-manager-git", "commit-manager-git"}
+	got := svc.deployReq.InfrastructureAgentIDs
+	if len(got) != len(want) {
+		t.Fatalf("InfrastructureAgentIDs = %v, want %v; "+
+			"all infrastructure agent IDs from the selections file must be forwarded", got, want)
+	}
+	for i, id := range want {
+		if got[i] != id {
+			t.Errorf("InfrastructureAgentIDs[%d] = %q, want %q", i, got[i], id)
+		}
+	}
+}
+
+// ---------------------------------------------------------------------------
+// TestRun_WorkflowsSubcommand_NoModelQuestionsInRequest (existing test)
+// ---------------------------------------------------------------------------
+
 // TestRun_WorkflowsSubcommand_NoModelQuestionsInRequest verifies that WorkflowUpdateRequest
 // has no tier-model or agent-model fields by observing that the CLI subcommand does not
 // expose --tier-models or --agent-models flags. This is the structural guarantee that the

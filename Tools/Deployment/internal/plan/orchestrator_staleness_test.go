@@ -38,6 +38,9 @@ import (
 func deployedStateWithOrchVersion(contentHash, version, harnessVersion, injectionsVersion, orchestratorInjectionsVersion string) domain.DeployedArtifactState {
 	s := deployedState(contentHash, version, harnessVersion, injectionsVersion)
 	s.OrchestratorInjectionsVersion = orchestratorInjectionsVersion
+	// Orchestrator files contain InjectionHarness-class regions; set the signal so
+	// AgentStaleness performs the InjectionsVersion comparison for these tests.
+	s.HasInjectionRegion = true
 	return s
 }
 

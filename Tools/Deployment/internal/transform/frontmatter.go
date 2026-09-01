@@ -99,8 +99,15 @@ func applyFrontmatter(
 	var changes []FieldChange
 	var gaps []domain.Gap
 
+	// touchedKeys records every frontmatter key that any transform step explicitly
+	// manages (sets or removes). Used by the deployed-field preservation pass (Step 5c)
+	// to determine which deployed-file keys are user-owned and should be copied into
+	// the output when the transform has not touched them.
+	touchedKeys := make(map[string]bool)
+
 	// Step 1: Remove fields declared in the descriptor drop list.
 	for _, key := range plan.Remove {
+		touchedKeys[key] = true
 		if v, ok := fm.Get(key); ok {
 			changes = append(changes, FieldChange{
 				Key:    key,
@@ -114,6 +121,7 @@ func applyFrontmatter(
 
 	// Step 2: Add or overwrite fields from the descriptor add list.
 	for _, field := range plan.Set {
+		touchedKeys[field.Key] = true
 		before := ""
 		if v, ok := fm.Get(field.Key); ok {
 			before = renderValue(v)
@@ -130,6 +138,7 @@ func applyFrontmatter(
 	// Step 3: Set the model field from the resolved model selection.
 	modelKey := desc.Frontmatter.ModelKey
 	if modelKey != "" {
+		touchedKeys[modelKey] = true
 		if req.Model.Resolved() {
 			before := ""
 			if v, ok := fm.Get(modelKey); ok {
@@ -170,6 +179,7 @@ func applyFrontmatter(
 	// written here; it is stripped by the migration step below if present from a legacy file.
 	tvField, _ := agentfields.ByDeployedName("harness_version")
 	if c := applyVersionStamp(fm, tvField.Deployed, desc.TransformVersion); c != nil {
+		touchedKeys[tvField.Deployed] = true
 		changes = append(changes, *c)
 	}
 	// injections_version is no longer stamped as a frontmatter field; it is written as a
@@ -177,12 +187,14 @@ func applyFrontmatter(
 	// The ivField variable is retained here for the migration strip below, which removes
 	// legacy mosaic_injections_version fields from pre-migration deployed files.
 	ivField, _ := agentfields.ByDeployedName("injections_version")
+	touchedKeys[ivField.Deployed] = true
 	// tool_mappings_version is a content hash of the effective tool_destinations
 	// mappings for this harness (combined project + user config). It lets `update`
 	// detect stale tool mappings without re-diffing tool lists. See "The
 	// tool_mappings_version stamp" in Tools/Deployment/docs/configuration.md.
 	tmvField, _ := agentfields.ByDeployedName("tool_mappings_version")
 	if c := applyVersionStamp(fm, tmvField.Deployed, req.ToolMappingsVersion); c != nil {
+		touchedKeys[tmvField.Deployed] = true
 		changes = append(changes, *c)
 	}
 
@@ -191,6 +203,7 @@ func applyFrontmatter(
 	// orchestrator (which today receives no bundle blocks) is never stamped.
 	bvField, _ := agentfields.ByDeployedName("bundle_version")
 	if req.Bundle.AppliesToRole(req.Role) && req.Bundle.Version != "" {
+		touchedKeys[bvField.Deployed] = true
 		before := ""
 		if v, ok := fm.Get(bvField.Deployed); ok {
 			before = renderValue(v)
@@ -208,6 +221,8 @@ func applyFrontmatter(
 	// generic source carries "id"; deployed files must carry the prefixed form. The
 	// agentfields registry supplies both names; no prefixed literal appears here.
 	idField, _ := agentfields.ByGeneric("id")
+	touchedKeys[idField.Legacy] = true
+	touchedKeys[idField.Deployed] = true
 	if v, ok := fm.Get(idField.Legacy); ok {
 		fm.Remove(idField.Legacy)
 		fm.Set(idField.Deployed, v)
@@ -223,6 +238,8 @@ func applyFrontmatter(
 	// generic source carries "role"; deployed files must carry the prefixed form. This is
 	// parallel to the id rename above; the agentfields registry supplies both names.
 	roleField, _ := agentfields.ByGeneric("role")
+	touchedKeys[roleField.Legacy] = true
+	touchedKeys[roleField.Deployed] = true
 	if v, ok := fm.Get(roleField.Legacy); ok {
 		fm.Remove(roleField.Legacy)
 		fm.Set(roleField.Deployed, v)
@@ -239,6 +256,8 @@ func applyFrontmatter(
 	// (mosaic_version). This is parallel to the id and role renames above; the agentfields
 	// registry supplies both names so no prefixed literal appears here.
 	versionField, _ := agentfields.ByGeneric("version")
+	touchedKeys[versionField.Legacy] = true
+	touchedKeys[versionField.Deployed] = true
 	if v, ok := fm.Get(versionField.Legacy); ok {
 		fm.Remove(versionField.Legacy)
 		fm.Set(versionField.Deployed, v)
@@ -257,6 +276,7 @@ func applyFrontmatter(
 	// pre-strips it so that deployed files are already free of it when Stage 2 takes effect.
 	// mosaic_orchestrator_injections_version: same — stripped here to prepare for Stage 2.
 	oldTVField, _ := agentfields.ByDeployedName("transform_version")
+	touchedKeys[oldTVField.Deployed] = true
 	if fm.Remove(oldTVField.Deployed) {
 		changes = append(changes, FieldChange{
 			Key:    oldTVField.Deployed,
@@ -274,6 +294,7 @@ func applyFrontmatter(
 		})
 	}
 	oivField, _ := agentfields.ByDeployedName("orchestrator_injections_version")
+	touchedKeys[oivField.Deployed] = true
 	if fm.Remove(oivField.Deployed) {
 		changes = append(changes, FieldChange{
 			Key:    oivField.Deployed,
@@ -283,8 +304,51 @@ func applyFrontmatter(
 		})
 	}
 
-	// Step 5: Set the resolved tool fields produced by Module.Tools (or PlaceholderExpansion).
+	// Steps 5 and 5b: Tool field handling.
+	// On Update (req.Deployed != nil) when the deployed file has the tools/permission key:
+	// preserve that field verbatim rather than re-generating it from source. This makes
+	// the tools/permission field user-owned after initial Deploy — subsequent Updates never
+	// overwrite user customizations (including per-command sub-permission flow mappings).
+	// On Create (req.Deployed == nil), or when the deployed file cannot be parsed, or when
+	// the deployed file has no tools key: fall through to the Create path (Steps 5 and 5b).
+	toolsPreservedVerbatim := false
+	if req.Deployed != nil && desc.Frontmatter.ToolsKey != "" {
+		deployedDoc, deployedParseErr := docformat.Parse(req.Deployed)
+		if deployedParseErr == nil {
+			deployedFM := deployedDoc.Frontmatter()
+			if deployedToolsValue, ok := deployedFM.Get(desc.Frontmatter.ToolsKey); ok {
+				before := ""
+				if v, ok2 := fm.Get(desc.Frontmatter.ToolsKey); ok2 {
+					before = renderValue(v)
+				}
+				fm.Set(desc.Frontmatter.ToolsKey, deployedToolsValue)
+				changes = append(changes, FieldChange{
+					Key:    desc.Frontmatter.ToolsKey,
+					Before: before,
+					After:  renderValue(deployedToolsValue),
+					Reason: "preserved from deployed file",
+				})
+				touchedKeys[desc.Frontmatter.ToolsKey] = true
+				toolsPreservedVerbatim = true
+			}
+		}
+		// When deployedParseErr != nil: fall through to the Create path below.
+		// buildDeployedRegionMap (called earlier in the pipeline) normally catches parse
+		// failures before reaching this point. If it does not, the safe fallback is to
+		// compute tools from source — identical to what a first-time Deploy would produce.
+		// When the deployed file parses but has no tools key: also fall through, so the
+		// output always has the tools/permission key set (never left absent).
+	}
+
+	// Step 5: Write tool fields from toolResult.Fields. When ToolsKey was already preserved
+	// verbatim above, skip only the ToolsKey entry itself; all other to:field destinations
+	// (such as mcpServers) are written normally regardless of toolsPreservedVerbatim.
 	for _, field := range toolResult.Fields {
+		touchedKeys[field.Key] = true
+		if toolsPreservedVerbatim && field.Key == desc.Frontmatter.ToolsKey {
+			// ToolsKey already set verbatim from the deployed file; do not overwrite.
+			continue
+		}
 		before := ""
 		if v, ok := fm.Get(field.Key); ok {
 			before = renderValue(v)
@@ -298,10 +362,37 @@ func applyFrontmatter(
 		fm.Set(field.Key, field.Value)
 	}
 
-	// Step 5b: Merge user-added tools from the deployed file.
-	if req.Deployed != nil {
+	// Step 5b: Merge user-added tools from the deployed file. This is skipped when
+	// toolsPreservedVerbatim is true because the deployed value is already set verbatim
+	// and there is nothing to merge (mergeDeployedTools only applies to ToolsKey).
+	if !toolsPreservedVerbatim && req.Deployed != nil {
 		mergeChanges := mergeDeployedTools(fm, req.Deployed, desc)
 		changes = append(changes, mergeChanges...)
+	}
+
+	// Step 5c: Preserve user-owned fields from the deployed file. After all managed-field
+	// steps have run, any key in the deployed file's frontmatter that was not touched by
+	// this transform is considered user-owned and is copied verbatim into the output. This
+	// implements the general preservation policy for arbitrary fields like mcpServers (when
+	// coming from a prior deploy) or custom fields the user has manually added.
+	if req.Deployed != nil {
+		deployedDoc, deployedParseErr := docformat.Parse(req.Deployed)
+		if deployedParseErr == nil {
+			deployedFM := deployedDoc.Frontmatter()
+			for _, k := range deployedFM.Keys() {
+				if touchedKeys[k] {
+					continue
+				}
+				v, _ := deployedFM.Get(k)
+				fm.Set(k, v)
+				changes = append(changes, FieldChange{
+					Key:    k,
+					Before: "",
+					After:  renderValue(v),
+					Reason: "preserved from deployed file",
+				})
+			}
+		}
 	}
 
 	// Step 6: Accumulate gaps for unresolved tool mappings. ToolUnmapped and ToolSkipped

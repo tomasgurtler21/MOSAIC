@@ -26,6 +26,8 @@ import (
 	"strings"
 	"testing"
 
+	commonharness "mosaic-common/harness"
+
 	"mosaic-agent-test/internal/domain"
 	"mosaic-agent-test/internal/harness/claudecode"
 )
@@ -310,4 +312,90 @@ func listSpawnDir(t *testing.T, dir string) []string {
 		names = append(names, filepath.Join(dir, e.Name()))
 	}
 	return names
+}
+
+// ---------------------------------------------------------------------------
+// Session persistence: subject opts in, default path does not (T4.2)
+// ---------------------------------------------------------------------------
+
+// TestSpawnPlan_SubjectLaunchOmitsNoSessionPersistenceFlag verifies that the
+// plan produced by SpawnPlan does NOT include --no-session-persistence. The
+// subject is spawned with session persistence enabled so that the Claude Code
+// CLI writes its transcript file to the path it supplies in every hook payload.
+// Without session persistence the transcript file is never written, even though
+// the payload carries a valid path — which means the logger bundle's
+// emit_usage_records returns 0 silently on every hook firing, and no model or
+// token fields are ever written into OrchestrationLogs.
+func TestSpawnPlan_SubjectLaunchOmitsNoSessionPersistenceFlag(t *testing.T) {
+	a, _, prov := provisionedAdapter(t)
+
+	plan, err := a.SpawnPlan(testContext(), spawnTestSubject(), prov)
+	if err != nil {
+		t.Fatalf("SpawnPlan: %v", err)
+	}
+
+	for _, arg := range plan.Args {
+		if arg == "--no-session-persistence" {
+			t.Errorf("SpawnPlan: Args = %v, want --no-session-persistence absent from the subject spawn plan; the subject must be launched with session persistence enabled so the logger bundle can capture usage records", plan.Args)
+			return
+		}
+	}
+}
+
+// TestSpawnPlan_EnvCarriesMosaicRunID asserts that the spawn plan's Env slice
+// contains a MOSAIC_RUN_ID entry whose value equals the sandbox's run
+// identifier. The MOSAIC logger bundle reads this variable as a fallback when
+// no run id can be extracted from the opening prompt, attributing the
+// session's events to the correct run bucket from the first hook firing.
+func TestSpawnPlan_EnvCarriesMosaicRunID(t *testing.T) {
+	a, sb, prov := provisionedAdapter(t)
+
+	plan, err := a.SpawnPlan(testContext(), spawnTestSubject(), prov)
+	if err != nil {
+		t.Fatalf("SpawnPlan: %v", err)
+	}
+
+	prefix := claudecode.RunIDEnvVar + "="
+	var found string
+	for _, e := range plan.Env {
+		if strings.HasPrefix(e, prefix) {
+			found = strings.TrimPrefix(e, prefix)
+			break
+		}
+	}
+	if found == "" {
+		t.Fatalf("SpawnPlan: Env = %v, want a %s entry so the logger bundle can attribute events to the correct run bucket", plan.Env, claudecode.RunIDEnvVar)
+	}
+	if found != sb.Key.RunID {
+		t.Errorf("SpawnPlan: %s = %q, want %q (the sandbox run id)", claudecode.RunIDEnvVar, found, sb.Key.RunID)
+	}
+}
+
+// TestSpawnPlan_DefaultSpawnRequestPreservesNoSessionPersistenceFlag verifies
+// that a zero-value SpawnRequest — the shape used by any spawn that has not
+// explicitly opted into transcript persistence — still produces
+// --no-session-persistence. This guards against the subject-specific opt-in
+// accidentally widening to all builds: only the subject launch (via SpawnPlan)
+// enables transcript persistence; every other call path that uses the default
+// SpawnRequest must continue to emit the flag unchanged.
+func TestSpawnPlan_DefaultSpawnRequestPreservesNoSessionPersistenceFlag(t *testing.T) {
+	args, _, err := commonharness.BuildArgs(commonharness.SpawnRequest{
+		Agent:        commonharness.AgentRef{Kind: commonharness.InvocationOrdinary},
+		OutputFormat: "json",
+		// SessionPersistence deliberately omitted (zero value = false).
+	})
+	if err != nil {
+		t.Fatalf("BuildArgs with default SpawnRequest: %v", err)
+	}
+
+	found := false
+	for _, arg := range args {
+		if arg == "--no-session-persistence" {
+			found = true
+			break
+		}
+	}
+	if !found {
+		t.Errorf("args = %v, want --no-session-persistence present for a zero-value SpawnRequest; the opt-in must be explicit and scoped only to the subject launch", args)
+	}
 }

@@ -9,7 +9,6 @@ last_updated: 2026-01-29T10:00:00Z
 global_sequence: 2
 checkpoints: enabled
 commits: disabled
-commit_branch_variant: mosaic-owned
 pre_consultation: disabled
 manual_resolution: disabled
 current_state:

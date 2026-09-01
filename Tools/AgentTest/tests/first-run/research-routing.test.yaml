@@ -1,5 +1,11 @@
 schema_version: 1
-id: research-routing
+name: research-routing
+id: 54
+version: 1
+changelog:
+  - version: 1
+    date: "2026-01-01"
+    changes: "Initial."
 description: >
   Brownfield-tdd RESEARCH phase: codebase-research dispatched first, returns
   SUCCESS, orchestrator advances to requirements-refinement. Asserts the exact
@@ -13,6 +19,7 @@ subject:
   identity: orchestrator
   agent: orchestrator
   workflows: [brownfield-tdd]
+  infrastructure_agents: []
   opening_message: |
     Task: Add a --verbose flag to the widgets CLI so it prints per-item
     diagnostics to stderr.
@@ -29,7 +36,7 @@ subject:
 stub_registry: research-routing.stubs.json
 
 timeout: 10m
-turn_limit: 30
+turn_limit: 10
 stop_after_invocations: 2
 
 assertions:
@@ -54,5 +61,6 @@ assertions:
       human_in_the_loop: true
       required_input_artifacts:
         - Orchestration-{run_id}/Research.md
+        - Orchestration-{run_id}/Requirements.md
       required_output_artifacts:
         - Orchestration-{run_id}/Requirements.md

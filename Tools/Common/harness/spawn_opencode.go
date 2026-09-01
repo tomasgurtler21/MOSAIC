@@ -53,12 +53,16 @@ func BuildOpenCodeArgs(req SpawnRequest) ([]string, error) {
 		"run",
 		"--agent", req.Agent.Identifier,
 		"--format", "json",
-		// --auto auto-approves only what is not explicitly denied. It does
-		// NOT override a capability that defaults to deny (currently only
-		// .env file access is documented as such). If a MOSAIC OpenCode
-		// agent's toolset is later found to need such a capability, the fix
-		// is a permissive OpenCode config entry for that capability — not an
-		// assumption that --auto already covers it.
+		// --auto satisfies the no-manual-permission-prompts requirement by
+		// converting every "ask" permission into an implicit "allow" for the
+		// duration of this invocation while leaving explicitly-denied
+		// capabilities unchanged. It does NOT override a capability that
+		// defaults to deny (currently only .env file access is documented as
+		// such). If a MOSAIC OpenCode agent's toolset is later found to need
+		// such a capability, the fix is a permissive OpenCode config entry
+		// for that capability — not an assumption that --auto already covers
+		// it. No per-tool allowlist is needed or possible: OpenCode offers no
+		// CLI flag to scope --auto to a named tool subset.
 		"--auto",
 	}
 

@@ -9,7 +9,6 @@ global_sequence: 2
 mode: auto
 checkpoints: disabled
 commits: disabled
-commit_branch_variant: mosaic-owned
 pre_consultation: disabled
 manual_resolution: disabled
 current_state:

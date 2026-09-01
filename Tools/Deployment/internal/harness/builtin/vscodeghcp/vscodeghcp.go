@@ -210,8 +210,13 @@ func (m *module) convertFieldsToFlowList(result domain.ToolResult) domain.ToolRe
 // version attribute on InjectionHarness-class region tags (written by applyHarnessRegion).
 // This method no longer stamps it as a frontmatter field for any agent.
 func (m *module) Frontmatter(req domain.FrontmatterRequest) (domain.FrontmatterPlan, error) {
-	set := make([]domain.FrontmatterField, len(m.desc.Frontmatter.Add))
-	copy(set, m.desc.Frontmatter.Add)
+	// Resolve role-conditional fields (e.g. user-invocable) for the agent's role.
+	resolved := descriptor.ResolveRoleConditionalFields(m.desc.Frontmatter.RoleConditionalAdd, req.Role)
+	set := make([]domain.FrontmatterField, 0, len(m.desc.Frontmatter.Add)+len(resolved))
+	set = append(set, m.desc.Frontmatter.Add...)
+
+	// Append resolved role-conditional fields after static fields.
+	set = append(set, resolved...)
 
 	return domain.FrontmatterPlan{
 		Set:      set,

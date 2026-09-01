@@ -101,7 +101,33 @@ Tools\AgentTest\dist\mosaic-agent-test.exe --tui
 
 The TUI scans for `*.suite.yaml` files starting from the process working directory (or from the path given by `--suites`). Launching from the repository root lets it discover all suites under `Tools/AgentTest/tests/`.
 
-### 4.3 Launching the CLI
+### 4.3 TUI Run-Configuration Surface
+
+After selecting a harness and models, the TUI lands on the **suite-select screen**. The help bar shows all discoverable keys. Press **Tab** (shown as "configure run" in the help bar) to open the **settings screen**, where every per-run setting is displayed as a labelled row and all are editable.
+
+**Settings screen — five settings:**
+
+| Setting | Edit mode | How to change |
+|---------|-----------|---------------|
+| Retain sandbox | Cycle | Press Enter to advance: Never → OnFailure → Always → Never |
+| Repetitions | Numeric | Press Enter to open the editor, type digits, Enter to confirm or Esc to cancel |
+| Report path | Inline text | Press Enter to open the editor, type the path, Enter to confirm or Esc to cancel |
+| Catalog folder | Inline text | Press Enter to open the editor, type the path, Enter to confirm or Esc to cancel |
+| Max concurrent runs | Numeric | Press Enter to open the editor, type digits (must be ≥ 1), Enter to confirm or Esc to cancel |
+
+Navigate between settings with the **up/down arrow keys**. The cursor marks the focused row. Press **Esc** to return to the suite-select screen without starting a run. Every functional key is shown in the help bar — no key is hidden.
+
+**Repetitions provenance:** The repetitions setting shows whether the displayed value comes from the selected suite file (shown as `N (suite default)`) or is a user override entered in this session (shown as `N (override)`). When the suite declares no default and the user has not set an override, the display reads `suite default`. The displayed value is the one that will actually be used when the run starts.
+
+**Max concurrent runs:** Controls how many tests × repetitions run concurrently across the entire suite — one bound over the full (test × repetition) matrix, not one per nesting level. The default is `4`, chosen conservatively: each concurrent run is a full harness process plus a deployed agent tree plus a relocated harness configuration tree on disk, and every dispatch inside it spawns short-lived interceptor processes contending on that run's own lock file. Four gives most of the wall-clock relief the feature exists for while keeping simultaneous sandboxes to a handful and staying well below the concurrency a provider account is likely to permit. A value of `1` is strictly sequential and reproduces the pre-concurrency behaviour exactly. Values below `1` are rejected.
+
+**Resource cost of a chosen bound.** Each attempt in flight occupies one slot and holds: one sandbox directory on disk (named `<suiteRunID>-<testID>-<runNumber>`), one deployed agent tree (subject orchestrator plus stub collaborators, typically a few hundred KB of text files), one relocated harness configuration tree (potentially several MB, depending on the session transcript the harness accumulates), one growing diagnostic-capture file for the subject's stdout and stderr, one deploy log written during setup, one running harness process, and short-lived interceptor processes for each dispatch. At a bound of N, N complete sets of these resources exist simultaneously. They are released when each slot completes teardown.
+
+**Retention multiplies the footprint.** When sandbox retention is set to `OnFailure` or `Always`, teardown does not delete the sandbox. With `Always`, every attempt leaves its sandbox, deployed agent tree, harness configuration tree, and diagnostic capture on disk until you delete them manually. A 50-repetition suite with `Always` retention retains 50 sandboxes, potentially several hundred MB total. Use `OnFailure` for diagnostic workflows (retain evidence only where it is needed) and `Never` for large-repetition statistical runs.
+
+After configuring, press **Esc** to return to the suite-select screen and **Enter** to start the run.
+
+### 4.4 Launching the CLI
 
 The CLI requires a positional subcommand:
 
@@ -114,6 +140,12 @@ Tools\AgentTest\dist\mosaic-agent-test.exe validate <suite-file>
 ```
 
 The CLI exits with a structured result and is suitable for scripted use, CI, and cases where stdout must carry the machine-readable report (`--format json`).
+
+**`--max-concurrent-runs <n>`** sets how many tests × repetitions run concurrently across the entire suite. The default is `4` (see the Max concurrent runs section under the TUI settings above for the full rationale). A value of `1` is strictly sequential. Values below `1` are rejected as a usage error.
+
+```
+Tools\AgentTest\dist\mosaic-agent-test.exe run suite.yaml --max-concurrent-runs 1
+```
 
 ---
 
@@ -203,6 +235,130 @@ MOSAIC_AGENT_TEST_MOSAIC_ROOT=C:\AI\MOSAIC\MOSAIC
 ```
 
 **Option 1 is always simpler.** Reserve Option 2 for CI pipelines or developer machines where the binary is installed to a central location outside the source tree.
+
+---
+
+## 7. Sandbox Location and Retention
+
+Each test run creates an isolated sandbox directory where the subject agent and its stub collaborators are deployed before the run starts.
+
+### Sandbox naming scheme
+
+Every sandbox lives under the workspace root and follows this layout:
+
+```
+<workspaceRoot>/
+  <RunID>-<TestID>-<RunNumber>/
+    subject/      <- subject agent deployment
+    control/      <- stub collaborator deployment
+```
+
+`RunID` is a UUID assigned when the suite run starts. `TestID` is the test's identifier from the suite file. `RunNumber` is a 1-based counter for the current repetition (always `1` unless `--repetitions` is set above 1).
+
+### Default workspace root
+
+The workspace root defaults to:
+
+```
+<os.TempDir()>/mosaic-agent-test-workspaces
+```
+
+On Windows this resolves to:
+
+```
+C:\Users\<user>\AppData\Local\Temp\mosaic-agent-test-workspaces
+```
+
+On Linux it resolves to `/tmp/mosaic-agent-test-workspaces`.
+
+To override the workspace root, pass `--workspace-root` with an absolute path:
+
+```
+mosaic-agent-test.exe --workspace-root D:\test-sandboxes run my-suite.suite.yaml
+```
+
+### Retention cycle
+
+The `--retention` flag (or the TUI retention toggle) controls whether sandbox directories survive after a run completes. The setting cycles through three states:
+
+| State | Behaviour |
+|-------|-----------|
+| `Never` (default) | Every sandbox is deleted after its run, regardless of outcome. |
+| `OnFailure` | Sandboxes from failing runs are kept; sandboxes from passing runs are deleted. |
+| `Always` | Every sandbox is kept after its run, regardless of outcome. |
+
+In the TUI, press the retention key to advance through the cycle: `Never → OnFailure → Always → Never → ...`. The current state is shown on the run screen.
+
+A retained sandbox is printed to the report as the sandbox path, so you can inspect the deployed agents and conversation transcripts after the fact.
+
+---
+
+## 8. Cost Attribution: Configuration and Diagnostics
+
+### 8.1 How the Analyser Finds pricing.yaml
+
+`mosaic-agent-test` invokes `mosaic-log-analyzer` as a subprocess. The analyser resolves its pricing configuration at:
+
+```
+<working directory>/MosaicLogAnalyzer/config/pricing.yaml
+```
+
+AgentTest sets the analyser subprocess's **working directory** to the resolved MOSAIC root — the same path `--mosaic-root` controls. This is the only mechanism through which the analyser locates pricing configuration; it exposes no override flag of its own.
+
+When the binary lives at `Tools/AgentTest/dist/mosaic-agent-test.exe`, the default `--mosaic-root` resolves to the repository root (`selfDir/../../..`), so the effective pricing file path is:
+
+```
+<repo root>\MosaicLogAnalyzer\config\pricing.yaml
+```
+
+**A `pricing.yaml` placed inside `Tools/AgentTest/dist/` is never read.** The analyser's working directory is set to the MOSAIC root, not to `dist/`. Placing the file in `dist/` will not fix a missing-pricing error.
+
+### 8.2 Fixing a Missing pricing.yaml
+
+A missing pricing file produces an error similar to:
+
+```
+error loading pricing config: open MosaicLogAnalyzer\config\pricing.yaml: The system cannot find the path specified.
+```
+
+**Option 1 — Place the file at the correct location.** Copy `pricing.yaml` to:
+
+```
+<repo root>\MosaicLogAnalyzer\config\pricing.yaml
+```
+
+If the `MosaicLogAnalyzer/config/` directory does not yet exist at the repository root, create it first. The repository already contains this directory under the source tree; `pricing.yaml` belongs there alongside the rest of the log-analyser configuration.
+
+**Option 2 — Override MosaicRoot.** If you cannot modify the repository root, point `--mosaic-root` at the directory that contains your `MosaicLogAnalyzer/config/pricing.yaml`. AgentTest passes this directory to the analyser as its working directory:
+
+```
+mosaic-agent-test.exe --mosaic-root D:\my-config-root run my-suite.suite.yaml
+```
+
+Or set the environment variable for persistent configuration:
+
+```
+MOSAIC_AGENT_TEST_MOSAIC_ROOT=D:\my-config-root
+```
+
+**Option 1 is the standard path.**
+
+### 8.3 Cost Attribution Diagnostics
+
+A run's cost report can produce one of four attribution values. Each names a distinct failure cause:
+
+| Attribution | Meaning | Likely cause |
+|-------------|---------|--------------|
+| `attributed` | Full cost captured for this run | All models priced, run identity bound correctly |
+| `partial` | Partial cost captured; some models unpriced | One or more models had no entry in `pricing.yaml`; the attributable amount from priced models is shown and the unpriced model(s) are named |
+| `unknown_bucket` | Events exist but in the fallback bucket | Run identity was not resolved before the subject emitted events; events landed in the `unknown-run` folder instead of the per-run folder |
+| `unavailable` | No usable cost data | Logger bundle did not run, subject terminated before emitting events, or the analyser could not be invoked |
+
+**Partial attribution:** When one model among several is unpriced, the cost report shows the attributable amount from priced models rather than zeroing the entire run. The unpriced model name is included in the cost detail. One unpriced model does not silence the rest.
+
+**unknown_bucket vs unavailable:** If you see `unknown_bucket`, the subject ran and emitted events but they were attributed to the fallback bucket rather than the per-run folder. This is a run-identity binding failure, not a pricing configuration failure — check that the subject dispatched at least one collaborator using the documented protocol envelope before the cutoff fired. If you see `unavailable` with "no usage data found", the logger bundle either did not run or the subject terminated without emitting any events at all.
+
+**Unpriced model:** If you see `partial` or `unavailable` with a message about model pricing, add the model to `pricing.yaml`. The model name is included in the diagnostic detail when the analyser can identify it.
 
 ---
 

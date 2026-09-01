@@ -372,10 +372,26 @@ type modelResolution struct {
 	models         map[string]domain.ModelSelection
 	tierModelsUsed map[domain.Tier]string
 
+	// interactivelyResolvedTiers holds only the tier-to-model mappings that were
+	// resolved by asking the user/caller interactively through Interaction.SelectOne
+	// during this resolveModels invocation. Pre-answered tiers (from the caller's
+	// request fields, --selections, or previously-persisted config) are NOT included.
+	// This is the set that should be passed to persistTierModels: only interactively
+	// answered values are eligible for persistence (R1 interactive-only persistence rule).
+	//
+	// This map is a subset of tierModelsUsed. When all tiers were pre-answered or
+	// skipped, this map is empty (len == 0), and persistTierModels returns immediately
+	// without writing, preserving whatever the config file already contains.
+	interactivelyResolvedTiers map[domain.Tier]string
+
 	// accumulatedOptions holds every custom model ID that was entered during this
 	// resolveModels invocation (at both tier and agent granularity), merged with any
 	// custom IDs that were passed in via extraOptions. These are domain.Option values
 	// ready to be appended to harnessOptions in a subsequent invocation.
+	//
+	// appendCustomID is only called from ans.Custom branches inside Interaction.SelectOne
+	// answers, so accumulatedOptions contains only interactively-entered custom model IDs
+	// by construction. Pre-answered agentModels never populate this field.
 	accumulatedOptions []domain.Option
 
 	// tierSkippedAll is true when the user chose SkippedAll for QTierModel during
@@ -432,6 +448,11 @@ func (s *service) resolveModels(
 		tierModelsUsed[k] = v
 	}
 
+	// interactivelyResolvedTiers collects tier-to-model mappings answered through
+	// Interaction.SelectOne during this invocation. Pre-answered tiers (loaded from
+	// persisted config or from the caller's request fields) are NOT included.
+	interactivelyResolvedTiers := make(map[domain.Tier]string)
+
 	harnessOptions := buildModelOptions(module.Descriptor().Models.IDs)
 
 	// Track which option IDs are already in harnessOptions to enable deduplication.
@@ -473,8 +494,18 @@ func (s *service) resolveModels(
 		}
 	}
 
+	usedTiers := make(map[domain.Tier]bool, len(agents))
+	for _, a := range agents {
+		if a.RecommendedTier != "" {
+			usedTiers[a.RecommendedTier] = true
+		}
+	}
+
 	tierSkippedAll := skipAll[domain.QTierModel] || tierSkipOverride
 	for _, ti := range s.deps.Catalog.Tiers() {
+		if !usedTiers[ti.Tier] {
+			continue // skip tiers not used by any agent in the current selection
+		}
 		if _, ok := tierModelsUsed[ti.Tier]; ok {
 			continue // pre-answered, either from this request or a prior persisted run
 		}
@@ -504,6 +535,7 @@ func (s *service) resolveModels(
 			}
 			if modelID != "" {
 				tierModelsUsed[ti.Tier] = modelID
+				interactivelyResolvedTiers[ti.Tier] = modelID
 			}
 		case domain.Cancelled:
 			return modelResolution{}, fmt.Errorf("select model for tier %s: %w", ti.Tier, ErrModelSelectionCancelled)
@@ -569,11 +601,12 @@ func (s *service) resolveModels(
 	}
 
 	return modelResolution{
-		models:             models,
-		tierModelsUsed:     tierModelsUsed,
-		accumulatedOptions: accumulatedOptions,
-		tierSkippedAll:     tierSkippedAll,
-		agentSkippedAll:    agentSkippedAll,
+		models:                     models,
+		tierModelsUsed:             tierModelsUsed,
+		interactivelyResolvedTiers: interactivelyResolvedTiers,
+		accumulatedOptions:         accumulatedOptions,
+		tierSkippedAll:             tierSkippedAll,
+		agentSkippedAll:            agentSkippedAll,
 	}, nil
 }
 
@@ -590,52 +623,73 @@ func buildModelOptions(ids []string) []domain.Option {
 // the persisted user config's CustomModelIDs list for the given harness, then saves.
 // Deduplication is by exact string match. Existing persisted IDs that are not in the
 // current run's set are preserved (the list is append-only across runs).
+//
+// Only interactively-entered custom model IDs should be passed (R1). The accumulatedOptions
+// field of modelResolution already satisfies this constraint by construction: appendCustomID
+// is only called from ans.Custom branches inside Interaction.SelectOne. When customIDs is
+// empty, this function returns immediately without touching the config file.
 func (s *service) persistCustomModelIDs(harnessID string, customIDs []string) error {
-	cfg, err := s.deps.UserConfig.Load()
-	if err != nil {
-		return err
+	if len(customIDs) == 0 {
+		return nil
 	}
-	if cfg.CustomModelIDs == nil {
-		cfg.CustomModelIDs = make(map[string][]string)
-	}
-	existing := cfg.CustomModelIDs[harnessID]
-	seen := make(map[string]bool, len(existing)+len(customIDs))
-	merged := make([]string, 0, len(existing)+len(customIDs))
-	for _, id := range existing {
-		if !seen[id] {
-			seen[id] = true
-			merged = append(merged, id)
+	return s.deps.UserConfig.WithLock(func() error {
+		cfg, err := s.deps.UserConfig.Load()
+		if err != nil {
+			return err
 		}
-	}
-	for _, id := range customIDs {
-		if !seen[id] {
-			seen[id] = true
-			merged = append(merged, id)
+		if cfg.CustomModelIDs == nil {
+			cfg.CustomModelIDs = make(map[string][]string)
 		}
-	}
-	cfg.CustomModelIDs[harnessID] = merged
-	return s.deps.UserConfig.Save(cfg)
+		existing := cfg.CustomModelIDs[harnessID]
+		seen := make(map[string]bool, len(existing)+len(customIDs))
+		merged := make([]string, 0, len(existing)+len(customIDs))
+		for _, id := range existing {
+			if !seen[id] {
+				seen[id] = true
+				merged = append(merged, id)
+			}
+		}
+		for _, id := range customIDs {
+			if !seen[id] {
+				seen[id] = true
+				merged = append(merged, id)
+			}
+		}
+		cfg.CustomModelIDs[harnessID] = merged
+		return s.deps.UserConfig.Save(cfg)
+	})
 }
 
-// persistTierModels merges the tier mappings used this run into the persisted user config
-// and saves it, keyed by harness id (AC18.3). Per-agent selections are never passed here.
+// persistTierModels merges the tier mappings resolved interactively during this run
+// into the persisted user config and saves it, keyed by harness id. Per-agent
+// selections are never passed here.
+//
+// Only interactively-resolved tiers should be passed (R1). Pre-answered or
+// previously-persisted tiers must not be re-persisted. When tierModelsUsed is empty
+// (all tiers were pre-answered or skipped), this function returns immediately without
+// touching the config file — the existing values on disk are already correct.
 func (s *service) persistTierModels(harnessID string, tierModelsUsed map[domain.Tier]string) error {
-	cfg, err := s.deps.UserConfig.Load()
-	if err != nil {
-		return err
+	if len(tierModelsUsed) == 0 {
+		return nil
 	}
-	if cfg.TierModels == nil {
-		cfg.TierModels = make(map[string]map[domain.Tier]string)
-	}
-	merged := make(map[domain.Tier]string, len(tierModelsUsed))
-	for k, v := range cfg.TierModels[harnessID] {
-		merged[k] = v
-	}
-	for k, v := range tierModelsUsed {
-		merged[k] = v
-	}
-	cfg.TierModels[harnessID] = merged
-	return s.deps.UserConfig.Save(cfg)
+	return s.deps.UserConfig.WithLock(func() error {
+		cfg, err := s.deps.UserConfig.Load()
+		if err != nil {
+			return err
+		}
+		if cfg.TierModels == nil {
+			cfg.TierModels = make(map[string]map[domain.Tier]string)
+		}
+		merged := make(map[domain.Tier]string, len(tierModelsUsed))
+		for k, v := range cfg.TierModels[harnessID] {
+			merged[k] = v
+		}
+		for k, v := range tierModelsUsed {
+			merged[k] = v
+		}
+		cfg.TierModels[harnessID] = merged
+		return s.deps.UserConfig.Save(cfg)
+	})
 }
 
 // notifyPersistFailure surfaces a failed convenience-persist (tier models or custom model

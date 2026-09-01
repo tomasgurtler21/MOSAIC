@@ -15,7 +15,7 @@ package harness_test
 //   - Includes --append-system-prompt-file <DefinitionPath>.
 //   - Includes -p <marshalled-request-json>.
 //   - Includes --output-format json.
-//   - Includes --permission-mode auto.
+//   - Includes --permission-mode dontAsk (derived from agent tools frontmatter).
 //   - Includes --no-session-persistence.
 //   - Does NOT include --dangerously-skip-permissions.
 //   - Does NOT include a synthesized <env> block in the -p prompt.
@@ -24,7 +24,7 @@ package harness_test
 //   - Includes --agent <Identifier>.
 //   - Includes -p <env-block + marshalled-request-json>.
 //   - Includes --output-format json.
-//   - Includes --permission-mode auto.
+//   - Includes --permission-mode dontAsk (derived from agent tools frontmatter).
 //   - Includes --no-session-persistence.
 //   - Does NOT include --append-system-prompt-file.
 //   - Does NOT include --dangerously-skip-permissions.
@@ -391,7 +391,10 @@ func indexOfArg(args []string, arg string) int {
 	return -1
 }
 
-// ordinaryAgentRef returns an AgentReference with InvocationOrdinary.
+// ordinaryAgentRef returns an AgentReference with InvocationOrdinary using a
+// static (non-existent) definition path. Used by adapter tests that do not
+// exercise tool extraction (e.g., GHCP CLI and OpenCode adapters).
+// ClaudeCodeAdapter tests must use ordinaryAgentRefCC(t) instead.
 func ordinaryAgentRef() domain.AgentReference {
 	return domain.AgentReference{
 		Identifier:     "test-agent",
@@ -400,11 +403,41 @@ func ordinaryAgentRef() domain.AgentReference {
 	}
 }
 
-// orchestratorAgentRef returns an AgentReference with InvocationOrchestrator.
+// orchestratorAgentRef returns an AgentReference with InvocationOrchestrator
+// using a static (non-existent) definition path. Used by adapter tests that do
+// not exercise tool extraction. ClaudeCodeAdapter tests must use
+// orchestratorAgentRefCC(t) instead.
 func orchestratorAgentRef() domain.AgentReference {
 	return domain.AgentReference{
 		Identifier:     "orchestrator-agent",
 		DefinitionPath: "/agents/orchestrator-agent.md",
+		InvocationKind: domain.InvocationOrchestrator,
+	}
+}
+
+// ordinaryAgentRefCC returns an AgentReference with InvocationOrdinary backed
+// by a temporary definition file containing valid Claude Code tools frontmatter.
+// Use this in ClaudeCodeAdapter tests: the adapter's FR-10 extraction reads the
+// definition file before spawning.
+func ordinaryAgentRefCC(t *testing.T) domain.AgentReference {
+	t.Helper()
+	defPath := writeDefFile(t, validClaudeCodeDef)
+	return domain.AgentReference{
+		Identifier:     "test-agent",
+		DefinitionPath: defPath,
+		InvocationKind: domain.InvocationOrdinary,
+	}
+}
+
+// orchestratorAgentRefCC returns an AgentReference with InvocationOrchestrator
+// backed by a temporary definition file containing valid Claude Code tools
+// frontmatter. Use this in ClaudeCodeAdapter tests.
+func orchestratorAgentRefCC(t *testing.T) domain.AgentReference {
+	t.Helper()
+	defPath := writeDefFile(t, validClaudeCodeDef)
+	return domain.AgentReference{
+		Identifier:     "orchestrator-agent",
+		DefinitionPath: defPath,
 		InvocationKind: domain.InvocationOrchestrator,
 	}
 }
@@ -428,7 +461,7 @@ func minimalClaudeRequest(instanceID string) domain.ProtocolRequest {
 // the agent's DefinitionPath.
 func TestClaudeCodeAdapter_OrdinaryInvocation_IncludesAppendSystemPromptFile(t *testing.T) {
 	argsFile := setHelperEnv(t, "success")
-	agent := ordinaryAgentRef()
+	agent := ordinaryAgentRefCC(t)
 
 	adapter := harness.NewClaudeCodeAdapter(helperExe(t), 5*time.Second)
 	_, err := adapter.Invoke(context.Background(), agent, minimalClaudeRequest("test-agent#1"))
@@ -451,7 +484,7 @@ func TestClaudeCodeAdapter_OrdinaryInvocation_IncludesPromptFlag(t *testing.T) {
 	stdinFile := setupStdinCapture(t)
 
 	adapter := harness.NewClaudeCodeAdapter(helperExe(t), 5*time.Second)
-	_, err := adapter.Invoke(context.Background(), ordinaryAgentRef(), minimalClaudeRequest("test-agent#1"))
+	_, err := adapter.Invoke(context.Background(), ordinaryAgentRefCC(t), minimalClaudeRequest("test-agent#1"))
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -475,7 +508,7 @@ func TestClaudeCodeAdapter_OrdinaryInvocation_IncludesOutputFormatJSON(t *testin
 	argsFile := setHelperEnv(t, "success")
 
 	adapter := harness.NewClaudeCodeAdapter(helperExe(t), 5*time.Second)
-	_, err := adapter.Invoke(context.Background(), ordinaryAgentRef(), minimalClaudeRequest("test-agent#1"))
+	_, err := adapter.Invoke(context.Background(), ordinaryAgentRefCC(t), minimalClaudeRequest("test-agent#1"))
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -486,20 +519,21 @@ func TestClaudeCodeAdapter_OrdinaryInvocation_IncludesOutputFormatJSON(t *testin
 	}
 }
 
-// TestClaudeCodeAdapter_OrdinaryInvocation_IncludesPermissionModeAuto verifies
-// that ordinary invocations include --permission-mode auto.
-func TestClaudeCodeAdapter_OrdinaryInvocation_IncludesPermissionModeAuto(t *testing.T) {
+// TestClaudeCodeAdapter_OrdinaryInvocation_IncludesPermissionModeDontAsk verifies
+// that ordinary invocations use --permission-mode dontAsk when the agent's
+// definition file provides a valid tools frontmatter field.
+func TestClaudeCodeAdapter_OrdinaryInvocation_IncludesPermissionModeDontAsk(t *testing.T) {
 	argsFile := setHelperEnv(t, "success")
 
 	adapter := harness.NewClaudeCodeAdapter(helperExe(t), 5*time.Second)
-	_, err := adapter.Invoke(context.Background(), ordinaryAgentRef(), minimalClaudeRequest("test-agent#1"))
+	_, err := adapter.Invoke(context.Background(), ordinaryAgentRefCC(t), minimalClaudeRequest("test-agent#1"))
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
 
 	args := readArgs(t, argsFile)
-	if !containsSequence(args, "--permission-mode", "auto") {
-		t.Errorf("want --permission-mode auto in args, got %v", args)
+	if !containsSequence(args, "--permission-mode", "dontAsk") {
+		t.Errorf("want --permission-mode dontAsk in args (derived from agent tools frontmatter), got %v", args)
 	}
 }
 
@@ -509,7 +543,7 @@ func TestClaudeCodeAdapter_OrdinaryInvocation_IncludesNoSessionPersistence(t *te
 	argsFile := setHelperEnv(t, "success")
 
 	adapter := harness.NewClaudeCodeAdapter(helperExe(t), 5*time.Second)
-	_, err := adapter.Invoke(context.Background(), ordinaryAgentRef(), minimalClaudeRequest("test-agent#1"))
+	_, err := adapter.Invoke(context.Background(), ordinaryAgentRefCC(t), minimalClaudeRequest("test-agent#1"))
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -527,7 +561,7 @@ func TestClaudeCodeAdapter_OrdinaryInvocation_NeverDangerouslySkipPermissions(t 
 	argsFile := setHelperEnv(t, "success")
 
 	adapter := harness.NewClaudeCodeAdapter(helperExe(t), 5*time.Second)
-	_, err := adapter.Invoke(context.Background(), ordinaryAgentRef(), minimalClaudeRequest("test-agent#1"))
+	_, err := adapter.Invoke(context.Background(), ordinaryAgentRefCC(t), minimalClaudeRequest("test-agent#1"))
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -545,7 +579,7 @@ func TestClaudeCodeAdapter_OrdinaryInvocation_NoEnvBlock(t *testing.T) {
 	argsFile := setHelperEnv(t, "success")
 
 	adapter := harness.NewClaudeCodeAdapter(helperExe(t), 5*time.Second)
-	_, err := adapter.Invoke(context.Background(), ordinaryAgentRef(), minimalClaudeRequest("test-agent#1"))
+	_, err := adapter.Invoke(context.Background(), ordinaryAgentRefCC(t), minimalClaudeRequest("test-agent#1"))
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -568,7 +602,7 @@ func TestClaudeCodeAdapter_OrdinaryInvocation_NoEnvBlock(t *testing.T) {
 // orchestrator invocations include --agent <Identifier>.
 func TestClaudeCodeAdapter_OrchestratorInvocation_IncludesAgentFlag(t *testing.T) {
 	argsFile := setHelperEnv(t, "success")
-	agent := orchestratorAgentRef()
+	agent := orchestratorAgentRefCC(t)
 
 	adapter := harness.NewClaudeCodeAdapter(helperExe(t), 5*time.Second)
 	_, err := adapter.Invoke(context.Background(), agent, minimalClaudeRequest("orchestrator-agent#1"))
@@ -589,7 +623,7 @@ func TestClaudeCodeAdapter_OrchestratorInvocation_NoAppendSystemPromptFile(t *te
 	argsFile := setHelperEnv(t, "success")
 
 	adapter := harness.NewClaudeCodeAdapter(helperExe(t), 5*time.Second)
-	_, err := adapter.Invoke(context.Background(), orchestratorAgentRef(), minimalClaudeRequest("orchestrator-agent#1"))
+	_, err := adapter.Invoke(context.Background(), orchestratorAgentRefCC(t), minimalClaudeRequest("orchestrator-agent#1"))
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -606,7 +640,7 @@ func TestClaudeCodeAdapter_OrchestratorInvocation_IncludesOutputFormatJSON(t *te
 	argsFile := setHelperEnv(t, "success")
 
 	adapter := harness.NewClaudeCodeAdapter(helperExe(t), 5*time.Second)
-	_, err := adapter.Invoke(context.Background(), orchestratorAgentRef(), minimalClaudeRequest("orchestrator-agent#1"))
+	_, err := adapter.Invoke(context.Background(), orchestratorAgentRefCC(t), minimalClaudeRequest("orchestrator-agent#1"))
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -617,20 +651,21 @@ func TestClaudeCodeAdapter_OrchestratorInvocation_IncludesOutputFormatJSON(t *te
 	}
 }
 
-// TestClaudeCodeAdapter_OrchestratorInvocation_IncludesPermissionModeAuto
-// verifies that orchestrator invocations include --permission-mode auto.
-func TestClaudeCodeAdapter_OrchestratorInvocation_IncludesPermissionModeAuto(t *testing.T) {
+// TestClaudeCodeAdapter_OrchestratorInvocation_IncludesPermissionModeDontAsk
+// verifies that orchestrator invocations use --permission-mode dontAsk when
+// the agent's definition file provides a valid tools frontmatter field.
+func TestClaudeCodeAdapter_OrchestratorInvocation_IncludesPermissionModeDontAsk(t *testing.T) {
 	argsFile := setHelperEnv(t, "success")
 
 	adapter := harness.NewClaudeCodeAdapter(helperExe(t), 5*time.Second)
-	_, err := adapter.Invoke(context.Background(), orchestratorAgentRef(), minimalClaudeRequest("orchestrator-agent#1"))
+	_, err := adapter.Invoke(context.Background(), orchestratorAgentRefCC(t), minimalClaudeRequest("orchestrator-agent#1"))
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
 
 	args := readArgs(t, argsFile)
-	if !containsSequence(args, "--permission-mode", "auto") {
-		t.Errorf("want --permission-mode auto in orchestrator args, got %v", args)
+	if !containsSequence(args, "--permission-mode", "dontAsk") {
+		t.Errorf("want --permission-mode dontAsk in orchestrator args (derived from agent tools frontmatter), got %v", args)
 	}
 }
 
@@ -640,7 +675,7 @@ func TestClaudeCodeAdapter_OrchestratorInvocation_IncludesNoSessionPersistence(t
 	argsFile := setHelperEnv(t, "success")
 
 	adapter := harness.NewClaudeCodeAdapter(helperExe(t), 5*time.Second)
-	_, err := adapter.Invoke(context.Background(), orchestratorAgentRef(), minimalClaudeRequest("orchestrator-agent#1"))
+	_, err := adapter.Invoke(context.Background(), orchestratorAgentRefCC(t), minimalClaudeRequest("orchestrator-agent#1"))
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -658,7 +693,7 @@ func TestClaudeCodeAdapter_OrchestratorInvocation_NeverDangerouslySkipPermission
 	argsFile := setHelperEnv(t, "success")
 
 	adapter := harness.NewClaudeCodeAdapter(helperExe(t), 5*time.Second)
-	_, err := adapter.Invoke(context.Background(), orchestratorAgentRef(), minimalClaudeRequest("orchestrator-agent#1"))
+	_, err := adapter.Invoke(context.Background(), orchestratorAgentRefCC(t), minimalClaudeRequest("orchestrator-agent#1"))
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -679,7 +714,7 @@ func TestClaudeCodeAdapter_OrchestratorInvocation_IncludesEnvBlock(t *testing.T)
 	stdinFile := setupStdinCapture(t)
 
 	adapter := harness.NewClaudeCodeAdapter(helperExe(t), 5*time.Second)
-	_, err := adapter.Invoke(context.Background(), orchestratorAgentRef(), minimalClaudeRequest("orchestrator-agent#1"))
+	_, err := adapter.Invoke(context.Background(), orchestratorAgentRefCC(t), minimalClaudeRequest("orchestrator-agent#1"))
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -707,7 +742,7 @@ func TestClaudeCodeAdapter_OrchestratorInvocation_EnvBlockContainsWorkingDir(t *
 	stdinFile := setupStdinCapture(t)
 
 	adapter := harness.NewClaudeCodeAdapter(helperExe(t), 5*time.Second)
-	_, err := adapter.Invoke(context.Background(), orchestratorAgentRef(), minimalClaudeRequest("orchestrator-agent#1"))
+	_, err := adapter.Invoke(context.Background(), orchestratorAgentRefCC(t), minimalClaudeRequest("orchestrator-agent#1"))
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -726,7 +761,7 @@ func TestClaudeCodeAdapter_OrchestratorInvocation_EnvBlockContainsPlatform(t *te
 	stdinFile := setupStdinCapture(t)
 
 	adapter := harness.NewClaudeCodeAdapter(helperExe(t), 5*time.Second)
-	_, err := adapter.Invoke(context.Background(), orchestratorAgentRef(), minimalClaudeRequest("orchestrator-agent#1"))
+	_, err := adapter.Invoke(context.Background(), orchestratorAgentRefCC(t), minimalClaudeRequest("orchestrator-agent#1"))
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -745,7 +780,7 @@ func TestClaudeCodeAdapter_OrchestratorInvocation_EnvBlockContainsDate(t *testin
 	stdinFile := setupStdinCapture(t)
 
 	adapter := harness.NewClaudeCodeAdapter(helperExe(t), 5*time.Second)
-	_, err := adapter.Invoke(context.Background(), orchestratorAgentRef(), minimalClaudeRequest("orchestrator-agent#1"))
+	_, err := adapter.Invoke(context.Background(), orchestratorAgentRefCC(t), minimalClaudeRequest("orchestrator-agent#1"))
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -765,7 +800,7 @@ func TestClaudeCodeAdapter_OrchestratorInvocation_IncludesRequestInPrompt(t *tes
 	stdinFile := setupStdinCapture(t)
 
 	adapter := harness.NewClaudeCodeAdapter(helperExe(t), 5*time.Second)
-	_, err := adapter.Invoke(context.Background(), orchestratorAgentRef(), minimalClaudeRequest("orchestrator-agent#1"))
+	_, err := adapter.Invoke(context.Background(), orchestratorAgentRefCC(t), minimalClaudeRequest("orchestrator-agent#1"))
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -796,7 +831,7 @@ func TestClaudeCodeAdapter_ContextCancellation_ReturnsCtxErr(t *testing.T) {
 		cancel()
 	}()
 
-	_, err := adapter.Invoke(ctx, ordinaryAgentRef(), minimalClaudeRequest("test-agent#1"))
+	_, err := adapter.Invoke(ctx, ordinaryAgentRefCC(t), minimalClaudeRequest("test-agent#1"))
 
 	if !errors.Is(err, context.Canceled) {
 		t.Errorf("want context.Canceled, got %v", err)
@@ -812,7 +847,7 @@ func TestClaudeCodeAdapter_Timeout_ReturnsErrTimeout(t *testing.T) {
 	// Very short timeout so the test completes quickly.
 	adapter := harness.NewClaudeCodeAdapter(helperExe(t), 100*time.Millisecond)
 
-	_, err := adapter.Invoke(context.Background(), ordinaryAgentRef(), minimalClaudeRequest("test-agent#1"))
+	_, err := adapter.Invoke(context.Background(), ordinaryAgentRefCC(t), minimalClaudeRequest("test-agent#1"))
 
 	if !errors.Is(err, harness.ErrTimeout) {
 		t.Errorf("want ErrTimeout, got %v", err)
@@ -824,7 +859,7 @@ func TestClaudeCodeAdapter_Timeout_ReturnsErrTimeout(t *testing.T) {
 func TestClaudeCodeAdapter_MissingExecutable_ReturnsErrExecutableNotFound(t *testing.T) {
 	adapter := harness.NewClaudeCodeAdapter("/nonexistent/path/to/claude", 5*time.Second)
 
-	_, err := adapter.Invoke(context.Background(), ordinaryAgentRef(), minimalClaudeRequest("test-agent#1"))
+	_, err := adapter.Invoke(context.Background(), ordinaryAgentRefCC(t), minimalClaudeRequest("test-agent#1"))
 
 	if !errors.Is(err, harness.ErrExecutableNotFound) {
 		t.Errorf("want ErrExecutableNotFound, got %v", err)
@@ -839,7 +874,7 @@ func TestClaudeCodeAdapter_NonZeroExit_ReturnsErrNonZeroExit(t *testing.T) {
 
 	adapter := harness.NewClaudeCodeAdapter(helperExe(t), 5*time.Second)
 
-	_, err := adapter.Invoke(context.Background(), ordinaryAgentRef(), minimalClaudeRequest("test-agent#1"))
+	_, err := adapter.Invoke(context.Background(), ordinaryAgentRefCC(t), minimalClaudeRequest("test-agent#1"))
 
 	if !errors.Is(err, harness.ErrNonZeroExit) {
 		t.Errorf("want ErrNonZeroExit, got %v", err)
@@ -854,7 +889,7 @@ func TestClaudeCodeAdapter_NonZeroExit_ErrorContainsStderr(t *testing.T) {
 
 	adapter := harness.NewClaudeCodeAdapter(helperExe(t), 5*time.Second)
 
-	_, err := adapter.Invoke(context.Background(), ordinaryAgentRef(), minimalClaudeRequest("test-agent#1"))
+	_, err := adapter.Invoke(context.Background(), ordinaryAgentRefCC(t), minimalClaudeRequest("test-agent#1"))
 
 	if err == nil {
 		t.Fatal("want error, got nil")
@@ -878,7 +913,7 @@ func TestClaudeCodeAdapter_ValidEnvelope_ReturnsParsedResponse(t *testing.T) {
 
 	adapter := harness.NewClaudeCodeAdapter(helperExe(t), 5*time.Second)
 
-	resp, err := adapter.Invoke(context.Background(), ordinaryAgentRef(), minimalClaudeRequest("test-agent#1"))
+	resp, err := adapter.Invoke(context.Background(), ordinaryAgentRefCC(t), minimalClaudeRequest("test-agent#1"))
 
 	if err != nil {
 		t.Fatalf("want no error, got %v", err)
@@ -899,7 +934,7 @@ func TestClaudeCodeAdapter_EmptyOutput_ReturnsErrEmptyResponse(t *testing.T) {
 
 	adapter := harness.NewClaudeCodeAdapter(helperExe(t), 5*time.Second)
 
-	_, err := adapter.Invoke(context.Background(), ordinaryAgentRef(), minimalClaudeRequest("test-agent#1"))
+	_, err := adapter.Invoke(context.Background(), ordinaryAgentRefCC(t), minimalClaudeRequest("test-agent#1"))
 
 	if !errors.Is(err, harness.ErrEmptyResponse) {
 		t.Errorf("want ErrEmptyResponse, got %v", err)
@@ -914,7 +949,7 @@ func TestClaudeCodeAdapter_NonJSONOutput_ReturnsErrMalformedJSON(t *testing.T) {
 
 	adapter := harness.NewClaudeCodeAdapter(helperExe(t), 5*time.Second)
 
-	_, err := adapter.Invoke(context.Background(), ordinaryAgentRef(), minimalClaudeRequest("test-agent#1"))
+	_, err := adapter.Invoke(context.Background(), ordinaryAgentRefCC(t), minimalClaudeRequest("test-agent#1"))
 
 	if !errors.Is(err, harness.ErrMalformedJSON) {
 		t.Errorf("want ErrMalformedJSON, got %v", err)
@@ -930,7 +965,7 @@ func TestClaudeCodeAdapter_ValidJSONNoProtocolResponse_ReturnsErrMalformedOutput
 
 	adapter := harness.NewClaudeCodeAdapter(helperExe(t), 5*time.Second)
 
-	_, err := adapter.Invoke(context.Background(), ordinaryAgentRef(), minimalClaudeRequest("test-agent#1"))
+	_, err := adapter.Invoke(context.Background(), ordinaryAgentRefCC(t), minimalClaudeRequest("test-agent#1"))
 
 	if !errors.Is(err, harness.ErrMalformedOutput) {
 		t.Errorf("want ErrMalformedOutput, got %v", err)
@@ -948,7 +983,7 @@ func TestClaudeCodeAdapter_NonJSONOutput_ErrorHasNoGoTypeName(t *testing.T) {
 
 	adapter := harness.NewClaudeCodeAdapter(helperExe(t), 5*time.Second)
 
-	_, err := adapter.Invoke(context.Background(), ordinaryAgentRef(), minimalClaudeRequest("test-agent#1"))
+	_, err := adapter.Invoke(context.Background(), ordinaryAgentRefCC(t), minimalClaudeRequest("test-agent#1"))
 
 	if err == nil {
 		t.Fatal("want error, got nil")
@@ -974,7 +1009,7 @@ func TestClaudeCodeAdapter_JSONObjectWithoutProtocolFields_ReturnsErrMalformedOu
 
 	adapter := harness.NewClaudeCodeAdapter(helperExe(t), 5*time.Second)
 
-	_, err := adapter.Invoke(context.Background(), ordinaryAgentRef(), minimalClaudeRequest("test-agent#1"))
+	_, err := adapter.Invoke(context.Background(), ordinaryAgentRefCC(t), minimalClaudeRequest("test-agent#1"))
 
 	if !errors.Is(err, harness.ErrMalformedJSON) {
 		t.Errorf("want ErrMalformedJSON, got %v", err)
@@ -989,7 +1024,7 @@ func TestClaudeCodeAdapter_JSONObjectWithoutProtocolFields_ErrorContainsRawOutpu
 
 	adapter := harness.NewClaudeCodeAdapter(helperExe(t), 5*time.Second)
 
-	_, err := adapter.Invoke(context.Background(), ordinaryAgentRef(), minimalClaudeRequest("test-agent#1"))
+	_, err := adapter.Invoke(context.Background(), ordinaryAgentRefCC(t), minimalClaudeRequest("test-agent#1"))
 
 	if err == nil {
 		t.Fatal("want error, got nil")
@@ -1009,7 +1044,7 @@ func TestClaudeCodeAdapter_LargeUnrecoverableOutput_TruncatedWithIndicator(t *te
 
 	adapter := harness.NewClaudeCodeAdapter(helperExe(t), 5*time.Second)
 
-	_, err := adapter.Invoke(context.Background(), ordinaryAgentRef(), minimalClaudeRequest("test-agent#1"))
+	_, err := adapter.Invoke(context.Background(), ordinaryAgentRefCC(t), minimalClaudeRequest("test-agent#1"))
 
 	if !errors.Is(err, harness.ErrMalformedJSON) {
 		t.Errorf("want ErrMalformedJSON, got %v", err)
@@ -1033,7 +1068,7 @@ func TestClaudeCodeAdapter_BareJSONProtocolResponse_Recovered(t *testing.T) {
 
 	adapter := harness.NewClaudeCodeAdapter(helperExe(t), 5*time.Second)
 
-	resp, err := adapter.Invoke(context.Background(), ordinaryAgentRef(), minimalClaudeRequest("test-agent#1"))
+	resp, err := adapter.Invoke(context.Background(), ordinaryAgentRefCC(t), minimalClaudeRequest("test-agent#1"))
 
 	if err != nil {
 		t.Fatalf("want successful recovery of bare JSON protocol response, got error: %v", err)
@@ -1056,7 +1091,7 @@ func TestClaudeCodeAdapter_EmbeddedProtocolResponseInCliText_Recovered(t *testin
 
 	adapter := harness.NewClaudeCodeAdapter(helperExe(t), 5*time.Second)
 
-	resp, err := adapter.Invoke(context.Background(), ordinaryAgentRef(), minimalClaudeRequest("test-agent#1"))
+	resp, err := adapter.Invoke(context.Background(), ordinaryAgentRefCC(t), minimalClaudeRequest("test-agent#1"))
 
 	if err != nil {
 		t.Fatalf("want successful recovery of embedded protocol response, got error: %v", err)
@@ -1178,7 +1213,7 @@ func TestClaudeCodeAdapterWithLogger_SuccessfulInvocation_LogsInvokeStart(t *tes
 	logger := &recordingLogger{}
 	adapter := harness.NewClaudeCodeAdapterWithLogger(helperExe(t), 5*time.Second, logger)
 
-	_, err := adapter.Invoke(context.Background(), ordinaryAgentRef(), minimalClaudeRequest("test-agent#1"))
+	_, err := adapter.Invoke(context.Background(), ordinaryAgentRefCC(t), minimalClaudeRequest("test-agent#1"))
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -1196,7 +1231,7 @@ func TestClaudeCodeAdapterWithLogger_SuccessfulInvocation_LogsRawStdout(t *testi
 	logger := &recordingLogger{}
 	adapter := harness.NewClaudeCodeAdapterWithLogger(helperExe(t), 5*time.Second, logger)
 
-	_, _ = adapter.Invoke(context.Background(), ordinaryAgentRef(), minimalClaudeRequest("test-agent#1"))
+	_, _ = adapter.Invoke(context.Background(), ordinaryAgentRefCC(t), minimalClaudeRequest("test-agent#1"))
 
 	if !logger.eventLogged(domain.EventHarnessStdout) {
 		t.Errorf("want %s logged after process exits, got events: %v", domain.EventHarnessStdout, logger.allEvents())
@@ -1211,7 +1246,7 @@ func TestClaudeCodeAdapterWithLogger_SuccessfulInvocation_LogsRawStderr(t *testi
 	logger := &recordingLogger{}
 	adapter := harness.NewClaudeCodeAdapterWithLogger(helperExe(t), 5*time.Second, logger)
 
-	_, _ = adapter.Invoke(context.Background(), ordinaryAgentRef(), minimalClaudeRequest("test-agent#1"))
+	_, _ = adapter.Invoke(context.Background(), ordinaryAgentRefCC(t), minimalClaudeRequest("test-agent#1"))
 
 	if !logger.eventLogged(domain.EventHarnessStderr) {
 		t.Errorf("want %s logged after process exits, got events: %v", domain.EventHarnessStderr, logger.allEvents())
@@ -1226,7 +1261,7 @@ func TestClaudeCodeAdapterWithLogger_SuccessfulInvocation_LogsInvokeOK(t *testin
 	logger := &recordingLogger{}
 	adapter := harness.NewClaudeCodeAdapterWithLogger(helperExe(t), 5*time.Second, logger)
 
-	_, err := adapter.Invoke(context.Background(), ordinaryAgentRef(), minimalClaudeRequest("test-agent#1"))
+	_, err := adapter.Invoke(context.Background(), ordinaryAgentRefCC(t), minimalClaudeRequest("test-agent#1"))
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -1247,7 +1282,7 @@ func TestClaudeCodeAdapterWithLogger_NonZeroExit_LogsInvokeError(t *testing.T) {
 	logger := &recordingLogger{}
 	adapter := harness.NewClaudeCodeAdapterWithLogger(helperExe(t), 5*time.Second, logger)
 
-	_, _ = adapter.Invoke(context.Background(), ordinaryAgentRef(), minimalClaudeRequest("test-agent#1"))
+	_, _ = adapter.Invoke(context.Background(), ordinaryAgentRefCC(t), minimalClaudeRequest("test-agent#1"))
 
 	if !logger.eventLogged(domain.EventHarnessInvokeError) {
 		t.Errorf("want %s logged on non-zero exit, got events: %v", domain.EventHarnessInvokeError, logger.allEvents())
@@ -1265,7 +1300,7 @@ func TestClaudeCodeAdapterWithLogger_InvokeStart_CarriesAgentAndKindFields(t *te
 	logger := &recordingLogger{}
 	adapter := harness.NewClaudeCodeAdapterWithLogger(helperExe(t), 5*time.Second, logger)
 
-	_, _ = adapter.Invoke(context.Background(), ordinaryAgentRef(), minimalClaudeRequest("test-agent#1"))
+	_, _ = adapter.Invoke(context.Background(), ordinaryAgentRefCC(t), minimalClaudeRequest("test-agent#1"))
 
 	agentVal, ok := logger.fieldValue(domain.EventHarnessInvokeStart, "agent")
 	if !ok {
@@ -1295,7 +1330,7 @@ func TestClaudeCodeAdapterWithLogger_NonJSONOutput_LogsParseFailed(t *testing.T)
 	logger := &recordingLogger{}
 	adapter := harness.NewClaudeCodeAdapterWithLogger(helperExe(t), 5*time.Second, logger)
 
-	_, _ = adapter.Invoke(context.Background(), ordinaryAgentRef(), minimalClaudeRequest("test-agent#1"))
+	_, _ = adapter.Invoke(context.Background(), ordinaryAgentRefCC(t), minimalClaudeRequest("test-agent#1"))
 
 	if !logger.eventLogged(domain.EventHarnessParseFailed) {
 		t.Errorf("want %s logged on non-JSON output with failed recovery, got events: %v",
@@ -1311,7 +1346,7 @@ func TestClaudeCodeAdapterWithLogger_BareJSONRecovery_LogsParseRecovered(t *test
 	logger := &recordingLogger{}
 	adapter := harness.NewClaudeCodeAdapterWithLogger(helperExe(t), 5*time.Second, logger)
 
-	_, err := adapter.Invoke(context.Background(), ordinaryAgentRef(), minimalClaudeRequest("test-agent#1"))
+	_, err := adapter.Invoke(context.Background(), ordinaryAgentRefCC(t), minimalClaudeRequest("test-agent#1"))
 	if err != nil {
 		t.Fatalf("unexpected error (bare-JSON recovery should succeed): %v", err)
 	}
@@ -1330,7 +1365,7 @@ func TestClaudeCodeAdapterWithLogger_EmbeddedJSONRecovery_LogsParseRecovered(t *
 	logger := &recordingLogger{}
 	adapter := harness.NewClaudeCodeAdapterWithLogger(helperExe(t), 5*time.Second, logger)
 
-	_, err := adapter.Invoke(context.Background(), ordinaryAgentRef(), minimalClaudeRequest("test-agent#1"))
+	_, err := adapter.Invoke(context.Background(), ordinaryAgentRefCC(t), minimalClaudeRequest("test-agent#1"))
 	if err != nil {
 		t.Fatalf("unexpected error (embedded-JSON recovery should succeed): %v", err)
 	}
@@ -1353,7 +1388,7 @@ func TestClaudeCodeAdapterWithLogger_NilLogger_NormalisedToNop(t *testing.T) {
 
 	adapter := harness.NewClaudeCodeAdapterWithLogger(helperExe(t), 5*time.Second, nil)
 
-	resp, err := adapter.Invoke(context.Background(), ordinaryAgentRef(), minimalClaudeRequest("test-agent#1"))
+	resp, err := adapter.Invoke(context.Background(), ordinaryAgentRefCC(t), minimalClaudeRequest("test-agent#1"))
 	if err != nil {
 		t.Fatalf("want no error with nil logger, got %v", err)
 	}
@@ -1370,7 +1405,7 @@ func TestClaudeCodeAdapter_BasicConstructor_UnchangedBehaviourAfterLoggerAdded(t
 	setHelperEnv(t, "success")
 	adapter := harness.NewClaudeCodeAdapter(helperExe(t), 5*time.Second)
 
-	resp, err := adapter.Invoke(context.Background(), ordinaryAgentRef(), minimalClaudeRequest("test-agent#1"))
+	resp, err := adapter.Invoke(context.Background(), ordinaryAgentRefCC(t), minimalClaudeRequest("test-agent#1"))
 	if err != nil {
 		t.Fatalf("want no error with basic constructor, got %v", err)
 	}
@@ -1393,7 +1428,7 @@ func TestClaudeCodeAdapterWithLogger_ProtocolDecodeFailure_LogsRawContent(t *tes
 	logger := &recordingLogger{}
 	adapter := harness.NewClaudeCodeAdapterWithLogger(helperExe(t), 5*time.Second, logger)
 
-	_, err := adapter.Invoke(context.Background(), ordinaryAgentRef(), minimalClaudeRequest("test-agent#1"))
+	_, err := adapter.Invoke(context.Background(), ordinaryAgentRefCC(t), minimalClaudeRequest("test-agent#1"))
 
 	if !errors.Is(err, harness.ErrMalformedOutput) {
 		t.Fatalf("want ErrMalformedOutput, got %v", err)
@@ -1419,7 +1454,7 @@ func TestClaudeCodeAdapterWithLogger_ProtocolNotExtractable_LogsRawContent(t *te
 	logger := &recordingLogger{}
 	adapter := harness.NewClaudeCodeAdapterWithLogger(helperExe(t), 5*time.Second, logger)
 
-	_, err := adapter.Invoke(context.Background(), ordinaryAgentRef(), minimalClaudeRequest("test-agent#1"))
+	_, err := adapter.Invoke(context.Background(), ordinaryAgentRefCC(t), minimalClaudeRequest("test-agent#1"))
 
 	if !errors.Is(err, harness.ErrMalformedOutput) {
 		t.Fatalf("want ErrMalformedOutput, got %v", err)
@@ -1445,7 +1480,7 @@ func TestClaudeCodeAdapterWithLogger_ProtocolNotExtractable_LargePayloadUntrunca
 	logger := &recordingLogger{}
 	adapter := harness.NewClaudeCodeAdapterWithLogger(helperExe(t), 5*time.Second, logger)
 
-	_, err := adapter.Invoke(context.Background(), ordinaryAgentRef(), minimalClaudeRequest("test-agent#1"))
+	_, err := adapter.Invoke(context.Background(), ordinaryAgentRefCC(t), minimalClaudeRequest("test-agent#1"))
 
 	if !errors.Is(err, harness.ErrMalformedOutput) {
 		t.Fatalf("want ErrMalformedOutput, got %v", err)
@@ -1474,7 +1509,7 @@ func TestClaudeCodeAdapterWithLogger_MalformedJSON_NoDuplicateRawContentLog(t *t
 	logger := &recordingLogger{}
 	adapter := harness.NewClaudeCodeAdapterWithLogger(helperExe(t), 5*time.Second, logger)
 
-	_, err := adapter.Invoke(context.Background(), ordinaryAgentRef(), minimalClaudeRequest("test-agent#1"))
+	_, err := adapter.Invoke(context.Background(), ordinaryAgentRefCC(t), minimalClaudeRequest("test-agent#1"))
 
 	if !errors.Is(err, harness.ErrMalformedJSON) {
 		t.Fatalf("want ErrMalformedJSON, got %v", err)
@@ -1497,7 +1532,7 @@ func TestClaudeCodeAdapterWithLogger_ObjectShapedEnvelope_NoParseRecoveredLogged
 	logger := &recordingLogger{}
 	adapter := harness.NewClaudeCodeAdapterWithLogger(helperExe(t), 5*time.Second, logger)
 
-	resp, err := adapter.Invoke(context.Background(), ordinaryAgentRef(), minimalClaudeRequest("test-agent#1"))
+	resp, err := adapter.Invoke(context.Background(), ordinaryAgentRefCC(t), minimalClaudeRequest("test-agent#1"))
 
 	if err != nil {
 		t.Fatalf("want no error for a successful object-shaped envelope, got %v", err)

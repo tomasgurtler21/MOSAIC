@@ -1,0 +1,16 @@
+{
+  "schema_version": 1,
+  "test_id": "impl-only-skip-tests",
+  "on_unmatched": "halt",
+  "stubs": [
+    {
+      "match": { "tool": "dispatch", "agent": "implementation-tdd", "invocation": 1 },
+      "response": {
+        "agent_instance_id": "implementation-tdd#8",
+        "run_id": "{run_id}",
+        "status_code": "SUCCESS",
+        "status_message": "Implemented verbose flag parsing and wired to diagnostics."
+      }
+    }
+  ]
+}

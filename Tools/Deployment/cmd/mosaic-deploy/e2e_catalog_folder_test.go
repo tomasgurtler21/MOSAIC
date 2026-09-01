@@ -25,11 +25,7 @@ package main
 //     - catalog.Root() equals the resolved mosaicRoot (not the catalogFolder).
 //     - catalog.CatalogRoot() equals the resolved catalogFolder (not mosaicRoot/Catalog).
 //
-// NOTE: This test calls scanGlobalFlags with the Stage-5 three-return signature
-// (mosaicRoot, catalogFolder string, allowExternal bool). Until I5.1 updates the
-// implementation, this file will not compile — that is the expected TDD RED state.
-// Once I5.1 updates the signature and I5.2 implements resolveCatalogFolder, the test
-// will compile but fail until I5.4 threads the resolved folder into catalog.Load.
+// scanGlobalFlags signature: (args []string) (mosaicRoot, catalogFolder, logDir string, allowExternal bool)
 
 import (
 	"fmt"
@@ -168,7 +164,7 @@ func TestE2E_CatalogFolder_AgentsSourcedFromFixtureCatalogue(t *testing.T) {
 
 	// Step 1: Parse --catalog-folder from the argument list (simulates main.go step 1).
 	args := []string{"--catalog-folder", customCatalogRoot, "deploy", "--harness", "stub"}
-	_, catalogFolderFlag, _ := scanGlobalFlags(args)
+	_, catalogFolderFlag, _, _ := scanGlobalFlags(args)
 
 	// Step 2: Resolve the catalog folder (simulates main.go step 2 after root resolution).
 	catalogFolder, err := resolveCatalogFolder(mosaicRoot, catalogFolderFlag)
@@ -207,7 +203,7 @@ func TestE2E_CatalogFolder_WorkflowsSourcedFromFixtureCatalogue(t *testing.T) {
 	writeE2EWorkflowToCustomCatalogueRoot(t, customCatalogRoot, "TestCategory", "fixture-wf")
 
 	args := []string{"--catalog-folder", customCatalogRoot, "workflows"}
-	_, catalogFolderFlag, _ := scanGlobalFlags(args)
+	_, catalogFolderFlag, _, _ := scanGlobalFlags(args)
 
 	catalogFolder, err := resolveCatalogFolder(mosaicRoot, catalogFolderFlag)
 	if err != nil {
@@ -245,7 +241,7 @@ func TestE2E_CatalogFolder_BundleSourcedFromMosaicRoot(t *testing.T) {
 	}
 
 	args := []string{"--catalog-folder", customCatalogRoot, "deploy"}
-	_, catalogFolderFlag, _ := scanGlobalFlags(args)
+	_, catalogFolderFlag, _, _ := scanGlobalFlags(args)
 
 	catalogFolder, err := resolveCatalogFolder(mosaicRoot, catalogFolderFlag)
 	if err != nil {
@@ -283,7 +279,7 @@ func TestE2E_CatalogFolder_CatalogRootAccessor_ReflectsCustomFolder(t *testing.T
 	customCatalogRoot := t.TempDir()
 
 	args := []string{"--catalog-folder", customCatalogRoot, "deploy"}
-	_, catalogFolderFlag, _ := scanGlobalFlags(args)
+	_, catalogFolderFlag, _, _ := scanGlobalFlags(args)
 
 	catalogFolder, err := resolveCatalogFolder(mosaicRoot, catalogFolderFlag)
 	if err != nil {
@@ -321,8 +317,7 @@ func TestE2E_CatalogFolder_CatalogRootAccessor_ReflectsCustomFolder(t *testing.T
 // then directly shows that swapping mosaicRoot for catalogFolder in registry.Options
 // breaks harness discovery.
 //
-// NOTE: This test calls scanGlobalFlags with the Stage-5 three-return signature and
-// will not compile until I5.1 updates the implementation — that is the expected RED state.
+// scanGlobalFlags signature: (args []string) (mosaicRoot, catalogFolder, logDir string, allowExternal bool)
 func TestE2E_CatalogFolder_HarnessDiscovery_UsesMosaicRoot_NotCatalogFolder(t *testing.T) {
 	mosaicRoot := makeE2EMosaicRoot(t)
 	catalogFolder := t.TempDir() // a plain directory, not a MOSAIC root
@@ -344,7 +339,7 @@ func TestE2E_CatalogFolder_HarnessDiscovery_UsesMosaicRoot_NotCatalogFolder(t *t
 	// Step 1: Parse --catalog-folder from the argument list (simulates main.go step 1).
 	// This call also demonstrates the three-return signature that I5.1 must implement.
 	args := []string{"--catalog-folder", catalogFolder, "deploy", "--harness", harnessID}
-	_, catalogFolderFlag, _ := scanGlobalFlags(args)
+	_, catalogFolderFlag, _, _ := scanGlobalFlags(args)
 
 	// Step 2: Resolve the catalogue folder (simulates main.go step 2).
 	resolvedCatalogFolder, err := resolveCatalogFolder(mosaicRoot, catalogFolderFlag)
@@ -428,7 +423,7 @@ func TestE2E_CatalogFolder_AbsentFlag_UsesDefaultCatalogue(t *testing.T) {
 
 	// No --catalog-folder in args.
 	args := []string{"deploy", "--harness", "stub"}
-	_, catalogFolderFlag, _ := scanGlobalFlags(args)
+	_, catalogFolderFlag, _, _ := scanGlobalFlags(args)
 
 	if catalogFolderFlag != "" {
 		t.Fatalf("scanGlobalFlags returned catalogFolderFlag = %q, want \"\"; "+

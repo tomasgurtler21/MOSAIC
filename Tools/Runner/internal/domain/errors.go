@@ -85,6 +85,41 @@ func (e *UnresolvableApproachError) Error() string {
 	)
 }
 
+// RowNotInGroupError is returned at the routing decision when the current
+// row index does not fall within any execution group of the resolved stage.
+// This is a mid-run routing-decision failure, analogous to
+// UnresolvableApproachError: it is discovered after admission succeeded
+// and is never recovered from.
+//
+// It replaces the previous silent sentinel (RowIndex: -1, nil error) that
+// caused an unguarded negative-index slice access in the caller.
+//
+// The Stage field reflects whichever stage's groups were being searched at
+// the point of failure. This may be the current stage (initial lookup) or
+// the next-stage fallback (recursive orderedGroupsForStage call). Tests
+// should cover both call sites.
+type RowNotInGroupError struct {
+	WorkflowID WorkflowID
+	RowIndex   int
+	Stage      StageNumber
+	Groups     []ExecutionGroup // the resolved groups that were searched
+}
+
+func (e *RowNotInGroupError) Error() string {
+	groupDescs := make([]string, len(e.Groups))
+	for i, g := range e.Groups {
+		if g.Name != "" {
+			groupDescs[i] = fmt.Sprintf("%s[%d,%d)", string(g.Name), g.StartRow, g.EndRow)
+		} else {
+			groupDescs[i] = fmt.Sprintf("[%d,%d)", g.StartRow, g.EndRow)
+		}
+	}
+	return fmt.Sprintf(
+		"stage %d: row %d is not in any execution group of workflow %q (groups: %s)",
+		e.Stage, e.RowIndex, e.WorkflowID, strings.Join(groupDescs, ", "),
+	)
+}
+
 // PositionUnresolvedCause states why a position could not be resolved.
 type PositionUnresolvedCause int
 

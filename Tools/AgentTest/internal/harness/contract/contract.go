@@ -73,6 +73,27 @@ type Config struct {
 	// skipped (never silently passed) with the gap named in the skip
 	// reason.
 	CompetingRewriteRequest func(sb domain.Sandbox, subject domain.SubjectUnderTest) domain.ProvisionRequest
+
+	// NativeAgentStart synthesises a native agent-start payload for agentID,
+	// in the adapter's own wire shape.
+	//
+	// Required (non-nil) for an adapter declaring a non-empty
+	// CompletionCorrelationField: that declaration is a claim that the
+	// adapter recovers completion correlation through an agent-start phase,
+	// and this seam is what lets the suite hold the claim honest instead of
+	// accepting it. Nil for any other adapter, whose corresponding subtest is
+	// skipped with the reason named, never silently passed.
+	NativeAgentStart func(agentID string) []byte
+
+	// NativeCompletionForAgent synthesises a native completion payload
+	// attributed to agentID and carrying observed as what the collaborator
+	// actually said.
+	//
+	// Required (non-nil) under the same condition as NativeAgentStart. It is
+	// distinct from NativeCompletion, which synthesises a completion payload
+	// without controlling which dispatch it belongs to and which remains the
+	// seam the capability-honesty check drives.
+	NativeCompletionForAgent func(agentID, observed string) []byte
 }
 
 // ObservedEffect is what a Config.Observe call reports about a native
@@ -123,6 +144,10 @@ func Run(t *testing.T, cfg Config) {
 	t.Run("MalformedNativePayload", func(t *testing.T) { testMalformedNativePayload(t, cfg) })
 	t.Run("Teardown", func(t *testing.T) { testTeardown(t, cfg) })
 	t.Run("EnvironmentCheck", func(t *testing.T) { testEnvironmentCheck(t, cfg) })
+	t.Run("ScopeAccounting", func(t *testing.T) { testScopeAccounting(t, cfg) })
+	t.Run("ScopeIsolationAcrossRuns", func(t *testing.T) { testScopeIsolationAcrossRuns(t, cfg) })
+	t.Run("RealScopeUntouched", func(t *testing.T) { testRealScopeUntouched(t, cfg) })
+	t.Run("CompletionCorrelation", func(t *testing.T) { testCompletionCorrelation(t, cfg) })
 }
 
 // newSandbox builds a domain.Sandbox rooted at dir, creating the subject and
@@ -131,7 +156,7 @@ func newSandbox(t *testing.T, dir string) domain.Sandbox {
 	t.Helper()
 
 	sb := domain.Sandbox{
-		Key:        domain.RunKey{RunID: "contract-run", TestID: "contract-test", RunNumber: 1},
+		Key:        domain.RunKey{RunID: "contract-run", TestName: "contract-test", RunNumber: 1},
 		Root:       dir,
 		SubjectDir: filepath.Join(dir, "subject"),
 		ControlDir: filepath.Join(dir, "control"),

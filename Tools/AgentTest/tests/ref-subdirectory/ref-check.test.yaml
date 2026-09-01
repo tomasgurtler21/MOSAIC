@@ -1,0 +1,24 @@
+schema_version: 1
+name: ref-check
+id: 65
+version: 1
+changelog:
+  - version: 1
+    date: "2026-01-01"
+    changes: "Initial."
+description: >
+  Verifies that bare-filename refs resolve against the fixtures/ subdirectory
+  of the test definition's own directory. The referenced files exist only
+  inside fixtures/; they are not present at the suite root. This is the
+  canonical layout for nested-fixtures-subdirectory suites.
+layer: orchestrator
+subject:
+  identity: orchestrator
+  agent: orchestrator
+  infrastructure_agents: []
+stub_registry: ref-check.stubs.json
+seed_files:
+  - path: Orchestration/sample-fixture.md
+    ref: sample-fixture.md
+  - path: Orchestration/second-fixture.md
+    ref: second-fixture.md

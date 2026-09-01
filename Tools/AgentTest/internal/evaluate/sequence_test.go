@@ -6,6 +6,7 @@ package evaluate_test
 // groups (and between a group and an ordered step) must.
 
 import (
+	"strings"
 	"testing"
 	"time"
 
@@ -231,5 +232,155 @@ func TestEvaluate_InvocationSequence_SubsequenceMatch_PassesWithExtraInvocation(
 	ar := findAssertion(t, got.Assertions, domain.ClassInvocationSequence, "")
 	if ar.Outcome != domain.AssertionPass {
 		t.Errorf("Outcome = %q, want pass — a non-exact assertion is a subsequence match", ar.Outcome)
+	}
+}
+
+// TestEvaluate_InvocationSequence_FailDetail_IncludesObservedIdentities verifies
+// that when an expected identity is not found, the failure Detail includes the
+// identities of the invocations actually observed at/after the search position,
+// so the user can see what was there instead of the expected step.
+func TestEvaluate_InvocationSequence_FailDetail_IncludesObservedIdentities(t *testing.T) {
+	start := time.Date(2026, 8, 7, 12, 0, 0, 0, time.UTC)
+	ev := baseEvidence()
+	// Observed: reviewer then implementer — neither is researcher.
+	ev.Records = []domain.LogRecord{
+		startRecord(1, 1, reviewer(), "", start, plainMessage("reviewer#1")),
+		endRecord(1, 1, reviewer(), start.Add(time.Second)),
+		startRecord(2, 1, implementer(), "", start.Add(2*time.Second), plainMessage("implementer#1")),
+		endRecord(2, 1, implementer(), start.Add(3*time.Second)),
+	}
+	// Declared: researcher must appear, but researcher never logged.
+	r := researcher()
+	ev.Definition.Assertions.InvocationSequence = &domain.SequenceAssertion{
+		Steps: []domain.SequenceStep{{Identity: &r}},
+	}
+
+	got := evaluate.Evaluate(ev)
+
+	ar := findAssertion(t, got.Assertions, domain.ClassInvocationSequence, "")
+	if ar.Outcome != domain.AssertionFail {
+		t.Fatalf("Outcome = %q, want fail — researcher was never observed", ar.Outcome)
+	}
+	// The Detail must name what was actually observed at/after the search position
+	// so the user knows what was there instead of the expected step.
+	if !strings.Contains(ar.Detail, reviewer().Key()) {
+		t.Errorf("Detail = %q; want it to contain the observed identity %q", ar.Detail, reviewer().Key())
+	}
+	if !strings.Contains(ar.Detail, implementer().Key()) {
+		t.Errorf("Detail = %q; want it to contain the observed identity %q", ar.Detail, implementer().Key())
+	}
+}
+
+// TestEvaluate_InvocationSequence_FailDetail_AtSearchPosition verifies that
+// the observed invocations reported in the failure Detail are those at/after
+// the current search position, not invocations before it. When the first step
+// passes (advancing the pointer), only invocations after the match position
+// should appear in the next step's failure Detail.
+func TestEvaluate_InvocationSequence_FailDetail_AtSearchPosition(t *testing.T) {
+	start := time.Date(2026, 8, 7, 12, 0, 0, 0, time.UTC)
+	ev := baseEvidence()
+	// Observed: researcher (position 0), then implementer (position 1).
+	// First declared step (researcher) will match at position 0 — pointer advances to 1.
+	// Second declared step (reviewer) will not be found at/after position 1.
+	// The Detail for the second step's failure must include implementer (at position 1)
+	// but must NOT include researcher (at position 0, already consumed).
+	ev.Records = []domain.LogRecord{
+		startRecord(1, 1, researcher(), "", start, plainMessage("researcher#1")),
+		endRecord(1, 1, researcher(), start.Add(time.Second)),
+		startRecord(2, 1, implementer(), "", start.Add(2*time.Second), plainMessage("implementer#1")),
+		endRecord(2, 1, implementer(), start.Add(3*time.Second)),
+	}
+	r1, r2 := researcher(), reviewer()
+	ev.Definition.Assertions.InvocationSequence = &domain.SequenceAssertion{
+		Steps: []domain.SequenceStep{
+			{Identity: &r1}, // matches at position 0
+			{Identity: &r2}, // not found at or after position 1
+		},
+	}
+
+	got := evaluate.Evaluate(ev)
+
+	ar := findAssertion(t, got.Assertions, domain.ClassInvocationSequence, "")
+	if ar.Outcome != domain.AssertionFail {
+		t.Fatalf("Outcome = %q, want fail — reviewer was never observed after researcher", ar.Outcome)
+	}
+	// implementer is at/after the search position (position 1) and must appear in Detail.
+	if !strings.Contains(ar.Detail, implementer().Key()) {
+		t.Errorf("Detail = %q; want it to contain the observed identity %q at/after the search position", ar.Detail, implementer().Key())
+	}
+	// researcher is before the search position (position 0, already consumed) and must NOT appear in Detail.
+	if strings.Contains(ar.Detail, researcher().Key()) {
+		t.Errorf("Detail must not contain researcher (consumed before the search position)")
+	}
+}
+
+// TestEvaluate_InvocationSequence_Pass_PopulatesExpected verifies that on a
+// passing InvocationSequence assertion, the Expected field is populated so the
+// user can see what sequence was declared — not just that it passed.
+func TestEvaluate_InvocationSequence_Pass_PopulatesExpected(t *testing.T) {
+	start := time.Date(2026, 8, 7, 12, 0, 0, 0, time.UTC)
+	ev := baseEvidence()
+	ev.Records = []domain.LogRecord{
+		startRecord(1, 1, researcher(), "", start, plainMessage("researcher#1")),
+		endRecord(1, 1, researcher(), start.Add(time.Second)),
+		startRecord(2, 1, reviewer(), "", start.Add(2*time.Second), plainMessage("reviewer#1")),
+		endRecord(2, 1, reviewer(), start.Add(3*time.Second)),
+	}
+	r1, r2 := researcher(), reviewer()
+	ev.Definition.Assertions.InvocationSequence = &domain.SequenceAssertion{
+		Steps: []domain.SequenceStep{
+			{Identity: &r1},
+			{Identity: &r2},
+		},
+	}
+
+	got := evaluate.Evaluate(ev)
+
+	ar := findAssertion(t, got.Assertions, domain.ClassInvocationSequence, "")
+	if ar.Outcome != domain.AssertionPass {
+		t.Fatalf("Outcome = %q, want pass", ar.Outcome)
+	}
+	// Expected must be non-empty on pass so the user can see what sequence was declared.
+	if ar.Expected == "" {
+		t.Errorf("Expected = %q; want it to be non-empty on a passing assertion to describe the declared sequence", ar.Expected)
+	}
+}
+
+// TestEvaluate_InvocationSequence_Fail_PopulatesExpectedAndActual verifies
+// that on a failing InvocationSequence assertion both Expected and Actual are
+// populated so the user can compare the declared sequence against what was
+// actually observed.
+func TestEvaluate_InvocationSequence_Fail_PopulatesExpectedAndActual(t *testing.T) {
+	start := time.Date(2026, 8, 7, 12, 0, 0, 0, time.UTC)
+	ev := baseEvidence()
+	// Observed: reviewer then researcher (wrong order).
+	ev.Records = []domain.LogRecord{
+		startRecord(1, 1, reviewer(), "", start, plainMessage("reviewer#1")),
+		endRecord(1, 1, reviewer(), start.Add(time.Second)),
+		startRecord(2, 1, researcher(), "", start.Add(2*time.Second), plainMessage("researcher#1")),
+		endRecord(2, 1, researcher(), start.Add(3*time.Second)),
+	}
+	// Declared: researcher then reviewer.
+	r1, r2 := researcher(), reviewer()
+	ev.Definition.Assertions.InvocationSequence = &domain.SequenceAssertion{
+		Steps: []domain.SequenceStep{
+			{Identity: &r1},
+			{Identity: &r2},
+		},
+	}
+
+	got := evaluate.Evaluate(ev)
+
+	ar := findAssertion(t, got.Assertions, domain.ClassInvocationSequence, "")
+	if ar.Outcome != domain.AssertionFail {
+		t.Fatalf("Outcome = %q, want fail — observed order is the reverse of the declared order", ar.Outcome)
+	}
+	// Both Expected and Actual must be non-empty on fail so the user can compare
+	// the declared sequence against what was actually observed.
+	if ar.Expected == "" {
+		t.Errorf("Expected = %q; want it to be non-empty on a failing assertion to describe the declared sequence", ar.Expected)
+	}
+	if ar.Actual == "" {
+		t.Errorf("Actual = %q; want it to be non-empty on a failing assertion to describe the observed sequence", ar.Actual)
 	}
 }

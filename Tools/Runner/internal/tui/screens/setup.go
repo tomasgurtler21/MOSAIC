@@ -121,6 +121,91 @@ func (s *OrchestratorFileScreen) Resize(width, height int) {
 }
 
 // ---------------------------------------------------------------------------
+// HarnessSelectScreen
+// ---------------------------------------------------------------------------
+
+// HarnessSelectScreen lets the user select the AI harness adapter before the
+// rest of the setup sequence proceeds.
+//
+// Navigation contract:
+//   - Enter on a harness -> Done() == true, SelectedID() returns its ID.
+//   - Esc -> Back() == true (quit; this is the first setup screen).
+type HarnessSelectScreen struct {
+	list   *widgets.List
+	width  int
+	height int
+	styles Styles
+}
+
+// NewHarnessSelectScreen creates the harness selection screen.
+func NewHarnessSelectScreen(width, height int, styles Styles) *HarnessSelectScreen {
+	sels := harness.CLISelections()
+	items := make([]widgets.ListItem, len(sels))
+	for i, s := range sels {
+		items[i] = widgets.ListItem{
+			ID:    s.ID,
+			Label: s.Label,
+		}
+	}
+	listStyles := widgets.ListStyles{
+		Normal:   styles.Body,
+		Selected: styles.Selected,
+		Disabled: styles.Muted,
+		Cursor:   "▶",
+	}
+	contentH := height - 6
+	if contentH < 1 {
+		contentH = 1
+	}
+	list := widgets.NewList(items, contentH, width, listStyles)
+	return &HarnessSelectScreen{
+		list:   list,
+		width:  width,
+		height: height,
+		styles: styles,
+	}
+}
+
+// Update processes a key message and delegates to the list widget.
+func (s *HarnessSelectScreen) Update(msg tea.Msg) tea.Cmd {
+	s.list.Update(msg)
+	return nil
+}
+
+// View renders the harness selection screen.
+func (s *HarnessSelectScreen) View() string {
+	title := s.styles.Title.Width(s.width).Render("Select Harness")
+	subtitle := s.styles.Subtitle.Width(s.width).Render("Choose the AI harness to use for this run.")
+	border := s.styles.Border.Width(s.width).Render(strings.Repeat("─", s.width))
+	listView := s.list.View()
+	help := s.styles.Help.Width(s.width).Render("↑/k up  ↓/j down  enter select  esc quit  ctrl+c quit")
+	return strings.Join([]string{title, subtitle, border, listView, border, help}, "\n")
+}
+
+// Done reports whether the user selected a harness.
+func (s *HarnessSelectScreen) Done() bool { return s.list.Done() }
+
+// Back reports whether the user pressed Esc.
+func (s *HarnessSelectScreen) Back() bool { return s.list.Back() }
+
+// SelectedID returns the selected harness ID. Only valid when Done() is true.
+func (s *HarnessSelectScreen) SelectedID() string { return s.list.SelectedID() }
+
+// Reset clears the done and back flags.
+func (s *HarnessSelectScreen) Reset() { s.list.Reset() }
+
+// Resize updates the screen dimensions and reflows the list.
+func (s *HarnessSelectScreen) Resize(width, height int) {
+	s.width = width
+	s.height = height
+	contentH := height - 6
+	if contentH < 1 {
+		contentH = 1
+	}
+	s.list.Resize(contentH, width)
+}
+
+// ---------------------------------------------------------------------------
 // WorkflowSelectScreen
 // ---------------------------------------------------------------------------
 
@@ -480,6 +565,12 @@ type ConfigSelection struct {
 	// command-line pre-scan result, and passes "" onward when both are empty
 	// so that buildAdapter's per-harness default applies.
 	ExecutablePath string
+
+	// GHCPCLIMode is the user's per-run GHCP CLI permission-mode selection.
+	// Populated by the GHCP CLI mode-selection screen or by the
+	// --ghcp-permission-mode CLI flag. Empty when the harness is not GHCP CLI.
+	// Accepted values: "blanket", "allowlist".
+	GHCPCLIMode string
 }
 
 // configStep identifies which configuration prompt is currently active.
@@ -533,15 +624,16 @@ type infraClassEntry struct {
 //   - Conditional steps (commits, commit-branch, pre-consult) are skipped in both
 //     navigation directions when their conditions are not met.
 type ConfigScreen struct {
-	step           configStep
-	back           bool
-	sel            ConfigSelection
-	cursor         int
-	width          int
-	height         int
-	styles         Styles
-	timeoutInput   *widgets.TextInput
-	declaredAgents []domain.DeclaredInfraAgent // populated by SetDeclaredAgents
+	step               configStep
+	back               bool
+	sel                ConfigSelection
+	cursor             int
+	width              int
+	height             int
+	styles             Styles
+	timeoutInput       *widgets.TextInput
+	declaredAgents     []domain.DeclaredInfraAgent // populated by SetDeclaredAgents
+	harnessPreselected bool                        // true when harness was selected before config wizard
 
 	// infraClassQueue holds the gated classes needing user selection, in the
 	// order they were encountered in declaredAgents. Populated when
@@ -549,6 +641,12 @@ type ConfigScreen struct {
 	infraClassQueue []infraClassEntry
 	// infraClassIdx is the index into infraClassQueue for the current prompt.
 	infraClassIdx int
+
+	// Run-mode awareness for the conditional version-drift prompt.
+	isNewRun         bool   // true: new run; false: resumed run
+	recordedVersion  string // workflow version from artifact frontmatter (empty if not available)
+	currentVersion   string // workflow version from current orchestrator file (empty if not available)
+	versionsInjected bool   // true once SetVersionDriftInfo has supplied both versions
 }
 
 // NewConfigScreen creates the configuration screen.
@@ -579,17 +677,16 @@ func NewConfigScreen(width, height int, styles Styles) *ConfigScreen {
 		return nil
 	})
 	return &ConfigScreen{
-		step:   configStepMode,
-		cursor: -1, // mode step starts with no option preselected
-		sel: ConfigSelection{
-			Settings: domain.RunSettings{
-				CommitBranchVariant: domain.CommitBranchMOSAICOwned,
-			},
-		},
-		width:        width,
-		height:       height,
-		styles:       styles,
-		timeoutInput: timeoutInput,
+		step:            configStepMode,
+		cursor:          -1, // mode step starts with no option preselected
+		sel:             ConfigSelection{},
+		width:           width,
+		height:          height,
+		styles:          styles,
+		timeoutInput:    timeoutInput,
+		isNewRun:        true, // safe default
+		recordedVersion: "",
+		currentVersion:  "",
 	}
 }
 
@@ -600,8 +697,13 @@ func (s *ConfigScreen) Update(msg tea.Msg) tea.Cmd {
 		cmd := s.timeoutInput.Update(msg)
 		if s.timeoutInput.Back() {
 			s.timeoutInput.Reset()
-			s.step = configStepHarness
-			s.cursor = 0
+			if s.harnessPreselected {
+				s.step = configStepMode
+				s.cursor = s.modeIndex()
+			} else {
+				s.step = configStepHarness
+				s.cursor = 0
+			}
 			return nil
 		}
 		if s.timeoutInput.Done() {
@@ -612,7 +714,11 @@ func (s *ConfigScreen) Update(msg tea.Msg) tea.Cmd {
 				s.sel.Timeout = 30 * time.Minute
 			}
 			s.timeoutInput.Reset()
-			s.step = configStepVersionDrift
+			if s.showsVersionDrift() {
+				s.step = configStepVersionDrift
+			} else {
+				s.step = configStepCheckpoints
+			}
 			s.cursor = 0
 			return nil
 		}
@@ -683,6 +789,14 @@ func (s *ConfigScreen) advance() tea.Cmd {
 		if s.cursor < len(modes) {
 			s.sel.Settings.Mode = modes[s.cursor]
 		}
+		if s.harnessPreselected {
+			// Harness was selected on the dedicated harness screen; skip the
+			// harness step and go directly to the timeout input.
+			s.step = configStepHarnessTimeout
+			s.timeoutInput.Reset()
+			s.cursor = 0
+			return s.timeoutInput.Init()
+		}
 		s.step = configStepHarness
 		s.cursor = 0
 	case configStepHarness:
@@ -713,6 +827,9 @@ func (s *ConfigScreen) advance() tea.Cmd {
 		if s.sel.Settings.Commits {
 			s.step = configStepCommitBranch
 		} else {
+			// CommitBranchVariant is only meaningful when commits are enabled;
+			// reset to zero value so it does not linger from a prior selection.
+			s.sel.Settings.CommitBranchVariant = domain.CommitBranchVariant("")
 			s.step = s.nextAfterCommitSection()
 			if s.step == configStepPreConsult {
 				s.cursor = 1
@@ -807,7 +924,10 @@ func (s *ConfigScreen) prevStepAndCursor() (configStep, int) {
 		// but if we reach here via Esc on version-drift, go to timeout.
 		return configStepHarnessTimeout, 0
 	case configStepCheckpoints:
-		return configStepVersionDrift, 0
+		if s.showsVersionDrift() {
+			return configStepVersionDrift, 0
+		}
+		return configStepHarnessTimeout, 0
 	case configStepCommits:
 		return configStepCheckpoints, 0
 	case configStepCommitBranch:
@@ -904,9 +1024,13 @@ func (s *ConfigScreen) View() string {
 	case configStepHarnessTimeout:
 		body.WriteString(s.timeoutInput.View())
 	case configStepVersionDrift:
-		body.WriteString(s.styles.Body.Width(s.width).Render("Allow workflow version drift:") + "\n")
-		body.WriteString(s.renderOption(0, "Yes"))
-		body.WriteString(s.renderOption(1, "No (default)"))
+		// Defense in depth: the step machine never lands here unless the prompt is
+		// meaningful, but never render it if it somehow does.
+		if s.showsVersionDrift() {
+			body.WriteString(s.styles.Body.Width(s.width).Render("Allow workflow version drift:") + "\n")
+			body.WriteString(s.renderOption(0, "Yes"))
+			body.WriteString(s.renderOption(1, "No (default)"))
+		}
 	case configStepCheckpoints:
 		body.WriteString(s.styles.Body.Width(s.width).Render("Checkpoints:") + "\n")
 		body.WriteString(s.renderOption(0, "Disabled (default)"))
@@ -978,11 +1102,7 @@ func (s *ConfigScreen) Reset() {
 	s.step = configStepMode
 	s.back = false
 	s.cursor = -1 // mode step starts with no option preselected
-	s.sel = ConfigSelection{
-		Settings: domain.RunSettings{
-			CommitBranchVariant: domain.CommitBranchMOSAICOwned,
-		},
-	}
+	s.sel = ConfigSelection{}
 	s.timeoutInput.Reset()
 	s.infraClassQueue = nil
 	s.infraClassIdx = 0
@@ -1005,4 +1125,49 @@ func (s *ConfigScreen) Resize(width, height int) {
 // skipped and the single agent is auto-selected.
 func (s *ConfigScreen) SetDeclaredAgents(agents []domain.DeclaredInfraAgent) {
 	s.declaredAgents = agents
+}
+
+// SetPreselectedHarness records that the harness was already chosen on the
+// harness-selection screen. The config wizard skips the configStepHarness
+// prompt and the back path from configStepHarnessTimeout goes directly to
+// configStepMode rather than configStepHarness.
+func (s *ConfigScreen) SetPreselectedHarness(id string) {
+	s.sel.Harness = id
+	s.harnessPreselected = true
+}
+
+// SetIsNewRun injects the run-mode flag before setup wizard begins.
+// Must be called by rootModel before any screen transitions occur.
+// isNew=true indicates a new run; false indicates a resumed run.
+func (s *ConfigScreen) SetIsNewRun(isNew bool) {
+	s.isNewRun = isNew
+}
+
+// SetVersionDriftInfo injects version information before setup wizard begins.
+// Must be called by rootModel after loading artifact state and after workflow is resolved,
+// but before any screen transitions occur.
+// recordedVersion: workflow version from artifact frontmatter (empty if not available)
+// currentVersion: workflow version from current orchestrator file (empty if not available)
+func (s *ConfigScreen) SetVersionDriftInfo(recordedVersion, currentVersion string) {
+	s.recordedVersion = recordedVersion
+	s.currentVersion = currentVersion
+	s.versionsInjected = true
+}
+
+// showsVersionDrift reports whether the version-drift prompt is meaningful for
+// this run, and so whether the step machine visits it in either direction.
+//
+// A new run has no recorded version to drift from, so the question is never
+// asked. A resumed run is asked only when the recorded version differs from the
+// version the current orchestrator file declares; a missing value on one side
+// only counts as a difference, so an unknown version errs towards asking.
+//
+// A caller that never supplied the versions gets the prompt: without them the
+// screen cannot tell a genuine match from two absent values, and asking a
+// redundant question is safer than silently defaulting the answer to "no".
+func (s *ConfigScreen) showsVersionDrift() bool {
+	if !s.versionsInjected {
+		return true
+	}
+	return !s.isNewRun && s.recordedVersion != s.currentVersion
 }

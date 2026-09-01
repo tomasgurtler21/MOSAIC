@@ -142,7 +142,7 @@ type standinScript struct {
 	// every repetition of one test) still produce different observable
 	// outcomes across repetitions, without a second divergent script.
 	SkipInvokeOnRuns []int `json:"skip_invoke_on_runs,omitempty"`
-	// SkipInvokeForTestIDs names test ids (matching domain.RunKey.TestID,
+	// SkipInvokeForTestIDs names test ids (matching domain.RunKey.TestName,
 	// read back via readTestIdentity) on which runStandin treats every
 	// Invoke turn in the script as a no-op, the same way SkipInvokeOnRuns
 	// does for a run number. This is what lets one suite's several tests
@@ -201,7 +201,8 @@ type wireResult struct {
 // wireCallOut is the native payload this stand-in sends into
 // fake.Adapter.TranslateCall, matching that package's own private wireCall
 // field names exactly (phase, tool, agent, agent_instance_id,
-// task_description, token).
+// task_description, token). AgentID is only populated for the completion
+// phase, where fake.Adapter expects an agent_id field instead of a token.
 type wireCallOut struct {
 	Phase           string `json:"phase"`
 	Tool            string `json:"tool"`
@@ -209,6 +210,7 @@ type wireCallOut struct {
 	AgentInstanceID string `json:"agent_instance_id"`
 	TaskDescription string `json:"task_description"`
 	Token           string `json:"token"`
+	AgentID         string `json:"agent_id,omitempty"`
 }
 
 // wireReplyIn decodes what fake.Adapter.TranslateOutcome writes back,
@@ -374,7 +376,17 @@ func runStandin() int {
 	}
 
 	if lastResult == nil {
-		lastResult = &wireResult{Disposition: string(domain.DispositionCompleted)}
+		// If the early-exit sentinel was written by a cutoff during this run,
+		// report EarlyExit so the runner's supervisor records the correct
+		// termination reason. Without this check the standin always emits
+		// DispositionCompleted and the supervisor's sentinel poller (250 ms
+		// tick) never wins the race against the fast subprocess exit.
+		sentinelPath := filepath.Join(controlDir, domain.EarlyExitSentinelName)
+		if _, statErr := os.Stat(sentinelPath); statErr == nil {
+			lastResult = &wireResult{Disposition: string(domain.DispositionEarlyExit)}
+		} else {
+			lastResult = &wireResult{Disposition: string(domain.DispositionCompleted)}
+		}
 	}
 	out, _ := json.Marshal(lastResult)
 	fmt.Fprintln(os.Stdout, string(out))
@@ -420,6 +432,14 @@ func stringInSlice(xs []string, s string) bool {
 // it is exactly what internal/concurrency.Peaks is defined to read off the
 // log.
 //
+// When the adapter declares SupportsReplyRecovery, concurrencyBatch
+// additionally drives a completion-phase interception for every dispatch
+// that did not terminate at the pre-invocation point. The completion event
+// is driven after all post-phase events for the batch, in the same order
+// the post events were driven. The synthetic agent_id is stable for a
+// given sequence number, so the decision core's sole-outstanding fallback
+// can correlate it back to its dispatch when exactly one is in flight.
+//
 // Returns false when a member's pre-invocation interception halts the run,
 // in which case the caller stops the whole script rather than continuing
 // with a partial batch.
@@ -440,10 +460,14 @@ func concurrencyBatch(
 	batch []wireSubjectTurn,
 ) bool {
 	type pending struct {
-		id    domain.CollaboratorIdentity
-		token string
+		id      domain.CollaboratorIdentity
+		token   string
+		agentID string // synthetic agent_id for the completion phase
+		needsPost bool // true for OutcomeRewritePrompt dispatches
 	}
-	var toClose []pending
+	var toProcess []pending // all non-terminating dispatches
+
+	replyRecovery := adapter.Capabilities().SupportsReplyRecovery
 
 	for _, t := range batch {
 		id := domain.CollaboratorIdentity{ToolName: t.Invoke.Tool, AgentIdentity: t.Invoke.Agent}
@@ -456,6 +480,7 @@ func concurrencyBatch(
 		}
 		*seq++
 		token := fmt.Sprintf("standin-%d", *seq)
+		agentID := fmt.Sprintf("fake-agent-%d", *seq)
 		testID, runNumber := readTestIdentity(store)
 
 		reply, ok := runInterception(adapter, store, log, effects, clock, registry, groups,
@@ -468,8 +493,24 @@ func concurrencyBatch(
 		switch reply.Kind {
 		case string(domain.OutcomeHalt):
 			return false
+		case string(domain.OutcomeSubstitute):
+			// Substitution terminates at the pre-invocation point: no post or
+			// completion event follows. TerminatesAtPre(OutcomeSubstitute) = true.
 		case string(domain.OutcomeRewritePrompt):
-			toClose = append(toClose, pending{id: id, token: reply.Token})
+			// OutcomeRewritePrompt always needs a post-phase close; when reply
+			// recovery is enabled it also needs a completion event.
+			toProcess = append(toProcess, pending{
+				id: id, token: reply.Token, agentID: agentID, needsPost: true,
+			})
+		default:
+			// OutcomePassthrough and anything else: the collaborator runs without
+			// interception. With reply recovery, a completion event still follows
+			// so the decision core can apply the cutoff rule.
+			if replyRecovery {
+				toProcess = append(toProcess, pending{
+					id: id, token: token, agentID: agentID, needsPost: false,
+				})
+			}
 		}
 	}
 
@@ -484,12 +525,31 @@ func concurrencyBatch(
 		probeResults[path] = statErr == nil
 	}
 
-	for _, p := range toClose {
+	// Drive the post-phase for all dispatches that need it.
+	for _, p := range toProcess {
+		if !p.needsPost {
+			continue
+		}
 		testID, runNumber := readTestIdentity(store)
 		runInterception(adapter, store, log, effects, clock, registry, groups,
 			controlDir, subjectDir, testID, runNumber, domain.PhasePost,
 			wireCallOut{Phase: "post", Tool: p.id.ToolName, Agent: p.id.AgentIdentity, Token: p.token})
 	}
+
+	// When reply recovery is declared, drive a completion-phase event for
+	// every non-terminating dispatch after all post events for the batch. This
+	// mirrors what a real reply-recovery harness does: its SubagentStop hook
+	// fires once per completed collaborator, after the collaborator finishes,
+	// and is what the decision core applies the cutoff rule to.
+	if replyRecovery {
+		for _, p := range toProcess {
+			testID, runNumber := readTestIdentity(store)
+			runInterception(adapter, store, log, effects, clock, registry, groups,
+				controlDir, subjectDir, testID, runNumber, domain.PhaseCompletion,
+				wireCallOut{Phase: "completion", Tool: p.id.ToolName, Agent: p.id.AgentIdentity, AgentID: p.agentID})
+		}
+	}
+
 	return true
 }
 

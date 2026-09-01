@@ -169,11 +169,12 @@ func TestAgentStaleness_HarnessVersionField_Name_CompatibleWithExecutorStamping(
 // deterministic and field-rename-transparent.
 func TestAgentStaleness_DeltaOrder_HarnessVersionInPositionTwo(t *testing.T) {
 	deployed := domain.DeployedArtifactState{
-		Present:           true,
-		ContentHash:       "sha256:abc",
-		Version:           "1.0",
-		HarnessVersion:    "2.0",
-		InjectionsVersion: "3.0",
+		Present:            true,
+		ContentHash:        "sha256:abc",
+		Version:            "1.0",
+		HarnessVersion:     "2.0",
+		InjectionsVersion:  "3.0",
+		HasInjectionRegion: true, // injection region present: injections_version mismatch must produce a delta
 	}
 	agent := makeAgent("test-agent", "1.1")
 	stamps := domain.VersionStamps{
@@ -381,11 +382,12 @@ func TestAgentStaleness_Orchestrator_InjectionsVersionMatchesOrchestratorValue_N
 // injections version and must be updated.
 func TestAgentStaleness_Orchestrator_InjectionsVersionDiffersFromOrchestratorValue_ProducesDelta(t *testing.T) {
 	deployed := domain.DeployedArtifactState{
-		Present:           true,
-		ContentHash:       "sha256:abc",
-		Version:           "1.0",
-		HarnessVersion:    "2.0",
-		InjectionsVersion: "6.0", // old orchestrator injections version on the deployed tag
+		Present:            true,
+		ContentHash:        "sha256:abc",
+		Version:            "1.0",
+		HarnessVersion:     "2.0",
+		InjectionsVersion:  "6.0", // old orchestrator injections version on the deployed tag
+		HasInjectionRegion: true,  // injection region present: injections_version mismatch must produce a delta
 	}
 	agent := makeOrchestrator()
 	agent.Version = deployed.Version

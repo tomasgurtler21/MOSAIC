@@ -1,5 +1,11 @@
 schema_version: 1
-id: protocol-violations-fail
+name: protocol-violations-fail
+id: 23
+version: 1
+changelog:
+  - version: 1
+    date: "2026-01-01"
+    changes: "Initial."
 description: >
   The declared count (0) does not match the true violation count (1) the helper's malformed response produces, so protocol_violations must fail by name.
 layer: subagent
@@ -8,6 +14,7 @@ negative: false
 subject:
   identity: standin-subject
   agent: standin-subject
+  infrastructure_agents: []
   opening_message: |
     Greet the collaborator, then have the helper assist without creating files.
   invocation_kind: subagent

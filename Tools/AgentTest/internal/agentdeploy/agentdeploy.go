@@ -226,10 +226,11 @@ type wireRunSummary struct {
 }
 
 type wireActionRecord struct {
-	Ref        wireArtifactRef `json:"Ref"`
-	TargetPath string          `json:"TargetPath"`
-	Taken      string          `json:"Taken"`
-	Err        string          `json:"Err"`
+	Ref           wireArtifactRef `json:"Ref"`
+	TargetPath    string          `json:"TargetPath"`
+	Taken         string          `json:"Taken"`
+	Err           string          `json:"Err"`
+	SourceVersion string          `json:"SourceVersion"`
 }
 
 type wireArtifactRef struct {
@@ -423,16 +424,28 @@ func buildDeployArgs(req domain.DeployRequest, opts Options, selectionsPath stri
 	// --output json is always present so the deployer can parse the run summary.
 	args = append(args, "--output", "json")
 
-	// --mosaic-root and --catalog-folder follow the empty-means-omitted convention,
-	// identical to buildArgs for render, keeping both root-scoped overrides together.
+	// --mosaic-root, --catalog-folder, and --log-dir all follow the
+	// empty-means-omitted convention: the flag is omitted when the field is
+	// empty, and emitted verbatim when non-empty. All three root-scoped
+	// overrides are kept together so the convention is visible in one place.
 	if opts.MosaicRoot != "" {
 		args = append(args, "--mosaic-root", opts.MosaicRoot)
 	}
 	if opts.CatalogFolder != "" {
 		args = append(args, "--catalog-folder", opts.CatalogFolder)
 	}
+	// --log-dir overrides the directory the deployment tool writes its two
+	// sink files (latest.log and history.log) to. Omitted when empty so the
+	// tool falls back to its own default location — the correct behaviour for
+	// callers that have not opted into per-run isolation. When non-empty the
+	// value is the run's own sandbox location so concurrent invocations each
+	// write to their own directory and cannot contend on a shared path.
+	if req.LogDir != "" {
+		args = append(args, "--log-dir", req.LogDir)
+	}
 
-	// --selections is appended when a temporary tier-models file was written.
+	// --selections is appended when a temporary selections file was written
+	// (carrying tier_models and/or infrastructure_agents).
 	if selectionsPath != "" {
 		args = append(args, "--selections", selectionsPath)
 	}
@@ -440,27 +453,54 @@ func buildDeployArgs(req domain.DeployRequest, opts Options, selectionsPath stri
 	return args
 }
 
-// writeSelectionsFile creates a temporary YAML file whose only top-level key
-// is tier_models, carrying the caller's map verbatim. The file path is returned
-// so the caller can pass it to --selections and remove it unconditionally.
+// writeSelectionsFile creates a temporary YAML file carrying the caller's
+// tier-model pre-answers and infrastructure-agent selection. The file path is
+// returned so the caller can pass it to --selections and remove it
+// unconditionally.
 //
-// No other key is written: an emitted workflows key — even empty — would fight
-// the --workflows flag the same Deploy call carries.
-func writeSelectionsFile(tierModels map[string]string) (string, error) {
+// tier_models is written only when the map is non-empty. infrastructure_agents
+// is always written when infrastructureAgentIDs is non-nil: a non-nil empty
+// slice produces "infrastructure_agents: []" (explicitly none) and a populated
+// slice produces each ID as a list item. A nil slice omits the key entirely,
+// leaving the deploy tool free to ask its interactive question.
+//
+// No workflows key is written: an emitted workflows key — even empty — would
+// fight the --workflows flag the same Deploy call carries.
+func writeSelectionsFile(tierModels map[string]string, infrastructureAgentIDs []string) (string, error) {
 	f, err := os.CreateTemp("", "agentdeploy-selections-*.yaml")
 	if err != nil {
 		return "", err
 	}
 	defer f.Close()
 
-	if _, err := fmt.Fprintln(f, "tier_models:"); err != nil {
-		return f.Name(), err
-	}
-	for k, v := range tierModels {
-		if _, err := fmt.Fprintf(f, "  %s: %s\n", k, v); err != nil {
+	if len(tierModels) > 0 {
+		if _, err := fmt.Fprintln(f, "tier_models:"); err != nil {
 			return f.Name(), err
 		}
+		for k, v := range tierModels {
+			if _, err := fmt.Fprintf(f, "  %s: %s\n", k, v); err != nil {
+				return f.Name(), err
+			}
+		}
 	}
+
+	if infrastructureAgentIDs != nil {
+		if len(infrastructureAgentIDs) == 0 {
+			if _, err := fmt.Fprintln(f, "infrastructure_agents: []"); err != nil {
+				return f.Name(), err
+			}
+		} else {
+			if _, err := fmt.Fprintln(f, "infrastructure_agents:"); err != nil {
+				return f.Name(), err
+			}
+			for _, id := range infrastructureAgentIDs {
+				if _, err := fmt.Fprintf(f, "- %s\n", id); err != nil {
+					return f.Name(), err
+				}
+			}
+		}
+	}
+
 	return f.Name(), nil
 }
 
@@ -487,12 +527,12 @@ func (d *deployer) Deploy(ctx context.Context, req domain.DeployRequest) (domain
 	}
 
 	// Write the temporary selections file when the caller supplies tier-model
-	// pre-answers. The defer ensures removal on every exit path: success,
-	// non-zero exit, undecodable output, tool-unavailable, timeout, and
-	// caller cancellation.
+	// pre-answers or infrastructure-agent IDs. The defer ensures removal on
+	// every exit path: success, non-zero exit, undecodable output,
+	// tool-unavailable, timeout, and caller cancellation.
 	var selectionsPath string
-	if len(req.TierModels) > 0 {
-		path, err := writeSelectionsFile(req.TierModels)
+	if len(req.TierModels) > 0 || req.InfrastructureAgentIDs != nil {
+		path, err := writeSelectionsFile(req.TierModels, req.InfrastructureAgentIDs)
 		if err != nil {
 			return domain.DeployResult{}, fmt.Errorf("agentdeploy: could not write selections file: %w", err)
 		}
@@ -542,6 +582,7 @@ func (d *deployer) Deploy(ctx context.Context, req domain.DeployRequest) (domain
 				agents = append(agents, domain.DeployedAgent{
 					Key:             action.Ref.Key,
 					DestinationPath: action.TargetPath,
+					SourceVersion:   action.SourceVersion,
 				})
 			}
 		}

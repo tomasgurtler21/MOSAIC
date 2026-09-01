@@ -69,29 +69,35 @@ func realAdapterRunnerDeps(t *testing.T, adapter domain.HarnessAdapter, interpre
 		t.Fatalf("fixtures.NewResolver(%q): %v", fixtureRoot, err)
 	}
 
-	d := Deps{
-		Adapter:  adapter,
-		Fixtures: resolver,
-		Effects:  sideeffects.NewApplier(resolver),
-		Cost:     fakeCostProvider{},
-		Clock:    fakeClock{},
-
-		SelfPath:       "/abs/path/to/mosaic-agent-test",
+	bundle := HarnessBundle{
+		Adapter:        adapter,
+		Decoder:        fakeDecoder,
+		Launcher:       fakeLauncher{},
+		Environment:    domain.EnvironmentReport{},
 		InterpreterCmd: interpreterCmd,
 	}
 
+	d := Deps{
+		HarnessFactory: fakeHarnessFactory{},
+		Fixtures:       resolver,
+		Effects:        sideeffects.NewApplier(resolver),
+		Cost:           fakeCostProvider{},
+		Clock:          fakeClock{},
+		SelfPath:       "/abs/path/to/mosaic-agent-test",
+	}
+
 	ws := workspace.NewManager(t.TempDir(), d.Clock)
-	return d.RunnerDeps(ws, fakeProgressSink{})
+	return d.RunnerDeps(ws, fakeProgressSink{}, bundle)
 }
 
 // minimalRunnerRequest builds the smallest runner.Request a real adapter can
 // provision and spawn a plan for.
 func minimalRunnerRequest(testID string) runner.Request {
 	return runner.Request{
-		Key: domain.RunKey{RunID: "run-" + testID, TestID: testID, RunNumber: 1},
+		Key: domain.RunKey{RunID: "run-" + testID, TestName: testID, RunNumber: 1},
 		Test: preflight.ResolvedTest{
 			Definition: domain.TestDefinition{
-				ID:    testID,
+				Name:  testID,
 				Layer: domain.LayerSubagent,
 				Subject: domain.SubjectUnderTest{
 					Identity:       "researcher",

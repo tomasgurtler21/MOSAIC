@@ -1,6 +1,6 @@
 ---
 id: 45
-version: 1.1.0
+version: 1.1.1
 name: test-scenario-review
 description: Reviews a test scenario space for coverage completeness, traceability to the resolved requirement, and correctness against the research dossier — the quality gate before any test case is written
 role: subagent
@@ -107,14 +107,14 @@ Apply these checks systematically.
 
 | Severity | Requires Rework |
 |----------|-----------------|
-| CRITICAL | ✅ Always |
-| MAJOR | ✅ Yes |
-| MINOR | ❌ No |
-| SUGGESTION | ❌ No |
+| CRITICAL | Yes — Always |
+| MAJOR | Yes |
+| MINOR | No |
+| SUGGESTION | No |
 
 **Status Code Logic:**
-- ANY issue at "Requires Rework: ✅" level → return `COMPLETED_NEEDS_ACTION`
-- ALL issues at "Requires Rework: ❌" levels → return `SUCCESS` with issues noted in report
+- ANY issue at "Requires Rework: Yes" level → return `COMPLETED_NEEDS_ACTION`
+- ALL issues at "Requires Rework: No" levels → return `SUCCESS` with issues noted in report
 
 </SeverityThresholds>
 

@@ -47,7 +47,7 @@ public void CalculateTotal_Should_Sum_Item_Prices()
 }
 ```
 
-**Result:** `NotImplementedException` thrown → **Valid RED** ✅
+**Result:** `NotImplementedException` thrown → **Valid RED** [PASS]
 
 The test compiles, runs, and fails. This is acceptable RED even though the assertion never executes.
 
@@ -65,7 +65,7 @@ public void CalculateTotal_Should_Sum_Item_Prices()
 }
 ```
 
-**Result:** Compilation error → **NOT valid RED** ❌
+**Result:** Compilation error → **NOT valid RED** [FAIL]
 
 Create the interface/stub first, THEN claim RED.
 
@@ -99,7 +99,7 @@ public void CalculateTotal_Should_Sum_Item_Prices()
 }
 ```
 
-**Result:** Assertion fails with clear message → **Ideal RED** ✅
+**Result:** Assertion fails with clear message → **Ideal RED** [PASS]
 
 ---
 
@@ -458,12 +458,12 @@ public void UserService_Create_And_Delete_Should_Work()
 
 | Example | Pattern | Verdict |
 |---------|---------|---------|
-| NotImplementedException | RED Phase | ✅ Valid RED |
-| Compile error | RED Phase | ❌ Not RED yet |
-| Property existence test | Behavioral | ❌ Wasteful |
-| Validation logic test | Behavioral | ✅ Valuable |
-| Exact message match | Exception | ❌ Brittle |
-| Contains check | Exception | ✅ Robust |
-| Verify call count | Mocking | ❌ Implementation detail |
-| Test return value | Mocking | ✅ Tests outcome |
-| Verify for fire-and-forget | Mocking | ⚠️ Acceptable when side effect IS behavior |
+| NotImplementedException | RED Phase | [PASS] Valid RED |
+| Compile error | RED Phase | [FAIL] Not RED yet |
+| Property existence test | Behavioral | [FAIL] Wasteful |
+| Validation logic test | Behavioral | [PASS] Valuable |
+| Exact message match | Exception | [FAIL] Brittle |
+| Contains check | Exception | [PASS] Robust |
+| Verify call count | Mocking | [FAIL] Implementation detail |
+| Test return value | Mocking | [PASS] Tests outcome |
+| Verify for fire-and-forget | Mocking | [WARN] Acceptable when side effect IS behavior |

@@ -1,0 +1,24 @@
+{
+  "schema_version": 1,
+  "test_id": "wildcard-input-expansion",
+  "on_unmatched": "halt",
+  "stubs": [
+    {
+      "match": { "tool": "dispatch", "agent": "contracts-designer", "invocation": 1 },
+      "response": {
+        "agent_instance_id": "contracts-designer#6",
+        "run_id": "{run_id}",
+        "status_code": "SUCCESS",
+        "status_message": "Designed verbose flag contracts."
+      },
+      "side_effects": {
+        "create_files": [
+          {
+            "path": "Orchestration-{run_id}/ContractsDesign.md",
+            "content": "---\nrun_id: {run_id}\ncreated_by: contracts-designer#6\nhuman_approved: true\n---\n# Contracts Design\n\n## Verbose Flag Contract\n\n- diagnostics.SetVerbose(bool)\n- diagnostics.Itemf(format, args...)\n"
+          }
+        ]
+      }
+    }
+  ]
+}

@@ -84,7 +84,7 @@ func TestExamples_DocumentationGradeSamples_PassPreflightAndRunGreen(t *testing.
 
 	byID := map[string]wireTestReportDoc{}
 	for _, tr := range out.Result.Tests {
-		byID[tr.TestID] = tr
+		byID[tr.TestName] = tr
 	}
 	if len(byID) != 2 {
 		t.Fatalf("Result.Tests has %d entries, want 2\nstdout: %s", len(byID), out.Stdout)

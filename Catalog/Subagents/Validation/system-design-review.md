@@ -1,6 +1,6 @@
 ---
 id: 10
-version: 3.3.0
+version: 3.3.1
 name: system-design-review
 description: Reviews system design quality for greenfield projects - ensuring architecture is complete, consistent, implementable, and aligned with requirements
 role: subagent
@@ -115,14 +115,14 @@ Apply these checks systematically:
 
 | Severity | Requires Rework |
 |----------|-----------------|
-| CRITICAL | ✅ Always |
-| MAJOR | ✅ Yes |
-| MINOR | ❌ No |
-| SUGGESTION | ❌ No |
+| CRITICAL | Yes — Always |
+| MAJOR | Yes |
+| MINOR | No |
+| SUGGESTION | No |
 
 **Status Code Logic:**
-- ANY issue at "Requires Rework: ✅" level → return `COMPLETED_NEEDS_ACTION`
-- ALL issues at "Requires Rework: ❌" levels → return `SUCCESS` with issues noted in report
+- ANY issue at "Requires Rework: Yes" level → return `COMPLETED_NEEDS_ACTION`
+- ALL issues at "Requires Rework: No" levels → return `SUCCESS` with issues noted in report
 
 </SeverityThresholds>
 
@@ -175,15 +175,15 @@ Your review artifact should follow this template:
 
 | Requirement | Component | Status |
 |-------------|-----------|--------|
-| [FR-1: ...] | [Component Name] | ✅ Covered |
-| [FR-2: ...] | - | ❌ Not addressed |
+| [FR-1: ...] | [Component Name] | [PASS] Covered |
+| [FR-2: ...] | - | Not addressed |
 
 ### Missing Coverage
 - [Requirement not addressed by any component]
 
 ## Architecture Assessment
 
-**Style:** [What was chosen] - [✅ Appropriate / ⚠️ Questionable / ❌ Inappropriate]
+**Style:** [What was chosen] - [[PASS] Appropriate / [WARN] Questionable / [FAIL] Inappropriate]
 
 **Style Assessment:**
 - [Why the style is or isn't appropriate for requirements]
@@ -191,7 +191,7 @@ Your review artifact should follow this template:
 ### Component Analysis
 | Component | Responsibility Clear? | Dependencies Clear? | Issues |
 |-----------|----------------------|---------------------|--------|
-| [Component 1] | ✅ / ⚠️ / ❌ | ✅ / ⚠️ / ❌ | [Issues or "None"] |
+| [Component 1] | [PASS] / [WARN] / [FAIL] | [PASS] / [WARN] / [FAIL] | [Issues or "None"] |
 
 ### Boundary Analysis
 - [Assessment of component boundaries - clear? overlapping? gaps?]
@@ -200,15 +200,15 @@ Your review artifact should follow this template:
 
 | Category | Recommendation | Assessment |
 |----------|----------------|------------|
-| Language | [Choice] | ✅ Appropriate / ⚠️ Concern: [reason] |
-| Framework | [Choice] | ✅ Appropriate / ⚠️ Concern: [reason] |
-| Database | [Choice] | ✅ Appropriate / ⚠️ Concern: [reason] |
+| Language | [Choice] | [PASS] Appropriate / [WARN] Concern: [reason] |
+| Framework | [Choice] | [PASS] Appropriate / [WARN] Concern: [reason] |
+| Database | [Choice] | [PASS] Appropriate / [WARN] Concern: [reason] |
 
 ### Technology Concerns
 - [Any red flags or concerns about technology choices]
 
 ## Project Structure Assessment
-**Assessment:** ✅ Well-organized / ⚠️ Minor issues / ❌ Needs restructuring
+**Assessment:** [PASS] Well-organized / [WARN] Minor issues / [FAIL] Needs restructuring
 
 - [Feedback on structure]
 

@@ -1,5 +1,11 @@
 schema_version: 1
-id: subagent-layer
+name: subagent-layer
+id: 36
+version: 1
+changelog:
+  - version: 1
+    date: "2026-01-01"
+    changes: "Initial."
 description: >
   Declares layer: subagent against a run whose one collaborator response
   carries an invented status code (the true violation count is 1), with
@@ -11,6 +17,7 @@ negative: false
 subject:
   identity: standin-subject
   agent: standin-subject
+  infrastructure_agents: []
   opening_message: |
     Dispatch the helper, then finish.
   invocation_kind: subagent

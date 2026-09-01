@@ -7,6 +7,6 @@ the reviewer row can expand Stage-*/Plan.md into per-stage paths.
 
 | Phase | Subagent | HITL | On Success | On Findings | Input | Output |
 |-------|----------|:----:|------------|-------------|-------|--------|
-| PLANNING | planner | ❌ | reviewer | - | - | Plan.md, Stage-*/Plan.md, Stage-*/PlanProgress.md |
-| PLANNING | reviewer | ❌ | COMPLETE | planner | Plan.md, Stage-*/Plan.md | review.md |
+| PLANNING | planner | FALSE | reviewer | - | - | Plan.md, Stage-*/Plan.md, Stage-*/PlanProgress.md |
+| PLANNING | reviewer | FALSE | COMPLETE | planner | Plan.md, Stage-*/Plan.md | review.md |
 </Workflow>

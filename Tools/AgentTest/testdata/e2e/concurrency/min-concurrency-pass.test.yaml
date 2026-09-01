@@ -1,5 +1,11 @@
 schema_version: 1
-id: min-concurrency-pass
+name: min-concurrency-pass
+id: 49
+version: 1
+changelog:
+  - version: 1
+    date: "2026-01-01"
+    changes: "Initial."
 description: >
   Two collaborators are dispatched as one parallel group whose pre-invocation
   interceptions both fire before either's post-invocation interception, so
@@ -11,6 +17,7 @@ negative: false
 subject:
   identity: standin-subject
   agent: standin-subject
+  infrastructure_agents: []
   opening_message: |
     Dispatch the researcher and the library researcher together, then finish.
   invocation_kind: subagent

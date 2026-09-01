@@ -1,5 +1,11 @@
 schema_version: 1
-id: one-dispatch
+name: one-dispatch
+id: 53
+version: 1
+changelog:
+  - version: 1
+    date: "2026-01-01"
+    changes: "Initial."
 description: >
   First real-harness AgentTest run. The real production orchestrator is
   deployed from the test catalogue and driven by the real brownfield-tdd
@@ -17,6 +23,7 @@ subject:
   identity: orchestrator
   agent: orchestrator
   workflows: [brownfield-tdd]
+  infrastructure_agents: []
   opening_message: |
     Task: Add a --verbose flag to the widgets CLI so it prints per-item
     diagnostics to stderr.
@@ -33,15 +40,11 @@ subject:
 stub_registry: one-dispatch.stubs.json
 
 timeout: 10m
-turn_limit: 20
+turn_limit: 5
 stop_after_invocations: 1
 
 assertions:
-  # Not exact: stop_after_invocations halts the run at the *second* dispatch,
-  # and that halted dispatch is still recorded as an observed invocation. The
-  # assertion is about the first routing decision the real brownfield-tdd
-  # workflow makes, which is codebase-research.
   invocation_sequence:
-    exact: false
+    exact: true
     steps:
       - { tool: dispatch, agent: codebase-research }

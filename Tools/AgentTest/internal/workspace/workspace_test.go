@@ -14,7 +14,7 @@ import (
 
 func testKey(t *testing.T, suffix string) domain.RunKey {
 	t.Helper()
-	return domain.RunKey{RunID: "run-" + suffix, TestID: "test-" + suffix, RunNumber: 1}
+	return domain.RunKey{RunID: "run-" + suffix, TestName: "test-" + suffix, RunNumber: 1}
 }
 
 func TestCreate_MakesFreshIsolatedSandboxWithSeparateSubjectAndControlDirs(t *testing.T) {

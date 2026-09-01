@@ -1,0 +1,25 @@
+{
+  "schema_version": 1,
+  "test_id": "interval-precise-boundary",
+  "on_unmatched": "halt",
+  "stubs": [
+    {
+      "match": { "tool": "dispatch", "agent": "implementation-tdd", "invocation": 1 },
+      "response": {
+        "agent_instance_id": "implementation-tdd#10",
+        "run_id": "{run_id}",
+        "status_code": "SUCCESS",
+        "status_message": "Implemented verbose flag parsing for stage 1."
+      }
+    },
+    {
+      "match": { "tool": "dispatch", "agent": "orchestration-review-interval-10", "invocation": 1 },
+      "response": {
+        "agent_instance_id": "orchestration-review-interval-10#11",
+        "run_id": "{run_id}",
+        "status_code": "SUCCESS",
+        "status_message": "Orchestration review complete. No drift observed."
+      }
+    }
+  ]
+}

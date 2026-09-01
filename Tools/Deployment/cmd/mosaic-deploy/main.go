@@ -80,7 +80,7 @@ func main() {
 
 	// Step 1: Pre-scan global flags needed for dependency wiring. cobra will
 	// re-parse these when cli.Run calls root.Execute; the two parses agree.
-	mosaicRoot, catalogFolderFlag, allowExternal := scanGlobalFlags(args)
+	mosaicRoot, catalogFolderFlag, logDir, allowExternal := scanGlobalFlags(args)
 
 	// Step 2: Resolve the MOSAIC root from the working directory when the flag
 	// is not provided explicitly.
@@ -134,7 +134,7 @@ func main() {
 
 	// Step 4: Construct the logger before catalog/registry (StartRun is called
 	// inside the app layer per run, not here).
-	logger := logging.New(mosaicRoot, toolCfg)
+	logger := logging.New(mosaicRoot, toolCfg, logging.WithLogDir(logDir))
 
 	// Step 5: Load the MOSAIC source catalog. The resolved catalogFolder is the
 	// exclusive source for agents and workflows; bundle and protocol always come
@@ -226,16 +226,20 @@ func main() {
 }
 
 // scanGlobalFlags does a minimal pre-scan of args for the global flags that
-// influence dependency wiring: --mosaic-root, --catalog-folder, and --allow-external.
-// cobra will re-parse all flags when cli.Run executes; this pre-scan exists only so
-// that main.go can construct app.New(deps) before handing control to cli.Run.
+// influence dependency wiring: --mosaic-root, --catalog-folder, --log-dir,
+// and --allow-external. cobra will re-parse all flags when cli.Run executes;
+// this pre-scan exists only so that main.go can construct app.New(deps) before
+// handing control to cli.Run.
 //
 // catalogFolder is the raw user-supplied value, or "" when the flag is absent.
 // Defaulting to {mosaic-root}/Catalog is done by resolveCatalogFolder, not here.
 //
+// logDir is the raw user-supplied value, or "" when the flag is absent, in
+// which case the logger writes to its default location.
+//
 // The scan understands both --flag value and --flag=value forms. It does not
 // validate other flags — unknown flags are left for cobra to handle.
-func scanGlobalFlags(args []string) (mosaicRoot, catalogFolder string, allowExternal bool) {
+func scanGlobalFlags(args []string) (mosaicRoot, catalogFolder, logDir string, allowExternal bool) {
 	for i := 0; i < len(args); i++ {
 		arg := args[i]
 		switch {
@@ -249,6 +253,11 @@ func scanGlobalFlags(args []string) (mosaicRoot, catalogFolder string, allowExte
 			i++
 		case strings.HasPrefix(arg, "--catalog-folder="):
 			catalogFolder = pathinput.Unquote(strings.TrimSpace(strings.TrimPrefix(arg, "--catalog-folder=")))
+		case arg == "--log-dir" && i+1 < len(args):
+			logDir = pathinput.Unquote(strings.TrimSpace(args[i+1]))
+			i++
+		case strings.HasPrefix(arg, "--log-dir="):
+			logDir = pathinput.Unquote(strings.TrimSpace(strings.TrimPrefix(arg, "--log-dir=")))
 		case arg == "--allow-external":
 			allowExternal = true
 		}

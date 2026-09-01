@@ -52,7 +52,57 @@ type SpawnRequest struct {
 	// The Claude Code builder ignores this field: it has
 	// --append-system-prompt-file and needs no substitute.
 	SystemPrompt string
+
+	// SessionPersistence, when true, omits --no-session-persistence from
+	// the constructed argument list, allowing the Claude Code CLI to write
+	// its transcript file. The default (false) preserves today's behaviour
+	// exactly: --no-session-persistence is emitted for both invocation kinds.
+	SessionPersistence bool
+
+	// DerivedTools is the tool allowlist derived from the invoked agent's
+	// deployed tools frontmatter. BuildArgs reads this to emit --allowedTools
+	// for Claude Code's dontAsk permission mode. BuildGHCPCLIArgs reads this
+	// to emit --allow-tool entries for Partial Allowlist mode.
+	//
+	// This field is intentionally separate from AllowedTools. AllowedTools is
+	// populated by Tools/AgentTest from a test-authored allowed_tools value (a
+	// different source, different purpose); DerivedTools is populated by
+	// Tools/Runner from the agent's own deployed frontmatter. No builder reads
+	// both fields. This separation guarantees the non-collision constraint:
+	// Runner's new deterministic behavior cannot alter AgentTest's invocations.
+	//
+	// When DerivedTools is nil or empty, BuildArgs falls back to
+	// --permission-mode auto (backward-compatible with callers that do not
+	// populate this field, notably AgentTest's SpawnPlan methods).
+	DerivedTools []string
+
+	// GHCPCLIMode selects the permission strategy for the GHCP CLI arg
+	// builder. The zero value (GHCPCLIModeUnresolved) causes
+	// BuildGHCPCLIArgs to return ErrGHCPCLIModeUnresolved. Set to
+	// GHCPCLIModeBlanket for --yolo behavior or
+	// GHCPCLIModePartialAllowlist for per-tool --allow-tool entries derived
+	// from DerivedTools.
+	GHCPCLIMode GHCPCLIPermissionMode
 }
+
+// GHCPCLIPermissionMode selects one of the two supported GHCP CLI permission
+// strategies. The zero value is invalid and rejected by BuildGHCPCLIArgs.
+type GHCPCLIPermissionMode string
+
+const (
+	// GHCPCLIModeUnresolved is the zero value. BuildGHCPCLIArgs returns
+	// ErrGHCPCLIModeUnresolved when it encounters this.
+	GHCPCLIModeUnresolved GHCPCLIPermissionMode = ""
+
+	// GHCPCLIModeBlanket selects the existing --yolo behavior: blanket
+	// permission grant, documented by the CLI as equivalent to
+	// --allow-all-tools --allow-all-paths --allow-all-urls.
+	GHCPCLIModeBlanket GHCPCLIPermissionMode = "blanket"
+
+	// GHCPCLIModePartialAllowlist selects per-tool --allow-tool entries
+	// derived from the agent's deployed tools frontmatter, omitting --yolo.
+	GHCPCLIModePartialAllowlist GHCPCLIPermissionMode = "allowlist"
+)
 
 // Response is the structured result of a spawn.
 //

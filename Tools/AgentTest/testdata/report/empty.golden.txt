@@ -1,3 +1,4 @@
+Repetitions: suite default
 Suite: empty-suite
 Started: 2026-08-07T12:00:00Z
 Finished: 2026-08-07T12:00:00Z

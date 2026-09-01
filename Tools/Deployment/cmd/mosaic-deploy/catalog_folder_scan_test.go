@@ -20,13 +20,7 @@ package main
 //     - The presence of --catalog-folder does not alter the mosaicRoot or allowExternal results.
 //     - The presence of --mosaic-root does not alter the catalogFolder result.
 //
-// NOTE: These tests reference scanGlobalFlags with its Stage-5 signature:
-//
-//     func scanGlobalFlags(args []string) (mosaicRoot, catalogFolder string, allowExternal bool)
-//
-// The current implementation returns only (mosaicRoot string, allowExternal bool). Until
-// I5.1 updates the signature to include catalogFolder, this file will not compile — that
-// is the expected TDD RED compilation failure.
+// scanGlobalFlags signature: (args []string) (mosaicRoot, catalogFolder, logDir string, allowExternal bool)
 
 import "testing"
 
@@ -40,7 +34,7 @@ import "testing"
 func TestScanGlobalFlags_CatalogFolder_SpaceForm_Returned(t *testing.T) {
 	rawPath := "/path/to/my-catalog"
 
-	_, got, _ := scanGlobalFlags([]string{"--catalog-folder", rawPath, "deploy"})
+	_, got, _, _ := scanGlobalFlags([]string{"--catalog-folder", rawPath, "deploy"})
 
 	if got != rawPath {
 		t.Errorf("scanGlobalFlags --catalog-folder %q: catalogFolder = %q, want %q; "+
@@ -56,7 +50,7 @@ func TestScanGlobalFlags_CatalogFolder_SpaceForm_QuotedValueStripped(t *testing.
 	rawPath := "/path/to/my-catalog"
 	quotedPath := `"` + rawPath + `"`
 
-	_, got, _ := scanGlobalFlags([]string{"--catalog-folder", quotedPath, "deploy"})
+	_, got, _, _ := scanGlobalFlags([]string{"--catalog-folder", quotedPath, "deploy"})
 
 	if got != rawPath {
 		t.Errorf("scanGlobalFlags --catalog-folder %q: catalogFolder = %q, want %q; "+
@@ -73,8 +67,8 @@ func TestScanGlobalFlags_CatalogFolder_SpaceForm_QuotedAndUnquotedAreIdentical(t
 	rawPath := "/path/to/my-catalog"
 	quotedPath := `"` + rawPath + `"`
 
-	_, gotQuoted, _ := scanGlobalFlags([]string{"--catalog-folder", quotedPath, "deploy"})
-	_, gotUnquoted, _ := scanGlobalFlags([]string{"--catalog-folder", rawPath, "deploy"})
+	_, gotQuoted, _, _ := scanGlobalFlags([]string{"--catalog-folder", quotedPath, "deploy"})
+	_, gotUnquoted, _, _ := scanGlobalFlags([]string{"--catalog-folder", rawPath, "deploy"})
 
 	if gotQuoted != gotUnquoted {
 		t.Errorf("scanGlobalFlags --catalog-folder: quoted form produced %q, "+
@@ -93,7 +87,7 @@ func TestScanGlobalFlags_CatalogFolder_SpaceForm_QuotedAndUnquotedAreIdentical(t
 func TestScanGlobalFlags_CatalogFolder_EqualsForm_Returned(t *testing.T) {
 	rawPath := "/path/to/my-catalog"
 
-	_, got, _ := scanGlobalFlags([]string{"--catalog-folder=" + rawPath, "deploy"})
+	_, got, _, _ := scanGlobalFlags([]string{"--catalog-folder=" + rawPath, "deploy"})
 
 	if got != rawPath {
 		t.Errorf("scanGlobalFlags --catalog-folder=%q: catalogFolder = %q, want %q; "+
@@ -108,7 +102,7 @@ func TestScanGlobalFlags_CatalogFolder_EqualsForm_QuotedValueStripped(t *testing
 	rawPath := "/path/to/my-catalog"
 	quotedPath := `"` + rawPath + `"`
 
-	_, got, _ := scanGlobalFlags([]string{"--catalog-folder=" + quotedPath, "deploy"})
+	_, got, _, _ := scanGlobalFlags([]string{"--catalog-folder=" + quotedPath, "deploy"})
 
 	if got != rawPath {
 		t.Errorf("scanGlobalFlags --catalog-folder=%q: catalogFolder = %q, want %q; "+
@@ -123,8 +117,8 @@ func TestScanGlobalFlags_CatalogFolder_EqualsForm_QuotedValueStripped(t *testing
 func TestScanGlobalFlags_CatalogFolder_EqualsForm_SpaceFormYieldSameResult(t *testing.T) {
 	rawPath := "/path/to/my-catalog"
 
-	_, gotSpace, _ := scanGlobalFlags([]string{"--catalog-folder", rawPath, "deploy"})
-	_, gotEquals, _ := scanGlobalFlags([]string{"--catalog-folder=" + rawPath, "deploy"})
+	_, gotSpace, _, _ := scanGlobalFlags([]string{"--catalog-folder", rawPath, "deploy"})
+	_, gotEquals, _, _ := scanGlobalFlags([]string{"--catalog-folder=" + rawPath, "deploy"})
 
 	if gotSpace != gotEquals {
 		t.Errorf("scanGlobalFlags: space form produced %q, equals form produced %q; "+
@@ -142,7 +136,7 @@ func TestScanGlobalFlags_CatalogFolder_EqualsForm_SpaceFormYieldSameResult(t *te
 // string. Defaulting to {mosaic-root}/Catalog is the responsibility of
 // resolveCatalogFolder, not of the pre-scan.
 func TestScanGlobalFlags_CatalogFolder_Absent_ReturnsEmpty(t *testing.T) {
-	_, got, _ := scanGlobalFlags([]string{"deploy", "--harness", "stub"})
+	_, got, _, _ := scanGlobalFlags([]string{"deploy", "--harness", "stub"})
 
 	if got != "" {
 		t.Errorf("scanGlobalFlags without --catalog-folder: catalogFolder = %q, want \"\"; "+
@@ -162,7 +156,7 @@ func TestScanGlobalFlags_CatalogFolder_CoexistsWithMosaicRoot(t *testing.T) {
 	mosaicRootPath := "/my/mosaic-root"
 	catalogFolderPath := "/my/catalog"
 
-	gotMosaicRoot, gotCatalogFolder, _ := scanGlobalFlags([]string{
+	gotMosaicRoot, gotCatalogFolder, _, _ := scanGlobalFlags([]string{
 		"--mosaic-root", mosaicRootPath,
 		"--catalog-folder", catalogFolderPath,
 		"deploy",
@@ -186,7 +180,7 @@ func TestScanGlobalFlags_CatalogFolder_CoexistsWithMosaicRoot(t *testing.T) {
 func TestScanGlobalFlags_CatalogFolder_CoexistsWithAllowExternal(t *testing.T) {
 	catalogFolderPath := "/my/catalog"
 
-	_, gotCatalogFolder, gotAllowExternal := scanGlobalFlags([]string{
+	_, gotCatalogFolder, _, gotAllowExternal := scanGlobalFlags([]string{
 		"--catalog-folder", catalogFolderPath,
 		"--allow-external",
 		"deploy",
@@ -210,7 +204,7 @@ func TestScanGlobalFlags_AllThreeGlobalFlags_AllExtracted(t *testing.T) {
 	mosaicRootPath := "/my/mosaic-root"
 	catalogFolderPath := "/my/catalog"
 
-	gotMosaicRoot, gotCatalogFolder, gotAllowExternal := scanGlobalFlags([]string{
+	gotMosaicRoot, gotCatalogFolder, _, gotAllowExternal := scanGlobalFlags([]string{
 		"--mosaic-root", mosaicRootPath,
 		"--catalog-folder", catalogFolderPath,
 		"--allow-external",
@@ -235,8 +229,8 @@ func TestScanGlobalFlags_CatalogFolder_DoesNotAffectMosaicRootResult(t *testing.
 	mosaicRootPath := "/my/mosaic-root"
 	catalogFolderPath := "/my/catalog"
 
-	withoutCatalogFolder, _, _ := scanGlobalFlags([]string{"--mosaic-root", mosaicRootPath, "deploy"})
-	withCatalogFolder, _, _ := scanGlobalFlags([]string{
+	withoutCatalogFolder, _, _, _ := scanGlobalFlags([]string{"--mosaic-root", mosaicRootPath, "deploy"})
+	withCatalogFolder, _, _, _ := scanGlobalFlags([]string{
 		"--mosaic-root", mosaicRootPath,
 		"--catalog-folder", catalogFolderPath,
 		"deploy",
@@ -256,7 +250,7 @@ func TestScanGlobalFlags_CatalogFolder_EqualsForm_CoexistsWithMosaicRootEqualsFo
 	mosaicRootPath := "/my/mosaic-root"
 	catalogFolderPath := "/my/catalog"
 
-	gotMosaicRoot, gotCatalogFolder, _ := scanGlobalFlags([]string{
+	gotMosaicRoot, gotCatalogFolder, _, _ := scanGlobalFlags([]string{
 		"--mosaic-root=" + mosaicRootPath,
 		"--catalog-folder=" + catalogFolderPath,
 		"deploy",
@@ -285,7 +279,7 @@ func TestScanGlobalFlags_AllThreeGlobalFlags_ReversedOrder_AllExtracted(t *testi
 
 	// Reversed: --allow-external first, then --catalog-folder, then --mosaic-root,
 	// followed by the subcommand. The forward-order test uses the opposite sequence.
-	gotMosaicRoot, gotCatalogFolder, gotAllowExternal := scanGlobalFlags([]string{
+	gotMosaicRoot, gotCatalogFolder, _, gotAllowExternal := scanGlobalFlags([]string{
 		"--allow-external",
 		"--catalog-folder", catalogFolderPath,
 		"--mosaic-root", mosaicRootPath,

@@ -35,9 +35,12 @@ type ToolAfterPayload struct {
 	Args          json.RawMessage `json:"args"`
 
 	// Output is the real tool's result as the after-hook received it. Its
-	// runtime shape is inconsistent between two undocumented forms, so it is
-	// carried raw and interpreted defensively rather than decoded into one
-	// assumed shape.
+	// runtime shape varies across at least three observed forms: bare XML text
+	// (raw bytes starting with '<'), a JSON-encoded string whose value may be
+	// an XML envelope, and a JSON content array of the form
+	// {"content":[{"type":"text","text":"…"}]}. An {"output":"…"} object is
+	// also handled. The field is carried raw and interpreted defensively by
+	// extractOutput rather than decoded into one assumed shape.
 	Output json.RawMessage `json:"output"`
 }
 

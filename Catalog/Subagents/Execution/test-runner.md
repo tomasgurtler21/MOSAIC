@@ -1,6 +1,6 @@
 ---
 id: 17
-version: 3.2.0
+version: 3.2.1
 name: test-runner
 description: Executes tests and reports results - providing clear pass/fail outcomes and failure diagnostics for the workflow
 role: subagent
@@ -82,7 +82,7 @@ Your test results artifact should follow this template:
 # Test Results - [Timestamp]
 
 ## Summary
-- **Status:** ✅ ALL PASSED | ⚠️ SOME FAILED | ❌ ALL FAILED | 🚫 COULD NOT RUN
+- **Status:** [PASS] ALL PASSED | [WARN] SOME FAILED | [FAIL] ALL FAILED | [N/A] COULD NOT RUN
 - **Total:** [N] tests
 - **Passed:** [N]
 - **Failed:** [N]
@@ -94,8 +94,8 @@ Your test results artifact should follow this template:
 - Branch: [N]%
 
 ## Passed Tests
-- ✅ TestName1
-- ✅ TestName2
+- [PASS] TestName1
+- [PASS] TestName2
 
 ## Failed Tests
 

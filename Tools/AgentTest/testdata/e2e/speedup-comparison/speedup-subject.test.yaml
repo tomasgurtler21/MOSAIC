@@ -1,0 +1,42 @@
+schema_version: 1
+name: speedup-subject
+id: 44
+version: 1
+changelog:
+  - version: 1
+    date: "2026-01-01"
+    changes: "Initial."
+description: >
+  One test with several repetitions so concurrent execution of the suite
+  produces a measurable wall-clock improvement over sequential execution. The
+  per-run delay is injected via Scenario.SleepBeforeExit in the Go test
+  harness; this fixture only declares the repetition count and the subject
+  script so the comparison is purely structural and deterministic.
+layer: subagent
+negative: false
+repetitions: 6
+pass_rate: 1.0
+
+subject:
+  identity: standin-subject
+  agent: standin-subject
+  infrastructure_agents: []
+  opening_message: |
+    Invoke the worker collaborator once, then finish.
+  invocation_kind: subagent
+  allowed_tools: [Task]
+
+stub_registry: speedup-subject.stubs.json
+stub_agents:
+  - identity:
+      tool: dispatch
+      agent: worker
+    source: ../stub-agent-placeholder.md
+timeout: 90s
+turn_limit: 5
+
+assertions:
+  invocation_sequence:
+    exact: true
+    steps:
+      - { tool: dispatch, agent: worker }

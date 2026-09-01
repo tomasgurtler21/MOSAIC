@@ -9,6 +9,7 @@ import json
 import pathlib
 
 import mosaic_logger_core as core
+from mosaic_logger_transcript import _long_path_safe
 
 
 # ---------------------------------------------------------------------------
@@ -81,7 +82,7 @@ def export_transcript(source_path: "str | None",
         if not source_path:
             return ExportResult(ok=False, reason="empty or None source_path")
 
-        src = pathlib.Path(source_path)
+        src = pathlib.Path(_long_path_safe(source_path))
         try:
             data = src.read_bytes()
         except Exception as exc:

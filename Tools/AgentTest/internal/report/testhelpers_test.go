@@ -68,11 +68,11 @@ func fixtureFullResult() report.Result {
 		FinishedAt:    fixtureFinished(),
 		Tests: []report.TestReport{
 			{
-				TestID:      "checkout-happy-path",
+				TestName:      "checkout-happy-path",
 				Description: "a valid cart checks out",
 				Layer:       domain.LayerSubagent,
 				Aggregate: domain.AggregateResult{
-					TestID:   "checkout-happy-path",
+					TestName:   "checkout-happy-path",
 					Verdict:  domain.VerdictPass,
 					Counted:  1,
 					Passed:   1,
@@ -84,7 +84,7 @@ func fixtureFullResult() report.Result {
 				},
 				Runs: []report.RunReport{
 					{
-						Key:      domain.RunKey{RunID: "run-001", TestID: "checkout-happy-path", RunNumber: 1},
+						Key:      domain.RunKey{RunID: "run-001", TestName: "checkout-happy-path", RunNumber: 1},
 						Verdict:  domain.VerdictPass,
 						Duration: 2 * time.Second,
 						Cost: domain.CostReport{
@@ -95,11 +95,11 @@ func fixtureFullResult() report.Result {
 				},
 			},
 			{
-				TestID:      "checkout-rejects-invalid-cart",
+				TestName:      "checkout-rejects-invalid-cart",
 				Description: "an empty cart is rejected rather than completed",
 				Layer:       domain.LayerSubagent,
 				Aggregate: domain.AggregateResult{
-					TestID:  "checkout-rejects-invalid-cart",
+					TestName:  "checkout-rejects-invalid-cart",
 					Verdict: domain.VerdictFail,
 					Reasons: []domain.FailureReason{domain.ReasonAssertion},
 					Counted: 1,
@@ -111,7 +111,7 @@ func fixtureFullResult() report.Result {
 				},
 				Runs: []report.RunReport{
 					{
-						Key:     domain.RunKey{RunID: "run-001", TestID: "checkout-rejects-invalid-cart", RunNumber: 1},
+						Key:     domain.RunKey{RunID: "run-001", TestName: "checkout-rejects-invalid-cart", RunNumber: 1},
 						Verdict: domain.VerdictFail,
 						Reasons: []domain.FailureReason{domain.ReasonAssertion},
 						Assertions: []domain.AssertionResult{
@@ -132,11 +132,11 @@ func fixtureFullResult() report.Result {
 				},
 			},
 			{
-				TestID:      "checkout-times-out",
+				TestName:      "checkout-times-out",
 				Description: "the subject exceeds its declared timeout",
 				Layer:       domain.LayerSubagent,
 				Aggregate: domain.AggregateResult{
-					TestID:  "checkout-times-out",
+					TestName:  "checkout-times-out",
 					Verdict: domain.VerdictTimeout,
 					Reasons: []domain.FailureReason{domain.ReasonTimeout},
 					Counted: 1,
@@ -148,7 +148,7 @@ func fixtureFullResult() report.Result {
 				},
 				Runs: []report.RunReport{
 					{
-						Key:      domain.RunKey{RunID: "run-001", TestID: "checkout-times-out", RunNumber: 1},
+						Key:      domain.RunKey{RunID: "run-001", TestName: "checkout-times-out", RunNumber: 1},
 						Verdict:  domain.VerdictTimeout,
 						Reasons:  []domain.FailureReason{domain.ReasonTimeout},
 						Duration: 30 * time.Second,
@@ -160,11 +160,11 @@ func fixtureFullResult() report.Result {
 				},
 			},
 			{
-				TestID:      "checkout-state-integrity-fault",
+				TestName:      "checkout-state-integrity-fault",
 				Description: "a lock reclaim recurs and ends the test as an infrastructure failure",
 				Layer:       domain.LayerSubagent,
 				Aggregate: domain.AggregateResult{
-					TestID:                "checkout-state-integrity-fault",
+					TestName:                "checkout-state-integrity-fault",
 					Verdict:               domain.VerdictFail,
 					Reasons:               []domain.FailureReason{domain.ReasonInfrastructure},
 					Counted:               0,
@@ -174,10 +174,17 @@ func fixtureFullResult() report.Result {
 					TotalCost: domain.CostReport{
 						Attribution: domain.AttributionAttributed,
 					},
+					Exclusions: []domain.ExcludedRun{
+						{
+							Key:    domain.RunKey{RunID: "run-001", TestName: "checkout-state-integrity-fault", RunNumber: 1},
+							Reason: domain.ExclusionStateIntegrity,
+							Detail: "lock was reclaimed; one or more state updates may have been lost",
+						},
+					},
 				},
 				Runs: []report.RunReport{
 					{
-						Key:      domain.RunKey{RunID: "run-001", TestID: "checkout-state-integrity-fault", RunNumber: 1},
+						Key:      domain.RunKey{RunID: "run-001", TestName: "checkout-state-integrity-fault", RunNumber: 1},
 						Verdict:  domain.VerdictFail,
 						Reasons:  []domain.FailureReason{domain.ReasonStateIntegrity},
 						Duration: 5 * time.Second,
@@ -189,11 +196,11 @@ func fixtureFullResult() report.Result {
 				},
 			},
 			{
-				TestID:      "checkout-cost-unattributed",
+				TestName:      "checkout-cost-unattributed",
 				Description: "the subject passes but its cost could not be attributed",
 				Layer:       domain.LayerSubagent,
 				Aggregate: domain.AggregateResult{
-					TestID:   "checkout-cost-unattributed",
+					TestName:   "checkout-cost-unattributed",
 					Verdict:  domain.VerdictPass,
 					Counted:  1,
 					Passed:   1,
@@ -205,7 +212,7 @@ func fixtureFullResult() report.Result {
 				},
 				Runs: []report.RunReport{
 					{
-						Key:     domain.RunKey{RunID: "run-001", TestID: "checkout-cost-unattributed", RunNumber: 1},
+						Key:     domain.RunKey{RunID: "run-001", TestName: "checkout-cost-unattributed", RunNumber: 1},
 						Verdict: domain.VerdictPass,
 						Conditions: []domain.RunCondition{
 							{Kind: domain.ConditionCostUnattributed, Detail: "log root missing"},
@@ -257,28 +264,40 @@ func fixtureAllExcludedResult() report.Result {
 		FinishedAt:    fixtureFinished(),
 		Tests: []report.TestReport{
 			{
-				TestID:      "always-loses-its-lock",
+				TestName:      "always-loses-its-lock",
 				Description: "every repetition is excluded for state integrity",
 				Layer:       domain.LayerSubagent,
 				Aggregate: domain.AggregateResult{
-					TestID:                "always-loses-its-lock",
+					TestName:                "always-loses-its-lock",
 					Verdict:               domain.VerdictFail,
 					Reasons:               []domain.FailureReason{domain.ReasonInfrastructure},
 					Counted:               0,
 					Excluded:              2,
 					InfrastructureFailure: true,
 					TotalCost:             domain.CostReport{Attribution: domain.AttributionAttributed},
+					Exclusions: []domain.ExcludedRun{
+						{
+							Key:    domain.RunKey{RunID: "run-001", TestName: "always-loses-its-lock", RunNumber: 1},
+							Reason: domain.ExclusionStateIntegrity,
+							Detail: "lock was reclaimed; one or more state updates may have been lost",
+						},
+						{
+							Key:    domain.RunKey{RunID: "run-001", TestName: "always-loses-its-lock", RunNumber: 2},
+							Reason: domain.ExclusionStateIntegrity,
+							Detail: "lock was reclaimed; one or more state updates may have been lost",
+						},
+					},
 				},
 				Runs: []report.RunReport{
 					{
-						Key:      domain.RunKey{RunID: "run-001", TestID: "always-loses-its-lock", RunNumber: 1},
+						Key:      domain.RunKey{RunID: "run-001", TestName: "always-loses-its-lock", RunNumber: 1},
 						Verdict:  domain.VerdictFail,
 						Reasons:  []domain.FailureReason{domain.ReasonStateIntegrity},
 						Duration: 500 * time.Millisecond,
 						Cost:     domain.CostReport{Attribution: domain.AttributionAttributed},
 					},
 					{
-						Key:      domain.RunKey{RunID: "run-001", TestID: "always-loses-its-lock", RunNumber: 2},
+						Key:      domain.RunKey{RunID: "run-001", TestName: "always-loses-its-lock", RunNumber: 2},
 						Verdict:  domain.VerdictFail,
 						Reasons:  []domain.FailureReason{domain.ReasonStateIntegrity},
 						Duration: 500 * time.Millisecond,

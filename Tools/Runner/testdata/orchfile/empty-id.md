@@ -3,5 +3,5 @@
 
 | Phase | Subagent | HITL | Input | Output |
 |-------|----------|:----:|-------|--------|
-| PLANNING | planner | ✅ | - | Plan.md |
+| PLANNING | planner | TRUE | - | Plan.md |
 </Workflow>

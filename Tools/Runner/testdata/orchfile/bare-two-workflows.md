@@ -3,7 +3,7 @@
 
 | Phase | Subagent | HITL | Input | Output |
 |-------|----------|:----:|-------|--------|
-| RESEARCH | researcher | ❌ | - | Research.md |
+| RESEARCH | researcher | FALSE | - | Research.md |
 </Workflow>
 
 <Workflow type="core" name="workflow-beta" version="2.0">
@@ -11,5 +11,5 @@
 
 | Phase | Subagent | HITL | Input | Output |
 |-------|----------|:----:|-------|--------|
-| PLANNING | planner | ✅ | - | Plan.md |
+| PLANNING | planner | TRUE | - | Plan.md |
 </Workflow>

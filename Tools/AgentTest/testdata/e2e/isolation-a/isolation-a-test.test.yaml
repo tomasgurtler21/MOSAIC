@@ -1,5 +1,11 @@
 schema_version: 1
-id: isolation-a-test
+name: isolation-a-test
+id: 32
+version: 1
+changelog:
+  - version: 1
+    date: "2026-01-01"
+    changes: "Initial."
 description: >
   This run's one collaborator creates artifact-a.txt and nothing else.
 layer: subagent
@@ -8,6 +14,7 @@ negative: false
 subject:
   identity: standin-subject
   agent: standin-subject
+  infrastructure_agents: []
   opening_message: |
     Ask worker-a to do its one thing, then finish.
   invocation_kind: subagent

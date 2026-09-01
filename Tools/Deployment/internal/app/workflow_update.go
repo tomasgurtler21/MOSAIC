@@ -159,7 +159,7 @@ func (s *service) UpdateWorkflows(ctx context.Context, req WorkflowUpdateRequest
 		probeAgentByKey[a.Key] = a
 	}
 
-	deployedState, err := probeDeployedStateWithIndex(workspace, plannedPaths, module.Descriptor().Frontmatter.ModelKey, seed, deployedAgentIndex, probeAgentByKey)
+	deployedState, err := probeDeployedStateWithIndex(workspace, plannedPaths, module.Descriptor().Frontmatter.ModelKey, seed, deployedAgentIndex, probeAgentByKey, nil)
 	if err != nil {
 		return domain.RunSummary{}, err
 	}
@@ -360,7 +360,7 @@ func (s *service) UpdateWorkflows(ctx context.Context, req WorkflowUpdateRequest
 	// Persist tier models and custom model IDs collected during this run (from model
 	// questions asked for newly-required agents), matching deploy-new's persistence step.
 	if len(newAgents) > 0 {
-		if err := s.persistTierModels(harnessID, newAgentModelRes.tierModelsUsed); err != nil {
+		if err := s.persistTierModels(harnessID, newAgentModelRes.interactivelyResolvedTiers); err != nil {
 			s.notifyPersistFailure(ctx, err)
 		}
 		customIDs := make([]string, 0, len(newAgentModelRes.accumulatedOptions))

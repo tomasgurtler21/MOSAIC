@@ -32,9 +32,11 @@ func buildDeps(
 	invoker domain.RawInvoker,
 	interact domain.Interaction,
 	approvals domain.ApprovalReader,
+	dispLogger domain.DispatchLogger,
 ) session.Deps {
 	consultant := &deviation.OrchestratorConsultant{
-		Invoker: invoker,
+		Invoker:        invoker,
+		DispatchLogger: dispLogger,
 	}
 
 	deps := session.Deps{

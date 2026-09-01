@@ -5,12 +5,19 @@ import (
 	"os"
 	"path/filepath"
 	"reflect"
+	"time"
 
 	"github.com/goccy/go-yaml"
 	"github.com/goccy/go-yaml/ast"
 	"github.com/goccy/go-yaml/parser"
+	"github.com/gofrs/flock"
 	"mosaic-deploy/internal/domain"
 )
+
+// lockTimeout is the maximum time WithLock waits to acquire the file lock before
+// returning an error. Chosen to be long enough to survive transient contention from
+// another concurrent deploy process while short enough to not stall the user's run.
+const lockTimeout = 3 * time.Second
 
 // userConfigSchemaVersion is the schema version written by this build into every
 // user-config.yaml. Old-schema files are migrated to this version on load.
@@ -61,6 +68,18 @@ type UserConfigStore interface {
 
 	// Path returns the absolute path of user-config.yaml.
 	Path() string
+
+	// WithLock acquires an exclusive file lock on a sidecar lock file
+	// (<Path()>.lock), calls fn, and releases the lock on return. The lock is
+	// scoped to the user-config.yaml file path so distinct MOSAIC roots never
+	// contend. If the lock cannot be acquired within the timeout (2-3 seconds),
+	// WithLock returns a non-nil error without calling fn. The error message
+	// is suitable for display through notifyPersistFailure (human-readable,
+	// mentioning that another process held the lock).
+	//
+	// Callers wrap their Load-mutate-Save cycle inside fn so the entire
+	// read-modify-write is atomic with respect to other cooperating processes.
+	WithLock(fn func() error) error
 }
 
 // ---------------------------------------------------------------------------
@@ -96,6 +115,42 @@ func NewUserConfigStore(mosaicRoot string) UserConfigStore {
 // Path returns the absolute path of user-config.yaml.
 func (s *userConfigStore) Path() string {
 	return s.filePath
+}
+
+// WithLock acquires an exclusive file lock on the sidecar lock file at
+// s.filePath+".lock", calls fn under the lock, and releases the lock on return.
+// If the lock cannot be acquired within lockTimeout, WithLock returns an error
+// without calling fn. The lock file (and its parent directory) are created if
+// they do not exist. The lock is released even if fn panics.
+func (s *userConfigStore) WithLock(fn func() error) error {
+	lockPath := s.filePath + ".lock"
+
+	// Ensure the parent directory exists so flock can create the lock file.
+	dir := filepath.Dir(lockPath)
+	if err := os.MkdirAll(dir, 0o755); err != nil {
+		return fmt.Errorf("create lock file directory: %w", err)
+	}
+
+	fl := flock.New(lockPath)
+
+	deadline := time.Now().Add(lockTimeout)
+	for {
+		ok, lockErr := fl.TryLock()
+		if lockErr != nil {
+			return fmt.Errorf("acquire lock on %s: %w", lockPath, lockErr)
+		}
+		if ok {
+			break
+		}
+		if time.Now().After(deadline) {
+			return fmt.Errorf("could not acquire lock on %s: another process held the lock for more than %s",
+				lockPath, lockTimeout)
+		}
+		time.Sleep(50 * time.Millisecond)
+	}
+
+	defer func() { _ = fl.Unlock() }()
+	return fn()
 }
 
 // Load reads user-config.yaml and returns the parsed UserConfig. When the file is absent,

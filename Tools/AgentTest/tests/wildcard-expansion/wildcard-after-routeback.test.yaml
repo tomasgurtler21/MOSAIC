@@ -1,0 +1,90 @@
+schema_version: 1
+name: wildcard-after-routeback
+id: 76
+version: 1
+changelog:
+  - version: 1
+    date: "2026-01-01"
+    changes: "Initial."
+description: >
+  Scenario W-3. After a route-back to planner that added Stage-3, the
+  orchestrator dispatches plan-review. Wildcard expansion of Stage-*/Plan.md
+  and Stage-*/PlanProgress.md must include the newly added Stage-3 files,
+  not use a stale count from before the route-back.
+
+layer: orchestrator
+negative: false
+
+subject:
+  identity: orchestrator
+  agent: orchestrator
+  workflows: [brownfield-tdd]
+  infrastructure_agents: []
+  opening_message: |
+    Continue the existing workflow run. Read the Orchestration.md in the
+    run-scoped folder and resume from where it left off. Do not ask me any
+    further questions - proceed immediately and autonomously.
+  invocation_kind: orchestrator
+  allowed_tools: [Read, Write, Edit, Bash, Glob, Grep, Task]
+
+stub_registry: wildcard-after-routeback.stubs.json
+
+timeout: 10m
+turn_limit: 5
+stop_after_invocations: 1
+
+seed_files:
+  - path: Orchestration-{run_id}/Orchestration.md
+    ref: planning-routeback-new-stage.md
+  - path: Orchestration-{run_id}/Research.md
+    ref: Research.md
+  - path: Orchestration-{run_id}/Requirements.md
+    ref: Requirements.md
+  - path: Orchestration-{run_id}/Plan.md
+    ref: Plan-3stage.md
+  - path: Orchestration-{run_id}/Stage-1/Plan.md
+    ref: Stage-1-Plan.md
+  - path: Orchestration-{run_id}/Stage-1/PlanProgress.md
+    ref: Stage-1-PlanProgress.md
+  - path: Orchestration-{run_id}/Stage-2/Plan.md
+    ref: Stage-2-Plan.md
+  - path: Orchestration-{run_id}/Stage-2/PlanProgress.md
+    ref: Stage-2-PlanProgress.md
+  - path: Orchestration-{run_id}/Stage-3/Plan.md
+    ref: Stage-3-Plan.md
+  - path: Orchestration-{run_id}/Stage-3/PlanProgress.md
+    ref: Stage-3-PlanProgress.md
+  - path: Orchestration-{run_id}/ContractsDesign.md
+    ref: ContractsDesign.md
+  - path: Orchestration-{run_id}/plan-review.md
+    ref: plan-review.md
+  - path: Orchestration-{run_id}/requirements-review.md
+    ref: requirements-review.md
+  - path: Orchestration-{run_id}/contracts-review.md
+    ref: contracts-review.md
+  - path: Orchestration-{run_id}/TestResults.md
+    ref: TestResults.md
+
+assertions:
+  invocation_sequence:
+    exact: true
+    steps:
+      - { tool: dispatch, agent: plan-review }
+
+  task_messages:
+    - at: 1
+      identity: { tool: dispatch, agent: plan-review }
+      human_in_the_loop: false
+      required_input_artifacts:
+        - Orchestration-{run_id}/Requirements.md
+        - Orchestration-{run_id}/Plan.md
+        - Orchestration-{run_id}/Stage-1/Plan.md
+        - Orchestration-{run_id}/Stage-2/Plan.md
+        - Orchestration-{run_id}/Stage-3/Plan.md
+        - Orchestration-{run_id}/Stage-1/PlanProgress.md
+        - Orchestration-{run_id}/Stage-2/PlanProgress.md
+        - Orchestration-{run_id}/Stage-3/PlanProgress.md
+      optional_input_artifacts:
+        - Orchestration-{run_id}/TestResults.md
+      required_output_artifacts:
+        - Orchestration-{run_id}/plan-review.md

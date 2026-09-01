@@ -1,0 +1,78 @@
+schema_version: 1
+name: hitl-plan-stage-override
+id: 56
+version: 1
+changelog:
+  - version: 1
+    date: "2026-01-01"
+    changes: "Initial."
+description: >
+  Scenarios H-2 + E-1. Plan stage table marks stage 1 with HITL=Yes, but
+  the workflow table marks test-writer-tdd with HITL=false. The orchestrator
+  must apply additive merge and dispatch test-writer-tdd with
+  human_in_the_loop: true. Also verifies E-1: TDD approach dispatches
+  test-writer-tdd as the first EXECUTION agent.
+
+layer: orchestrator
+negative: false
+
+subject:
+  identity: orchestrator
+  agent: orchestrator
+  workflows: [brownfield-tdd]
+  infrastructure_agents: []
+  opening_message: |
+    Continue the existing workflow run. Read the Orchestration.md in the
+    run-scoped folder and resume from where it left off. Do not ask me any
+    further questions - proceed immediately and autonomously.
+  invocation_kind: orchestrator
+  allowed_tools: [Read, Write, Edit, Bash, Glob, Grep, Task]
+
+stub_registry: hitl-plan-stage-override.stubs.json
+
+timeout: 10m
+turn_limit: 5
+stop_after_invocations: 1
+
+seed_files:
+  - path: Orchestration-{run_id}/Orchestration.md
+    ref: design-complete.md
+  - path: Orchestration-{run_id}/Research.md
+    ref: Research.md
+  - path: Orchestration-{run_id}/Requirements.md
+    ref: Requirements.md
+  - path: Orchestration-{run_id}/Plan.md
+    ref: Plan-hitl-stage1.md
+  - path: Orchestration-{run_id}/Stage-1/Plan.md
+    ref: Stage-1-Plan.md
+  - path: Orchestration-{run_id}/Stage-1/PlanProgress.md
+    ref: Stage-1-PlanProgress.md
+  - path: Orchestration-{run_id}/Stage-2/Plan.md
+    ref: Stage-2-Plan.md
+  - path: Orchestration-{run_id}/Stage-2/PlanProgress.md
+    ref: Stage-2-PlanProgress.md
+  - path: Orchestration-{run_id}/ContractsDesign.md
+    ref: ContractsDesign.md
+  - path: Orchestration-{run_id}/plan-review.md
+    ref: plan-review.md
+  - path: Orchestration-{run_id}/contracts-review.md
+    ref: contracts-review.md
+  - path: Orchestration-{run_id}/requirements-review.md
+    ref: requirements-review.md
+
+assertions:
+  invocation_sequence:
+    exact: true
+    steps:
+      - { tool: dispatch, agent: test-writer-tdd }
+
+  task_messages:
+    # Dispatch 1: test-writer-tdd with HITL=true (plan stage override)
+    - at: 1
+      identity: { tool: dispatch, agent: test-writer-tdd }
+      human_in_the_loop: true
+      required_input_artifacts:
+        - Orchestration-{run_id}/Stage-1/Plan.md
+        - Orchestration-{run_id}/ContractsDesign.md
+      optional_input_artifacts:
+        - Orchestration-{run_id}/Stage-1/PlanProgress.md

@@ -1,5 +1,11 @@
 schema_version: 1
-id: final-state-fail
+name: final-state-fail
+id: 20
+version: 1
+changelog:
+  - version: 1
+    date: "2026-01-01"
+    changes: "Initial."
 description: >
   The seeded orchestration document's phase is EXECUTION, not the declared COMPLETED, so final_state.phase must fail by name.
 layer: subagent
@@ -8,6 +14,7 @@ negative: false
 subject:
   identity: standin-subject
   agent: standin-subject
+  infrastructure_agents: []
   opening_message: |
     Greet the collaborator, then have the helper assist without creating files.
   invocation_kind: subagent

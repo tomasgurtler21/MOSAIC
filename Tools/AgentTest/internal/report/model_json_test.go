@@ -209,11 +209,11 @@ func fixtureResultWithModels(subjectModel, stubModel string) report.Result {
 		FinishedAt:    fixtureFinished(),
 		Tests: []report.TestReport{
 			{
-				TestID:      "model-attribution-test",
+				TestName:      "model-attribution-test",
 				Description: "models used appear in the report",
 				Layer:       domain.LayerSubagent,
 				Aggregate: domain.AggregateResult{
-					TestID:   "model-attribution-test",
+					TestName:   "model-attribution-test",
 					Verdict:  domain.VerdictPass,
 					Counted:  1,
 					Passed:   1,
@@ -225,7 +225,7 @@ func fixtureResultWithModels(subjectModel, stubModel string) report.Result {
 				},
 				Runs: []report.RunReport{
 					{
-						Key:          domain.RunKey{RunID: "run-001", TestID: "model-attribution-test", RunNumber: 1},
+						Key:          domain.RunKey{RunID: "run-001", TestName: "model-attribution-test", RunNumber: 1},
 						Verdict:      domain.VerdictPass,
 						Duration:     1 * time.Second,
 						SubjectModel: subjectModel,

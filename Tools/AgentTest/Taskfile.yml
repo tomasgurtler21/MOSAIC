@@ -17,13 +17,13 @@ vars:
   DIST_DIR: ./dist
 
   # Source material for the staged runtime dependencies: the logger bundle's
-  # source lives at the repo root, the cost tool's build output is another
-  # tool's dist/, and the deploy tool's build output is the Deployment tool's
-  # dist/. All three are staged into this tool's own dist/ so a freshly built
-  # binary resolves its binary-relative defaults (see
-  # cmd/mosaic-agent-test's resolveWiringConfig) with no flag or environment
-  # variable set.
-  HOOKS_SRC_DIR: ../../.claude/hooks
+  # canonical source lives in Catalog/Hooks/mosaic-logger (not the deployed
+  # copy at .claude/hooks/), the cost tool's build output is another tool's
+  # dist/, and the deploy tool's build output is the Deployment tool's dist/.
+  # All three are staged into this tool's own dist/ so a freshly built binary
+  # resolves its binary-relative defaults (see cmd/mosaic-agent-test's
+  # resolveWiringConfig) with no flag or environment variable set.
+  HOOKS_SRC_DIR: ../../Catalog/Hooks/mosaic-logger
   LOGANALYZER_DIST_DIR: ../LogAnalyzer/dist
   DEPLOYMENT_DIST_DIR: ../Deployment/dist
 
@@ -35,6 +35,7 @@ tasks:
 
   build:windows:
     desc: "Cross-compile for Windows (amd64). Output: dist/mosaic-agent-test.exe"
+    deps: [stage:bundle]
     env:
       GOOS: windows
       GOARCH: amd64
@@ -47,6 +48,7 @@ tasks:
 
   build:linux:
     desc: "Cross-compile for Linux (amd64). Output: dist/mosaic-agent-test-linux-amd64"
+    deps: [stage:bundle]
     env:
       GOOS: linux
       GOARCH: amd64
@@ -62,7 +64,8 @@ tasks:
     deps: [build:windows, build:linux]
 
   build:native:
-    desc: Build a binary for the current platform
+    desc: Build a binary for the current platform and stage the logger bundle
+    deps: [stage:bundle]
     env:
       CGO_ENABLED: "0"
     cmds:
@@ -74,18 +77,21 @@ tasks:
   # The layout staged here is the expected logger-bundle layout the
   # composition root's binary-relative default and the preflight bundle
   # check both describe: dist/logger-bundle/hook.yaml (the manifest) plus
-  # dist/logger-bundle/claude-code/ (one directory per harness variant, this
-  # tool's only bundle-consuming adapter today). Only the claude-code
-  # variant's files are staged: opencode declares no logger bundle option
-  # (see buildDeps in cmd/mosaic-agent-test/dispatch.go).
+  # one directory per harness variant. Both the claude-code and opencode
+  # variants are staged: both adapters provision the bundle into sandboxes
+  # at runtime (claudecode via provisionLoggerBundle, opencode via
+  # loadLoggerBundleContribution).
   # ---------------------------------------------------------------------------
 
   stage:bundle:
-    desc: "Stage the logger bundle's claude-code variant into dist/logger-bundle/"
+    desc: "Stage all logger bundle variants into dist/logger-bundle/"
     cmds:
       - mkdir -p {{.DIST_DIR}}/logger-bundle/claude-code
+      - mkdir -p {{.DIST_DIR}}/logger-bundle/opencode/lib
       - cp {{.HOOKS_SRC_DIR}}/hook.yaml {{.DIST_DIR}}/logger-bundle/hook.yaml
-      - cp {{.HOOKS_SRC_DIR}}/mosaic_logger*.py {{.DIST_DIR}}/logger-bundle/claude-code/
+      - cp {{.HOOKS_SRC_DIR}}/claude-code/mosaic_logger*.py {{.DIST_DIR}}/logger-bundle/claude-code/
+      - cp {{.HOOKS_SRC_DIR}}/opencode/plugin.ts {{.DIST_DIR}}/logger-bundle/opencode/plugin.ts
+      - cp {{.HOOKS_SRC_DIR}}/opencode/lib/*.ts {{.DIST_DIR}}/logger-bundle/opencode/lib/
     generates:
       - "{{.DIST_DIR}}/logger-bundle/hook.yaml"
 

@@ -1,6 +1,6 @@
 ---
 id: 19
-version: 5.2.0
+version: 5.2.1
 name: audit-to-pull-request
 description: Transforms a single audit artifact into condensed PR-ready comments — filters to PR scope via git diff hunk-level analysis with context zone intelligence, deduplicates against existing PR comments, writes unique in-scope findings to a partial PR response queue, and captures filtered-out findings in a transform report
 role: subagent
@@ -48,11 +48,11 @@ You are the **AuditToPullRequest** agent in a multi-agent orchestration system.
 
 | Classification | Condition | Write to PR Response Queue | Write to Transform Report |
 |----------------|-----------|:--------------------------:|:-------------------------:|
-| **Unique** | In-scope finding not covered by any existing PR comment | ✅ | ❌ |
-| **Expansion** | Overlaps with existing comment but adds substantive new insight (deeper impact, elevated severity) | ✅ | ❌ |
-| **Duplicate** | Same core issue already raised by an existing PR comment | ❌ | ✅ |
-| **Out-of-scope** | File not in PR, file is a pure rename (R100), file is deleted, or finding's line range does not overlap any changed hunk | ❌ | ✅ |
-| **Context-irrelevant** | Finding overlaps a hunk's context zone but is semantically unrelated to the actual change (per the `pr-scope-filtering` skill's context zone rules) | ❌ | ✅ |
+| **Unique** | In-scope finding not covered by any existing PR comment | Yes | No |
+| **Expansion** | Overlaps with existing comment but adds substantive new insight (deeper impact, elevated severity) | Yes | No |
+| **Duplicate** | Same core issue already raised by an existing PR comment | No | Yes |
+| **Out-of-scope** | File not in PR, file is a pure rename (R100), file is deleted, or finding's line range does not overlap any changed hunk | No | Yes |
+| **Context-irrelevant** | Finding overlaps a hunk's context zone but is semantically unrelated to the actual change (per the `pr-scope-filtering` skill's context zone rules) | No | Yes |
 
    Write each filtered finding to the transform report's `filtered_entries` array immediately as you classify it — do not batch in memory. For findings routed to the PR response queue, verify the line range against the cached diff and map to exact file path and line. **Normalize all file paths** to start with a leading `/` — ADO requires this prefix for inline comments to render correctly (e.g., `TestTool/Lib/File.cs` → `/TestTool/Lib/File.cs`). Apply this normalization to both PR response queue entries and transform report entries.
 8. Update the transform report's `summary` counts with final totals
@@ -239,16 +239,16 @@ The transform report uses structured JSON embedded in a markdown code block — 
 
 | Field | duplicate | out_of_scope | context_irrelevant |
 |-------|:---------:|:------------:|:------------------:|
-| classification | ✅ | ✅ | ✅ |
-| severity | ✅ | ✅ | ✅ |
-| title | ✅ | ✅ | ✅ |
-| file | ✅ | ✅ | ✅ |
-| start_line | ✅ | ✅ | ✅ |
-| end_line | ✅ | ✅ | ✅ |
-| condensed_finding | ✅ | ✅ | ✅ |
-| duplicate_of | ✅ | — | — |
-| reason | — | ✅ | ✅ |
-| nearest_change | — | — | ✅ |
+| classification | Yes | Yes | Yes |
+| severity | Yes | Yes | Yes |
+| title | Yes | Yes | Yes |
+| file | Yes | Yes | Yes |
+| start_line | Yes | Yes | Yes |
+| end_line | Yes | Yes | Yes |
+| condensed_finding | Yes | Yes | Yes |
+| duplicate_of | Yes | — | — |
+| reason | — | Yes | Yes |
+| nearest_change | — | — | Yes |
 
 ### PR Response Queue Integration
 

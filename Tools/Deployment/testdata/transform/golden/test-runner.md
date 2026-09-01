@@ -92,7 +92,7 @@ Your test results artifact should follow this template:
 # Test Results - [Timestamp]
 
 ## Summary
-- **Status:** ✅ ALL PASSED | ⚠️ SOME FAILED | ❌ ALL FAILED | 🚫 COULD NOT RUN
+- **Status:** TRUE ALL PASSED | [WARN] SOME FAILED | FALSE ALL FAILED | [N/A] COULD NOT RUN
 - **Total:** [N] tests
 - **Passed:** [N]
 - **Failed:** [N]
@@ -104,8 +104,8 @@ Your test results artifact should follow this template:
 - Branch: [N]%
 
 ## Passed Tests
-- ✅ TestName1
-- ✅ TestName2
+- TRUE TestName1
+- TRUE TestName2
 
 ## Failed Tests
 

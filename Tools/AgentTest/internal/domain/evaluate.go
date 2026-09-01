@@ -59,11 +59,21 @@ type RunEvidence struct {
 	// searched without evaluate importing anything path- or I/O-related.
 	LogRoot string
 
-	// LogsProduced reports whether LogRoot contained any log records at all.
+	// LogsProduced reports whether ANY log records exist for this session,
+	// including in the unknown-run fallback bucket. False only when neither
+	// the run-id folder nor the fallback bucket contains logs.
 	// False raises ConditionNoLogsProduced. Only meaningful when the run
 	// actually started: RunEvidence is never built on the path where it did
 	// not (see ConditionRunNotStarted).
 	LogsProduced bool
+
+	// FallbackBucketPresent reports whether the unknown-run fallback bucket
+	// exists alongside the run-id folder. Used by conditions to produce a
+	// non-misleading signal: when true, the condition detail names the
+	// fallback bucket rather than claiming no logs were found. It is used
+	// only in conditions.go and never by assertion evaluation, so assertion
+	// results remain independent of which bucket a run's logs land in.
+	FallbackBucketPresent bool
 
 	// RetainedSandboxPath is the sandbox left on disk for diagnosis by this
 	// attempt's teardown, empty when none was retained. Carried here so the
@@ -92,6 +102,18 @@ type RunEvidence struct {
 	// real value. This mirrors SubjectVersion's treatment exactly.
 	SubjectModel string
 	StubModel    string
+
+	// HarnessID is the stable identifier of the harness adapter that
+	// actually served this run, taken from adapter.ID() at evidence-building
+	// time. Empty means no harness identity was recorded; renderings show
+	// it as unknown rather than blank — matching SubjectVersion's treatment.
+	HarnessID string
+
+	// Residue is the correlation state the run still held when it ended.
+	// Zero-valued means nothing leaked, which is the expected state; see
+	// StateResidue.Unreadable for the case where that could not be
+	// established.
+	Residue StateResidue
 }
 
 // TestResult is the outcome of evaluating one run's evidence: a verdict with
@@ -137,6 +159,29 @@ type TestResult struct {
 	// report can attribute a regression to a model change.
 	SubjectModel string
 	StubModel    string
+
+	// HarnessID is carried through from RunEvidence unchanged, exactly as
+	// SubjectVersion, SubjectModel, and StubModel are. It names the harness
+	// adapter that actually served this run.
+	HarnessID string
+
+	// TerminationReason is the raw disposition string from
+	// RunEvidence.SubjectResult.Disposition, carried through unchanged so the
+	// report layer can render it without re-consulting RunEvidence. Empty means
+	// no disposition was recorded; the renderings show it as "unknown".
+	TerminationReason string
+
+	// Version is the content version of the test definition this run exercised,
+	// carried through from RunEvidence.Definition.Version by evaluate.Evaluate
+	// at both return sites. Zero means the definition was constructed without a
+	// version (e.g. in a test helper that predates versioning).
+	Version int
+
+	// NumericID is the stable numeric identity of the test definition this run
+	// exercised, carried through from RunEvidence.Definition.NumericID by
+	// evaluate.Evaluate at both return sites. Zero means the definition was
+	// constructed without a numeric ID.
+	NumericID int
 }
 
 // AssertionOutcome is the per-assertion result of evaluating one class.
@@ -178,6 +223,31 @@ const (
 	ConditionExtractionDegraded      RunConditionKind = "extraction_degraded"
 	ConditionUnmatchedInvocation     RunConditionKind = "unmatched_invocation"
 	ConditionOrchestrationUnreadable RunConditionKind = "orchestration_unreadable"
+
+	// ConditionUncorrelatedCompletion reports that at least one completion
+	// event could not be resolved to the dispatch that produced it while a
+	// dispatch was outstanding.
+	//
+	// It exists because that failure previously produced a well-formed but
+	// empty end record — no sequence number, no identity, no echo outcome —
+	// and nothing named it. Echo-fidelity comparison depends on the same
+	// correlation, so a run in this state was not evaluating echo fidelity at
+	// all, equally invisibly.
+	//
+	// Detail names how many completions were affected and how many dispatches
+	// were outstanding, and is never the empty string.
+	ConditionUncorrelatedCompletion RunConditionKind = "uncorrelated_completion"
+
+	// ConditionLeakedRunState reports that the run finished with correlation
+	// state still outstanding: pending stubs never resolved, or in-flight
+	// entries never released.
+	//
+	// It is an infrastructure condition about the tool, not a statement about
+	// the subject. Detail names the counts and the sequence numbers of the
+	// affected dispatches, so the fault is diagnosable from the report rather
+	// than by inspecting a retained sandbox — which is how it had to be
+	// discovered before this condition existed.
+	ConditionLeakedRunState RunConditionKind = "leaked_run_state"
 
 	// ConditionRunNotStarted carries the detail of a fault that stopped an
 	// attempt before it began: a setup, provisioning or spawn-plan failure, or
@@ -228,10 +298,11 @@ type RepetitionPolicy struct {
 // AggregateResult combines the results of a test's repetitions against its
 // declared pass rate.
 type AggregateResult struct {
-	TestID  string
-	Verdict Verdict
-	Reasons []FailureReason
-	Runs    []TestResult
+	TestName  string // human-readable display name of the test
+	NumericID int    // Stable numeric identity, populated from the first TestResult's NumericID.
+	Verdict   Verdict
+	Reasons   []FailureReason
+	Runs      []TestResult
 
 	// Counted excludes runs excluded for state integrity: the aggregate
 	// must measure the subject, not the tool.
@@ -252,4 +323,10 @@ type AggregateResult struct {
 	// after its single retry.
 	InfrastructureFailure bool
 	TotalCost             CostReport
+
+	// Exclusions describes every run excluded from the denominator, in the
+	// order the runs were attempted. len(Exclusions) always equals Excluded.
+	//
+	// Renders as [] rather than null, like every other collection on the wire.
+	Exclusions []ExcludedRun
 }

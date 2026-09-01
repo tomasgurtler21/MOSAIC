@@ -40,6 +40,11 @@ type ActionRecord struct {
 	Stale      []VersionDelta
 	BackupPath string
 	Err        string // non-empty only for TakenFailed
+
+	// SourceVersion is the source artifact's declared version (frontmatter `version`).
+	// Populated for agent artifacts when the source declares one; empty otherwise.
+	// This is distinct from Stale, which records staleness deltas, not the declared version.
+	SourceVersion string
 }
 
 // ExternalModuleInfo carries identity information about the external harness process, for logging

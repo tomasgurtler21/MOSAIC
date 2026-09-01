@@ -8,7 +8,8 @@ package tui
 //   - Esc from seed screen returns to task screen
 //   - Seed screen -> config on Enter
 //   - Esc from config first prompt returns to seed screen when isNewRun == true
-//   - Seed screen is skipped in both directions when isNewRun == false
+//   - Seed screen is not shown at all when isNewRun == false (the resumed run's
+//     forward and backward paths past it are covered in resume_skip_test.go)
 //   - Re-entry of the seed screen works (Reset obligation)
 //
 // RunConfig.SeedInputs mapping:
@@ -131,40 +132,32 @@ func TestNavigation_ConfigScreen_NewRun_EscReturnsToSeedScreen(t *testing.T) {
 // T1.2 — Navigation: resume-run path (isNewRun == false)
 // ---------------------------------------------------------------------------
 
-// TestNavigation_SeedInputScreen_Resume_TaskEnterGoesToConfig verifies that
-// confirming the task screen transitions directly to config when isNewRun is false
-// (the seed screen is skipped entirely on resumed runs).
-func TestNavigation_SeedInputScreen_Resume_TaskEnterGoesToConfig(t *testing.T) {
-	// newTestModel() leaves isNewRun = false (the default).
-	m := newTestModel()
-	m.screen = screenSetupTask
+// The resume path no longer passes through the task screen in either direction:
+// a resumed run is asked neither which workflow to run nor what the task is, so
+// there is no task screen for it to advance from or step back to. Both
+// directions are covered against the resume path's real shape in
+// resume_skip_test.go -- TestSetupFlow_ResumedRun_ReachesConfigurationDirectly
+// forward, TestSetupFlow_ResumedRun_BackFromConfiguration_ReturnsToTheHarnessQuestion
+// backward. What survives here is the statement those tests do not make: the
+// seed screen is not a step on the resume path either.
 
-	m.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'T'}})
-	m.Update(tea.KeyMsg{Type: tea.KeyEnter})
-
-	if m.screen != screenSetupConfig {
-		t.Errorf("screen = %v after task Enter (resume run), want screenSetupConfig (%v)",
-			m.screen, screenSetupConfig)
-	}
-}
-
-// TestNavigation_ConfigScreen_Resume_EscReturnsToTaskScreen verifies that pressing
-// Esc on the first config prompt returns directly to the task screen when isNewRun is
-// false (the seed screen is skipped in the backward direction on resumed runs).
+// TestNavigation_SeedInputScreen_Resume_IsNotShown verifies that a resumed run
+// reaching configuration never stops at the seed-input screen.
 //
-// Note: TestNavigation_ConfigScreen_EscReturnsToTaskScreen in navigation_test.go
-// already covers this case. This test restates it explicitly as the resume-path
-// counterpart to TestNavigation_ConfigScreen_NewRun_EscReturnsToSeedScreen so both
-// paths are documented in one place.
-func TestNavigation_ConfigScreen_Resume_EscReturnsToTaskScreen(t *testing.T) {
-	m := newTestModel() // isNewRun = false
-	m.screen = screenSetupConfig
+// Seed inputs seed a run at its creation. A resumed run was seeded when it was
+// created, and offering the screen again invites input that has nowhere to go.
+func TestNavigation_SeedInputScreen_Resume_IsNotShown(t *testing.T) {
+	m := newResumedRunModel(t)
 
-	sendKey(m, tea.KeyEsc)
+	sendKey(m, tea.KeyEnter) // answer the harness question
 
-	if m.screen != screenSetupTask {
-		t.Errorf("screen = %v after Esc from config (resume run), want screenSetupTask (%v)",
-			m.screen, screenSetupTask)
+	if m.screen == screenSetupSeedInput {
+		t.Errorf("the setup sequence stopped on the seed-input screen for a resumed run; " +
+			"seed inputs belong to a run's creation and cannot be supplied again on resume")
+	}
+	if m.selections.seedInput != "" {
+		t.Errorf("selections.seedInput = %q for a resumed run, want empty",
+			m.selections.seedInput)
 	}
 }
 

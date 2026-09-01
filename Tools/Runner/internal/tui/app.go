@@ -14,6 +14,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"runtime/debug"
 	"strings"
 	"time"
 
@@ -43,11 +44,13 @@ type screenID int
 
 const (
 	screenRunSelect      screenID = iota // run selection (shown when multiple resumable runs exist)
-	screenSetupFile                      // orchestrator file path entry
+	screenSetupHarness                   // harness adapter selection — first step of the setup sequence
+	screenSetupFile                      // orchestrator file path entry (legacy; no longer in active flow)
 	screenSetupWorkflow                  // workflow selection
 	screenSetupTask                      // task description entry
 	screenSetupSeedInput                 // seed-input path entry (new runs only)
 	screenSetupConfig                    // run configuration prompts
+	screenSetupGHCPMode                  // GHCP CLI permission-mode selection (shown only for ghcp-cli harness)
 	screenProgress                       // live execution progress
 	screenArtifact                       // read-only artifact inspection
 	screenQuestion                       // generic overlay from Interaction port
@@ -95,6 +98,17 @@ type Options struct {
 	// IsNewRun is true when --new-run was given or the scan yielded zero candidates.
 	IsNewRun bool
 
+	// RecordedWorkflowID is the workflow a resumed run recorded when it was
+	// created, for the entry points that settle run identity before the TUI
+	// launches (--run <run_id>). Runs chosen on the run-select screen adopt
+	// their recorded workflow there instead, and never need this.
+	//
+	// It exists because the setup sequence skips the workflow question on a
+	// resumed run: a run that arrives pre-resolved with nothing here reaches
+	// the session with no workflow at all and is refused, however well its
+	// artifact records one. Always "" for a new run.
+	RecordedWorkflowID domain.WorkflowID
+
 	// InitialRunFolder is the resolved run-scoped folder path when --run or
 	// single-candidate auto-resume resolved run identity before TUI launch.
 	// It is carried into m.selections.runFolder so that readArtifactContent
@@ -108,6 +122,15 @@ type Options struct {
 	// adapter selection and timeout from the config screen (zero value = fake adapter).
 	// When nil, the session passed to Run() is used directly (test/backward-compat path).
 	SessionFactory func(runFolder string, isNewRun bool, orchFile string, cfg screens.ConfigSelection) session.Session
+
+	// OrchestratorDiscoverer, when non-nil, is called after the user selects a harness
+	// on the harness-selection screen to compute the orchestrator file path from the
+	// harness's agents-directory convention. When nil, orchestrator discovery is skipped
+	// and OrchestratorFilePath in RunConfig will be empty (test/backward-compat path).
+	//
+	// Signature mirrors harness.DiscoverOrchestrator so the production entry point can
+	// inject it directly without the TUI importing the harness package.
+	OrchestratorDiscoverer func(workDir, harnessID string) (string, error)
 
 	// MintRunIdentity, when non-nil, is called when the user chooses "new run"
 	// on the run-select screen, to resolve run identity before the session is
@@ -133,6 +156,23 @@ type Options struct {
 	// Clock supplies the timestamp handed to ArtifactStore.SetPhase for the
 	// completion-marker write. When nil, a real UTC clock is used.
 	Clock domain.Clock
+
+	// OnRunIDResolved, when non-nil, is called once when the run-select screen
+	// resolves a deferred run identity. It receives the resolved run_id. It is
+	// nil-safe (skipped when nil) and is only invoked when the resolved run_id
+	// is non-empty (empty run_id, e.g. from a nil minter, does not trigger it).
+	OnRunIDResolved func(runID string)
+
+	// StopSignal is the shared graceful-stop flag. rootModel calls Request()
+	// when the user confirms a stop (replacing the old m.ctxCancel() call)
+	// and Reset() before rebuilding and restarting a session on the
+	// in-screen continue action, so a prior confirmed stop does not
+	// immediately re-arm on the resumed run.
+	//
+	// The same instance must be the one closed over by SessionFactory's
+	// construction of session.Deps.StopRequested, otherwise the TUI's
+	// Request()/Reset() calls have no effect on the running session.
+	StopSignal *session.StopSignal
 }
 
 // runSetupSelections holds all inputs collected during the setup phase.
@@ -192,10 +232,12 @@ type rootModel struct {
 	height    int
 
 	// Session dependencies.
-	sess            session.Session
-	sessionFactory  func(runFolder string, isNewRun bool, orchFile string, cfg screens.ConfigSelection) session.Session
-	mintRunIdentity RunIdentityMinter
-	interact        *ProgramRef
+	sess                   session.Session
+	sessionFactory         func(runFolder string, isNewRun bool, orchFile string, cfg screens.ConfigSelection) session.Session
+	mintRunIdentity        RunIdentityMinter
+	interact               *ProgramRef
+	orchestratorDiscoverer func(workDir, harnessID string) (string, error)
+	onRunIDResolved        func(runID string)
 
 	// Completion-marker write seam. When artifactStoreFactory is nil the TUI
 	// constructs the store itself from the resolved run folder. When clock is
@@ -217,11 +259,13 @@ type rootModel struct {
 	runSelectQuestion *runselect.Question
 
 	// Entry screens (concrete types so back-navigation preserves state).
+	harnessScreen   *screens.HarnessSelectScreen
 	fileScreen      *screens.OrchestratorFileScreen
 	workflowScreen  *screens.WorkflowSelectScreen
 	taskScreen      *screens.TaskScreen
 	seedInputScreen *screens.SeedInputScreen
 	configScreen    *screens.ConfigScreen
+	ghcpModeScreen  *screens.GHCPCLIModeScreen
 
 	// Collected setup selections.
 	selections runSetupSelections
@@ -260,6 +304,12 @@ type rootModel struct {
 
 	// Done screen.
 	doneScreen *screens.DoneScreen
+
+	// stopSignal is the shared graceful-stop flag (session.StopSignal). See
+	// Options.StopSignal for the contract; the same instance is closed over
+	// by SessionFactory so the TUI's Request()/Reset() calls reach the
+	// running session's dispatch loop.
+	stopSignal *session.StopSignal
 }
 
 // Run owns the terminal for the lifetime of the call. It presents the setup screens,
@@ -293,10 +343,12 @@ func newRootModel(ctx context.Context, sess session.Session, opts Options) *root
 	style := stylesFromTheme(opts.Theme)
 	ctx, cancel := context.WithCancel(ctx)
 
+	harnessScreen := screens.NewHarnessSelectScreen(w, h, style)
 	fileScreen := screens.NewOrchestratorFileScreen(w, h, style)
 	taskScreen := screens.NewTaskScreen(w, h, style)
 	seedInputScreen := screens.NewSeedInputScreen(w, h, style)
 	configScreen := screens.NewConfigScreen(w, h, style)
+	ghcpModeScreen := screens.NewGHCPCLIModeScreen(w, h, style)
 
 	interact := opts.Interaction
 	if interact == nil {
@@ -304,7 +356,7 @@ func newRootModel(ctx context.Context, sess session.Session, opts Options) *root
 	}
 
 	// Determine the initial screen and resolve run identity from pre-launch options.
-	initialScreen := screenSetupFile
+	initialScreen := screenSetupHarness
 	var runSelectScreen *screens.RunSelectScreen
 	preRunID := opts.ResolvedRunID
 	preIsNewRun := opts.IsNewRun
@@ -333,24 +385,32 @@ func newRootModel(ctx context.Context, sess session.Session, opts Options) *root
 	// Zero candidates (or pre-resolved): skip run select, go straight to setup.
 
 	m := &rootModel{
-		ctx:                  ctx,
-		ctxCancel:            cancel,
-		theme:                opts.Theme,
-		screen:               initialScreen,
-		width:                w,
-		height:               h,
-		sess:                 sess,
-		sessionFactory:       opts.SessionFactory,
-		mintRunIdentity:      opts.MintRunIdentity,
-		interact:             interact,
-		runSelectScreen:      runSelectScreen,
-		runSelectQuestion:    runSelectQuestion,
-		fileScreen:           fileScreen,
-		taskScreen:           taskScreen,
-		seedInputScreen:      seedInputScreen,
-		configScreen:         configScreen,
-		artifactStoreFactory: opts.ArtifactStoreFactory,
-		clock:                opts.Clock,
+		ctx:                    ctx,
+		ctxCancel:              cancel,
+		theme:                  opts.Theme,
+		screen:                 initialScreen,
+		width:                  w,
+		height:                 h,
+		sess:                   sess,
+		sessionFactory:         opts.SessionFactory,
+		mintRunIdentity:        opts.MintRunIdentity,
+		interact:               interact,
+		orchestratorDiscoverer: opts.OrchestratorDiscoverer,
+		runSelectScreen:        runSelectScreen,
+		runSelectQuestion:      runSelectQuestion,
+		harnessScreen:          harnessScreen,
+		fileScreen:             fileScreen,
+		taskScreen:             taskScreen,
+		seedInputScreen:        seedInputScreen,
+		configScreen:           configScreen,
+		ghcpModeScreen:         ghcpModeScreen,
+		artifactStoreFactory:   opts.ArtifactStoreFactory,
+		clock:                  opts.Clock,
+		onRunIDResolved:        opts.OnRunIDResolved,
+		stopSignal:             opts.StopSignal,
+	}
+	if m.stopSignal == nil {
+		m.stopSignal = session.NewStopSignal()
 	}
 
 	// Always propagate InitialRunFolder so readArtifactContent and the COMPLETED-marker
@@ -360,6 +420,13 @@ func newRootModel(ctx context.Context, sess session.Session, opts Options) *root
 	if preRunID != "" || preIsNewRun {
 		m.selections.runID = preRunID
 		m.selections.isNewRun = preIsNewRun
+	}
+	// A run resolved before launch never reaches the run-select screen, which is
+	// where a chosen run adopts its recorded workflow. Since the setup sequence
+	// no longer asks a resumed run which workflow to run, the recorded value has
+	// to enter here or not at all.
+	if !preIsNewRun && opts.RecordedWorkflowID != "" {
+		m.selections.workflowID = opts.RecordedWorkflowID
 	}
 
 	return m
@@ -416,10 +483,10 @@ func stylesFromTheme(t tuicommon.Theme) screens.Styles {
 
 // Init is called once when the Bubble Tea program starts.
 func (m *rootModel) Init() tea.Cmd {
-	if m.screen == screenRunSelect {
-		return nil
-	}
-	return m.fileScreen.InputInit()
+	// The harness-select screen (and the run-select screen) are list-based and
+	// require no init command. Text-input screens call their own InputInit when
+	// transitioning to them.
+	return nil
 }
 
 // Update processes an incoming message and drives the screen state machine.
@@ -523,6 +590,8 @@ func (m *rootModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	switch m.screen {
 	case screenRunSelect:
 		return m.updateRunSelect(msg)
+	case screenSetupHarness:
+		return m.updateSetupHarness(msg)
 	case screenSetupFile:
 		return m.updateSetupFile(msg)
 	case screenSetupWorkflow:
@@ -533,6 +602,8 @@ func (m *rootModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		return m.updateSetupSeedInput(msg)
 	case screenSetupConfig:
 		return m.updateSetupConfig(msg)
+	case screenSetupGHCPMode:
+		return m.updateSetupGHCPMode(msg)
 	case screenProgress:
 		return m.updateProgress(msg)
 	case screenArtifact:
@@ -553,6 +624,9 @@ func (m *rootModel) resizeScreens() {
 	if m.runSelectScreen != nil {
 		m.runSelectScreen.Resize(m.width, m.height)
 	}
+	if m.harnessScreen != nil {
+		m.harnessScreen.Resize(m.width, m.height)
+	}
 	if m.fileScreen != nil {
 		m.fileScreen.Resize(m.width, m.height)
 	}
@@ -567,6 +641,9 @@ func (m *rootModel) resizeScreens() {
 	}
 	if m.configScreen != nil {
 		m.configScreen.Resize(m.width, m.height)
+	}
+	if m.ghcpModeScreen != nil {
+		m.ghcpModeScreen.Resize(m.width, m.height)
 	}
 	if m.progressScreen != nil {
 		m.progressScreen.Resize(m.width, m.height)
@@ -591,8 +668,8 @@ func (m *rootModel) resizeScreens() {
 
 func (m *rootModel) updateRunSelect(msg tea.Msg) (tea.Model, tea.Cmd) {
 	if m.runSelectScreen == nil {
-		m.screen = screenSetupFile
-		return m, m.fileScreen.InputInit()
+		m.screen = screenSetupHarness
+		return m, nil
 	}
 	m.runSelectScreen.Update(msg)
 	if m.runSelectScreen.Back() {
@@ -610,6 +687,9 @@ func (m *rootModel) updateRunSelect(msg tea.Msg) (tea.Model, tea.Cmd) {
 				m.selections.runID = ""
 				m.selections.runFolder = ""
 			}
+			if m.onRunIDResolved != nil && m.selections.runID != "" {
+				m.onRunIDResolved(m.selections.runID)
+			}
 		} else if m.runSelectQuestion != nil {
 			choiceID := m.runSelectScreen.SelectedChoiceID()
 			// Resolve the chosen ID back to a full Identity via the same
@@ -622,15 +702,39 @@ func (m *rootModel) updateRunSelect(msg tea.Msg) (tea.Model, tea.Cmd) {
 				mint = func() (string, string) { return "", "" }
 			}
 			id, err := runselect.Answer(*m.runSelectQuestion, choiceID, runselect.Minter(mint))
-			if err == nil {
-				m.selections.runID = id.RunID
-				m.selections.runFolder = id.RunFolder
-				m.selections.isNewRun = false
-				// Reconstruct the session with the correct run-scoped store if a factory is available.
-				// Harness config is not yet known (config screen has not run); defaults to fake adapter.
-				if m.sessionFactory != nil {
-					m.sess = m.sessionFactory(id.RunFolder, false, "", screens.ConfigSelection{})
-				}
+			if err != nil {
+				// The screen should never offer a choice Answer cannot
+				// resolve, so this is a defect rather than a user mistake --
+				// and it must be shown rather than swallowed. Falling through
+				// would leave the run, its folder and its workflow all empty
+				// while isNewRun stayed false, which the setup flow reads as a
+				// resumed run and walks past every remaining question with
+				// nothing selected.
+				style := stylesFromTheme(m.theme)
+				m.doneScreen = screens.NewDoneScreen(
+					domain.RunOutcome{Status: domain.RunRefused, Message: err.Error()},
+					"", m.width, m.height, style,
+				)
+				m.screen = screenDone
+				m.runSelectScreen.Reset()
+				return m, nil
+			}
+			m.selections.runID = id.RunID
+			m.selections.runFolder = id.RunFolder
+			m.selections.isNewRun = false
+			// The chosen run brings its workflow with it. Adopting it here
+			// is what makes skipping the workflow question safe: the value
+			// is settled the moment the run is, not dropped and asked for
+			// again. A run that recorded none carries none, and the
+			// session layer refuses it rather than setup substituting one.
+			m.selections.workflowID = domain.WorkflowID(id.Workflow)
+			// Reconstruct the session with the correct run-scoped store if a factory is available.
+			// Harness config is not yet known (config screen has not run); defaults to fake adapter.
+			if m.sessionFactory != nil {
+				m.sess = m.sessionFactory(id.RunFolder, false, "", screens.ConfigSelection{})
+			}
+			if m.onRunIDResolved != nil && m.selections.runID != "" {
+				m.onRunIDResolved(m.selections.runID)
 			}
 		}
 		// When "new run" is selected, the session factory is called with the minted
@@ -639,8 +743,8 @@ func (m *rootModel) updateRunSelect(msg tea.Msg) (tea.Model, tea.Cmd) {
 			m.sess = m.sessionFactory(m.selections.runFolder, true, "", screens.ConfigSelection{})
 		}
 		m.runSelectScreen.Reset()
-		m.screen = screenSetupFile
-		return m, m.fileScreen.InputInit()
+		m.screen = screenSetupHarness
+		return m, nil
 	}
 	return m, nil
 }
@@ -648,6 +752,120 @@ func (m *rootModel) updateRunSelect(msg tea.Msg) (tea.Model, tea.Cmd) {
 // ---------------------------------------------------------------------------
 // Setup screen handlers
 // ---------------------------------------------------------------------------
+
+func (m *rootModel) updateSetupHarness(msg tea.Msg) (tea.Model, tea.Cmd) {
+	if m.harnessScreen == nil {
+		m.screen = screenSetupWorkflow
+		return m, nil
+	}
+	m.harnessScreen.Update(msg)
+	if m.harnessScreen.Back() {
+		m.harnessScreen.Reset()
+		return m, tea.Quit
+	}
+	if m.harnessScreen.Done() {
+		harnessID := m.harnessScreen.SelectedID()
+		m.harnessScreen.Reset()
+
+		// Auto-discover the orchestrator file from the harness's agents directory.
+		// The discoverer is injected via Options so that the TUI package does not
+		// import the concrete harness package (import boundary constraint).
+		orchPath := ""
+		if m.orchestratorDiscoverer != nil {
+			workDir, wdErr := os.Getwd()
+			if wdErr != nil {
+				style := stylesFromTheme(m.theme)
+				m.doneScreen = screens.NewDoneScreen(
+					domain.RunOutcome{Status: domain.RunRefused, Message: wdErr.Error()},
+					"", m.width, m.height, style,
+				)
+				m.screen = screenDone
+				return m, nil
+			}
+			discovered, orchErr := m.orchestratorDiscoverer(workDir, harnessID)
+			if orchErr != nil {
+				style := stylesFromTheme(m.theme)
+				m.doneScreen = screens.NewDoneScreen(
+					domain.RunOutcome{Status: domain.RunRefused, Message: orchErr.Error()},
+					"", m.width, m.height, style,
+				)
+				m.screen = screenDone
+				return m, nil
+			}
+			orchPath = discovered
+			m.selections.orchestratorFile = orchPath
+		}
+
+		// Enumerate workflow regions from the discovered file (when available).
+		// When no discoverer is injected (test/backward-compat), the workflow list
+		// is empty and the workflow screen renders an empty list.
+		var regions []domain.WorkflowRegion
+		if orchPath != "" {
+			var err error
+			regions, err = orchfile.EnumerateWorkflows(orchPath)
+			if err != nil {
+				style := stylesFromTheme(m.theme)
+				m.doneScreen = screens.NewDoneScreen(
+					domain.RunOutcome{Status: domain.RunRefused, Message: err.Error()},
+					"", m.width, m.height, style,
+				)
+				m.screen = screenDone
+				return m, nil
+			}
+
+			// Enumerate infrastructure agents so the config screen can prompt when
+			// multiple agents of the same gated class are declared.
+			infraAgents, err := orchfile.EnumerateInfrastructureAgents(orchPath)
+			if err != nil {
+				infraAgents = nil
+			}
+			m.configScreen.SetDeclaredAgents(infraAgents)
+		}
+		m.workflows = regions
+
+		// Tell the config screen the harness is already selected so it skips
+		// the harness step in its own wizard.
+		m.configScreen.SetPreselectedHarness(harnessID)
+		// Propagate into selections so startSession() can read it.
+		m.selections.config.Harness = harnessID
+
+		style := stylesFromTheme(m.theme)
+		m.workflowScreen = screens.NewWorkflowSelectScreen(regions, m.width, m.height, style)
+
+		// A resumed run is asked neither which workflow to run nor what its
+		// task is. Both were settled when the run was created and both are
+		// recorded in its artifact, so asking again only invites an answer that
+		// contradicts the run being resumed. The harness question is the last
+		// one such a run is asked; from here it goes straight to configuration,
+		// carrying whatever workflow it recorded -- including none, which the
+		// session layer refuses rather than setup papering over.
+		if !m.selections.isNewRun {
+			m.prepareConfigScreen()
+			m.screen = screenSetupConfig
+			return m, nil
+		}
+
+		m.screen = screenSetupWorkflow
+		return m, nil
+	}
+	return m, nil
+}
+
+// prepareConfigScreen tells the configuration screen which run mode it is in
+// and how the version the selected workflow declares compares with the one the
+// run recorded, so it can decide whether to ask about version drift.
+//
+// Both facts become knowable only once the workflow is settled, and that
+// happens at a different point on each path: at the user's answer for a new
+// run, and at the harness question for a resumed one, which never reaches the
+// workflow screen at all.
+func (m *rootModel) prepareConfigScreen() {
+	m.configScreen.SetIsNewRun(m.selections.isNewRun)
+	m.configScreen.SetVersionDriftInfo(
+		string(m.recordedWorkflowVersion()),
+		string(m.selectedWorkflowVersion()),
+	)
+}
 
 func (m *rootModel) updateSetupFile(msg tea.Msg) (tea.Model, tea.Cmd) {
 	cmd := m.fileScreen.Update(msg)
@@ -698,12 +916,17 @@ func (m *rootModel) updateSetupWorkflow(msg tea.Msg) (tea.Model, tea.Cmd) {
 	m.workflowScreen.Update(msg)
 	if m.workflowScreen.Back() {
 		m.workflowScreen.Reset()
-		m.screen = screenSetupFile
-		return m, m.fileScreen.InputInit()
+		m.screen = screenSetupHarness
+		return m, nil
 	}
 	if m.workflowScreen.Done() {
 		selectedID := m.workflowScreen.SelectedID()
 		m.selections.workflowID = domain.WorkflowID(selectedID)
+
+		// The version-drift question is only meaningful once both versions are
+		// known, and the selected workflow's version is only known here. A new
+		// run has no recorded version, so it is never asked.
+		m.prepareConfigScreen()
 
 		m.workflowScreen.Reset()
 		m.screen = screenSetupTask
@@ -756,31 +979,102 @@ func (m *rootModel) updateSetupConfig(msg tea.Msg) (tea.Model, tea.Cmd) {
 			m.screen = screenSetupSeedInput
 			return m, m.seedInputScreen.InputInit()
 		}
-		m.screen = screenSetupTask
-		return m, m.taskScreen.InputInit()
+		// Back returns the user to the last question they were actually asked.
+		// A resumed run was never asked for its workflow or its task, so that
+		// question is the harness one; routing back to a skipped screen would
+		// put the very question the forward path exists to suppress.
+		m.screen = screenSetupHarness
+		return m, nil
 	}
 	if m.configScreen.Done() {
 		m.selections.config = m.configScreen.Selection()
 		m.configScreen.Reset()
 
-		// Reconstruct the session with the harness adapter selected in the config screen.
-		// This replaces the placeholder session (which used the fake adapter) with one
-		// using the real adapter when "Claude Code CLI" was chosen.
-		if m.sessionFactory != nil {
-			m.sess = m.sessionFactory(m.selections.runFolder, m.selections.isNewRun, m.selections.orchestratorFile, m.selections.config)
+		// When the selected harness is GHCP CLI, show the permission-mode
+		// selection screen before spawning any process. For all other harnesses,
+		// proceed directly to the progress screen.
+		if m.selections.config.Harness == "ghcp-cli" {
+			m.ghcpModeScreen.Reset()
+			m.screen = screenSetupGHCPMode
+			return m, nil
 		}
 
-		// Transition to progress screen and start the session. The chosen run
-		// is stated as the initial status line before dispatch (AC2.7),
-		// mirroring the CLI's stdout announcement -- the same runselect.Announce
-		// renderer, so the wording is the single source for both frontends.
-		style := stylesFromTheme(m.theme)
-		m.progressScreen = screens.NewProgressScreen(m.width, m.height, style)
-		m.progressScreen.SetStatus(runselect.Announce(m.announceIdentity()), false)
-		m.screen = screenProgress
-		return m, tea.Batch(m.progressScreen.Init(), m.startSession())
+		return m, m.launchSession()
 	}
 	return m, nil
+}
+
+// launchSession wires the session factory with the current config selection and
+// transitions to the progress screen, starting the session in a background goroutine.
+// This is the common terminal step from both updateSetupConfig (non-GHCP-CLI harnesses)
+// and updateSetupGHCPMode (GHCP CLI harness, after mode is resolved).
+func (m *rootModel) launchSession() tea.Cmd {
+	// Reconstruct the session with the harness adapter and resolved config.
+	// This replaces the placeholder session (which used the fake adapter) with
+	// one using the real adapter and all resolved settings.
+	if m.sessionFactory != nil {
+		m.sess = m.sessionFactory(m.selections.runFolder, m.selections.isNewRun, m.selections.orchestratorFile, m.selections.config)
+	}
+
+	// Transition to progress screen and start the session. The chosen run
+	// is stated as the initial status line before dispatch, mirroring the
+	// CLI's stdout announcement.
+	style := stylesFromTheme(m.theme)
+	m.progressScreen = screens.NewProgressScreen(m.width, m.height, style)
+	m.progressScreen.SetStatus(runselect.Announce(m.announceIdentity()), false)
+	m.screen = screenProgress
+	return tea.Batch(m.progressScreen.Init(), m.startSession())
+}
+
+func (m *rootModel) updateSetupGHCPMode(msg tea.Msg) (tea.Model, tea.Cmd) {
+	if m.ghcpModeScreen == nil {
+		// Screen not available; default to blanket and proceed.
+		m.selections.config.GHCPCLIMode = string(screens.GHCPCLIModeBlanket)
+		return m, m.launchSession()
+	}
+	m.ghcpModeScreen.Update(msg)
+	if m.ghcpModeScreen.Back() {
+		m.ghcpModeScreen.Reset()
+		m.screen = screenSetupConfig
+		return m, nil
+	}
+	if m.ghcpModeScreen.Done() {
+		m.selections.config.GHCPCLIMode = string(m.ghcpModeScreen.Mode())
+		m.ghcpModeScreen.Reset()
+		return m, m.launchSession()
+	}
+	return m, nil
+}
+
+// recordedWorkflowVersion returns the workflow version recorded in the run's
+// artifact frontmatter, or the empty version when there is nothing to read: a
+// new run has no prior artifact, and a resumed run whose artifact is missing,
+// unreadable, or unparseable has no recorded version to compare against.
+func (m *rootModel) recordedWorkflowVersion() domain.WorkflowVersion {
+	if m.selections.isNewRun || m.selections.runFolder == "" {
+		return ""
+	}
+	data, err := os.ReadFile(filepath.Join(m.selections.runFolder, "Orchestration.md"))
+	if err != nil {
+		return ""
+	}
+	state, err := artifact.Parse(data)
+	if err != nil {
+		return ""
+	}
+	return state.WorkflowVersion
+}
+
+// selectedWorkflowVersion returns the version declared by the workflow region
+// the user selected, or the empty version when the orchestrator file declares
+// none for it.
+func (m *rootModel) selectedWorkflowVersion() domain.WorkflowVersion {
+	for _, wf := range m.workflows {
+		if wf.Info.ID == m.selections.workflowID {
+			return wf.Info.Version
+		}
+	}
+	return ""
 }
 
 // announceIdentity builds the runselect.Identity used to render the
@@ -822,8 +1116,7 @@ func (m *rootModel) updateProgress(msg tea.Msg) (tea.Model, tea.Cmd) {
 	cmd := m.progressScreen.Update(msg)
 
 	if m.progressScreen.GracefulStop() {
-		// Cancel the context so the session's next harness.Invoke sees ctx.Err().
-		m.ctxCancel()
+		m.stopSignal.Request()
 	}
 
 	if m.progressScreen.ArtifactViewRequested() {
@@ -1100,6 +1393,26 @@ func (m *rootModel) updateDone(msg tea.Msg) (tea.Model, tea.Cmd) {
 		if m.doneScreen.Done() {
 			return m, tea.Quit
 		}
+		if m.doneScreen.Continue() {
+			// Resume: disarm the prior confirmed stop so the new run's dispatch
+			// loop does not see a stale stop signal on its very first boundary check.
+			m.stopSignal.Reset()
+			// Rebuild the session via the factory if one is set, mirroring the
+			// updateExecOverride retry path. Reuse m.sess directly when no factory
+			// is set (test/backward-compat path).
+			if m.sessionFactory != nil {
+				m.sess = m.sessionFactory(m.selections.runFolder, m.selections.isNewRun, m.selections.orchestratorFile, m.selections.config)
+			}
+			// Always construct a new ProgressScreen — the old one still holds
+			// the completed run's row history and stop notice.
+			style := stylesFromTheme(m.theme)
+			m.progressScreen = screens.NewProgressScreen(m.width, m.height, style)
+			m.doneScreen = nil
+			m.screen = screenProgress
+			// Reuse m.ctx unchanged — Stage 2 stopped cancelling ctx on graceful
+			// stop, so the existing context is still valid and reusable.
+			return m, tea.Batch(m.progressScreen.Init(), m.startSession())
+		}
 	}
 	return m, nil
 }
@@ -1139,13 +1452,24 @@ func (m *rootModel) startSession() tea.Cmd {
 	sess := m.sess
 	ctx := m.ctx
 
-	return func() tea.Msg {
+	return func() (msg tea.Msg) {
+		defer func() {
+			if p := recover(); p != nil {
+				stack := debug.Stack()
+				if len(stack) > 4096 {
+					stack = stack[:4096]
+				}
+				msg = runErrorMsg{err: fmt.Errorf("panic in session: %v\n%s", p, stack)}
+			}
+		}()
+
 		var seedInputs []string
 		if sel.isNewRun && sel.seedInput != "" {
 			seedInputs = []string{sel.seedInput}
 		}
 		config := domain.RunConfig{
 			OrchestratorFilePath: sel.orchestratorFile,
+			HarnessID:            sel.config.Harness,
 			WorkflowID:           sel.workflowID,
 			Task:                 sel.task,
 			RunID:                sel.runID,
@@ -1176,6 +1500,10 @@ func (m *rootModel) View() string {
 		if m.runSelectScreen != nil {
 			return m.runSelectScreen.View()
 		}
+	case screenSetupHarness:
+		if m.harnessScreen != nil {
+			return m.harnessScreen.View()
+		}
 	case screenSetupFile:
 		return m.fileScreen.View()
 	case screenSetupWorkflow:
@@ -1188,6 +1516,10 @@ func (m *rootModel) View() string {
 		return m.seedInputScreen.View()
 	case screenSetupConfig:
 		return m.configScreen.View()
+	case screenSetupGHCPMode:
+		if m.ghcpModeScreen != nil {
+			return m.ghcpModeScreen.View()
+		}
 	case screenProgress:
 		if m.progressScreen != nil {
 			return m.progressScreen.View()
@@ -1226,4 +1558,3 @@ func (m *rootModel) viewQuestion() string {
 	}
 	return m.theme.Style(tuicommon.RoleMuted).Render("Waiting for question…")
 }
-

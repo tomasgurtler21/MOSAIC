@@ -121,8 +121,16 @@ func ResolveExecutable(path string) (Command, error) {
 // <env> block is synthesized and prepended to the stdin payload alongside the
 // prompt content.
 //
-// Both invocation kinds use --permission-mode auto and never include
-// --dangerously-skip-permissions.
+// When req.DerivedTools is non-empty, both invocation kinds use
+// --permission-mode dontAsk and emit one --allowedTools flag per tool name
+// from DerivedTools. This is the deterministic permission path used by the
+// Runner adapter after reading the agent's deployed frontmatter.
+//
+// When req.DerivedTools is nil or empty, both invocation kinds fall back to
+// --permission-mode auto (backward-compatible with callers that do not
+// populate DerivedTools, notably AgentTest's SpawnPlan methods).
+//
+// --dangerously-skip-permissions is never included.
 //
 // The prompt content never appears as an argv value. -p is emitted as a bare
 // flag with no following value; the prompt content (with the <env> block
@@ -135,6 +143,13 @@ func ResolveExecutable(path string) (Command, error) {
 func BuildArgs(req SpawnRequest) (args []string, stdin []byte, err error) {
 	stdinContent := req.Prompt
 
+	// Select permission mode. When DerivedTools is non-empty, use deterministic
+	// dontAsk mode; otherwise fall back to auto for backward compatibility.
+	permMode := "auto"
+	if len(req.DerivedTools) > 0 {
+		permMode = "dontAsk"
+	}
+
 	switch req.Agent.Kind {
 	case InvocationOrchestrator:
 		stdinContent = EnvBlock(req.WorkingDir) + "\n" + stdinContent
@@ -142,17 +157,23 @@ func BuildArgs(req SpawnRequest) (args []string, stdin []byte, err error) {
 			"--agent", req.Agent.Identifier,
 			"-p",
 			"--output-format", req.OutputFormat,
-			"--permission-mode", "auto",
-			"--no-session-persistence",
+			"--permission-mode", permMode,
 		}
 	default: // InvocationOrdinary
 		args = []string{
 			"-p",
 			"--append-system-prompt-file", req.Agent.DefinitionPath,
 			"--output-format", req.OutputFormat,
-			"--permission-mode", "auto",
-			"--no-session-persistence",
+			"--permission-mode", permMode,
 		}
+	}
+
+	if !req.SessionPersistence {
+		args = append(args, "--no-session-persistence")
+	}
+
+	for _, tool := range req.DerivedTools {
+		args = append(args, "--allowedTools", tool)
 	}
 
 	args = append(args, req.ExtraArgs...)
@@ -232,11 +253,11 @@ func Run(ctx context.Context, cmd Command, args []string, o RunOptions) (Respons
 	var waitErr error
 	select {
 	case <-ctx.Done():
-		_ = execCmd.Process.Kill()
+		killProcessTree(execCmd.Process)
 		<-waitCh
 		return Response{}, ErrCancelled
 	case <-time.After(timeout):
-		_ = execCmd.Process.Kill()
+		killProcessTree(execCmd.Process)
 		<-waitCh
 		logEvent(o.Sink, "spawn.timeout", "invocation exceeded configured timeout", nil)
 		return Response{}, ErrTimeout

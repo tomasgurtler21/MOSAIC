@@ -58,7 +58,10 @@ var (
 // (losing the CLI's <env> block), the shared package synthesizes an
 // equivalent <env> block and prepends it to the -p prompt content.
 //
-// Both invocation kinds use --permission-mode auto and --output-format json.
+// Both invocation kinds read the agent's deployed definition file to extract
+// the tools frontmatter field, then use --permission-mode dontAsk with
+// --allowedTools entries derived from that field. An agent with a missing or
+// empty tools field is rejected before any subprocess is spawned (FR-10).
 // --dangerously-skip-permissions is never used.
 type ClaudeCodeAdapter struct {
 	executablePath string
@@ -123,6 +126,18 @@ func (a *ClaudeCodeAdapter) Invoke(ctx context.Context, agent domain.AgentRefere
 		domain.F("kind", string(agent.InvocationKind)),
 	)
 
+	// FR-10: extract tools from the agent's deployed definition file before
+	// building the spawn request. An agent with missing or empty tools is
+	// rejected here, before any subprocess is spawned.
+	derivedTools, err := commonharness.ExtractClaudeCodeTools(agent.DefinitionPath)
+	if err != nil {
+		wrapped := fmt.Errorf("agent %q (%s): %w", agent.Identifier, agent.DefinitionPath, err)
+		a.logger.Log(domain.EventHarnessInvokeError, wrapped.Error(),
+			domain.F("agent", request.AgentInstanceID),
+		)
+		return domain.ProtocolResponse{}, wrapped
+	}
+
 	reqBytes, err := MarshalRequest(request)
 	if err != nil {
 		return domain.ProtocolResponse{}, fmt.Errorf("marshal request: %w", err)
@@ -136,6 +151,7 @@ func (a *ClaudeCodeAdapter) Invoke(ctx context.Context, agent domain.AgentRefere
 		},
 		Prompt:       string(reqBytes),
 		OutputFormat: "json",
+		DerivedTools: derivedTools,
 	}
 
 	resp, err := a.spawner.Spawn(ctx, spawnReq)
@@ -231,6 +247,18 @@ func (a *ClaudeCodeAdapter) InvokeRaw(ctx context.Context, agent domain.AgentRef
 		domain.F("kind", string(agent.InvocationKind)),
 	)
 
+	// FR-10: extract tools from the agent's deployed definition file before
+	// building the spawn request. An agent with missing or empty tools is
+	// rejected here, before any subprocess is spawned.
+	derivedTools, err := commonharness.ExtractClaudeCodeTools(agent.DefinitionPath)
+	if err != nil {
+		wrapped := fmt.Errorf("agent %q (%s): %w", agent.Identifier, agent.DefinitionPath, err)
+		a.logger.Log(domain.EventHarnessInvokeError, wrapped.Error(),
+			domain.F("agent", agent.Identifier),
+		)
+		return nil, wrapped
+	}
+
 	spawnReq := commonharness.SpawnRequest{
 		Agent: commonharness.AgentRef{
 			Identifier:     agent.Identifier,
@@ -239,6 +267,7 @@ func (a *ClaudeCodeAdapter) InvokeRaw(ctx context.Context, agent domain.AgentRef
 		},
 		Prompt:       string(payload),
 		OutputFormat: "json",
+		DerivedTools: derivedTools,
 	}
 
 	cmd, err := commonharness.ResolveExecutable(a.executablePath)

@@ -22,3 +22,9 @@ const (
 // environment is what lets the adapter report the user scope as neutralized
 // rather than merely inspected.
 const ConfigHomeEnvVar = "CLAUDE_CONFIG_DIR"
+
+// RunIDEnvVar is the environment variable injected into the subject's process
+// so the MOSAIC logger bundle can attribute the session's events to the
+// correct run bucket without waiting for a protocol-compliant dispatch to
+// extract a run id from the opening prompt.
+const RunIDEnvVar = "MOSAIC_RUN_ID"

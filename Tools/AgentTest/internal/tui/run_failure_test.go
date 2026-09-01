@@ -44,12 +44,12 @@ import (
 // so report-write-failure tests can verify the run result is retained.
 func runFailureResult(suiteID, testID string) report.Result {
 	run := report.RunReport{
-		Key:      domain.RunKey{TestID: testID, RunNumber: 1},
+		Key:      domain.RunKey{TestName: testID, RunNumber: 1},
 		Verdict:  domain.VerdictPass,
 		Duration: time.Second,
 	}
-	tr := report.TestReport{TestID: testID, Runs: []report.RunReport{run}}
-	return report.Build(suiteID, time.Now(), time.Now(), []report.TestReport{tr})
+	tr := report.TestReport{TestName: testID, Runs: []report.RunReport{run}}
+	return report.Build(suiteID, time.Now(), time.Now(), []report.TestReport{tr}, "")
 }
 
 // tuiStubStructuredFailure is a test-local error type that satisfies the

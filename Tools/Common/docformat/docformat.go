@@ -435,14 +435,37 @@ func parseFrontmatterBytes(data []byte) (*Frontmatter, error) {
 	var currentKey string
 	var currentLines [][]byte
 	var currentStartLine int
+	// braceDepth tracks whether we are currently inside a multi-line flow mapping
+	// value (open brace count > 0). Continuation lines inside a brace span are
+	// opaque content and must not be checked for tab indentation.
+	braceDepth := 0
 
 	for lineNum, line := range lines {
-		// Detect tab at the start of any line (YAML disallows tab indentation).
-		if len(line) > 0 && line[0] == '\t' {
+		// Update brace depth from the previous line's content before the tab check.
+		// If we are inside an open brace span, tab indentation is opaque content
+		// and must not trigger an error.
+		insideBraceSpan := braceDepth > 0
+
+		// Detect tab at the start of any line (YAML disallows tab indentation),
+		// but only for lines that are not inside a multi-line flow mapping span.
+		if !insideBraceSpan && len(line) > 0 && line[0] == '\t' {
 			return nil, fmt.Errorf(
 				"frontmatter: line %d: tab character used for indentation (YAML requires spaces)",
 				lineNum+1,
 			)
+		}
+
+		// Update brace depth for the current line so continuation lines inside
+		// a flow mapping are correctly recognised as opaque content.
+		trimmedLine := bytes.TrimRight(line, "\r\n")
+		for _, b := range trimmedLine {
+			if b == '{' {
+				braceDepth++
+			} else if b == '}' {
+				if braceDepth > 0 {
+					braceDepth--
+				}
+			}
 		}
 
 		if key, ok := isTopLevelKeyLine(line); ok {
@@ -595,6 +618,10 @@ func parseGroupValue(key string, lines [][]byte, startLine int) (mosaic.FieldVal
 
 	if valueText[0] == '[' {
 		return parseFlowSequence(valueText, startLine)
+	}
+
+	if valueText[0] == '{' {
+		return parseScalarBytes(valueText)
 	}
 
 	return parseScalarBytes(valueText)
@@ -775,13 +802,23 @@ func blockSequenceItemLooksLikeMapping(text []byte) bool {
 }
 
 // parseBlockMapping parses indented "  key: value" lines into a KindMapping.
+// When a value starts with '{' and the closing '}' is not on the same line,
+// subsequent lines are consumed verbatim until the brace count returns to zero.
+// The entire multi-line span is stored as one opaque scalar value for that key.
+// Tab characters in continuation lines consumed as part of a brace span are not
+// flagged as indentation errors — they are opaque content, not key:value candidates.
 func parseBlockMapping(lines [][]byte, startLine int) (mosaic.FieldValue, error) {
 	var pairs []mosaic.FieldPair
-	for i, line := range lines {
+	i := 0
+	for i < len(lines) {
+		line := lines[i]
 		lineNum := startLine + 1 + i
 		if len(bytes.TrimSpace(line)) == 0 {
+			i++
 			continue
 		}
+		// Tab check applies only to key:value candidate lines, not to
+		// continuation lines consumed inside a brace span (handled below).
 		if len(line) > 0 && line[0] == '\t' {
 			return mosaic.FieldValue{}, fmt.Errorf(
 				"frontmatter: line %d: tab character used for indentation", lineNum,
@@ -797,13 +834,68 @@ func parseBlockMapping(lines [][]byte, startLine int) (mosaic.FieldValue, error)
 		key := string(stripped[:colonIdx])
 		after := bytes.TrimRight(stripped[colonIdx+1:], "\r\n")
 		after = bytes.TrimLeft(after, " \t")
+
+		if len(after) > 0 && after[0] == '{' && !flowMappingClosedOnSameLine(after) {
+			// Multi-line flow mapping: consume continuation lines until braces balance.
+			buf := make([]byte, len(after))
+			copy(buf, after)
+			depth := flowMappingBraceDepth(after)
+			i++
+			for i < len(lines) && depth > 0 {
+				buf = append(buf, '\n')
+				contLine := bytes.TrimRight(lines[i], "\r\n")
+				buf = append(buf, contLine...)
+				depth += flowMappingBraceDepth(contLine)
+				i++
+			}
+			val, err := parseScalarBytes(buf)
+			if err != nil {
+				return mosaic.FieldValue{}, fmt.Errorf("frontmatter: line %d: %w", lineNum, err)
+			}
+			pairs = append(pairs, mosaic.FieldPair{Key: key, Value: val})
+			continue
+		}
+
 		val, err := parseScalarBytes(after)
 		if err != nil {
 			return mosaic.FieldValue{}, fmt.Errorf("frontmatter: line %d: %w", lineNum, err)
 		}
 		pairs = append(pairs, mosaic.FieldPair{Key: key, Value: val})
+		i++
 	}
 	return mosaic.MappingValue(pairs), nil
+}
+
+// flowMappingClosedOnSameLine reports whether the byte slice (starting with '{')
+// also contains its matching '}' — simple brace counting, sufficient for
+// permission-map values where nesting depth is at most one.
+func flowMappingClosedOnSameLine(data []byte) bool {
+	depth := 0
+	for _, b := range data {
+		if b == '{' {
+			depth++
+		} else if b == '}' {
+			depth--
+			if depth == 0 {
+				return true
+			}
+		}
+	}
+	return false
+}
+
+// flowMappingBraceDepth returns the net brace depth change for a line:
+// +1 per '{', -1 per '}'. Used to track when a multi-line flow mapping closes.
+func flowMappingBraceDepth(line []byte) int {
+	depth := 0
+	for _, b := range line {
+		if b == '{' {
+			depth++
+		} else if b == '}' {
+			depth--
+		}
+	}
+	return depth
 }
 
 // parseFlowSequence parses a "[item1, item2, ...]" value into a KindList with ListFlow.
@@ -1116,9 +1208,28 @@ func serializeListEntry(key string, v mosaic.FieldValue, nl string) string {
 		sb.WriteString(":")
 		sb.WriteString(nl)
 		for _, item := range v.Items {
-			sb.WriteString("  - ")
-			sb.WriteString(serializeScalarInline(item))
-			sb.WriteString(nl)
+			switch item.Kind {
+			case mosaic.KindMapping:
+				// Serialize each pair of the mapping item. The first pair appears on
+				// the "  - " line; subsequent pairs are indented with four spaces so
+				// the YAML structure is unambiguous to parsers and human readers.
+				for i, pair := range item.Pairs {
+					if i == 0 {
+						sb.WriteString("  - ")
+					} else {
+						sb.WriteString("    ")
+					}
+					sb.WriteString(pair.Key)
+					sb.WriteString(": ")
+					sb.WriteString(serializeScalarInline(pair.Value))
+					sb.WriteString(nl)
+				}
+			default:
+				// KindScalar (and KindList as a future-concern fallback).
+				sb.WriteString("  - ")
+				sb.WriteString(serializeScalarInline(item))
+				sb.WriteString(nl)
+			}
 		}
 	}
 	return sb.String()

@@ -1,0 +1,38 @@
+{
+  "schema_version": "1",
+  "suite_id": "benchmarks",
+  "started_at": "2026-08-22T10:00:00Z",
+  "finished_at": "2026-08-22T10:15:00Z",
+  "tests": [
+    {
+      "test_name": "test-epsilon",
+      "test_id": 5,
+      "description": "Test epsilon with unavailable cost attribution",
+      "layer": "orchestrator",
+      "aggregate": {
+        "verdict": "pass",
+        "counted": 1,
+        "passed": 1,
+        "pass_rate": 1.0,
+        "infrastructure_failure": false,
+        "total_cost": { "total_usd": 0.0, "attribution": "unavailable" }
+      },
+      "runs": [
+        {
+          "subject_version": "v1.0.0",
+          "subject_model": "github-copilot/claude-sonnet-4.6",
+          "harness_id": "claude-code",
+          "verdict": "pass",
+          "duration_ms": 5000,
+          "cost": { "total_usd": 0.0, "attribution": "unavailable" },
+          "termination_reason": "completed",
+          "conditions": [],
+          "test_version": 1
+        }
+      ]
+    }
+  ],
+  "counts": { "pass": 1 },
+  "total_cost": { "total_usd": 0.0, "attribution": "unavailable" },
+  "infrastructure_failures": 0
+}

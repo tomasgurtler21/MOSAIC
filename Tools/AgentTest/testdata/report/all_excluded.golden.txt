@@ -1,14 +1,23 @@
+Repetitions: suite default
 Suite: all-excluded-suite
 Started: 2026-08-07T12:00:00Z
 Finished: 2026-08-07T12:05:00Z
 
 always-loses-its-lock: FAIL 0/0 passed (n/a, required 0%) [state_integrity] (infrastructure failure)
+  ? STATE_INTEGRITY
   subject version: unknown
   subject model: unknown
   stub model: unknown
+  harness: unknown
+  termination reason: unknown
+  ? STATE_INTEGRITY
   subject version: unknown
   subject model: unknown
   stub model: unknown
+  harness: unknown
+  termination reason: unknown
+  excluded [state_integrity]: lock was reclaimed; one or more state updates may have been lost (unknown)
+  excluded [state_integrity]: lock was reclaimed; one or more state updates may have been lost (unknown)
 
 Totals: FAIL=1
 Infrastructure failures: 1

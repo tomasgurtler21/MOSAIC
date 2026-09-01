@@ -1,0 +1,41 @@
+{
+  "schema_version": 1,
+  "test_id": "partially-done-redispatch",
+  "on_unmatched": "halt",
+  "stubs": [
+    {
+      "match": { "tool": "dispatch", "agent": "implementation-tdd", "invocation": 1 },
+      "response": {
+        "agent_instance_id": "implementation-tdd#10",
+        "run_id": "{run_id}",
+        "status_code": "PARTIALLY_DONE",
+        "status_message": "Implemented flag parsing and wired to diagnostics. Per-item output in list command not yet started."
+      },
+      "side_effects": {
+        "create_files": [
+          {
+            "path": "Orchestration-{run_id}/Stage-1/PlanProgress.md",
+            "content": "---\nrun_id: {run_id}\ncreated_by: implementation-tdd#10\nhuman_approved: false\n---\n# Stage 1 Progress\n\n## Completed\n\n- Flag parsing with pflag (--verbose / -v)\n- Wired to diagnostics.SetVerbose\n\n## Remaining\n\n- Per-item diagnostics.Itemf calls in list command path\n"
+          }
+        ]
+      }
+    },
+    {
+      "match": { "tool": "dispatch", "agent": "implementation-tdd", "invocation": 2 },
+      "response": {
+        "agent_instance_id": "implementation-tdd#11",
+        "run_id": "{run_id}",
+        "status_code": "SUCCESS",
+        "status_message": "Completed per-item diagnostic output in list command."
+      },
+      "side_effects": {
+        "create_files": [
+          {
+            "path": "Orchestration-{run_id}/Stage-1/PlanProgress.md",
+            "content": "---\nrun_id: {run_id}\ncreated_by: implementation-tdd#11\nhuman_approved: false\n---\n# Stage 1 Progress\n\n## Completed\n\n- Flag parsing with pflag (--verbose / -v)\n- Wired to diagnostics.SetVerbose\n- Per-item diagnostics.Itemf calls in list command path\n\n## Remaining\n\nNone.\n"
+          }
+        ]
+      }
+    }
+  ]
+}

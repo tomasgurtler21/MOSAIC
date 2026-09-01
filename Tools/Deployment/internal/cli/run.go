@@ -36,6 +36,7 @@ func Run(ctx context.Context, args []string, svc app.Service, out, errOut io.Wri
 	var verbose bool
 	var mosaicRoot string
 	var catalogFolder string
+	var logDir string
 	var allowExternal bool
 
 	root := &cobra.Command{
@@ -56,6 +57,8 @@ func Run(ctx context.Context, args []string, svc app.Service, out, errOut io.Wri
 	root.PersistentFlags().StringVar(&mosaicRoot, "mosaic-root", "", "Override the MOSAIC root directory")
 	root.PersistentFlags().StringVar(&catalogFolder, "catalog-folder", "",
 		"Catalogue directory supplying agents and workflows (default: <mosaic-root>/Catalog)")
+	root.PersistentFlags().StringVar(&logDir, "log-dir", "",
+		"Override the directory run logs are written to (default: <mosaic-root>/MosaicDeploy/logs)")
 	root.PersistentFlags().BoolVar(&allowExternal, "allow-external", false, "Enable external harness modules")
 
 	// ------------------------------------------------------------------
@@ -124,6 +127,7 @@ func Run(ctx context.Context, args []string, svc app.Service, out, errOut io.Wri
 				}
 				req.WorkflowIDs = sf.Workflows
 				req.UtilityAgentIDs = sf.UtilityAgents
+				req.InfrastructureAgentIDs = sf.InfrastructureAgents
 				req.HookIDs = sf.Hooks
 				if len(sf.TierModels) > 0 {
 					req.TierModels = tierModelsFromFile(sf)

@@ -49,13 +49,28 @@ import (
 // Communication Protocol message, so the text path is exercised specifically.
 var rawPayload = []byte(`{"action":"route","agent":"agent-b","task_description":"do the thing"}`)
 
-// orchestratorRef returns an AgentReference with InvocationOrchestrator.
-// InvokeRaw requires orchestrator-kind so the CLI retains subagent-spawning
-// capability during consultation.
+// orchestratorRef returns an AgentReference with InvocationOrchestrator using a
+// static (non-existent) definition path. Suitable for OpenCode and GHCP CLI
+// adapter tests that do not read the definition file. ClaudeCodeAdapter tests
+// must use ccOrchestratorRef(t) instead.
 func orchestratorRef() domain.AgentReference {
 	return domain.AgentReference{
 		Identifier:     "orchestrator-agent",
 		DefinitionPath: "/agents/orchestrator-agent.md",
+		InvocationKind: domain.InvocationOrchestrator,
+	}
+}
+
+// ccOrchestratorRef returns an orchestrator-kind AgentReference backed by a
+// temporary definition file with valid Claude Code tools frontmatter. Use this
+// in ClaudeCodeAdapter tests: InvokeRaw reads the definition file (FR-10)
+// before spawning.
+func ccOrchestratorRef(t *testing.T) domain.AgentReference {
+	t.Helper()
+	defPath := writeDefFile(t, validClaudeCodeDef)
+	return domain.AgentReference{
+		Identifier:     "orchestrator-agent",
+		DefinitionPath: defPath,
 		InvocationKind: domain.InvocationOrchestrator,
 	}
 }
@@ -91,7 +106,7 @@ func TestGHCPCLIAdapter_SatisfiesRawInvoker(t *testing.T) {
 
 func TestClaudeCodeAdapter_InvokeRaw_IssuesOrchestratorKind(t *testing.T) {
 	argsFile := setHelperEnv(t, "success")
-	agent := orchestratorRef()
+	agent := ccOrchestratorRef(t)
 
 	adapter := harness.NewClaudeCodeAdapter(helperExe(t), 5*time.Second)
 	ri, ok := any(adapter).(domain.RawInvoker)
@@ -169,7 +184,7 @@ func TestClaudeCodeAdapter_InvokeRaw_ReturnsNonNilBytesOnSuccess(t *testing.T) {
 		t.Fatal("want ClaudeCodeAdapter to implement domain.RawInvoker")
 	}
 
-	got, err := ri.InvokeRaw(context.Background(), orchestratorRef(), rawPayload)
+	got, err := ri.InvokeRaw(context.Background(), ccOrchestratorRef(t), rawPayload)
 
 	if err != nil {
 		t.Fatalf("want no error, got %v", err)
@@ -246,7 +261,7 @@ func TestClaudeCodeAdapter_InvokeRaw_BadEnvelope_NotErrMalformedOutput(t *testin
 		t.Fatal("want ClaudeCodeAdapter to implement domain.RawInvoker")
 	}
 
-	_, err := ri.InvokeRaw(context.Background(), orchestratorRef(), rawPayload)
+	_, err := ri.InvokeRaw(context.Background(), ccOrchestratorRef(t), rawPayload)
 
 	// ErrMalformedOutput aliases ErrProtocolNotExtractable; neither must be
 	// returned by the text path.
@@ -266,7 +281,7 @@ func TestClaudeCodeAdapter_InvokeRaw_MissingExecutable_ReturnsErrExecutableNotFo
 		t.Fatal("want ClaudeCodeAdapter to implement domain.RawInvoker")
 	}
 
-	_, err := ri.InvokeRaw(context.Background(), orchestratorRef(), rawPayload)
+	_, err := ri.InvokeRaw(context.Background(), ccOrchestratorRef(t), rawPayload)
 
 	if !errors.Is(err, harness.ErrExecutableNotFound) {
 		t.Errorf("want ErrExecutableNotFound, got %v", err)
@@ -315,7 +330,7 @@ func TestClaudeCodeAdapter_InvokeRaw_Timeout_ReturnsErrTimeout(t *testing.T) {
 		t.Fatal("want ClaudeCodeAdapter to implement domain.RawInvoker")
 	}
 
-	_, err := ri.InvokeRaw(context.Background(), orchestratorRef(), rawPayload)
+	_, err := ri.InvokeRaw(context.Background(), ccOrchestratorRef(t), rawPayload)
 
 	if !errors.Is(err, harness.ErrTimeout) {
 		t.Errorf("want ErrTimeout, got %v", err)
@@ -370,7 +385,7 @@ func TestClaudeCodeAdapter_InvokeRaw_EmptyOutput_ReturnsErrEmptyResponse(t *test
 		t.Fatal("want ClaudeCodeAdapter to implement domain.RawInvoker")
 	}
 
-	_, err := ri.InvokeRaw(context.Background(), orchestratorRef(), rawPayload)
+	_, err := ri.InvokeRaw(context.Background(), ccOrchestratorRef(t), rawPayload)
 
 	if !errors.Is(err, harness.ErrEmptyResponse) {
 		t.Errorf("want ErrEmptyResponse, got %v", err)
@@ -431,7 +446,7 @@ func TestClaudeCodeAdapter_InvokeRaw_ContextCancellation_ReturnsCtxErr(t *testin
 		cancel()
 	}()
 
-	_, err := ri.InvokeRaw(ctx, orchestratorRef(), rawPayload)
+	_, err := ri.InvokeRaw(ctx, ccOrchestratorRef(t), rawPayload)
 
 	if !errors.Is(err, context.Canceled) {
 		t.Errorf("want context.Canceled on cancellation, got %v", err)
@@ -499,7 +514,7 @@ func TestClaudeCodeAdapter_InvokeRaw_Success_LogsInvokeEvents(t *testing.T) {
 		t.Fatal("want ClaudeCodeAdapter to implement domain.RawInvoker")
 	}
 
-	_, err := ri.InvokeRaw(context.Background(), orchestratorRef(), rawPayload)
+	_, err := ri.InvokeRaw(context.Background(), ccOrchestratorRef(t), rawPayload)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -520,7 +535,7 @@ func TestClaudeCodeAdapter_InvokeRaw_Failure_LogsInvokeError(t *testing.T) {
 		t.Fatal("want ClaudeCodeAdapter to implement domain.RawInvoker")
 	}
 
-	_, err := ri.InvokeRaw(context.Background(), orchestratorRef(), rawPayload)
+	_, err := ri.InvokeRaw(context.Background(), ccOrchestratorRef(t), rawPayload)
 	if err == nil {
 		t.Fatal("want error for missing executable, got nil")
 	}
@@ -543,7 +558,7 @@ func TestClaudeCodeAdapter_Invoke_UnchangedByInvokeRaw(t *testing.T) {
 
 	adapter := harness.NewClaudeCodeAdapter(helperExe(t), 5*time.Second)
 
-	resp, err := adapter.Invoke(context.Background(), ordinaryAgentRef(), minimalClaudeRequest("test-agent#1"))
+	resp, err := adapter.Invoke(context.Background(), ordinaryAgentRefCC(t), minimalClaudeRequest("test-agent#1"))
 
 	if err != nil {
 		t.Fatalf("want successful Invoke still to work, got %v", err)

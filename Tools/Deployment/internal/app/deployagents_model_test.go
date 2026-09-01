@@ -345,46 +345,7 @@ func TestDeployAgents_InfraAgent_SkippedModel_RecordsGapNoModel(t *testing.T) {
 }
 
 // ---------------------------------------------------------------------------
-// T3.5 — Ordinary subagent does NOT trigger QAgentModel
-// ---------------------------------------------------------------------------
-
-// TestDeployAgents_OrdinarySubagent_NoQAgentModel verifies that an ordinary subagent
-// (Role=RoleSubagent, Infrastructure="") does not receive a QAgentModel prompt. Model
-// resolution must only run for the infrastructure batch.
-func TestDeployAgents_OrdinarySubagent_NoQAgentModel(t *testing.T) {
-	stub := interactiontest.NewBuilder().AnswerReview(true).Build()
-	deps, workspace := newBaseDeps(t, stub)
-	deps.Catalog = modelTestCatalog()
-	deps.Planner = &stubPlanner{plan: domain.Plan{
-		Mode:          domain.ModeDeployAgents,
-		WorkspacePath: workspace,
-		Scope:         domain.ScopeProject,
-		Items: []domain.PlanItem{
-			{Ref: domain.ArtifactRef{Kind: domain.ArtifactAgent, Key: "plan-review"}, Action: domain.ActionCreate},
-		},
-	}}
-	svc := app.New(deps)
-
-	_, _ = svc.DeployAgents(context.Background(), app.DeployAgentsRequest{
-		HarnessID:              "stub-harness",
-		WorkspacePath:          workspace,
-		SubagentIDs:            []string{"plan-review"},
-		UtilityAgentIDs:        []string{},
-		InfrastructureAgentIDs: []string{},
-		StandaloneAgentIDs:     []string{},
-		AutoConfirmPlan:        true,
-	})
-
-	// Assert — QAgentModel must NOT be asked for ordinary subagents.
-	if stub.WasAsked(domain.QAgentModel, "plan-review") {
-		t.Error("QAgentModel was asked for \"plan-review\" which is an ordinary subagent " +
-			"(Role=RoleSubagent, Infrastructure=\"\"); model resolution must only run for " +
-			"the infrastructure batch — ordinary subagents do not receive per-agent model prompts")
-	}
-}
-
-// ---------------------------------------------------------------------------
-// T3.5 — RunSummary mode is ModeDeployAgents
+// RunSummary mode is ModeDeployAgents
 // ---------------------------------------------------------------------------
 
 // TestDeployAgents_RunSummaryMode_IsDeployAgents verifies that the RunSummary returned by

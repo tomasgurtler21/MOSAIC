@@ -72,9 +72,9 @@ type recordingApplier struct {
 	log   *eventLog
 }
 
-func (a recordingApplier) Apply(subjectDir string, effects []domain.FileEffect) (domain.EffectLedger, error) {
+func (a recordingApplier) Apply(subjectDir string, effects []domain.FileEffect, runID string) (domain.EffectLedger, error) {
 	a.log.add("effects.Apply")
-	return a.inner.Apply(subjectDir, effects)
+	return a.inner.Apply(subjectDir, effects, runID)
 }
 
 type recordingLog struct {

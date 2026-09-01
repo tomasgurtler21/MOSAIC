@@ -38,4 +38,31 @@ type NextInput struct {
 	// kind DeviationAmbiguousRoute, surfacing the condition rather than
 	// silently picking a mode.
 	Mode domain.ExecutionMode
+
+	// ArtifactRegistry carries the current artifact registry entries from
+	// the ArtifactState, with run-scoped path prefixes stripped.
+	//
+	// The engine uses it as a read-only lookup to detect whether a target
+	// row's resolved output artifacts have already been created in a prior
+	// invocation, enabling the FR-7/FR-8 creator-artifact injection on
+	// review loop-back. Nil or empty means no prior artifacts exist
+	// (first-invocation case; no injection occurs).
+	//
+	// COMPARISON CONTRACT: The engine compares registry entries against
+	// step.Request.OutputArtifacts -- the resolved, bare paths produced by
+	// buildDispatchStep for the target row -- NOT against raw
+	// row.OutputArtifacts (which may still contain unresolved template
+	// tokens like {StageNumber} or Stage-*). This ensures injection fires
+	// correctly even for rows whose declared output artifacts use templates.
+	//
+	// NORMALIZATION INVARIANT: Each entry's Artifact field must contain the
+	// bare (non-run-scoped) path, matching the format of resolved artifact
+	// paths (post-ResolveArtifacts, pre-run-scoping). Session is responsible
+	// for stripping the run-scoped prefix via StripRunPrefix before
+	// populating this field. The engine never performs path normalization.
+	//
+	// This field is populated by session from state.ArtifactRegistry
+	// (after prefix stripping) before calling Next. The engine never
+	// mutates it.
+	ArtifactRegistry []domain.ArtifactRegistryEntry
 }

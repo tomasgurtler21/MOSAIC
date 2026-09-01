@@ -215,7 +215,7 @@ func (s *service) DeployNew(ctx context.Context, req DeployRequest) (domain.RunS
 	if pathErr != nil {
 		return domain.RunSummary{}, pathErr
 	}
-	deployedState, err := probeDeployedStateWithIndex(workspace, plannedPaths, module.Descriptor().Frontmatter.ModelKey, nil, deployedAgentIndex, probeAgentByKey)
+	deployedState, err := probeDeployedStateWithIndex(workspace, plannedPaths, module.Descriptor().Frontmatter.ModelKey, nil, deployedAgentIndex, probeAgentByKey, nil)
 	if err != nil {
 		return domain.RunSummary{}, err
 	}
@@ -320,7 +320,7 @@ func (s *service) DeployNew(ctx context.Context, req DeployRequest) (domain.RunS
 		return domain.RunSummary{}, err
 	}
 
-	if err := s.persistTierModels(harnessID, modelRes.tierModelsUsed); err != nil {
+	if err := s.persistTierModels(harnessID, modelRes.interactivelyResolvedTiers); err != nil {
 		s.notifyPersistFailure(ctx, err)
 	}
 

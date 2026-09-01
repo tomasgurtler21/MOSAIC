@@ -1253,6 +1253,42 @@ func TestInjection_VSCodeGHCP_InjectionsVersion(t *testing.T) {
 }
 
 // ---------------------------------------------------------------------------
+// Role-conditional user-invocable tests
+// ---------------------------------------------------------------------------
+
+// TestVscodeGhcp_UserInvocable_MechanismIsRoleConditional verifies that the VS Code GHCP
+// descriptor implements user-invocable via the role-conditional schema (RoleConditionalAdd),
+// not via a static Add entry. Before implementation, RoleConditionalAdd will be empty because
+// vscode-ghcp.yaml has no value_by_role entry for user-invocable.
+//
+// RED: currently fails because vscode-ghcp.yaml does not declare user-invocable at all.
+// After implementation (descriptor change), the descriptor uses value_by_role and
+// RoleConditionalAdd is non-empty.
+func TestVscodeGhcp_UserInvocable_MechanismIsRoleConditional(t *testing.T) {
+	mod := newModule(t)
+	desc := mod.Descriptor()
+	if desc == nil {
+		t.Fatal("Descriptor() returned nil")
+	}
+
+	// The descriptor must use value_by_role for user-invocable, which is loaded into
+	// RoleConditionalAdd, not the static Add list.
+	if len(desc.Frontmatter.RoleConditionalAdd) == 0 {
+		t.Error("Frontmatter.RoleConditionalAdd is empty: user-invocable must be declared " +
+			"with value_by_role in vscode-ghcp.yaml, not as a static value entry; " +
+			"add a value_by_role entry for user-invocable matching the ghcp-cli.yaml pattern")
+	}
+
+	// The static Add list must not contain user-invocable (it must be role-conditional only).
+	for _, f := range desc.Frontmatter.Add {
+		if f.Key == "user-invocable" {
+			t.Errorf("Frontmatter.Add contains a static %q entry; "+
+				"user-invocable must be in RoleConditionalAdd (value_by_role), not in Add (static value)", f.Key)
+		}
+	}
+}
+
+// ---------------------------------------------------------------------------
 // Shared contract test (T13.8)
 // ---------------------------------------------------------------------------
 
@@ -1399,15 +1435,19 @@ func TestContract_VSCodeGHCP(t *testing.T) {
 
 		FrontmatterCases: []contracttest.FrontmatterCase{
 			{
-				// adds_disable_model_invocation_and_drops_generic_keys: the key behavioural difference
-				// from other harnesses is that VS Code GHCP declaratively adds "disable-model-invocation: false"
-				// to every agent. Set contains only this static descriptor Add field. The three
-				// generic-only keys are removed and the canonical key order is applied. Model and version
-				// stamps are NOT in Set — they are applied exclusively by the transform's Steps 3 and 4.
+				// adds_disable_model_invocation_and_drops_generic_keys: VS Code GHCP declaratively
+				// adds "disable-model-invocation: false" to every agent, and adds
+				// "user-invocable: false" for subagent-role agents via role-conditional resolution.
+				// The three generic-only keys are removed and the canonical key order is applied.
+				// Model and version stamps are NOT in Set — they are applied exclusively by the
+				// transform's Steps 3 and 4.
+				// RED: user-invocable entry in Set currently fails because vscode-ghcp does not
+				// yet implement role-conditional user-invocable.
 				Name: "adds_disable_model_invocation_and_drops_generic_keys",
 				Request: domain.FrontmatterRequest{
 					Kind:     domain.ArtifactAgent,
 					AgentKey: "test-agent",
+					Role:     domain.RoleSubagent,
 					Model: domain.ModelSelection{
 						ModelID: "Claude Sonnet 4.6",
 						Origin:  domain.OriginHarnessList,
@@ -1420,9 +1460,39 @@ func TestContract_VSCodeGHCP(t *testing.T) {
 				Expected: domain.FrontmatterPlan{
 					Set: []domain.FrontmatterField{
 						{Key: "disable-model-invocation", Value: domain.ScalarValue("false", domain.QuotePlain)},
+						{Key: "user-invocable", Value: domain.ScalarValue("false", domain.QuotePlain)},
 					},
 					Remove:   []string{"recommended_tier", "tier_rationale", "required_skills"},
-					KeyOrder: []string{"mosaic_id", "version", "mosaic_transform_version", "mosaic_injections_version", "name", "description", "model", "tools", "disable-model-invocation"},
+					KeyOrder: []string{"mosaic_id", "version", "mosaic_transform_version", "mosaic_injections_version", "name", "description", "model", "tools", "disable-model-invocation", "user-invocable"},
+				},
+			},
+			{
+				// user_invocable_true_for_orchestrator: VS Code GHCP sets "user-invocable: true"
+				// for orchestrator-role agents, enabling them to be invoked directly by users.
+				// The role-conditional schema resolves the orchestrator role to true, matching the
+				// behavior of ghcp-cli.
+				// RED: currently fails because vscode-ghcp does not yet implement user-invocable.
+				Name: "user_invocable_true_for_orchestrator",
+				Request: domain.FrontmatterRequest{
+					Kind:     domain.ArtifactAgent,
+					AgentKey: "test-agent",
+					Role:     domain.RoleOrchestrator,
+					Model: domain.ModelSelection{
+						ModelID: "Claude Sonnet 4.6",
+						Origin:  domain.OriginHarnessList,
+					},
+					Versions: domain.VersionStamps{
+						HarnessVersion:  "3.0.0",
+						InjectionsVersion: "1.3.0",
+					},
+				},
+				Expected: domain.FrontmatterPlan{
+					Set: []domain.FrontmatterField{
+						{Key: "disable-model-invocation", Value: domain.ScalarValue("false", domain.QuotePlain)},
+						{Key: "user-invocable", Value: domain.ScalarValue("true", domain.QuotePlain)},
+					},
+					Remove:   []string{"recommended_tier", "tier_rationale", "required_skills"},
+					KeyOrder: []string{"mosaic_id", "version", "mosaic_transform_version", "mosaic_injections_version", "name", "description", "model", "tools", "disable-model-invocation", "user-invocable"},
 				},
 			},
 		},

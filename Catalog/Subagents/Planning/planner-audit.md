@@ -1,6 +1,6 @@
 ---
 id: 7
-version: 5.2.0
+version: 5.2.1
 name: planner-audit
 description: Creates audit plans with typed stages (Implementation, Tests, Architecture, Contracts) and full per-stage isolation — outputs AuditPlan.md (brief routing artifact) + per-stage Stage-{N}/AuditPlan.md and Stage-{N}/AuditProgress.md for downstream audit agents
 role: subagent
@@ -176,12 +176,12 @@ For a plan with S stages, you create 1 + 2S files.
 
 | Stage | Name | Type | HITL |
 |-------|------|------|:----:|
-| 1 | User Management (Implementation) | Implementation | ❌ |
-| 2 | User Management (Tests) | Tests | ❌ |
-| 3 | Payment Processing (Implementation) | Implementation | ❌ |
-| 4 | Payment Processing (Tests) | Tests | ❌ |
-| 5 | Data Access Layer (Architecture) | Architecture | ❌ |
-| 6 | Service Provider Contracts (Contracts) | Contracts | ❌ |
+| 1 | User Management (Implementation) | Implementation | FALSE |
+| 2 | User Management (Tests) | Tests | FALSE |
+| 3 | Payment Processing (Implementation) | Implementation | FALSE |
+| 4 | Payment Processing (Tests) | Tests | FALSE |
+| 5 | Data Access Layer (Architecture) | Architecture | FALSE |
+| 6 | Service Provider Contracts (Contracts) | Contracts | FALSE |
 ```
 
 #### Stage-{N}/AuditPlan.md Template (Per-Stage Detail)
@@ -209,7 +209,7 @@ For a plan with S stages, you create 1 + 2S files.
 > Reference Stage-{N}/AuditPlan.md for authoritative definitions.
 
 **Type:** Implementation | Tests | Architecture | Contracts
-**HITL:** ❌
+**HITL:** FALSE
 
 ## Files
 - [ ] `src/Services/UserService.cs`

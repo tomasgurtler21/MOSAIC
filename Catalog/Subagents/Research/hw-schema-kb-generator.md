@@ -1,6 +1,6 @@
 ---
 id: 30
-version: 3.2.0
+version: 3.2.1
 name: hw-schema-kb-generator
 description: Synthesizes domain-oriented KB documentation from per-sheet research artifacts (Tier 1) and direct hw-schema tool queries (Tier 2+), describing functional domains, signal topology, and cross-sheet relationships
 role: subagent
@@ -162,10 +162,10 @@ When creating KBProgress.md, use this structure:
 
 | # | Tier | Scope | KB Document | Status | HITL | Recommended By |
 |---|------|-------|-------------|--------|------|----------------|
-| 1 | 1 | Full schematic overview | {path}/Overview.md | PENDING | ✅ | initial |
-| 2 | 2 | Power Supply Domain | {path}/PowerSupply.md | PENDING | ❌ | initial |
-| 3 | 2 | Communication Interfaces | {path}/CommInterfaces.md | PENDING | ❌ | initial |
-| 4 | 2 | Processor Core Domain | {path}/ProcessorCore.md | PENDING | ❌ | initial |
+| 1 | 1 | Full schematic overview | {path}/Overview.md | PENDING | TRUE | initial |
+| 2 | 2 | Power Supply Domain | {path}/PowerSupply.md | PENDING | FALSE | initial |
+| 3 | 2 | Communication Interfaces | {path}/CommInterfaces.md | PENDING | FALSE | initial |
+| 4 | 2 | Processor Core Domain | {path}/ProcessorCore.md | PENDING | FALSE | initial |
 ```
 
 ### KBFlags.md Format

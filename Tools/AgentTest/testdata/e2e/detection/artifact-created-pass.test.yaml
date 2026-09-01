@@ -1,5 +1,11 @@
 schema_version: 1
-id: artifact-created-pass
+name: artifact-created-pass
+id: 14
+version: 1
+changelog:
+  - version: 1
+    date: "2026-01-01"
+    changes: "Initial."
 description: >
   The greeter's declared side effect (greeting.txt) really exists after the run.
 layer: subagent
@@ -8,6 +14,7 @@ negative: false
 subject:
   identity: standin-subject
   agent: standin-subject
+  infrastructure_agents: []
   opening_message: |
     Greet the collaborator, then have the helper assist without creating files.
   invocation_kind: subagent

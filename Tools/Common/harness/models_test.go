@@ -343,73 +343,59 @@ func TestLookupModelCatalog_GHCPCLIFormatHint(t *testing.T) {
 // Seed content: model IDs membership
 // ---------------------------------------------------------------------------
 
-// TestLookupModelCatalog_ClaudeCodeContainsKnownIDs verifies that the
-// claude-code model catalog includes representative identifiers from the
-// descriptor seed. Testing a representative subset avoids brittleness when new
-// IDs are added; testing at least two gives confidence the full list was loaded.
+// TestLookupModelCatalog_ClaudeCodeContainsKnownIDs verifies structural
+// properties of the claude-code model catalog: it exists, is non-empty, and
+// contains no empty ID strings. Specific ID values are user-maintained data
+// and are not asserted here.
 func TestLookupModelCatalog_ClaudeCodeContainsKnownIDs(t *testing.T) {
 	cat, ok := harness.LookupModelCatalog(harness.HarnessIDClaudeCode)
 	if !ok {
 		t.Fatalf("want %q to be found", harness.HarnessIDClaudeCode)
 	}
-
-	wantPresent := []string{
-		"claude-sonnet-4-6",
-		"claude-opus-4-6",
+	if len(cat.IDs) == 0 {
+		t.Fatalf("claude-code catalog must contain at least one model ID")
 	}
-	idSet := make(map[string]bool, len(cat.IDs))
 	for _, id := range cat.IDs {
-		idSet[id] = true
-	}
-	for _, want := range wantPresent {
-		if !idSet[want] {
-			t.Errorf("want model ID %q in claude-code catalog, but it is missing", want)
+		if id == "" {
+			t.Errorf("claude-code catalog contains an empty model ID")
 		}
 	}
 }
 
-// TestLookupModelCatalog_OpenCodeContainsKnownIDs verifies that the opencode
-// model catalog includes representative identifiers from the descriptor seed.
+// TestLookupModelCatalog_OpenCodeContainsKnownIDs verifies structural
+// properties of the opencode model catalog: it exists, is non-empty, and
+// contains no empty ID strings. Specific ID values are user-maintained data
+// and are not asserted here.
 func TestLookupModelCatalog_OpenCodeContainsKnownIDs(t *testing.T) {
 	cat, ok := harness.LookupModelCatalog(harness.HarnessIDOpenCode)
 	if !ok {
 		t.Fatalf("want %q to be found", harness.HarnessIDOpenCode)
 	}
-
-	wantPresent := []string{
-		"anthropic/claude-sonnet-4-20250514",
-		"github-copilot/claude-sonnet-4-6",
+	if len(cat.IDs) == 0 {
+		t.Fatalf("opencode catalog must contain at least one model ID")
 	}
-	idSet := make(map[string]bool, len(cat.IDs))
 	for _, id := range cat.IDs {
-		idSet[id] = true
-	}
-	for _, want := range wantPresent {
-		if !idSet[want] {
-			t.Errorf("want model ID %q in opencode catalog, but it is missing", want)
+		if id == "" {
+			t.Errorf("opencode catalog contains an empty model ID")
 		}
 	}
 }
 
-// TestLookupModelCatalog_GHCPCLIContainsKnownIDs verifies that the ghcp-cli
-// model catalog includes representative identifiers from the descriptor seed.
+// TestLookupModelCatalog_GHCPCLIContainsKnownIDs verifies structural
+// properties of the ghcp-cli model catalog: it exists, is non-empty, and
+// contains no empty ID strings. Specific ID values are user-maintained data
+// and are not asserted here.
 func TestLookupModelCatalog_GHCPCLIContainsKnownIDs(t *testing.T) {
 	cat, ok := harness.LookupModelCatalog(harness.HarnessIDGHCPCLI)
 	if !ok {
 		t.Fatalf("want %q to be found", harness.HarnessIDGHCPCLI)
 	}
-
-	wantPresent := []string{
-		"claude-sonnet-4.6",
-		"gpt-4.1",
+	if len(cat.IDs) == 0 {
+		t.Fatalf("ghcp-cli catalog must contain at least one model ID")
 	}
-	idSet := make(map[string]bool, len(cat.IDs))
 	for _, id := range cat.IDs {
-		idSet[id] = true
-	}
-	for _, want := range wantPresent {
-		if !idSet[want] {
-			t.Errorf("want model ID %q in ghcp-cli catalog, but it is missing", want)
+		if id == "" {
+			t.Errorf("ghcp-cli catalog contains an empty model ID")
 		}
 	}
 }
@@ -532,17 +518,37 @@ func TestIsModelID_EmptyModelReturnsFalse(t *testing.T) {
 	}
 }
 
-// TestIsModelID_OpenCodeModel verifies a known opencode model returns true.
+// TestIsModelID_OpenCodeModel verifies that IsModelID returns true for an ID
+// that exists in the opencode catalog. The ID is obtained dynamically so the
+// test does not depend on any specific model ID string.
 func TestIsModelID_OpenCodeModel(t *testing.T) {
-	if !harness.IsModelID(harness.HarnessIDOpenCode, "anthropic/claude-sonnet-4-20250514") {
-		t.Errorf("want IsModelID(%q, %q) == true", harness.HarnessIDOpenCode, "anthropic/claude-sonnet-4-20250514")
+	cat, ok := harness.LookupModelCatalog(harness.HarnessIDOpenCode)
+	if !ok {
+		t.Fatalf("want %q to be found", harness.HarnessIDOpenCode)
+	}
+	if len(cat.IDs) == 0 {
+		t.Fatalf("opencode catalog must contain at least one model ID to test IsModelID")
+	}
+	id := cat.IDs[0]
+	if !harness.IsModelID(harness.HarnessIDOpenCode, id) {
+		t.Errorf("want IsModelID(%q, %q) == true for ID drawn from the catalog", harness.HarnessIDOpenCode, id)
 	}
 }
 
-// TestIsModelID_GHCPCLIModel verifies a known ghcp-cli model returns true.
+// TestIsModelID_GHCPCLIModel verifies that IsModelID returns true for an ID
+// that exists in the ghcp-cli catalog. The ID is obtained dynamically so the
+// test does not depend on any specific model ID string.
 func TestIsModelID_GHCPCLIModel(t *testing.T) {
-	if !harness.IsModelID(harness.HarnessIDGHCPCLI, "claude-sonnet-4.6") {
-		t.Errorf("want IsModelID(%q, %q) == true", harness.HarnessIDGHCPCLI, "claude-sonnet-4.6")
+	cat, ok := harness.LookupModelCatalog(harness.HarnessIDGHCPCLI)
+	if !ok {
+		t.Fatalf("want %q to be found", harness.HarnessIDGHCPCLI)
+	}
+	if len(cat.IDs) == 0 {
+		t.Fatalf("ghcp-cli catalog must contain at least one model ID to test IsModelID")
+	}
+	id := cat.IDs[0]
+	if !harness.IsModelID(harness.HarnessIDGHCPCLI, id) {
+		t.Errorf("want IsModelID(%q, %q) == true for ID drawn from the catalog", harness.HarnessIDGHCPCLI, id)
 	}
 }
 

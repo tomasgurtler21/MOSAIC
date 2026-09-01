@@ -1,0 +1,16 @@
+{
+  "schema_version": 1,
+  "test_id": "hitl-plan-stage-all-agents",
+  "on_unmatched": "halt",
+  "stubs": [
+    {
+      "match": { "tool": "dispatch", "agent": "tests-review-tdd", "invocation": 1 },
+      "response": {
+        "agent_instance_id": "tests-review-tdd#9",
+        "run_id": "{run_id}",
+        "status_code": "SUCCESS",
+        "status_message": "Tests review passed, no findings."
+      }
+    }
+  ]
+}

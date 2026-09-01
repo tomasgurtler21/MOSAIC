@@ -148,6 +148,9 @@ func TestLookupCLIHarness_UnknownIdentityFailsWithoutPanicking(t *testing.T) {
 	if entry.ID != "" || entry.Label != "" {
 		t.Errorf("want zero-valued entry for unknown identity, got %+v", entry)
 	}
+	if entry.AgentsDir != "" {
+		t.Errorf("want zero-valued AgentsDir for unknown identity, got %q", entry.AgentsDir)
+	}
 }
 
 func TestLookupCLIHarness_EmptyIdentityFailsWithoutPanicking(t *testing.T) {
@@ -235,5 +238,68 @@ func TestCLIHarnesses_GHCPCLIEntryHasExpectedLabel(t *testing.T) {
 func TestIsCLIHarness_TrueForGHCPCLI(t *testing.T) {
 	if !harness.IsCLIHarness(harness.HarnessIDGHCPCLI) {
 		t.Errorf("want IsCLIHarness(%q) == true", harness.HarnessIDGHCPCLI)
+	}
+}
+
+// ---------------------------------------------------------------------------
+// AgentsDir field: non-empty convention and per-harness expected values
+//
+// AgentsDir is the harness-convention relative path to the project-level
+// agents directory. These tests assert that every catalog entry has a
+// non-empty AgentsDir and that each known harness resolves to the correct
+// path as defined by the Deployment tool's builtin harness descriptors.
+// ---------------------------------------------------------------------------
+
+// TestCLIHarnesses_EveryEntryHasNonEmptyAgentsDir verifies that every catalog
+// entry declares a non-empty agents directory convention. A missing value
+// would prevent Runner from computing the snapshot directory path at runtime.
+func TestCLIHarnesses_EveryEntryHasNonEmptyAgentsDir(t *testing.T) {
+	for _, e := range harness.CLIHarnesses() {
+		if e.AgentsDir == "" {
+			t.Errorf("catalog entry %q has an empty AgentsDir: every CLI harness must declare its agents directory convention", e.ID)
+		}
+	}
+}
+
+// TestLookupCLIHarness_ClaudeCodeHasExpectedAgentsDir verifies that the
+// claude-code catalog entry uses the ".claude/agents" convention, matching
+// the claude-code.yaml descriptor's paths.agents.project value.
+func TestLookupCLIHarness_ClaudeCodeHasExpectedAgentsDir(t *testing.T) {
+	const want = ".claude/agents"
+	entry, ok := harness.LookupCLIHarness(harness.HarnessIDClaudeCode)
+	if !ok {
+		t.Fatalf("want %q to be found in the catalog", harness.HarnessIDClaudeCode)
+	}
+	if entry.AgentsDir != want {
+		t.Errorf("want AgentsDir == %q for %q, got %q", want, harness.HarnessIDClaudeCode, entry.AgentsDir)
+	}
+}
+
+// TestLookupCLIHarness_OpenCodeHasExpectedAgentsDir verifies that the
+// opencode catalog entry uses the ".opencode/agents" convention, matching
+// the opencode.yaml descriptor's paths.agents.project value.
+func TestLookupCLIHarness_OpenCodeHasExpectedAgentsDir(t *testing.T) {
+	const want = ".opencode/agents"
+	entry, ok := harness.LookupCLIHarness(harness.HarnessIDOpenCode)
+	if !ok {
+		t.Fatalf("want %q to be found in the catalog", harness.HarnessIDOpenCode)
+	}
+	if entry.AgentsDir != want {
+		t.Errorf("want AgentsDir == %q for %q, got %q", want, harness.HarnessIDOpenCode, entry.AgentsDir)
+	}
+}
+
+// TestLookupCLIHarness_GHCPCLIHasExpectedAgentsDir verifies that the
+// ghcp-cli catalog entry uses the ".github/agents" convention, matching
+// the ghcp-cli.yaml descriptor's paths.agents.project value. Note: the
+// correct value is ".github/agents", NOT ".ghcp/agents".
+func TestLookupCLIHarness_GHCPCLIHasExpectedAgentsDir(t *testing.T) {
+	const want = ".github/agents"
+	entry, ok := harness.LookupCLIHarness(harness.HarnessIDGHCPCLI)
+	if !ok {
+		t.Fatalf("want %q to be found in the catalog", harness.HarnessIDGHCPCLI)
+	}
+	if entry.AgentsDir != want {
+		t.Errorf("want AgentsDir == %q for %q, got %q", want, harness.HarnessIDGHCPCLI, entry.AgentsDir)
 	}
 }

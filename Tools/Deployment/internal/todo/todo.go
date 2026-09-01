@@ -23,6 +23,14 @@ type Collector interface {
 	Groups() []Group
 	// Empty reports whether no items have been collected.
 	Empty() bool
+	// Reset discards all previously accumulated items, returning the collector to its initial
+	// empty state. Subsequent calls to Empty() return true and Items()/Groups() return empty
+	// results until new items are added.
+	//
+	// Intended for use when a deployment attempt is abandoned (e.g., the user declines the
+	// plan review, triggering ErrPlanNotConfirmed) so that gaps from the abandoned attempt do
+	// not leak into the final report.
+	Reset()
 }
 
 // Group is the set of todo items sharing one category.

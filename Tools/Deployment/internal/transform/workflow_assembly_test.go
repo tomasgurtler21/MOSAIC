@@ -74,7 +74,7 @@ You are the Orchestrator.
 
 | Phase | Subagent | HITL |
 |-------|----------|:----:|
-| PLANNING | planner | ✅ |
+| PLANNING | planner | TRUE |
 
 </Workflow>
 </AvailableWorkflows>
@@ -92,7 +92,7 @@ const quickFixBlock = `<Workflow type="core" name="quick-fix" version="3.0">
 
 | Phase | Subagent | HITL |
 |-------|----------|:----:|
-| PLANNING | planner | ✅ |
+| PLANNING | planner | TRUE |
 
 </Workflow>
 `
@@ -104,8 +104,8 @@ const greenfieldTDDBlock = `<Workflow type="core" name="greenfield-tdd" version=
 
 | Phase | Subagent | HITL |
 |-------|----------|:----:|
-| RESEARCH | requirements-refinement | ✅ |
-| PLANNING | planner-tdd-soft | ✅ |
+| RESEARCH | requirements-refinement | TRUE |
+| PLANNING | planner-tdd-soft | TRUE |
 
 </Workflow>
 `

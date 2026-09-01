@@ -33,6 +33,46 @@ type RunSettings struct {
 	Repetitions          *int
 	PassRate             *float64
 	StopAfterInvocations *int
+
+	// EchoFidelity controls whether echo fidelity mismatches affect the
+	// test verdict. Nil means "not stated at this level" and inherits
+	// from the next level down in the suite/entry/definition precedence
+	// chain; the resolved default is EchoFidelityRequired.
+	//
+	// Possible values: EchoFidelityRequired, EchoFidelityAdvisory.
+	EchoFidelity *string
+}
+
+const (
+	// EchoFidelityRequired means echo fidelity mismatches cause FAIL with
+	// ReasonEchoMismatch. This is the default and preserves current behavior.
+	EchoFidelityRequired = "required"
+
+	// EchoFidelityAdvisory means echo fidelity is always evaluated and
+	// reported, but mismatches do not contribute to the verdict.
+	EchoFidelityAdvisory = "advisory"
+)
+
+// EffectiveEchoFidelity resolves a possibly-nil EchoFidelity pointer to
+// a concrete mode string, defaulting to EchoFidelityRequired.
+func EffectiveEchoFidelity(settings RunSettings) string {
+	if settings.EchoFidelity != nil {
+		return *settings.EchoFidelity
+	}
+	return EchoFidelityRequired
+}
+
+// ChangelogEntry is one entry in a test definition's changelog, recording
+// when and why the definition's content version was bumped.
+type ChangelogEntry struct {
+	// Version is the content version this entry describes. The most recent
+	// entry's Version must match the top-level Version field.
+	Version int
+	// Date records when the change was made (string, not parsed; format is
+	// the author's choice).
+	Date string
+	// Changes is a human-readable description of what changed.
+	Changes string
 }
 
 // TestDefinition is the authored document (`*.test.yaml`) describing one
@@ -40,7 +80,10 @@ type RunSettings struct {
 // the assertions its run must satisfy.
 type TestDefinition struct {
 	SchemaVersion int
-	ID            string
+	Name          string // The human-readable display name (YAML key: name).
+	NumericID     int    // Stable numeric identity, positive, unique across all definitions (YAML key: id).
+	Version       int    // Content version, starts at 1, incremented manually by authors.
+	Changelog     []ChangelogEntry // Version history; must contain an entry matching Version.
 	Description   string
 	Layer         TestLayer
 	// Negative inverts assertion outcomes. It never inverts echo fidelity or
@@ -107,7 +150,8 @@ const (
 type Stub struct {
 	Match StubMatch
 	// Response is the payload the collaborator is made to produce, carried
-	// verbatim so a faithful echo compares equal.
+	// verbatim (except for {run_id} placeholder expansion) so a faithful
+	// echo compares equal.
 	Response    json.RawMessage
 	SideEffects []FileEffect
 }

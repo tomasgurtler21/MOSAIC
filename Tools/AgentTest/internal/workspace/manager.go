@@ -98,7 +98,7 @@ func NewManager(rootDir string, clock domain.Clock) Manager {
 }
 
 func (m *manager) sandboxFor(key domain.RunKey) domain.Sandbox {
-	name := fmt.Sprintf("%s-%s-%d", sanitizeComponent(key.RunID), sanitizeComponent(key.TestID), key.RunNumber)
+	name := fmt.Sprintf("%s-%s-%d", sanitizeComponent(key.RunID), sanitizeComponent(key.TestName), key.RunNumber)
 	root := filepath.Join(m.rootDir, name)
 	return domain.Sandbox{
 		Key:        key,
@@ -168,6 +168,18 @@ func (m *manager) Teardown(s domain.Sandbox) error {
 	return nil
 }
 
+// Reap removes sandboxes orphaned by crashed prior runs. It is implemented
+// but intentionally not wired into any production call path for the following
+// reason: its liveness check judges a sandbox by the lock holder's process ID,
+// and the lock holder is a short-lived interceptor process that is normally
+// dead between interceptions. Wiring Reap into a concurrent run unmodified
+// would therefore classify live sandboxes (whose interceptor is simply between
+// hook firings) as dead and delete them.
+//
+// To wire this safely, the liveness check must be corrected to use an
+// evidence source that is alive for the full duration of the run, not only
+// while a hook is being processed. Correcting it is out of scope; until it is
+// corrected, no production path may call Reap.
 func (m *manager) Reap(policy ReapPolicy) ([]ReapedSandbox, error) {
 	olderThan := policy.OlderThan
 	if olderThan == 0 {

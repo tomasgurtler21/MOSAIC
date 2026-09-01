@@ -1,0 +1,15 @@
+# Root .gitattributes — LF line endings for all testdata fixtures and source files
+#
+# Go test fixtures are compared byte-for-byte or with LF-expecting parsers,
+# so they must not be converted to CRLF on Windows checkout. These blanket
+# rules supersede the per-directory .gitattributes files that were added
+# reactively in individual tools.
+#
+# The broader *.md rule also covers non-testdata markdown files (e.g., design
+# documents, protocol sources) that are embedded verbatim into deployment
+# transform outputs. Keeping all markdown as LF ensures transform outputs are
+# deterministic across platforms.
+
+*.md text eol=lf
+**/testdata/**/*.golden.txt text eol=lf
+**/testdata/**/*.sh text eol=lf

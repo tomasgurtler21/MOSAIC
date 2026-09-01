@@ -294,6 +294,60 @@ func TestBuild_PresentHookBundleWithAdvancedVersion_ExactlyOneVersionDelta(t *te
 	}
 }
 
+// ---------------------------------------------------------------------------
+// AC2.3 — Hook hash mismatch retains ActionConflict (Step 4 not removed for hooks)
+// ---------------------------------------------------------------------------
+
+// TestBuild_HookHashMismatch_StillClassifiesAsConflict verifies that when a hook bundle's
+// deployed content hash differs from the hash recorded in the manifest, the plan item
+// classifies as ActionConflict. The Step 4 whole-file hash check is retained in
+// classifyHookItem -- Stage 2 removes Step 4 only from classifyAgentItem and
+// classifySkillItem. This test guards against accidental removal of the hook hash check
+// during the Stage 2 implementation and must pass both before and after I2.1.
+func TestBuild_HookHashMismatch_StillClassifiesAsConflict(t *testing.T) {
+	const hookTarget = "hooks/pre-commit"
+	const recordedHash = "sha256:recorded-hook-hash"
+	const currentHash = "sha256:modified-hook-hash" // differs from recordedHash -- hash mismatch
+
+	hook := makeHookBundle("pre-commit", "1.0")
+
+	entry := domain.ManifestEntry{
+		Ref:         domain.ArtifactRef{Kind: domain.ArtifactHook, Key: "pre-commit"},
+		TargetPath:  hookTarget,
+		Version:     hook.Version,
+		ContentHash: recordedHash,
+	}
+	snap := presentSnapshot(domain.Manifest{Entries: []domain.ManifestEntry{entry}})
+
+	// Deployed hash differs from the manifest-recorded hash.
+	// For hooks, Step 4 is retained: this must still produce ActionConflict.
+	deployed := map[string]domain.DeployedArtifactState{
+		hookTarget: {
+			Present:     true,
+			ContentHash: currentHash,
+		},
+	}
+
+	in := buildInputWithHook(hook, hookTarget, snap, deployed)
+	p, err := plan.New().Build(context.Background(), in)
+	if err != nil {
+		t.Fatalf("Build: %v", err)
+	}
+
+	item, ok := findItem(p.Items, "pre-commit")
+	if !ok {
+		t.Fatal("plan has no item for hook pre-commit")
+	}
+
+	if item.Action != domain.ActionConflict {
+		t.Errorf("hook with hash mismatch: Action = %q, want ActionConflict; "+
+			"the Step 4 hash check must be retained for hooks -- only agents and skills "+
+			"have Step 4 removed in Stage 2. A hook hash mismatch must still classify as "+
+			"ActionConflict to guard against accidental local modification of hook files.",
+			item.Action)
+	}
+}
+
 // TestBuild_PresentHookBundleWithAdvancedVersion_ReasonDoesNotMentionVersionStamps verifies
 // that even the ActionUpdate case does not include the "no readable version stamps" clause.
 // The no-version-info fallback must be dropped on the hook path regardless of whether the hook

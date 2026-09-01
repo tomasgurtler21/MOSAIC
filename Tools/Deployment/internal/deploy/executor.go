@@ -187,12 +187,10 @@ func (e *executor) Execute(ctx context.Context, req ExecRequest) (ExecResult, er
 	}
 	prior := snap.Manifest
 
-	// In atomic mode, pre-record the probe item's path before resolveDeploymentRoot writes
-	// it. The probe is the executor's first filesystem write; journaling it here ensures the
-	// reversal can undo that initial write if the run later fails. A subsequent journal entry
-	// for the same path is recorded inside executeItem when the item loop processes the probe
-	// item; reversal applies both entries in reverse order, ending with a delete for new files
-	// or a restore to the true pre-run bytes for pre-existing files.
+	// Initialise the write journal for atomic mode. The probe item's path is pre-recorded
+	// after resolveDeploymentRoot returns (using the item that was actually written), because
+	// the multi-item probe iteration may use a different item than the first eligible one when
+	// the first item's content rendering fails.
 	//
 	// Atomic has no effect during DryRun (no writes occur) or when a fallback tier is selected
 	// (the workspace was unwritable — a fallback run is not a mid-plan stop). The journal is
@@ -200,19 +198,16 @@ func (e *executor) Execute(ctx context.Context, req ExecRequest) (ExecResult, er
 	var journal *writeJournal
 	if req.Atomic && !req.DryRun {
 		journal = &writeJournal{}
-		if probeItem, hasProbe := firstProbeItem(req.Plan.Items); hasProbe {
-			probePath := filepath.Join(req.Plan.WorkspacePath, probeItem.TargetPath)
-			// Best-effort pre-record: if the file is unreadable, the probe write will also
-			// likely fail (or a fallback will be chosen, making atomicMode false). Either way,
-			// the executeItem call for this same path re-probes and records correctly.
-			_ = journal.record(probePath)
-		}
 	}
 
 	// Resolve the deployment root once before any content write (CD-12, AC17.2).
+	// The journal is passed through so resolveDeploymentRoot can record the probe path
+	// before writing it, ensuring atomic reversal correctly sees the probe file as newly
+	// created (existed=false) and deletes it on rollback rather than restoring it.
 	// probeErr is non-nil when the workspace probe failed and a fallback was triggered;
 	// it is carried as the first partial error and the per-item Err in fallback mode.
-	deployRoot, fallback, probeErr, err := resolveDeploymentRoot(req)
+	// contentErrors lists items whose Content callback failed during probe iteration.
+	deployRoot, fallback, probeErr, contentErrors, _, err := resolveDeploymentRoot(req, journal)
 	if err != nil {
 		return ExecResult{}, err
 	}
@@ -222,7 +217,7 @@ func (e *executor) Execute(ctx context.Context, req ExecRequest) (ExecResult, er
 	// mid-plan stop and keeps today's non-atomic semantics. DryRun performs no writes.
 	atomicMode := req.Atomic && !req.DryRun && fallback == domain.FallbackNone
 	if !atomicMode {
-		journal = nil // discard probe pre-record; only workspace writes are reversed
+		journal = nil // only workspace writes are covered by atomic reversal
 	}
 
 	// Log the run start after the deployment root is known.
@@ -259,7 +254,31 @@ func (e *executor) Execute(ctx context.Context, req ExecRequest) (ExecResult, er
 	entryMap := buildEntryMap(prior) // carries prior entries; updated for successful workspace writes
 	var partialErr error
 
+	// Surface content-render failures from the probe phase as TakenFailed action records.
+	// Build a set of their TargetPaths to exclude them from the main execution loop so they
+	// are not double-processed.
+	contentErrorPaths := make(map[string]bool, len(contentErrors))
+	for _, ce := range contentErrors {
+		contentErrorPaths[ce.Item.TargetPath] = true
+		ar := domain.ActionRecord{
+			Ref:        ce.Item.Ref,
+			TargetPath: filepath.Join(deployRoot, ce.Item.TargetPath),
+			Taken:      domain.TakenFailed,
+			Err:        fmt.Sprintf("content render failed during probe: %s", ce.Err),
+		}
+		if ce.Item.Ref.Kind == domain.ArtifactAgent {
+			ar.SourceVersion = ce.Item.SourceVersion
+		}
+		e.log.Action(ar)
+		actions = append(actions, ar)
+	}
+
 	for _, item := range req.Plan.Items {
+		// Skip items that already have a TakenFailed record from the probe phase; executing
+		// them again would produce a duplicate action record for the same TargetPath.
+		if contentErrorPaths[item.TargetPath] {
+			continue
+		}
 		var ar domain.ActionRecord
 		var entry *domain.ManifestEntry
 
@@ -440,6 +459,9 @@ func (e *executor) executeItem(
 		TargetPath: filepath.Join(deployRoot, item.TargetPath),
 		Stale:      item.Stale,
 	}
+	if item.Ref.Kind == domain.ArtifactAgent {
+		ar.SourceVersion = item.SourceVersion
+	}
 
 	switch item.Action {
 	case domain.ActionUnchanged:
@@ -516,6 +538,9 @@ func (e *executor) executeFallbackItem(
 		Ref:        item.Ref,
 		TargetPath: filepath.Join(deployRoot, item.TargetPath),
 		Stale:      item.Stale,
+	}
+	if item.Ref.Kind == domain.ArtifactAgent {
+		ar.SourceVersion = item.SourceVersion
 	}
 
 	switch item.Action {
@@ -677,6 +702,9 @@ func simulateAction(item domain.PlanItem, req ExecRequest) domain.ActionRecord {
 		Ref:        item.Ref,
 		TargetPath: item.TargetPath,
 		Stale:      item.Stale,
+	}
+	if item.Ref.Kind == domain.ArtifactAgent {
+		ar.SourceVersion = item.SourceVersion
 	}
 	switch item.Action {
 	case domain.ActionCreate:

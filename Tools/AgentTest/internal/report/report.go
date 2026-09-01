@@ -33,11 +33,26 @@ type Result struct {
 	// fault, kept separate from the verdict counts because it is a statement
 	// about the tool rather than about the subject.
 	InfrastructureFailures int
+
+	// EffectiveRepetitions, when non-nil, is the repetitions count that was in
+	// effect for this run — either a CLI/TUI override or the suite's authored
+	// default as resolved by the caller. Nil means the caller did not record it.
+	// The text renderer surfaces this in the report header so a user can
+	// confirm the value without examining the suite file.
+	EffectiveRepetitions *int
+
+	// CatalogFolder is the agent catalog directory that was used for
+	// this run's agent deployments. Suite-level (not per-run on
+	// RunReport) because the catalog folder is process-wide and
+	// constant for all runs in a single invocation. Empty means no
+	// catalog folder was configured (production catalog was used).
+	CatalogFolder string
 }
 
 // TestReport is one test's aggregate outcome plus its per-repetition detail.
 type TestReport struct {
-	TestID      string
+	TestName    string // human-readable display name of the test
+	NumericID   int    // Stable numeric identity, sourced from Definition.NumericID.
 	Description string
 	Layer       domain.TestLayer
 	Aggregate   domain.AggregateResult
@@ -75,6 +90,31 @@ type RunReport struct {
 	// recorded; both renderings show that as unknown, never as blank.
 	SubjectModel string
 	StubModel    string
+
+	// HarnessID names the harness adapter that produced this run, carried
+	// from RunEvidence through TestResult. Per-run placement (not
+	// report-level) because a single invocation may run different attempts
+	// against different harnesses once harness selection is resolved.
+	//
+	// Empty means no harness identity was recorded; both renderings show
+	// that as unknown, never as blank.
+	HarnessID string
+
+	// TerminationReason names why this run ended. Values match
+	// domain.RunDisposition: "completed", "early_exit", "timed_out",
+	// "turn_limit", "spawn_failed". Empty only when disposition was not
+	// recorded, which both renderings show as "unknown" rather than blank.
+	TerminationReason string
+
+	// TestVersion is the content version of the test definition this run
+	// exercised, sourced from domain.TestResult.Version and copied by suite.go.
+	// Zero means the value was not recorded.
+	TestVersion int
+
+	// NumericID is the stable numeric identity of the test definition this run
+	// exercised, sourced from domain.TestResult.NumericID and copied by suite.go.
+	// Zero means the value was not recorded.
+	NumericID int
 }
 
 // SubjectFailure is what a subject that exited non-zero told us. Zero-valued
@@ -93,7 +133,7 @@ type SubjectFailure struct {
 // Counts, TotalCost and InfrastructureFailures are derived here, once, from
 // each test's aggregate — the same rule report.Result documents: no other
 // consumer computes a count or a total of its own.
-func Build(suiteID string, started, finished time.Time, tests []TestReport) Result {
+func Build(suiteID string, started, finished time.Time, tests []TestReport, catalogFolder string) Result {
 	counts := map[domain.Verdict]int{}
 	total := domain.CostReport{Attribution: domain.AttributionAttributed}
 	infra := 0
@@ -115,6 +155,7 @@ func Build(suiteID string, started, finished time.Time, tests []TestReport) Resu
 		Counts:                 counts,
 		TotalCost:              total,
 		InfrastructureFailures: infra,
+		CatalogFolder:          catalogFolder,
 	}
 }
 
@@ -151,6 +192,11 @@ const (
 
 	// ClassSubjectFailure is a subject that exited non-zero.
 	ClassSubjectFailure OutcomeClass = "subject_failure"
+
+	// ClassCutoff is a run that was terminated by the hard subject cutoff
+	// (stop_after_invocations). Present in Classify's output if and only if
+	// TerminationReason equals domain.DispositionEarlyExit.
+	ClassCutoff OutcomeClass = "cutoff"
 )
 
 // Classify reports every class a run exhibits, in a stable order. A run can
@@ -177,6 +223,9 @@ func Classify(r RunReport) []OutcomeClass {
 	}
 	if r.Subject.ExitCode != 0 {
 		out = append(out, ClassSubjectFailure)
+	}
+	if r.TerminationReason == string(domain.DispositionEarlyExit) {
+		out = append(out, ClassCutoff)
 	}
 	if len(out) == 0 && r.Verdict == domain.VerdictPass {
 		out = append(out, ClassPass)

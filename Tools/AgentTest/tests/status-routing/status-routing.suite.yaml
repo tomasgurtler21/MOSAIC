@@ -1,0 +1,23 @@
+schema_version: 1
+id: status-routing
+description: >
+  Status-code-driven routing decisions in brownfield-tdd. Tests that the
+  orchestrator correctly interprets each non-SUCCESS status code: route-back
+  on COMPLETED_NEEDS_ACTION, re-dispatch on PARTIALLY_DONE, retry on BLOCKED,
+  re-dispatch with context on NEEDS_CLARIFICATION, and escalate to human on
+  CAPABILITY_EXCEEDED.
+defaults:
+  timeout: 10m
+  turn_limit: 5
+  repetitions: 100
+  pass_rate: 0.95
+  echo_fidelity: advisory
+tests:
+  - path: findings-route-back.test.yaml
+  - path: partially-done-redispatch.test.yaml
+  - path: creator-fix-rereview.test.yaml
+  - path: blocked-e101-retry.test.yaml
+  - path: blocked-e501-retry.test.yaml
+  - path: needs-clarification-no-advance.test.yaml
+  - path: blocked-e503-hitl-retry.test.yaml
+  - path: capability-exceeded-escalate.test.yaml

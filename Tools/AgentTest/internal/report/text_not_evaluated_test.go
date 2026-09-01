@@ -32,17 +32,17 @@ func TestRenderText_ListsNotEvaluatedAssertionWithReason(t *testing.T) {
 		FinishedAt:    fixedFinish(),
 		Tests: []report.TestReport{
 			{
-				TestID: "orchestrator-suppressed",
+				TestName: "orchestrator-suppressed",
 				Layer:  domain.LayerOrchestrator,
 				Aggregate: domain.AggregateResult{
-					TestID:  "orchestrator-suppressed",
+					TestName:  "orchestrator-suppressed",
 					Verdict: domain.VerdictPass,
 					Counted: 1,
 					Passed:  1,
 				},
 				Runs: []report.RunReport{
 					{
-						Key:     domain.RunKey{RunID: "run-001", TestID: "orchestrator-suppressed", RunNumber: 1},
+						Key:     domain.RunKey{RunID: "run-001", TestName: "orchestrator-suppressed", RunNumber: 1},
 						Verdict: domain.VerdictPass,
 						Assertions: []domain.AssertionResult{
 							{
@@ -82,7 +82,7 @@ func TestRenderText_ListsNotEvaluatedAssertionWithReason(t *testing.T) {
 func TestRenderText_NotEvaluatedAssertionDistinctFromFailedAssertion(t *testing.T) {
 	// Arrange
 	failedRun := report.RunReport{
-		Key:     domain.RunKey{RunID: "run-001", TestID: "failed-assertion", RunNumber: 1},
+		Key:     domain.RunKey{RunID: "run-001", TestName: "failed-assertion", RunNumber: 1},
 		Verdict: domain.VerdictFail,
 		Reasons: []domain.FailureReason{domain.ReasonAssertion},
 		Assertions: []domain.AssertionResult{
@@ -96,7 +96,7 @@ func TestRenderText_NotEvaluatedAssertionDistinctFromFailedAssertion(t *testing.
 		Duration: time.Second,
 	}
 	notEvaluatedRun := report.RunReport{
-		Key:     domain.RunKey{RunID: "run-002", TestID: "not-evaluated-assertion", RunNumber: 1},
+		Key:     domain.RunKey{RunID: "run-002", TestName: "not-evaluated-assertion", RunNumber: 1},
 		Verdict: domain.VerdictPass,
 		Assertions: []domain.AssertionResult{
 			{
@@ -114,15 +114,15 @@ func TestRenderText_NotEvaluatedAssertionDistinctFromFailedAssertion(t *testing.
 		FinishedAt:    fixedFinish(),
 		Tests: []report.TestReport{
 			{
-				TestID:    "failed-assertion",
+				TestName:    "failed-assertion",
 				Layer:     domain.LayerSubagent,
-				Aggregate: domain.AggregateResult{TestID: "failed-assertion", Verdict: domain.VerdictFail, Reasons: []domain.FailureReason{domain.ReasonAssertion}, Counted: 1},
+				Aggregate: domain.AggregateResult{TestName: "failed-assertion", Verdict: domain.VerdictFail, Reasons: []domain.FailureReason{domain.ReasonAssertion}, Counted: 1},
 				Runs:      []report.RunReport{failedRun},
 			},
 			{
-				TestID:    "not-evaluated-assertion",
+				TestName:    "not-evaluated-assertion",
 				Layer:     domain.LayerOrchestrator,
-				Aggregate: domain.AggregateResult{TestID: "not-evaluated-assertion", Verdict: domain.VerdictPass, Counted: 1, Passed: 1},
+				Aggregate: domain.AggregateResult{TestName: "not-evaluated-assertion", Verdict: domain.VerdictPass, Counted: 1, Passed: 1},
 				Runs:      []report.RunReport{notEvaluatedRun},
 			},
 		},
@@ -163,17 +163,17 @@ func TestRenderText_PassingRunWithNoNotEvaluatedAssertions_Unaffected(t *testing
 		FinishedAt:    fixedFinish(),
 		Tests: []report.TestReport{
 			{
-				TestID: "ordinary-pass",
+				TestName: "ordinary-pass",
 				Layer:  domain.LayerSubagent,
 				Aggregate: domain.AggregateResult{
-					TestID:  "ordinary-pass",
+					TestName:  "ordinary-pass",
 					Verdict: domain.VerdictPass,
 					Counted: 1,
 					Passed:  1,
 				},
 				Runs: []report.RunReport{
 					{
-						Key:     domain.RunKey{RunID: "run-001", TestID: "ordinary-pass", RunNumber: 1},
+						Key:     domain.RunKey{RunID: "run-001", TestName: "ordinary-pass", RunNumber: 1},
 						Verdict: domain.VerdictPass,
 						Assertions: []domain.AssertionResult{
 							{Class: domain.ClassFinalStatus, Outcome: domain.AssertionPass, Expected: "SUCCESS", Actual: "SUCCESS"},

@@ -1,6 +1,6 @@
 ---
 id: 11
-version: 5.2.0
+version: 5.2.1
 name: plan-review
 description: Reviews plan quality, task sizing, dependency correctness, and validates TDD decisions against actual codebase - validating Plan.md (routing artifact) and all per-stage files (Stage-{N}/Plan.md, Stage-{N}/PlanProgress.md) before proceeding to design
 role: subagent
@@ -118,7 +118,7 @@ Apply these checks systematically:
 **Artifact Quality:**
 - [ ] Plan.md has immutability warning header (with HITL exception noted)
 - [ ] Plan.md has stage table with columns: Stage, Name, Goal, Depends On, HITL
-- [ ] Plan.md HITL column defaults to ❌ for all stages
+- [ ] Plan.md HITL column defaults to FALSE for all stages
 - [ ] Plan.md stage goals are strict one-liners (no task-level details in global plan)
 - [ ] Plan.md Unresolved Questions section is empty or absent (plan is complete)
 - [ ] Stage-{N}/Plan.md exists for every stage listed in Plan.md
@@ -161,14 +161,14 @@ When reading actual code, assess testability:
 
 | Severity | Requires Rework |
 |----------|-----------------|
-| CRITICAL | ✅ Always |
-| MAJOR | ✅ Yes |
-| MINOR | ❌ No |
-| SUGGESTION | ❌ No |
+| CRITICAL | Yes — Always |
+| MAJOR | Yes |
+| MINOR | No |
+| SUGGESTION | No |
 
 **Status Code Logic:**
-- ANY issue at "Requires Rework: ✅" level → return `COMPLETED_NEEDS_ACTION`
-- ALL issues at "Requires Rework: ❌" levels → return `SUCCESS` with issues noted in report
+- ANY issue at "Requires Rework: Yes" level → return `COMPLETED_NEEDS_ACTION`
+- ALL issues at "Requires Rework: No" levels → return `SUCCESS` with issues noted in report
 
 </SeverityThresholds>
 
@@ -201,8 +201,8 @@ Your review artifact should follow this template:
 
 ## Requirements Coverage
 **Coverage:** [X]% of requirements addressed
-- ✅ [Requirement that is addressed]
-- ❌ [Requirement that is missing or incomplete]
+- [PASS] [Requirement that is addressed]
+- [FAIL] [Requirement that is missing or incomplete]
 
 ## Code Reality Check
 **Files Examined:** [List of actual code files read]
@@ -211,9 +211,9 @@ Your review artifact should follow this template:
 ### TDD Decision Validation
 | Stage | Planned Approach | Code Assessment | Verdict |
 |-------|-----------------|-----------------|---------|
-| Stage 1 | TDD | Testable (has DI) | ✅ Valid |
-| Stage 2 | TDD | Untestable (no DI, god class) | ❌ Should be Implementation-First |
-| Stage 3 | Implementation-First | Legacy code | ✅ Valid |
+| Stage 1 | TDD | Testable (has DI) | [PASS] Valid |
+| Stage 2 | TDD | Untestable (no DI, god class) | [FAIL] Should be Implementation-First |
+| Stage 3 | Implementation-First | Legacy code | [PASS] Valid |
 
 ### Complexity Alignment
 - [Stage/Task] - Plan says [X], code suggests [Y]

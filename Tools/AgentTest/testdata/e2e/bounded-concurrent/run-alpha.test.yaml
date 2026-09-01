@@ -1,0 +1,41 @@
+schema_version: 1
+name: run-alpha
+id: 10
+version: 1
+changelog:
+  - version: 1
+    date: "2026-01-01"
+    changes: "Initial."
+description: >
+  First test in the bounded-concurrent scenario. Two repetitions, one
+  collaborator ("worker") dispatched per repetition and substituted directly.
+  Both repetitions must pass so the aggregate verdict is PASS, confirming the
+  concurrent scheduler preserves correctness under a bound above 1.
+layer: subagent
+negative: false
+repetitions: 2
+pass_rate: 1.0
+
+subject:
+  identity: standin-subject
+  agent: standin-subject
+  infrastructure_agents: []
+  opening_message: |
+    Invoke the worker collaborator once, then finish.
+  invocation_kind: subagent
+  allowed_tools: [Task]
+
+stub_registry: run-alpha.stubs.json
+stub_agents:
+  - identity:
+      tool: dispatch
+      agent: worker
+    source: ../stub-agent-placeholder.md
+timeout: 30s
+turn_limit: 5
+
+assertions:
+  invocation_sequence:
+    exact: true
+    steps:
+      - { tool: dispatch, agent: worker }

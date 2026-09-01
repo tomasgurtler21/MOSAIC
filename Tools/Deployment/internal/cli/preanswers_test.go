@@ -222,6 +222,204 @@ func TestPreAnswersFromSelectionsFile_AllSections_AllEntriesPresent(t *testing.T
 // T6.1 — Builder: empty / absent sections
 // ---------------------------------------------------------------------------
 
+// ---------------------------------------------------------------------------
+// T1.2 — Builder: infrastructure_agents empty-list handling
+// ---------------------------------------------------------------------------
+
+// TestPreAnswersFromSelectionsFile_EmptyInfrastructureAgents_ProducesEntry verifies that
+// an explicit `infrastructure_agents: []` in the selections file produces a pre-answer
+// entry for QInfrastructureAgents with an empty value (""). This distinguishes "deploy
+// none" from "not specified" (absent key), preventing the deploy tool from asking an
+// interactive question when the caller explicitly chose no infrastructure agents.
+//
+// RED: the current guard is `len(sf.InfrastructureAgents) > 0`, which skips the empty
+// list. The fix changes it to `sf.InfrastructureAgents != nil`.
+func TestPreAnswersFromSelectionsFile_EmptyInfrastructureAgents_ProducesEntry(t *testing.T) {
+	// Arrange
+	path := writeTempYAML(t, "infrastructure_agents: []\n")
+
+	// Act
+	pa, err := cli.PreAnswersFromSelectionsFile(path)
+
+	// Assert
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	innerMap, ok := pa.Values[domain.QInfrastructureAgents]
+	if !ok {
+		t.Fatal("QInfrastructureAgents entry missing from PreAnswers.Values; " +
+			"an explicit empty list must produce a pre-answer entry so the deploy tool " +
+			"knows not to ask an interactive question (\"deploy none\" vs \"not specified\")")
+	}
+	got, ok := innerMap[""]
+	if !ok {
+		t.Fatal("QInfrastructureAgents run-level subject \"\" missing from entry map")
+	}
+	if got != "" {
+		t.Errorf("QInfrastructureAgents answer = %q, want empty string; "+
+			"strings.Join([]string{}, \",\") must produce the empty string", got)
+	}
+}
+
+// TestPreAnswersFromSelectionsFile_AbsentInfrastructureAgents_NoEntry verifies that when
+// the infrastructure_agents key is absent from the selections file, no entry is added to
+// PreAnswers.Values for QInfrastructureAgents. This preserves the "ask interactively"
+// behavior for callers that did not supply an explicit selection.
+func TestPreAnswersFromSelectionsFile_AbsentInfrastructureAgents_NoEntry(t *testing.T) {
+	// Arrange — file with no infrastructure_agents key at all
+	path := writeTempYAML(t, "{}\n")
+
+	// Act
+	pa, err := cli.PreAnswersFromSelectionsFile(path)
+
+	// Assert
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if pa.Values != nil {
+		if _, ok := pa.Values[domain.QInfrastructureAgents]; ok {
+			t.Error("QInfrastructureAgents entry present for absent key; " +
+				"an absent infrastructure_agents key must not produce a pre-answer entry " +
+				"so the deploy tool can ask its interactive question")
+		}
+	}
+}
+
+// TestPreAnswersFromSelectionsFile_PopulatedInfrastructureAgents_CommaJoinedEntry verifies
+// that a non-empty infrastructure_agents list produces a pre-answer entry with the IDs
+// comma-joined, consistent with the encoding used by utility_agents and hooks.
+func TestPreAnswersFromSelectionsFile_PopulatedInfrastructureAgents_CommaJoinedEntry(t *testing.T) {
+	// Arrange
+	path := writeTempYAML(t, "infrastructure_agents:\n  - checkpoint-manager-git\n  - commit-manager-git\n")
+
+	// Act
+	pa, err := cli.PreAnswersFromSelectionsFile(path)
+
+	// Assert
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	innerMap, ok := pa.Values[domain.QInfrastructureAgents]
+	if !ok {
+		t.Fatal("QInfrastructureAgents entry missing from PreAnswers.Values")
+	}
+	const want = "checkpoint-manager-git,commit-manager-git"
+	if got := innerMap[""]; got != want {
+		t.Errorf("QInfrastructureAgents answer = %q, want %q; "+
+			"multiple IDs must be comma-joined", got, want)
+	}
+}
+
+// ---------------------------------------------------------------------------
+// T1.2 — Builder: utility_agents empty-list handling
+// ---------------------------------------------------------------------------
+
+// TestPreAnswersFromSelectionsFile_EmptyUtilityAgents_ProducesEntry verifies that an
+// explicit `utility_agents: []` produces a pre-answer entry for QUtilityAgents with an
+// empty value, preventing the deploy tool from asking an interactive question.
+//
+// RED: the current guard is `len(sf.UtilityAgents) > 0`; the fix changes it to
+// `sf.UtilityAgents != nil`.
+func TestPreAnswersFromSelectionsFile_EmptyUtilityAgents_ProducesEntry(t *testing.T) {
+	// Arrange
+	path := writeTempYAML(t, "utility_agents: []\n")
+
+	// Act
+	pa, err := cli.PreAnswersFromSelectionsFile(path)
+
+	// Assert
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	innerMap, ok := pa.Values[domain.QUtilityAgents]
+	if !ok {
+		t.Fatal("QUtilityAgents entry missing from PreAnswers.Values; " +
+			"an explicit empty list must produce a pre-answer entry (\"deploy none\") " +
+			"so the deploy tool does not ask an interactive question")
+	}
+	if got := innerMap[""]; got != "" {
+		t.Errorf("QUtilityAgents answer = %q, want empty string", got)
+	}
+}
+
+// TestPreAnswersFromSelectionsFile_AbsentUtilityAgents_NoEntry verifies that an absent
+// utility_agents key produces no QUtilityAgents entry in PreAnswers.
+func TestPreAnswersFromSelectionsFile_AbsentUtilityAgents_NoEntry(t *testing.T) {
+	// Arrange
+	path := writeTempYAML(t, "{}\n")
+
+	// Act
+	pa, err := cli.PreAnswersFromSelectionsFile(path)
+
+	// Assert
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if pa.Values != nil {
+		if _, ok := pa.Values[domain.QUtilityAgents]; ok {
+			t.Error("QUtilityAgents entry present for absent key; " +
+				"an absent utility_agents key must not produce a pre-answer entry")
+		}
+	}
+}
+
+// ---------------------------------------------------------------------------
+// T1.2 — Builder: hooks empty-list handling
+// ---------------------------------------------------------------------------
+
+// TestPreAnswersFromSelectionsFile_EmptyHooks_ProducesEntry verifies that an explicit
+// `hooks: []` produces a pre-answer entry for QHooks with an empty value, preventing
+// the deploy tool from asking an interactive question.
+//
+// RED: the current guard is `len(sf.Hooks) > 0`; the fix changes it to
+// `sf.Hooks != nil`.
+func TestPreAnswersFromSelectionsFile_EmptyHooks_ProducesEntry(t *testing.T) {
+	// Arrange
+	path := writeTempYAML(t, "hooks: []\n")
+
+	// Act
+	pa, err := cli.PreAnswersFromSelectionsFile(path)
+
+	// Assert
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	innerMap, ok := pa.Values[domain.QHooks]
+	if !ok {
+		t.Fatal("QHooks entry missing from PreAnswers.Values; " +
+			"an explicit empty list must produce a pre-answer entry (\"deploy none\") " +
+			"so the deploy tool does not ask an interactive question")
+	}
+	if got := innerMap[""]; got != "" {
+		t.Errorf("QHooks answer = %q, want empty string", got)
+	}
+}
+
+// TestPreAnswersFromSelectionsFile_AbsentHooks_NoEntry verifies that an absent hooks
+// key produces no QHooks entry in PreAnswers.
+func TestPreAnswersFromSelectionsFile_AbsentHooks_NoEntry(t *testing.T) {
+	// Arrange
+	path := writeTempYAML(t, "{}\n")
+
+	// Act
+	pa, err := cli.PreAnswersFromSelectionsFile(path)
+
+	// Assert
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if pa.Values != nil {
+		if _, ok := pa.Values[domain.QHooks]; ok {
+			t.Error("QHooks entry present for absent key; " +
+				"an absent hooks key must not produce a pre-answer entry")
+		}
+	}
+}
+
+// ---------------------------------------------------------------------------
+// Existing tests below (workflows empty / absent sections / error cases)
+// ---------------------------------------------------------------------------
+
 // TestPreAnswersFromSelectionsFile_EmptyWorkflows_NoQWorkflowsEntry verifies that an
 // empty workflows list does not produce a QWorkflows entry. Supplying an empty list as a
 // pre-answer would encode as "" which nonInteractive resolves as "no IDs selected",

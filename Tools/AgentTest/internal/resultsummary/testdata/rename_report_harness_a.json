@@ -1,0 +1,49 @@
+{
+  "schema_version": "1",
+  "suite_id": "suite-rename",
+  "started_at": "2026-08-20T10:00:00Z",
+  "finished_at": "2026-08-20T10:02:00Z",
+  "tests": [
+    {
+      "test_name": "original-name",
+      "test_id": 42,
+      "description": "A test that will later be renamed; numeric ID 42 is its stable identity",
+      "layer": "orchestrator",
+      "aggregate": {
+        "verdict": "pass",
+        "counted": 2,
+        "passed": 2,
+        "pass_rate": 1.0,
+        "infrastructure_failure": false,
+        "total_cost": { "total_usd": 0.02, "attribution": "direct" }
+      },
+      "runs": [
+        {
+          "subject_version": "v1.0.0",
+          "subject_model": "github-copilot/claude-sonnet-4.6",
+          "harness_id": "claude-code",
+          "verdict": "pass",
+          "duration_ms": 1000,
+          "cost": { "total_usd": 0.01, "attribution": "direct" },
+          "termination_reason": "completed",
+          "conditions": [],
+          "test_version": 1
+        },
+        {
+          "subject_version": "v1.0.0",
+          "subject_model": "github-copilot/claude-sonnet-4.6",
+          "harness_id": "claude-code",
+          "verdict": "pass",
+          "duration_ms": 1100,
+          "cost": { "total_usd": 0.01, "attribution": "direct" },
+          "termination_reason": "completed",
+          "conditions": [],
+          "test_version": 1
+        }
+      ]
+    }
+  ],
+  "counts": { "pass": 2 },
+  "total_cost": { "total_usd": 0.02, "attribution": "direct" },
+  "infrastructure_failures": 0
+}

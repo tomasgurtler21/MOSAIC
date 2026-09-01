@@ -1,9 +1,11 @@
 schema_version: 1
 id: echo-fidelity-e2e
 description: >
-  End-to-end echo-fidelity scenario (T18.3): the scripted collaborator's
-  reply, delivered on the rewrite-prompt path, is compared against what the
-  stub declared, and a mismatch fails the run unconditionally.
+  End-to-end echo-fidelity scenario: the scripted collaborator's reply,
+  delivered on the rewrite-prompt path, is compared against what the stub
+  declared. A mismatch excludes the run and triggers a retry; if the mismatch
+  recurs on the retry, both runs are excluded and the suite reports
+  InfrastructureFailure.
 defaults:
   timeout: 30s
   turn_limit: 5

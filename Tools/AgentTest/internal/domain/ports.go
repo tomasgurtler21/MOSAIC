@@ -226,6 +226,17 @@ type DeployRequest struct {
 	// not "send nothing".
 	Workflows []string
 
+	// InfrastructureAgentIDs pins the infrastructure agent set to deploy.
+	// nil means "not specified"; non-nil empty means "explicitly none."
+	// Same nil/non-nil convention as Workflows.
+	//
+	// When non-nil, the agentdeploy port writes an infrastructure_agents
+	// key in the --selections file so the deploy tool resolves the
+	// selection non-interactively. An absent key leaves the deploy tool
+	// free to ask its interactive question, which would hang an automated
+	// AgentTest run.
+	InfrastructureAgentIDs []string
+
 	// TierModels pre-answers model selection, keyed by tier name. Catalogue
 	// agent definitions carry a model placeholder rather than a real
 	// identifier, and identifiers are harness-specific, so a tier left
@@ -244,6 +255,23 @@ type DeployRequest struct {
 	// DryRun validates everything and writes nothing. Used by preflight to
 	// refuse a bad declaration before a sandbox exists.
 	DryRun bool
+
+	// LogDir is the directory the delegate writes its own per-run log files to.
+	//
+	// Empty means "do not override" — the flag is omitted and the delegate
+	// writes to its own default location under the shared repository root,
+	// following this port's empty-means-omitted convention for root-scoped
+	// overrides. A non-empty value is emitted as --log-dir so that the
+	// delegate writes its two sink files (latest.log, history.log) there
+	// instead.
+	//
+	// It exists because the delegate's default log location is derived from
+	// the repository root, which is the same for every attempt: without an
+	// override, N concurrent attempts truncate and append to the same two
+	// files, outside every sandbox. The runner sets this to
+	// sandbox.DeployLogDir() so each attempt writes to its own location
+	// and the run's retention policy governs the logs uniformly.
+	LogDir string
 }
 
 // DeployResult is what the delegate reported it did. Every field is reported
@@ -273,6 +301,11 @@ type DeployedAgent struct {
 	// sandbox-relative definition path is derived from this and from nothing
 	// else. Callers MUST NOT reconstruct it from harness layout knowledge.
 	DestinationPath string
+
+	// SourceVersion is the source agent's declared version. Empty means the
+	// source declared none — a legal state that must be reported as unknown,
+	// never as a blank that reads like a real value.
+	SourceVersion string
 }
 
 // RenderAgentResult is what the delegate reported it did. Every field is

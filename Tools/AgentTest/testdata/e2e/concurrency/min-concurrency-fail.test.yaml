@@ -1,5 +1,11 @@
 schema_version: 1
-id: min-concurrency-fail
+name: min-concurrency-fail
+id: 48
+version: 1
+changelog:
+  - version: 1
+    date: "2026-01-01"
+    changes: "Initial."
 description: >
   The same two collaborators are dispatched as one parallel group, whose
   reconstructed peak is 2 — but this test declares a minimum of 3, which the
@@ -10,6 +16,7 @@ negative: false
 subject:
   identity: standin-subject
   agent: standin-subject
+  infrastructure_agents: []
   opening_message: |
     Dispatch the researcher and the library researcher together, then finish.
   invocation_kind: subagent

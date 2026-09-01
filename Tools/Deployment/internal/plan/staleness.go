@@ -35,7 +35,11 @@ func AgentStaleness(deployed domain.DeployedArtifactState, agent domain.Agent, s
 			Source:   stamps.HarnessVersion,
 		})
 	}
-	if deployed.InjectionsVersion != stamps.InjectionsVersion {
+	// InjectionsVersion is compared only when the deployed file contains at least one
+	// InjectionHarness-class region. When HasInjectionRegion is false, the agent's body
+	// carries no injection harness content, so a version difference is a false positive
+	// (the probe found no region to read from, yielding "" regardless of the source stamp).
+	if deployed.HasInjectionRegion && deployed.InjectionsVersion != stamps.InjectionsVersion {
 		deltas = append(deltas, domain.VersionDelta{
 			Field:    "injections_version",
 			Deployed: deployed.InjectionsVersion,

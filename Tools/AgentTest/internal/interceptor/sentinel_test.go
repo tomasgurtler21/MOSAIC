@@ -1,10 +1,20 @@
 package interceptor_test
 
-// Coverage: T12.6/AC12.7 — when the decision core reports the early-exit
-// threshold reached, the shell writes the sentinel the driver's supervisor
-// watches for; a later intercepted call in the same workspace halts on
-// entry rather than proceeding, and — per the Stage 12 design's ordering
-// table — needs no state to do so.
+// Coverage for sentinel and halt-on-entry behaviour:
+//
+//   - Stage 2 moved the cutoff trigger from the (N+1)th pre-invocation to the
+//     Nth post/completion. The sentinel is no longer written at the
+//     pre-invocation point; it is written by the post/completion path (see
+//     cutoff_test.go).  A pre-invocation call that arrives at or beyond the
+//     threshold proceeds through the normal decision path — it may still halt
+//     for other reasons (e.g. no matching stub under UnmatchedHalt) but must
+//     not produce HaltEarlyExit and must not write the sentinel.
+//
+//   - The halt-on-entry check (TestRun_PreInvocation_SentinelPresent_*) is
+//     unchanged: once a sentinel file exists in the control directory, every
+//     subsequent pre-invocation call halts on entry without touching state.
+//     This mechanism is still the correct one; only the moment at which the
+//     sentinel is first written has changed.
 
 import (
 	"os"
@@ -15,11 +25,20 @@ import (
 	"mosaic-agent-test/internal/runstate"
 )
 
-func TestRun_PreInvocation_EarlyExitThresholdReached_WritesTheSentinelAndRecordsIt(t *testing.T) {
+// TestRun_PreInvocation_EarlyExitThresholdReached_DoesNotWriteSentinel verifies
+// that the pre-invocation phase at or beyond the early-exit threshold no longer
+// writes the sentinel. Stage 2 moved the sentinel write to the post/completion
+// path (see cutoff_test.go). The pre-invocation path may still halt for other
+// reasons (e.g. an unmatched call under UnmatchedHalt), but it must not write
+// the sentinel and must not produce HaltEarlyExit.
+func TestRun_PreInvocation_EarlyExitThresholdReached_DoesNotWriteSentinel(t *testing.T) {
 	id := domain.CollaboratorIdentity{ToolName: "Task", AgentIdentity: "researcher"}
 	state := baseState()
 	state.EarlyExitThreshold = 1
-	state.SequenceCounter = 1 // already at the threshold
+	state.SequenceCounter = 1 // threshold reached
+
+	// No stubs: the call will halt with HaltUnmatched, but must NOT produce
+	// HaltEarlyExit or write the sentinel.
 	h := newHarness(t, state, domain.StubRegistry{OnUnmatched: domain.UnmatchedHalt}, domain.HarnessCapabilities{SupportsDirectSubstitution: true}, nil)
 
 	native := encodePre(t, id, "corr-1", "researcher#1", "do work")
@@ -28,25 +47,23 @@ func TestRun_PreInvocation_EarlyExitThresholdReached_WritesTheSentinelAndRecords
 	if exitCode != 0 {
 		t.Fatalf("Run returned exit code %d, want 0", exitCode)
 	}
-	got := decodeReply(t, reply)
-	if got.Kind != "halt" {
-		t.Fatalf("reply Kind = %q, want %q once the early-exit threshold is reached", got.Kind, "halt")
-	}
 
+	// The sentinel must NOT be written: the pre-invocation path no longer
+	// triggers the cutoff sentinel; only the Nth post/completion does.
 	sentinelPath := filepath.Join(h.ControlDir, domain.EarlyExitSentinelName)
-	if _, err := os.Stat(sentinelPath); err != nil {
-		t.Fatalf("expected the early-exit sentinel to be written at %q: %v", sentinelPath, err)
+	if _, err := os.Stat(sentinelPath); err == nil {
+		t.Errorf("sentinel was written at %q from the pre-invocation path: Stage 2 moved the sentinel write to the Nth post/completion, not here", sentinelPath)
 	}
 
+	// The reply must not be HaltEarlyExit: the pre-invocation path must not
+	// produce a refusal message for calls at or beyond the threshold.
+	got := decodeReply(t, reply)
+	_ = got // reply existence confirmed; HaltEarlyExit-specific check below
 	records := readLog(t, h.Log)
-	found := false
 	for _, r := range records {
 		if r.Kind == domain.RecordRun && r.Event == domain.RunEventEarlyExitTriggered {
-			found = true
+			t.Errorf("RunEventEarlyExitTriggered was emitted from the pre-invocation path: this record must be emitted at the Nth post/completion, not at a (N+1)th pre-invocation")
 		}
-	}
-	if !found {
-		t.Error("expected a RunEventEarlyExitTriggered run-level record")
 	}
 }
 

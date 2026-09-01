@@ -49,7 +49,7 @@ func TestRepetition_MixedOutcomesAcrossRepetitions_AggregateAgainstDeclaredPassR
 
 	byID := map[string]wireTestReportDoc{}
 	for _, tr := range out.Result.Tests {
-		byID[tr.TestID] = tr
+		byID[tr.TestName] = tr
 	}
 	if len(byID) != 2 {
 		t.Fatalf("Result.Tests has %d entries, want 2\nstdout: %s", len(byID), out.Stdout)
@@ -69,20 +69,20 @@ func TestRepetition_MixedOutcomesAcrossRepetitions_AggregateAgainstDeclaredPassR
 func assertAggregate(t *testing.T, out Outcome, tr wireTestReportDoc, wantVerdict domain.Verdict, wantCounted, wantPassed int) {
 	t.Helper()
 
-	if tr.TestID == "" {
+	if tr.TestName == "" {
 		t.Fatalf("no result found for the expected test id\nstdout: %s", out.Stdout)
 	}
 	if got := tr.Aggregate.Verdict; got != string(wantVerdict) {
-		t.Errorf("test %q: Aggregate.Verdict = %q, want %q\nstdout: %s", tr.TestID, got, wantVerdict, out.Stdout)
+		t.Errorf("test %q: Aggregate.Verdict = %q, want %q\nstdout: %s", tr.TestName, got, wantVerdict, out.Stdout)
 	}
 	if tr.Aggregate.Counted != wantCounted {
-		t.Errorf("test %q: Aggregate.Counted = %d, want %d\nstdout: %s", tr.TestID, tr.Aggregate.Counted, wantCounted, out.Stdout)
+		t.Errorf("test %q: Aggregate.Counted = %d, want %d\nstdout: %s", tr.TestName, tr.Aggregate.Counted, wantCounted, out.Stdout)
 	}
 	if tr.Aggregate.Excluded != 0 {
-		t.Errorf("test %q: Aggregate.Excluded = %d, want 0 — no state-integrity fault is scripted here\nstdout: %s", tr.TestID, tr.Aggregate.Excluded, out.Stdout)
+		t.Errorf("test %q: Aggregate.Excluded = %d, want 0 — no state-integrity fault is scripted here\nstdout: %s", tr.TestName, tr.Aggregate.Excluded, out.Stdout)
 	}
 	if len(tr.Runs) != wantCounted {
-		t.Fatalf("test %q: Runs has %d entries, want %d\nstdout: %s", tr.TestID, len(tr.Runs), wantCounted, out.Stdout)
+		t.Fatalf("test %q: Runs has %d entries, want %d\nstdout: %s", tr.TestName, len(tr.Runs), wantCounted, out.Stdout)
 	}
 
 	passed := 0
@@ -92,6 +92,6 @@ func assertAggregate(t *testing.T, out Outcome, tr wireTestReportDoc, wantVerdic
 		}
 	}
 	if passed != wantPassed {
-		t.Errorf("test %q: %d of %d runs passed, want %d\nstdout: %s", tr.TestID, passed, len(tr.Runs), wantPassed, out.Stdout)
+		t.Errorf("test %q: %d of %d runs passed, want %d\nstdout: %s", tr.TestName, passed, len(tr.Runs), wantPassed, out.Stdout)
 	}
 }

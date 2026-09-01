@@ -35,7 +35,7 @@ import (
 // ---------------------------------------------------------------------------
 
 func TestBuildGHCPCLIArgs_AlwaysEmitsOutputFormatJSON(t *testing.T) {
-	args, err := harness.BuildGHCPCLIArgs(harness.SpawnRequest{Agent: ordinaryAgent(), Prompt: "hello"})
+	args, err := harness.BuildGHCPCLIArgs(harness.SpawnRequest{Agent: ordinaryAgent(), Prompt: "hello", GHCPCLIMode: harness.GHCPCLIModeBlanket})
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -45,17 +45,17 @@ func TestBuildGHCPCLIArgs_AlwaysEmitsOutputFormatJSON(t *testing.T) {
 }
 
 func TestBuildGHCPCLIArgs_AlwaysEmitsYolo(t *testing.T) {
-	args, err := harness.BuildGHCPCLIArgs(harness.SpawnRequest{Agent: ordinaryAgent(), Prompt: "hello"})
+	args, err := harness.BuildGHCPCLIArgs(harness.SpawnRequest{Agent: ordinaryAgent(), Prompt: "hello", GHCPCLIMode: harness.GHCPCLIModeBlanket})
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
 	if !containsArg(args, "--yolo") {
-		t.Errorf("want --yolo in args, got %v", args)
+		t.Errorf("want --yolo in Blanket mode args, got %v", args)
 	}
 }
 
 func TestBuildGHCPCLIArgs_AlwaysEmitsNoAskUser(t *testing.T) {
-	args, err := harness.BuildGHCPCLIArgs(harness.SpawnRequest{Agent: ordinaryAgent(), Prompt: "hello"})
+	args, err := harness.BuildGHCPCLIArgs(harness.SpawnRequest{Agent: ordinaryAgent(), Prompt: "hello", GHCPCLIMode: harness.GHCPCLIModeBlanket})
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -65,7 +65,7 @@ func TestBuildGHCPCLIArgs_AlwaysEmitsNoAskUser(t *testing.T) {
 }
 
 func TestBuildGHCPCLIArgs_EmptyOutputFormatTreatedAsJSON(t *testing.T) {
-	args, err := harness.BuildGHCPCLIArgs(harness.SpawnRequest{Agent: ordinaryAgent(), Prompt: "hello", OutputFormat: ""})
+	args, err := harness.BuildGHCPCLIArgs(harness.SpawnRequest{Agent: ordinaryAgent(), Prompt: "hello", OutputFormat: "", GHCPCLIMode: harness.GHCPCLIModeBlanket})
 	if err != nil {
 		t.Fatalf("unexpected error for empty OutputFormat: %v", err)
 	}
@@ -75,7 +75,7 @@ func TestBuildGHCPCLIArgs_EmptyOutputFormatTreatedAsJSON(t *testing.T) {
 }
 
 func TestBuildGHCPCLIArgs_ExplicitJSONOutputFormatIsAccepted(t *testing.T) {
-	args, err := harness.BuildGHCPCLIArgs(harness.SpawnRequest{Agent: ordinaryAgent(), Prompt: "hello", OutputFormat: "json"})
+	args, err := harness.BuildGHCPCLIArgs(harness.SpawnRequest{Agent: ordinaryAgent(), Prompt: "hello", OutputFormat: "json", GHCPCLIMode: harness.GHCPCLIModeBlanket})
 	if err != nil {
 		t.Fatalf("unexpected error for explicit OutputFormat \"json\": %v", err)
 	}
@@ -89,7 +89,7 @@ func TestBuildGHCPCLIArgs_ExplicitJSONOutputFormatIsAccepted(t *testing.T) {
 // ---------------------------------------------------------------------------
 
 func TestBuildGHCPCLIArgs_PromptCarriedByDashPFlag(t *testing.T) {
-	args, err := harness.BuildGHCPCLIArgs(harness.SpawnRequest{Agent: ordinaryAgent(), Prompt: "unique-prompt-marker"})
+	args, err := harness.BuildGHCPCLIArgs(harness.SpawnRequest{Agent: ordinaryAgent(), Prompt: "unique-prompt-marker", GHCPCLIMode: harness.GHCPCLIModeBlanket})
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -103,7 +103,7 @@ func TestBuildGHCPCLIArgs_PromptCarriedByDashPFlag(t *testing.T) {
 }
 
 func TestBuildGHCPCLIArgs_DashPAndPromptAreLastTwoArgs(t *testing.T) {
-	args, err := harness.BuildGHCPCLIArgs(harness.SpawnRequest{Agent: ordinaryAgent(), Prompt: "the-prompt"})
+	args, err := harness.BuildGHCPCLIArgs(harness.SpawnRequest{Agent: ordinaryAgent(), Prompt: "the-prompt", GHCPCLIMode: harness.GHCPCLIModeBlanket})
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -124,7 +124,7 @@ func TestBuildGHCPCLIArgs_DashPAndPromptAreLastTwoArgs(t *testing.T) {
 
 func TestBuildGHCPCLIArgs_AgentFlagEmittedWhenIdentifierNonEmpty(t *testing.T) {
 	agent := ordinaryAgent()
-	args, err := harness.BuildGHCPCLIArgs(harness.SpawnRequest{Agent: agent, Prompt: "x"})
+	args, err := harness.BuildGHCPCLIArgs(harness.SpawnRequest{Agent: agent, Prompt: "x", GHCPCLIMode: harness.GHCPCLIModeBlanket})
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -139,7 +139,7 @@ func TestBuildGHCPCLIArgs_AgentFlagAbsentWhenIdentifierEmpty(t *testing.T) {
 	// absent --agent selects the default assistant persona.
 	agent := ordinaryAgent()
 	agent.Identifier = ""
-	args, err := harness.BuildGHCPCLIArgs(harness.SpawnRequest{Agent: agent, Prompt: "x"})
+	args, err := harness.BuildGHCPCLIArgs(harness.SpawnRequest{Agent: agent, Prompt: "x", GHCPCLIMode: harness.GHCPCLIModeBlanket})
 	if err != nil {
 		t.Fatalf("unexpected error: empty agent identifier must not be an error for ghcp-cli, got %v", err)
 	}
@@ -153,7 +153,7 @@ func TestBuildGHCPCLIArgs_AgentFlagAbsentWhenIdentifierEmpty(t *testing.T) {
 // ---------------------------------------------------------------------------
 
 func TestBuildGHCPCLIArgs_ModelFlagOmittedWhenEmpty(t *testing.T) {
-	args, err := harness.BuildGHCPCLIArgs(harness.SpawnRequest{Agent: ordinaryAgent(), Prompt: "x", Model: ""})
+	args, err := harness.BuildGHCPCLIArgs(harness.SpawnRequest{Agent: ordinaryAgent(), Prompt: "x", Model: "", GHCPCLIMode: harness.GHCPCLIModeBlanket})
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -163,7 +163,7 @@ func TestBuildGHCPCLIArgs_ModelFlagOmittedWhenEmpty(t *testing.T) {
 }
 
 func TestBuildGHCPCLIArgs_ModelFlagIncludedWhenSet(t *testing.T) {
-	args, err := harness.BuildGHCPCLIArgs(harness.SpawnRequest{Agent: ordinaryAgent(), Prompt: "x", Model: "some-model"})
+	args, err := harness.BuildGHCPCLIArgs(harness.SpawnRequest{Agent: ordinaryAgent(), Prompt: "x", Model: "some-model", GHCPCLIMode: harness.GHCPCLIModeBlanket})
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -178,9 +178,10 @@ func TestBuildGHCPCLIArgs_ModelFlagIncludedWhenSet(t *testing.T) {
 
 func TestBuildGHCPCLIArgs_ExtraArgsPrecedeDashPPrompt(t *testing.T) {
 	args, err := harness.BuildGHCPCLIArgs(harness.SpawnRequest{
-		Agent:     ordinaryAgent(),
-		Prompt:    "the-prompt",
-		ExtraArgs: []string{"--custom-flag", "custom-value"},
+		Agent:       ordinaryAgent(),
+		Prompt:      "the-prompt",
+		ExtraArgs:   []string{"--custom-flag", "custom-value"},
+		GHCPCLIMode: harness.GHCPCLIModeBlanket,
 	})
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
@@ -200,9 +201,10 @@ func TestBuildGHCPCLIArgs_ExtraArgsPrecedeDashPPrompt(t *testing.T) {
 
 func TestBuildGHCPCLIArgs_MultipleExtraArgsPreservedVerbatimAndInOrder(t *testing.T) {
 	args, err := harness.BuildGHCPCLIArgs(harness.SpawnRequest{
-		Agent:     ordinaryAgent(),
-		Prompt:    "the-prompt",
-		ExtraArgs: []string{"--foo", "--bar", "baz"},
+		Agent:       ordinaryAgent(),
+		Prompt:      "the-prompt",
+		ExtraArgs:   []string{"--foo", "--bar", "baz"},
+		GHCPCLIMode: harness.GHCPCLIModeBlanket,
 	})
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
@@ -230,7 +232,7 @@ func TestBuildGHCPCLIArgs_NeverEmitsDashS(t *testing.T) {
 	// -s was empirically verified to have no effect alongside --output-format json.
 	// Its absence is a finding, not a gap: adding it would imply a behavioural
 	// difference that does not exist.
-	args, err := harness.BuildGHCPCLIArgs(harness.SpawnRequest{Agent: ordinaryAgent(), Prompt: "x"})
+	args, err := harness.BuildGHCPCLIArgs(harness.SpawnRequest{Agent: ordinaryAgent(), Prompt: "x", GHCPCLIMode: harness.GHCPCLIModeBlanket})
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -242,7 +244,7 @@ func TestBuildGHCPCLIArgs_NeverEmitsDashS(t *testing.T) {
 func TestBuildGHCPCLIArgs_NeverEmitsSessionContinuationFlags(t *testing.T) {
 	// --resume, --continue, --name are never emitted; every invocation creates
 	// a fresh session. This is a structural guarantee, not a conditional one.
-	args, err := harness.BuildGHCPCLIArgs(harness.SpawnRequest{Agent: ordinaryAgent(), Prompt: "x"})
+	args, err := harness.BuildGHCPCLIArgs(harness.SpawnRequest{Agent: ordinaryAgent(), Prompt: "x", GHCPCLIMode: harness.GHCPCLIModeBlanket})
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -260,11 +262,11 @@ func TestBuildGHCPCLIArgs_NeverEmitsSessionContinuationFlags(t *testing.T) {
 func TestBuildGHCPCLIArgs_SystemPromptDoesNotAffectOutput(t *testing.T) {
 	// GHCP CLI layers instructions from files it discovers itself; there is no
 	// system-prompt injection flag, and none should be invented.
-	withSP, err := harness.BuildGHCPCLIArgs(harness.SpawnRequest{Agent: ordinaryAgent(), Prompt: "x", SystemPrompt: "injected system prompt"})
+	withSP, err := harness.BuildGHCPCLIArgs(harness.SpawnRequest{Agent: ordinaryAgent(), Prompt: "x", SystemPrompt: "injected system prompt", GHCPCLIMode: harness.GHCPCLIModeBlanket})
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
-	withoutSP, err := harness.BuildGHCPCLIArgs(harness.SpawnRequest{Agent: ordinaryAgent(), Prompt: "x"})
+	withoutSP, err := harness.BuildGHCPCLIArgs(harness.SpawnRequest{Agent: ordinaryAgent(), Prompt: "x", GHCPCLIMode: harness.GHCPCLIModeBlanket})
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -280,7 +282,7 @@ func TestBuildGHCPCLIArgs_DefinitionPathDoesNotAppearInArgs(t *testing.T) {
 	// The CLI resolves an agent by name, not by file path; DefinitionPath is unused.
 	agent := ordinaryAgent()
 	agent.DefinitionPath = "/should/not/appear/anywhere.md"
-	args, err := harness.BuildGHCPCLIArgs(harness.SpawnRequest{Agent: agent, Prompt: "x"})
+	args, err := harness.BuildGHCPCLIArgs(harness.SpawnRequest{Agent: agent, Prompt: "x", GHCPCLIMode: harness.GHCPCLIModeBlanket})
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -290,9 +292,8 @@ func TestBuildGHCPCLIArgs_DefinitionPathDoesNotAppearInArgs(t *testing.T) {
 }
 
 func TestBuildGHCPCLIArgs_MaxTurnsDoesNotAffectOutput(t *testing.T) {
-	// The CLI offers no turn-limit flag; --yolo already grants what AllowedTools
-	// would express; MaxTurns is unused.
-	args, err := harness.BuildGHCPCLIArgs(harness.SpawnRequest{Agent: ordinaryAgent(), Prompt: "x", MaxTurns: 5})
+	// The CLI offers no turn-limit flag; MaxTurns is unused.
+	args, err := harness.BuildGHCPCLIArgs(harness.SpawnRequest{Agent: ordinaryAgent(), Prompt: "x", MaxTurns: 5, GHCPCLIMode: harness.GHCPCLIModeBlanket})
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -307,8 +308,11 @@ func TestBuildGHCPCLIArgs_MaxTurnsDoesNotAffectOutput(t *testing.T) {
 }
 
 func TestBuildGHCPCLIArgs_AllowedToolsDoesNotAffectOutput(t *testing.T) {
-	// --yolo grants blanket permission equivalent to --allow-all-tools; AllowedTools is unused.
-	args, err := harness.BuildGHCPCLIArgs(harness.SpawnRequest{Agent: ordinaryAgent(), Prompt: "x", AllowedTools: []string{"some-tool"}})
+	// AllowedTools is a separate field from DerivedTools and is never read by
+	// BuildGHCPCLIArgs regardless of mode. In Blanket mode, --yolo already
+	// grants all permissions; in Partial Allowlist mode, DerivedTools carries
+	// the per-tool list. AllowedTools is left for AgentTest compatibility.
+	args, err := harness.BuildGHCPCLIArgs(harness.SpawnRequest{Agent: ordinaryAgent(), Prompt: "x", AllowedTools: []string{"some-tool"}, GHCPCLIMode: harness.GHCPCLIModeBlanket})
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -332,7 +336,9 @@ func TestBuildGHCPCLIArgs_UnsupportedOutputFormatIsError(t *testing.T) {
 }
 
 func TestBuildGHCPCLIArgs_EmptyPromptIsError(t *testing.T) {
-	_, err := harness.BuildGHCPCLIArgs(harness.SpawnRequest{Agent: ordinaryAgent(), Prompt: ""})
+	// GHCPCLIMode must be set to Blanket so the mode check passes and the
+	// empty-prompt check fires.
+	_, err := harness.BuildGHCPCLIArgs(harness.SpawnRequest{Agent: ordinaryAgent(), Prompt: "", GHCPCLIMode: harness.GHCPCLIModeBlanket})
 	if !errors.Is(err, harness.ErrGHCPCLIEmptyPrompt) {
 		t.Fatalf("want ErrGHCPCLIEmptyPrompt, got %v", err)
 	}
@@ -376,10 +382,11 @@ func TestBuildGHCPCLIArgs_TwoSentinelsAreDistinguishable(t *testing.T) {
 
 func TestBuildGHCPCLIArgs_IdenticalInputYieldsIdenticalOutput(t *testing.T) {
 	req := harness.SpawnRequest{
-		Agent:     ordinaryAgent(),
-		Prompt:    "same-prompt",
-		Model:     "same-model",
-		ExtraArgs: []string{"--extra"},
+		Agent:       ordinaryAgent(),
+		Prompt:      "same-prompt",
+		Model:       "same-model",
+		ExtraArgs:   []string{"--extra"},
+		GHCPCLIMode: harness.GHCPCLIModeBlanket,
 	}
 	args1, err1 := harness.BuildGHCPCLIArgs(req)
 	args2, err2 := harness.BuildGHCPCLIArgs(req)
@@ -393,7 +400,7 @@ func TestBuildGHCPCLIArgs_IdenticalInputYieldsIdenticalOutput(t *testing.T) {
 
 func TestBuildGHCPCLIArgs_ReturnedSliceDoesNotAliasExtraArgs(t *testing.T) {
 	extra := []string{"--original"}
-	req := harness.SpawnRequest{Agent: ordinaryAgent(), Prompt: "x", ExtraArgs: extra}
+	req := harness.SpawnRequest{Agent: ordinaryAgent(), Prompt: "x", ExtraArgs: extra, GHCPCLIMode: harness.GHCPCLIModeBlanket}
 	args, err := harness.BuildGHCPCLIArgs(req)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
@@ -410,14 +417,15 @@ func TestBuildGHCPCLIArgs_ReturnedSliceDoesNotAliasExtraArgs(t *testing.T) {
 // ---------------------------------------------------------------------------
 
 func TestBuildGHCPCLIArgs_FullArgumentOrder_AllOptionalFieldsPopulated(t *testing.T) {
-	// Verifies the complete positional contract:
+	// Verifies the complete positional contract for Blanket mode:
 	//   --output-format json --yolo --no-ask-user --agent NAME --model M [ExtraArgs...] -p PROMPT
 	agent := ordinaryAgent()
 	req := harness.SpawnRequest{
-		Agent:     agent,
-		Prompt:    "the-prompt",
-		Model:     "some-model",
-		ExtraArgs: []string{"--custom-flag", "custom-value"},
+		Agent:       agent,
+		Prompt:      "the-prompt",
+		Model:       "some-model",
+		ExtraArgs:   []string{"--custom-flag", "custom-value"},
+		GHCPCLIMode: harness.GHCPCLIModeBlanket,
 	}
 	args, err := harness.BuildGHCPCLIArgs(req)
 	if err != nil {
@@ -438,13 +446,15 @@ func TestBuildGHCPCLIArgs_FullArgumentOrder_AllOptionalFieldsPopulated(t *testin
 }
 
 func TestBuildGHCPCLIArgs_FullArgumentOrder_NoOptionalFields(t *testing.T) {
-	// Verifies the minimal positional contract when all optional fields are absent:
+	// Verifies the minimal positional contract when all optional fields are absent
+	// (Blanket mode):
 	//   --output-format json --yolo --no-ask-user -p PROMPT
 	agent := ordinaryAgent()
 	agent.Identifier = ""
 	req := harness.SpawnRequest{
-		Agent:  agent,
-		Prompt: "minimal-prompt",
+		Agent:       agent,
+		Prompt:      "minimal-prompt",
+		GHCPCLIMode: harness.GHCPCLIModeBlanket,
 	}
 	args, err := harness.BuildGHCPCLIArgs(req)
 	if err != nil {

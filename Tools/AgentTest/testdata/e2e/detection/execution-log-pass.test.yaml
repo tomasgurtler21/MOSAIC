@@ -1,5 +1,11 @@
 schema_version: 1
-id: execution-log-pass
+name: execution-log-pass
+id: 19
+version: 1
+changelog:
+  - version: 1
+    date: "2026-01-01"
+    changes: "Initial."
 description: >
   The seeded execution log's agent ids and statuses match what is declared.
 layer: subagent
@@ -8,6 +14,7 @@ negative: false
 subject:
   identity: standin-subject
   agent: standin-subject
+  infrastructure_agents: []
   opening_message: |
     Greet the collaborator, then have the helper assist without creating files.
   invocation_kind: subagent

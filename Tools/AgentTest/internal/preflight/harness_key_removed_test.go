@@ -63,12 +63,19 @@ func TestValidate_TestDefinitionDeclaringHarnessKey_ReportsRemovedKeyDiagnostic(
 		"s.suite.yaml": validSuite,
 		"happy-path.test.yaml": `
 schema_version: 1
-id: happy-path
+name: happy-path
+id: 1
+version: 1
+changelog:
+  - version: 1
+    date: "2026-01-01"
+    changes: "Initial."
 layer: orchestrator
 harness: opencode
 subject:
   identity: orchestrator
-  definition: .claude/agents/orchestrator.md
+  agent: orchestrator
+  infrastructure_agents: []
 stub_registry: happy-path.stubs.json
 `,
 		"happy-path.stubs.json": validRegistry,

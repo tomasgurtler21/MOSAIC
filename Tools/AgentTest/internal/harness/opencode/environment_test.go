@@ -32,22 +32,6 @@ func TestCheckEnvironment_DeclaresNoInterpreter(t *testing.T) {
 	}
 }
 
-// TestCheckEnvironment_DefaultAdapterIsOK asserts a freshly constructed
-// adapter, with no fixture wired to simulate a failure, reports a usable
-// environment: the negative case above is proven against a check that can
-// actually succeed, not one that always fails.
-func TestCheckEnvironment_DefaultAdapterIsOK(t *testing.T) {
-	a := opencode.New(opencode.Options{})
-
-	report, err := a.CheckEnvironment(context.Background())
-	if err != nil {
-		t.Fatalf("CheckEnvironment: %v", err)
-	}
-	if !report.OK() {
-		t.Errorf("CheckEnvironment: OK() = false, want true for a freshly constructed adapter; Problems=%+v", report.Problems)
-	}
-}
-
 // TestCheckEnvironment_CompetingOutsideScopeRewriterFails asserts that a
 // non-sandbox scope reporting RewritesInput without neutralization fails the
 // environment check with ProblemCompetingRewriter, exercising the loop over

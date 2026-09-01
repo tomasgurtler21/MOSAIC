@@ -23,6 +23,7 @@ import (
 
 	"mosaic-agent-test/internal/cli"
 	"mosaic-agent-test/internal/domain"
+	"mosaic-agent-test/internal/harness/fake"
 )
 
 func TestDisposition_EarlyExit_EndsNormally(t *testing.T) {
@@ -40,6 +41,12 @@ func TestDisposition_EarlyExit_EndsNormally(t *testing.T) {
 
 	out := RunScenario(t, sc)
 
+	// A cutoff-terminated run is evaluated exactly like any other run: its
+	// verdict is determined by its assertions, not by a special disposition
+	// code. The single-decision test declares invocation_sequence.exact: true
+	// with 1 step (greeter). With the Stage 2 implementation the invocation
+	// log has exactly 1 entry (greeter only, no phantom helper record), so the
+	// assertion passes and the verdict is PASS.
 	assertSingleTestVerdict(t, out, "single-decision", domain.VerdictPass, cli.ExitSuccess)
 
 	if len(out.Result.Tests) != 1 || len(out.Result.Tests[0].Runs) != 1 {
@@ -51,6 +58,24 @@ func TestDisposition_EarlyExit_EndsNormally(t *testing.T) {
 			t.Errorf("Runs[0].Reasons contains %q, want an early exit to end normally with no such reason: %+v\nstdout: %s",
 				reason, run.Reasons, out.Stdout)
 		}
+	}
+
+	// Exact invocation-log count: the invocation_sequence.exact: true
+	// assertion declared in the fixture must pass, confirming the invocation
+	// log contains exactly N=1 entries and no phantom (N+1)th dispatch was
+	// recorded. A failure here means a phantom record is still being emitted.
+	foundSequenceAssertion := false
+	for _, a := range run.Assertions {
+		if a.Class == string(domain.ClassInvocationSequence) {
+			foundSequenceAssertion = true
+			if a.Outcome != "pass" {
+				t.Errorf("invocation_sequence assertion outcome = %q, want pass: the invocation log must contain exactly N=1 entries for a stop_after_invocations: 1 run; a non-pass result indicates a phantom (N+1)th record was emitted\nstdout: %s",
+					a.Outcome, out.Stdout)
+			}
+		}
+	}
+	if !foundSequenceAssertion {
+		t.Errorf("no invocation_sequence assertion found in run report; the fixture declares exact: true and it must be evaluated\nstdout: %s", out.Stdout)
 	}
 }
 
@@ -81,7 +106,7 @@ func TestDisposition_DeclaredTimeoutElapses_ReportsDistinctTimeoutVerdict(t *tes
 		t.Fatalf("RunScenario: exit code = %d, want cli.ExitTestsFailed (%d)\nstdout: %s\nstderr: %s",
 			out.ExitCode, cli.ExitTestsFailed, out.Stdout, out.Stderr)
 	}
-	if len(out.Result.Tests) != 1 || out.Result.Tests[0].TestID != "never-finishes" {
+	if len(out.Result.Tests) != 1 || out.Result.Tests[0].TestName != "never-finishes" {
 		t.Fatalf("Result.Tests = %+v, want exactly one test named %q\nstdout: %s", out.Result.Tests, "never-finishes", out.Stdout)
 	}
 	if len(out.Result.Tests[0].Runs) != 1 {
@@ -103,6 +128,184 @@ func TestDisposition_DeclaredTimeoutElapses_ReportsDistinctTimeoutVerdict(t *tes
 	}
 	if !wantReason {
 		t.Errorf("Runs[0].Reasons = %+v, want it to contain TIMEOUT\nstdout: %s", run.Reasons, out.Stdout)
+	}
+}
+
+// TestDisposition_ReplyRecoveryCutoff_ReportsEarlyExitWithExactCount covers
+// the reply-recovery branch of the hard subject cutoff: a suite run with
+// stop_after_invocations: 2 against a fake harness that declares
+// SupportsReplyRecovery but not SupportsDirectSubstitution. The cutoff fires
+// at the completion event of the second (Nth) dispatch, not at its
+// pre-invocation point, because turns are consumed at completion on this
+// branch.
+//
+// Two properties are asserted:
+//  1. The run's termination reason is "early_exit" (AC5.2: the run reports
+//     the early-exit disposition, not completed/timeout/state_integrity).
+//  2. The invocation_sequence.exact: true assertion declared in the fixture
+//     passes, confirming exactly N=2 invocation records exist and no phantom
+//     (N+1)th record was emitted (AC5.3).
+//
+// This is a RED test until both the fake adapter's completion-phase handling
+// (I5.1) and the stand-in's completion-event driving (T5.1) are implemented:
+// without them, the completion event never reaches the decision core, the
+// cutoff never fires, and the run does not end with DispositionEarlyExit.
+func TestDisposition_ReplyRecoveryCutoff_ReportsEarlyExitWithExactCount(t *testing.T) {
+	greeterID := domain.CollaboratorIdentity{ToolName: "dispatch", AgentIdentity: "greeter"}
+	helperID := domain.CollaboratorIdentity{ToolName: "dispatch", AgentIdentity: "helper"}
+
+	sc := Scenario{
+		Dir:       "testdata/e2e/reply-recovery-cutoff",
+		SuitePath: "reply-recovery-cutoff.suite.yaml",
+		Script: fake.Options{
+			Capabilities: domain.HarnessCapabilities{
+				SupportsReplyRecovery: true,
+				CorrelationField:      "token",
+			},
+			// Script provides the collaborator replies consumed at PhaseCompletion —
+			// one per dispatch. The stubs declare no echo body to compare against,
+			// so the actual reply content does not affect assertion outcomes.
+			Script: map[string][]fake.Turn{
+				greeterID.Key(): {{Body: `{"agent_instance_id":"greeter#1","status_code":"SUCCESS","status_message":"Greeted."}`}},
+				helperID.Key():  {{Body: `{"agent_instance_id":"helper#1","status_code":"SUCCESS","status_message":"Helped."}`}},
+			},
+			SubjectTurns: []fake.SubjectTurn{
+				{Invoke: &greeterID},
+				{Invoke: &helperID},
+				// No further turns: after the Nth (helper) dispatch's completion
+				// event fires the sentinel, the harness kills the stand-in.
+			},
+		},
+	}
+
+	out := RunScenario(t, sc)
+
+	// The suite's reply-recovery-stubbed test must have run and its
+	// invocation_sequence assertion must have passed, proving exactly N=2
+	// invocation records exist.
+	var stubbedRun *wireRunReportDoc
+	for _, tst := range out.Result.Tests {
+		if tst.TestName == "reply-recovery-stubbed" {
+			if len(tst.Runs) > 0 {
+				r := tst.Runs[0]
+				stubbedRun = &r
+			}
+		}
+	}
+	if stubbedRun == nil {
+		t.Fatalf("reply-recovery-stubbed test not found in result or had no runs\nstdout: %s\nstderr: %s",
+			out.Stdout, out.Stderr)
+	}
+
+	// AC5.2: the run must report the early-exit termination reason.
+	if stubbedRun.TerminationReason != string(domain.DispositionEarlyExit) {
+		t.Errorf("reply-recovery-stubbed run TerminationReason = %q, want %q — the cutoff must fire at the Nth dispatch's completion event and report the early-exit disposition\nstdout: %s",
+			stubbedRun.TerminationReason, domain.DispositionEarlyExit, out.Stdout)
+	}
+
+	// No fault reasons: early exit must end normally, not as timeout or state
+	// integrity.
+	for _, reason := range stubbedRun.Reasons {
+		if reason == "TIMEOUT" || reason == "STATE_INTEGRITY" {
+			t.Errorf("reply-recovery-stubbed run Reasons contains %q, want early exit to end normally: %+v\nstdout: %s",
+				reason, stubbedRun.Reasons, out.Stdout)
+		}
+	}
+
+	// AC5.3: the invocation_sequence assertion must pass — exactly N=2 entries
+	// in the invocation log, no phantom (N+1)th record.
+	foundSequenceAssertion := false
+	for _, a := range stubbedRun.Assertions {
+		if a.Class == string(domain.ClassInvocationSequence) {
+			foundSequenceAssertion = true
+			if a.Outcome != "pass" {
+				t.Errorf("invocation_sequence assertion outcome = %q, want pass: the invocation log must contain exactly N=2 entries for a stop_after_invocations: 2 reply-recovery run\nstdout: %s",
+					a.Outcome, out.Stdout)
+			}
+		}
+	}
+	if !foundSequenceAssertion {
+		t.Errorf("no invocation_sequence assertion found in reply-recovery-stubbed run; the fixture declares exact: true and it must be evaluated\nstdout: %s", out.Stdout)
+	}
+}
+
+// TestDisposition_ReplyRecoveryCutoff_UnmatchedNthDispatch_StillCutsOff
+// covers AC5.4: the hard subject cutoff holds even when the Nth dispatch
+// matched no registered stub and the unmatched policy is passthrough. The
+// cutoff rule depends on the invocation sequence number, not on whether a
+// pending stub was found, so it fires at the completion event of the Nth
+// dispatch regardless.
+//
+// This is a RED test until the decision core's ResolveSeq falls back to the
+// sequence counter when no pending stub exists (I5.1) and the completion event
+// is driven by the stand-in for passthrough dispatches (T5.1): without both,
+// the counter-fallback path is never exercised end to end.
+func TestDisposition_ReplyRecoveryCutoff_UnmatchedNthDispatch_StillCutsOff(t *testing.T) {
+	greeterID := domain.CollaboratorIdentity{ToolName: "dispatch", AgentIdentity: "greeter"}
+	helperID := domain.CollaboratorIdentity{ToolName: "dispatch", AgentIdentity: "helper"}
+
+	sc := Scenario{
+		Dir:       "testdata/e2e/reply-recovery-cutoff",
+		SuitePath: "reply-recovery-cutoff.suite.yaml",
+		Script: fake.Options{
+			Capabilities: domain.HarnessCapabilities{
+				SupportsReplyRecovery: true,
+				CorrelationField:      "token",
+			},
+			// Script: nil — the Nth dispatch (helper) has no stub and its
+			// ObservedResponse from completion does not need to match anything.
+			// Greeter's response at completion is also unscripted; the stub
+			// declares no echo body so no comparison is performed.
+			Script: nil,
+			SubjectTurns: []fake.SubjectTurn{
+				{Invoke: &greeterID},
+				{Invoke: &helperID},
+			},
+		},
+	}
+
+	out := RunScenario(t, sc)
+
+	var unmatchedRun *wireRunReportDoc
+	for _, tst := range out.Result.Tests {
+		if tst.TestName == "reply-recovery-unmatched" {
+			if len(tst.Runs) > 0 {
+				r := tst.Runs[0]
+				unmatchedRun = &r
+			}
+		}
+	}
+	if unmatchedRun == nil {
+		t.Fatalf("reply-recovery-unmatched test not found in result or had no runs\nstdout: %s\nstderr: %s",
+			out.Stdout, out.Stderr)
+	}
+
+	// AC5.4: the cutoff must still report early-exit even for an unmatched Nth.
+	if unmatchedRun.TerminationReason != string(domain.DispositionEarlyExit) {
+		t.Errorf("reply-recovery-unmatched run TerminationReason = %q, want %q — the cutoff must fire at the Nth completion even when the dispatch matched no stub\nstdout: %s",
+			unmatchedRun.TerminationReason, domain.DispositionEarlyExit, out.Stdout)
+	}
+
+	for _, reason := range unmatchedRun.Reasons {
+		if reason == "TIMEOUT" || reason == "STATE_INTEGRITY" {
+			t.Errorf("reply-recovery-unmatched run Reasons contains %q, want early exit to end normally: %+v\nstdout: %s",
+				reason, unmatchedRun.Reasons, out.Stdout)
+		}
+	}
+
+	// AC5.3 for the unmatched case: exactly N=2 invocation records in the log.
+	foundSequenceAssertion := false
+	for _, a := range unmatchedRun.Assertions {
+		if a.Class == string(domain.ClassInvocationSequence) {
+			foundSequenceAssertion = true
+			if a.Outcome != "pass" {
+				t.Errorf("invocation_sequence assertion outcome = %q, want pass: the invocation log must contain exactly N=2 entries even when the Nth dispatch was unmatched\nstdout: %s",
+					a.Outcome, out.Stdout)
+			}
+		}
+	}
+	if !foundSequenceAssertion {
+		t.Errorf("no invocation_sequence assertion found in reply-recovery-unmatched run; the fixture declares exact: true and it must be evaluated\nstdout: %s", out.Stdout)
 	}
 }
 
@@ -148,7 +351,7 @@ func TestDisposition_CompromisedLock_ExcludedFromPassRateAggregation(t *testing.
 
 	out := RunScenario(t, sc)
 
-	if len(out.Result.Tests) != 1 || out.Result.Tests[0].TestID != "lock-compromised" {
+	if len(out.Result.Tests) != 1 || out.Result.Tests[0].TestName != "lock-compromised" {
 		t.Fatalf("Result.Tests = %+v, want exactly one test named %q\nstdout: %s", out.Result.Tests, "lock-compromised", out.Stdout)
 	}
 	agg := out.Result.Tests[0].Aggregate
@@ -205,7 +408,7 @@ func TestDisposition_CompromisedLock_RetryRecovers(t *testing.T) {
 
 	out := RunScenario(t, sc)
 
-	if len(out.Result.Tests) != 1 || out.Result.Tests[0].TestID != "lock-compromised-once" {
+	if len(out.Result.Tests) != 1 || out.Result.Tests[0].TestName != "lock-compromised-once" {
 		t.Fatalf("Result.Tests = %+v, want exactly one test named %q\nstdout: %s", out.Result.Tests, "lock-compromised-once", out.Stdout)
 	}
 	agg := out.Result.Tests[0].Aggregate

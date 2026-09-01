@@ -1,0 +1,16 @@
+schema_version: 1
+id: route-back
+description: >
+  Distant route-back scenarios. Tests that after a route-back to a creator
+  agent (planner, contracts-designer), the orchestrator dispatches the paired
+  reviewer as a quality gate before re-entering EXECUTION, and provides
+  the correct input artifacts.
+defaults:
+  timeout: 10m
+  turn_limit: 5
+  repetitions: 100
+  pass_rate: 0.95
+  echo_fidelity: advisory
+tests:
+  - path: planner-routeback-quality-gate.test.yaml
+  - path: contracts-routeback-quality-gate.test.yaml

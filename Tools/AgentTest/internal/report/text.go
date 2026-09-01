@@ -32,8 +32,22 @@ func renderText(w io.Writer, r Result) error {
 }
 
 func writeHeader(w io.Writer, r Result) error {
+	if r.EffectiveRepetitions != nil {
+		if _, err := fmt.Fprintf(w, "Repetitions: %d\n", *r.EffectiveRepetitions); err != nil {
+			return err
+		}
+	} else {
+		if _, err := fmt.Fprintf(w, "Repetitions: suite default\n"); err != nil {
+			return err
+		}
+	}
 	if _, err := fmt.Fprintf(w, "Suite: %s\n", r.SuiteID); err != nil {
 		return err
+	}
+	if r.CatalogFolder != "" {
+		if _, err := fmt.Fprintf(w, "Catalog: %s\n", r.CatalogFolder); err != nil {
+			return err
+		}
 	}
 	if _, err := fmt.Fprintf(w, "Started: %s\n", r.StartedAt.Format(time.RFC3339)); err != nil {
 		return err
@@ -53,7 +67,7 @@ func writeTestLine(w io.Writer, t TestReport) error {
 	requiredPct := fmt.Sprintf("%.0f%%", t.Aggregate.RequiredPassRate*100)
 	stats := fmt.Sprintf("%d/%d passed (%s, required %s)",
 		t.Aggregate.Passed, t.Aggregate.Counted, achievedPct, requiredPct)
-	line := fmt.Sprintf("%s: %s %s", t.TestID, t.Aggregate.Verdict, stats)
+	line := fmt.Sprintf("%s: %s %s", t.TestName, t.Aggregate.Verdict, stats)
 	if classes := testClasses(t); len(classes) > 0 {
 		names := make([]string, len(classes))
 		for i, c := range classes {
@@ -67,9 +81,25 @@ func writeTestLine(w io.Writer, t TestReport) error {
 	if _, err := fmt.Fprintln(w, line); err != nil {
 		return err
 	}
+	// seenConditions tracks (Kind, Detail) pairs already rendered for this
+	// test. Conditions identical across multiple runs appear only once.
+	seenConditions := make(map[string]bool)
+
 	for _, run := range t.Runs {
 		for _, a := range run.Assertions {
 			switch a.Outcome {
+			case domain.AssertionPass:
+				target := ""
+				if a.Target != "" {
+					target = "[" + a.Target + "]"
+				}
+				detail := ""
+				if a.Detail != "" {
+					detail = fmt.Sprintf(" (%s)", a.Detail)
+				}
+				if _, err := fmt.Fprintf(w, "  + %s%s: expected %q, got %q%s\n", a.Class, target, a.Expected, a.Actual, detail); err != nil {
+					return err
+				}
 			case domain.AssertionFail:
 				detail := ""
 				if a.Detail != "" {
@@ -85,7 +115,17 @@ func writeTestLine(w io.Writer, t TestReport) error {
 			}
 		}
 		for _, c := range run.Conditions {
+			key := string(c.Kind) + "\x00" + c.Detail
+			if seenConditions[key] {
+				continue
+			}
+			seenConditions[key] = true
 			if _, err := fmt.Fprintf(w, "  ! %s: %s\n", c.Kind, c.Detail); err != nil {
+				return err
+			}
+		}
+		for _, reason := range run.Reasons {
+			if _, err := fmt.Fprintf(w, "  ? %s\n", reason); err != nil {
 				return err
 			}
 		}
@@ -111,6 +151,23 @@ func writeTestLine(w io.Writer, t TestReport) error {
 			return err
 		}
 		if _, err := fmt.Fprintf(w, "  stub model: %s\n", subjectVersionOrUnknown(run.StubModel)); err != nil {
+			return err
+		}
+		if _, err := fmt.Fprintf(w, "  harness: %s\n", subjectVersionOrUnknown(run.HarnessID)); err != nil {
+			return err
+		}
+		if _, err := fmt.Fprintf(w, "  termination reason: %s\n", subjectVersionOrUnknown(run.TerminationReason)); err != nil {
+			return err
+		}
+	}
+	// Render excluded-run details so a reader can see why each run did not
+	// count without inspecting a retained sandbox.
+	for _, excl := range t.Aggregate.Exclusions {
+		terminationReason := excl.TerminationReason
+		if terminationReason == "" {
+			terminationReason = "unknown"
+		}
+		if _, err := fmt.Fprintf(w, "  excluded [%s]: %s (%s)\n", excl.Reason, excl.Detail, terminationReason); err != nil {
 			return err
 		}
 	}

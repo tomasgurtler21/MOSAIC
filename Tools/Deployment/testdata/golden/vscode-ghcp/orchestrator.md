@@ -4,6 +4,7 @@ description: Placeholder-expanding fixture for golden file tests — exercises {
 model: Claude Sonnet 4.6
 tools: ['read/readFile', 'edit/createFile', 'edit/createDirectory', 'edit/editFiles', 'search/fileSearch', 'search/textSearch', 'search/listDirectory', 'execute/runInTerminal', 'agent', 'vscode/askQuestions']
 disable-model-invocation: false
+user-invocable: true
 mosaic_harness_version: 3.0.0
 mosaic_role: orchestrator
 mosaic_version: 1.0.0

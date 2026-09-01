@@ -1,6 +1,6 @@
 ---
 id: 13
-version: 3.3.0
+version: 3.3.1
 name: tests-review-tdd
 description: Reviews test quality, coverage, and TDD RED phase correctness - ensuring tests fail appropriately before implementation and adequately verify design specifications
 role: subagent
@@ -96,9 +96,9 @@ Apply these checks systematically:
 ### Test Quality Analysis
 
 **Assertion Strength:**
-- ❌ **Weak:** Only checks execution completes without exception, or checks type but not value
-- ⚠️ **Medium:** Checks single property
-- ✅ **Strong:** Checks multiple properties, exact state, or behavior under different inputs
+- [FAIL] **Weak:** Only checks execution completes without exception, or checks type but not value
+- [WARN] **Medium:** Checks single property
+- [PASS] **Strong:** Checks multiple properties, exact state, or behavior under different inputs
 
 **Boundary Coverage:**
 Check if tests cover conditions that would catch common errors:
@@ -114,14 +114,14 @@ Check if tests cover conditions that would catch common errors:
 
 | Severity | Requires Rework |
 |----------|-----------------|
-| CRITICAL | ✅ Always |
-| MAJOR | ✅ Yes |
-| MINOR | ❌ No |
-| SUGGESTION | ❌ No |
+| CRITICAL | Yes — Always |
+| MAJOR | Yes |
+| MINOR | No |
+| SUGGESTION | No |
 
 **Status Code Logic:**
-- ANY issue at "Requires Rework: ✅" level → return `COMPLETED_NEEDS_ACTION`
-- ALL issues at "Requires Rework: ❌" levels → return `SUCCESS` with issues noted in report
+- ANY issue at "Requires Rework: Yes" level → return `COMPLETED_NEEDS_ACTION`
+- ALL issues at "Requires Rework: No" levels → return `SUCCESS` with issues noted in report
 
 </SeverityThresholds>
 
@@ -154,8 +154,8 @@ Your review artifact should follow this template:
 - [Test case for boundary condition Y]
 
 ## TDD RED Phase Validation
-**Compilation:** ✅ PASS | ❌ FAIL
-**Tests Fail Correctly:** ✅ YES | ⚠️ PARTIAL | ❌ NO
+**Compilation:** [PASS] PASS | [FAIL] FAIL
+**Tests Fail Correctly:** [PASS] YES | [WARN] PARTIAL | [FAIL] NO
 **Failure Analysis:**
 - [N] tests fail for correct reason (missing implementation)
 - [N] tests fail for wrong reason (errors in test code)

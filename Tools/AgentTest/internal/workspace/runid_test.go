@@ -17,7 +17,7 @@ import (
 func TestCreate_LoggerBundleShapedRunIDSurvivesSandboxNaming(t *testing.T) {
 	mgr := workspace.NewManager(t.TempDir(), newFakeClock())
 	const runID = "20260809T171229Z-79ca"
-	key := domain.RunKey{RunID: runID, TestID: "example", RunNumber: 1}
+	key := domain.RunKey{RunID: runID, TestName: "example", RunNumber: 1}
 
 	sb, err := mgr.Create(key)
 	if err != nil {
@@ -31,8 +31,8 @@ func TestCreate_LoggerBundleShapedRunIDSurvivesSandboxNaming(t *testing.T) {
 
 func TestCreate_TwoRunIDsDifferingOnlyInEntropySuffixProduceDistinctSandboxRoots(t *testing.T) {
 	mgr := workspace.NewManager(t.TempDir(), newFakeClock())
-	keyA := domain.RunKey{RunID: "20260809T171229Z-79ca", TestID: "example", RunNumber: 1}
-	keyB := domain.RunKey{RunID: "20260809T171229Z-ab12", TestID: "example", RunNumber: 1}
+	keyA := domain.RunKey{RunID: "20260809T171229Z-79ca", TestName: "example", RunNumber: 1}
+	keyB := domain.RunKey{RunID: "20260809T171229Z-ab12", TestName: "example", RunNumber: 1}
 
 	sbA, err := mgr.Create(keyA)
 	if err != nil {

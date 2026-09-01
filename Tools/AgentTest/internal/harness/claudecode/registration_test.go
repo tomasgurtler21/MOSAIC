@@ -174,7 +174,12 @@ func TestCompose_CombinesPerEventKey_RewriterFirst(t *testing.T) {
 		t.Fatalf("reading golden file: %v", err)
 	}
 
-	if string(got) != string(golden) {
+	// Normalize line endings before comparing: json.Marshal always emits LF,
+	// but the golden file on disk may have CRLF on machines with
+	// core.autocrlf=true. Normalizing here keeps the comparison byte-exact
+	// for content while remaining portable across checkout configurations.
+	goldenStr := strings.ReplaceAll(string(golden), "\r\n", "\n")
+	if string(got) != goldenStr {
 		t.Errorf("Marshal output does not match golden file.\n--- got ---\n%s\n--- want ---\n%s", got, golden)
 	}
 

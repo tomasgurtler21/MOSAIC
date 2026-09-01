@@ -203,11 +203,15 @@ func TestCLIOptionsHarnesses_MatchSupportedSet(t *testing.T) {
 // cliOptions.Harnesses but forgets tuiOptions.Harnesses would satisfy every
 // other test while silently offering an unsupported catalog identity to TUI users.
 func TestTUIOptionsHarnesses_MatchSupportedSet(t *testing.T) {
-	// tuiOptions requires a non-empty WorkspaceRoot to pass its internal
-	// newTUISuiteRunner check; workspace.NewManager performs no filesystem
-	// validation at construction, so a placeholder string is sufficient.
+	// tuiOptions requires a non-empty WorkspaceRoot and a non-nil HarnessFactory
+	// to pass its internal bundle resolution; fakeHarnessFactory satisfies the
+	// factory without real I/O and "claude-code" is the default harness.
 	// We pass nil for suites — we are only inspecting the Harnesses field.
-	opts, err := tuiOptions(Deps{WorkspaceRoot: "placeholder"}, nil)
+	opts, err := tuiOptions(Deps{
+		WorkspaceRoot:  "placeholder",
+		HarnessFactory: fakeHarnessFactory{},
+		HarnessID:      "claude-code",
+	}, nil)
 	if err != nil {
 		t.Fatalf("tuiOptions(Deps{WorkspaceRoot: \"placeholder\"}, nil) returned an error: %v", err)
 	}

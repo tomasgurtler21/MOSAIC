@@ -1,6 +1,6 @@
 # Requirements: MosaicTest `staged-preplaced-plan`
 
-> ⚠️ **FIXTURE ARTIFACT** — present only because seeding requires it.
+> [WARN] **FIXTURE ARTIFACT** — present only because seeding requires it.
 
 Seeding refuses any seed set that does not contain exactly one `Requirement*`
 candidate among its top-level files, so every fixture seed root carries one.

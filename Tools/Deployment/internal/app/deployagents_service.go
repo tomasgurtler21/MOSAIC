@@ -5,10 +5,11 @@ package app
 // Infrastructure-category subagents, utility agents, and standalone agents, then deploys
 // exactly the selected agents plus the skills they require.
 //
-// Infrastructure agents resolve in a dedicated second model-resolution batch threaded from
-// the first, so no agent is prompted twice. Ordinary subagents, utility agents, and
-// standalone agents do not receive per-agent model prompts (agentSkipOverride suppresses
-// QAgentModel in the first batch); only the infra second batch asks QAgentModel.
+// Model resolution runs in two batches. The first batch covers non-infrastructure agents
+// (ordinary subagents, utility agents, standalone agents) with agentSkipOverride=false, so
+// each agent whose tier model is unresolved receives a per-agent QAgentModel prompt. The
+// second batch covers infrastructure agents using the same per-agent pattern, threaded from
+// the first batch's state so no tier is re-prompted and no agent appears in both batches.
 //
 // buildContent is always called with nil workflow and infrastructure block maps, so no
 // deployed orchestrator's managed regions are ever touched by this mode.
@@ -194,17 +195,19 @@ func deployAgents(ctx context.Context, s *service, req DeployAgentsRequest) (dom
 	}
 
 	// Model resolution — first batch: non-infrastructure agents.
-	// agentSkipOverride=true suppresses QAgentModel for ordinary subagents, utility agents,
-	// and standalone agents; per-agent model prompts are reserved for the infra second batch.
+	// agentSkipOverride=false allows QAgentModel for ordinary subagents, utility agents, and
+	// standalone agents when their tier model is unresolved, matching the behavior available
+	// to infrastructure agents in the second batch.
 	orderedFirstBatch := s.orderedAgentsForModelResolution(nil, nonInfraProbeAgents)
-	modelRes, err := s.resolveModels(ctx, req.TierModels, req.AgentModels, req.SkipAll, harnessID, module, orderedFirstBatch, nil, false, true)
+	modelRes, err := s.resolveModels(ctx, req.TierModels, req.AgentModels, req.SkipAll, harnessID, module, orderedFirstBatch, nil, false, false)
 	if err != nil {
 		return domain.RunSummary{}, err
 	}
 
 	// Model resolution — second batch: infrastructure agents.
 	// agentSkipOverride=false so QAgentModel is available for infra agents regardless of the
-	// first batch's agentSkippedAll state (which is always true due to the override above).
+	// first batch's agentSkippedAll state (which reflects whatever the first batch's users chose;
+	// each batch's QAgentModel availability is independent).
 	var infraModelRes modelResolution
 	if len(infraAgents) > 0 {
 		infraModelRes, err = s.resolveModels(
@@ -247,7 +250,7 @@ func deployAgents(ctx context.Context, s *service, req DeployAgentsRequest) (dom
 	if pathErr != nil {
 		return domain.RunSummary{}, pathErr
 	}
-	deployedState, err := probeDeployedStateWithIndex(workspace, plannedPaths, module.Descriptor().Frontmatter.ModelKey, nil, deployedAgentIndex, probeAgentByKey)
+	deployedState, err := probeDeployedStateWithIndex(workspace, plannedPaths, module.Descriptor().Frontmatter.ModelKey, nil, deployedAgentIndex, probeAgentByKey, nil)
 	if err != nil {
 		return domain.RunSummary{}, err
 	}
@@ -281,6 +284,10 @@ func deployAgents(ctx context.Context, s *service, req DeployAgentsRequest) (dom
 		ProtocolVersion:        protocol.Version,
 		BundleVersion:          bundle.Version,
 	}
+	// Clear gaps from any prior abandoned attempt within the same session.
+	// ErrPlanNotConfirmed restarts the flow with the same collector; without
+	// this reset, gaps from the declined plan would persist into the final report.
+	s.deps.Todo.Reset()
 	p, err := s.deps.Planner.Build(ctx, planInput)
 	if err != nil {
 		return domain.RunSummary{}, err
@@ -360,7 +367,7 @@ func deployAgents(ctx context.Context, s *service, req DeployAgentsRequest) (dom
 		return domain.RunSummary{}, err
 	}
 
-	if err := s.persistTierModels(harnessID, modelRes.tierModelsUsed); err != nil {
+	if err := s.persistTierModels(harnessID, modelRes.interactivelyResolvedTiers); err != nil {
 		s.notifyPersistFailure(ctx, err)
 	}
 

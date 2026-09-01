@@ -1,0 +1,100 @@
+schema_version: 1
+name: contracts-routeback-quality-gate
+id: 66
+version: 1
+changelog:
+  - version: 1
+    date: "2026-01-01"
+    changes: "Initial."
+description: >
+  Scenario R-3. implementation-review returns COMPLETED_NEEDS_ACTION with
+  a contracts interface mismatch. The workflow On Findings target routes
+  back to contracts-designer. After contracts-designer SUCCESS, the
+  orchestrator must dispatch contracts-review (quality gate) before
+  re-entering EXECUTION.
+
+layer: orchestrator
+negative: false
+
+subject:
+  identity: orchestrator
+  agent: orchestrator
+  workflows: [brownfield-tdd]
+  infrastructure_agents: []
+  opening_message: |
+    Continue the existing workflow run. Read the Orchestration.md in the
+    run-scoped folder and resume from where it left off. Do not ask me any
+    further questions - proceed immediately and autonomously.
+  invocation_kind: orchestrator
+  allowed_tools: [Read, Write, Edit, Bash, Glob, Grep, Task]
+
+stub_registry: contracts-routeback-quality-gate.stubs.json
+
+timeout: 10m
+turn_limit: 10
+stop_after_invocations: 2
+
+seed_files:
+  - path: Orchestration-{run_id}/Orchestration.md
+    ref: execution-impl-review-cna.md
+  - path: Orchestration-{run_id}/Research.md
+    ref: Research.md
+  - path: Orchestration-{run_id}/Requirements.md
+    ref: Requirements.md
+  - path: Orchestration-{run_id}/Plan.md
+    ref: Plan.md
+  - path: Orchestration-{run_id}/Stage-1/Plan.md
+    ref: Stage-1-Plan.md
+  - path: Orchestration-{run_id}/Stage-1/PlanProgress.md
+    ref: Stage-1-PlanProgress.md
+  - path: Orchestration-{run_id}/Stage-2/Plan.md
+    ref: Stage-2-Plan.md
+  - path: Orchestration-{run_id}/Stage-2/PlanProgress.md
+    ref: Stage-2-PlanProgress.md
+  - path: Orchestration-{run_id}/ContractsDesign.md
+    ref: ContractsDesign.md
+  - path: Orchestration-{run_id}/requirements-review.md
+    ref: requirements-review.md
+  - path: Orchestration-{run_id}/plan-review.md
+    ref: plan-review.md
+  - path: Orchestration-{run_id}/contracts-review.md
+    ref: contracts-review.md
+  - path: Orchestration-{run_id}/Stage-2/implementation-review.md
+    ref: Stage-2-implementation-review.md
+
+assertions:
+  invocation_sequence:
+    exact: true
+    steps:
+      - { tool: dispatch, agent: contracts-designer }
+      - { tool: dispatch, agent: contracts-review }
+
+  task_messages:
+    # Dispatch 1: contracts-designer (route-back from implementation-review CNA)
+    - at: 1
+      identity: { tool: dispatch, agent: contracts-designer }
+      human_in_the_loop: true
+      required_input_artifacts:
+        - Orchestration-{run_id}/Research.md
+        - Orchestration-{run_id}/Requirements.md
+      optional_input_artifacts:
+        - Orchestration-{run_id}/Plan.md
+        - Orchestration-{run_id}/ContractsDesign.md
+        - Orchestration-{run_id}/Stage-1/Plan.md
+        - Orchestration-{run_id}/Stage-2/Plan.md
+        - Orchestration-{run_id}/Stage-2/implementation-review.md
+      required_output_artifacts:
+        - Orchestration-{run_id}/ContractsDesign.md
+
+    # Dispatch 2: contracts-review (quality gate — R-3)
+    - at: 2
+      identity: { tool: dispatch, agent: contracts-review }
+      human_in_the_loop: false
+      required_input_artifacts:
+        - Orchestration-{run_id}/Plan.md
+        - Orchestration-{run_id}/ContractsDesign.md
+      optional_input_artifacts:
+        - Orchestration-{run_id}/Stage-1/Plan.md
+        - Orchestration-{run_id}/Stage-2/Plan.md
+      required_output_artifacts:
+        - Orchestration-{run_id}/contracts-review.md

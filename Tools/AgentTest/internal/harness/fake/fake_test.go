@@ -18,6 +18,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"testing"
 
 	"mosaic-agent-test/internal/domain"
@@ -56,7 +57,7 @@ var researcherID = domain.CollaboratorIdentity{ToolName: domain.DispatchToolName
 func fakeSandbox(t *testing.T, dir string) domain.Sandbox {
 	t.Helper()
 	return domain.Sandbox{
-		Key:        domain.RunKey{RunID: "fake-run", TestID: "fake-test", RunNumber: 1},
+		Key:        domain.RunKey{RunID: "fake-run", TestName: "fake-test", RunNumber: 1},
 		Root:       dir,
 		SubjectDir: dir + "/subject",
 		ControlDir: dir + "/control",
@@ -134,8 +135,18 @@ func TestTranslateCall_PhasePost_ExhaustedScript_ReturnsError(t *testing.T) {
 	}
 }
 
+// TestTranslateCall_PhasePost_NoScriptForIdentity_ReturnsErrorNotPanic verifies
+// that when a non-nil script map is provided but has no entry for the called
+// collaborator identity, TranslateCall returns an error rather than panicking.
+// This covers the "forgot to add this collaborator to the script" mistake.
+//
+// A nil Script (no script at all) is different: it means post calls are
+// unscripted and are allowed with an empty ObservedResponse. Tests that do not
+// care about collaborator responses can pass nil to Options.Script.
 func TestTranslateCall_PhasePost_NoScriptForIdentity_ReturnsErrorNotPanic(t *testing.T) {
-	a := fake.New(fake.Options{})
+	// Non-nil empty map: a script was provided but this collaborator has no
+	// scripted turns. This is the "identity not in script" error case.
+	a := fake.New(fake.Options{Script: map[string][]fake.Turn{}})
 
 	defer func() {
 		if r := recover(); r != nil {
@@ -269,7 +280,7 @@ func TestProvisionDeprovision_RemovesEverythingItInstalled(t *testing.T) {
 	a := fake.New(fake.Options{})
 
 	sandbox := domain.Sandbox{
-		Key:        domain.RunKey{RunID: "fake-run", TestID: "fake-test", RunNumber: 1},
+		Key:        domain.RunKey{RunID: "fake-run", TestName: "fake-test", RunNumber: 1},
 		Root:       dir,
 		SubjectDir: dir + "/subject",
 		ControlDir: dir + "/control",
@@ -413,6 +424,190 @@ func TestSpawnPlan_SubjectTurns_EncodedInStdinForScriptedStandIn(t *testing.T) {
 	}
 	if decoded[1].Result.ProtocolMessage != `{"status_code":"SUCCESS"}` {
 		t.Errorf("SpawnPlan: turn 1 Result.ProtocolMessage = %q, want %q", decoded[1].Result.ProtocolMessage, `{"status_code":"SUCCESS"}`)
+	}
+}
+
+// nativeCompletion encodes this package's own native completion payload for
+// the given collaborator identity and agent identifier. Used exclusively by
+// tests for PhaseCompletion translation; it must not be used or imported
+// outside this package.
+func nativeCompletion(id domain.CollaboratorIdentity, agentID string) []byte {
+	type wireCompletion struct {
+		Phase   string `json:"phase"`
+		Tool    string `json:"tool"`
+		Agent   string `json:"agent"`
+		AgentID string `json:"agent_id"`
+	}
+	b, _ := json.Marshal(wireCompletion{
+		Phase:   "completion",
+		Tool:    id.ToolName,
+		Agent:   id.AgentIdentity,
+		AgentID: agentID,
+	})
+	return b
+}
+
+// TestTranslateCall_PhaseCompletion_ReplyRecovery_ConsumesScriptedTurn verifies
+// that when SupportsReplyRecovery is true, TranslateCall(PhaseCompletion, ...)
+// consumes the next scripted turn for the decoded collaborator identity and
+// sets ObservedResponse to its body. This is the mechanism that carries the
+// recovered collaborator reply to the decision core for echo comparison and
+// cutoff evaluation.
+func TestTranslateCall_PhaseCompletion_ReplyRecovery_ConsumesScriptedTurn(t *testing.T) {
+	a := fake.New(fake.Options{
+		Capabilities: domain.HarnessCapabilities{SupportsReplyRecovery: true},
+		Script: map[string][]fake.Turn{
+			workerID.Key(): {{Body: "worker reply recovered at completion"}},
+		},
+	})
+
+	call, err := a.TranslateCall(domain.PhaseCompletion, nativeCompletion(workerID, "fake-agent-worker"))
+	if err != nil {
+		t.Fatalf("TranslateCall(PhaseCompletion): %v", err)
+	}
+	if call.ObservedResponse != "worker reply recovered at completion" {
+		t.Errorf("ObservedResponse = %q, want %q", call.ObservedResponse, "worker reply recovered at completion")
+	}
+	if call.AgentID != "fake-agent-worker" {
+		t.Errorf("AgentID = %q, want %q", call.AgentID, "fake-agent-worker")
+	}
+	if call.Phase != domain.PhaseCompletion {
+		t.Errorf("Phase = %q, want %q", call.Phase, domain.PhaseCompletion)
+	}
+}
+
+// TestTranslateCall_PhasePost_WhenReplyRecovery_NoTurnConsumed verifies that
+// when SupportsReplyRecovery is true, TranslateCall(PhasePost, ...) decodes to
+// a valid call but does NOT consume a scripted turn and leaves ObservedResponse
+// empty. The turn is deferred to the completion phase so it cannot be
+// double-consumed.
+func TestTranslateCall_PhasePost_WhenReplyRecovery_NoTurnConsumed(t *testing.T) {
+	a := fake.New(fake.Options{
+		Capabilities: domain.HarnessCapabilities{SupportsReplyRecovery: true},
+		Script: map[string][]fake.Turn{
+			workerID.Key(): {{Body: "deferred to completion"}},
+		},
+	})
+
+	call, err := a.TranslateCall(domain.PhasePost, nativePost(workerID, "token-1"))
+	if err != nil {
+		t.Fatalf("TranslateCall(PhasePost) with reply recovery: %v", err)
+	}
+	if call.ObservedResponse != "" {
+		t.Errorf("ObservedResponse = %q, want empty — the turn must be deferred to the completion phase", call.ObservedResponse)
+	}
+
+	// The scripted turn must still be available for the completion phase.
+	if got := a.RemainingScript(); got != 1 {
+		t.Errorf("RemainingScript() after PhasePost with reply recovery = %d, want 1 (turn not yet consumed)", got)
+	}
+}
+
+// TestTranslateCall_PhaseCompletion_ExhaustedScript_ReturnsError verifies that
+// an exhausted script at the completion phase surfaces as a handleable error
+// and never as blocking or a panic. This mirrors the same check for the post
+// phase, which already tests this property.
+func TestTranslateCall_PhaseCompletion_ExhaustedScript_ReturnsError(t *testing.T) {
+	a := fake.New(fake.Options{
+		Capabilities: domain.HarnessCapabilities{SupportsReplyRecovery: true},
+		Script: map[string][]fake.Turn{
+			workerID.Key(): {{Body: "only turn"}},
+		},
+	})
+
+	// Consume the one scripted turn.
+	if _, err := a.TranslateCall(domain.PhaseCompletion, nativeCompletion(workerID, "agent-1")); err != nil {
+		t.Fatalf("first TranslateCall(PhaseCompletion): unexpected error: %v", err)
+	}
+
+	// A second completion for the same identity must return an error.
+	_, err := a.TranslateCall(domain.PhaseCompletion, nativeCompletion(workerID, "agent-2"))
+	if err == nil {
+		t.Fatal("second TranslateCall(PhaseCompletion): expected an error once the script is exhausted, got nil")
+	}
+}
+
+// TestTranslateCall_PhaseCompletion_MalformedNativePayload_ReturnsErrorNotPanic
+// verifies that a malformed native completion payload surfaces as a handleable
+// error and never as a panic. This is the completion counterpart of the same
+// property exercised for pre and post.
+func TestTranslateCall_PhaseCompletion_MalformedNativePayload_ReturnsErrorNotPanic(t *testing.T) {
+	a := fake.New(fake.Options{
+		Capabilities: domain.HarnessCapabilities{SupportsReplyRecovery: true},
+	})
+
+	defer func() {
+		if r := recover(); r != nil {
+			t.Fatalf("TranslateCall(PhaseCompletion) panicked on a malformed native payload: %v", r)
+		}
+	}()
+
+	_, err := a.TranslateCall(domain.PhaseCompletion, []byte(`not valid json {{{`))
+	if err == nil {
+		t.Fatal("expected an error for a malformed native completion payload, got nil")
+	}
+}
+
+// TestTranslateCall_PhaseCompletion_NilScript_ReturnsEmptyResponse verifies
+// that when Script is nil (unscripted adapter) and SupportsReplyRecovery is
+// true, TranslateCall(PhaseCompletion, ...) succeeds and returns an empty
+// ObservedResponse. A nil Script means "no scripted turns for any
+// collaborator"; it is distinct from a non-nil empty map, which means "a
+// script was declared but this collaborator has no entries" (an error case).
+// This path is exercised by e2e scenarios that configure a reply-recovery run
+// without pre-scripted collaborator replies — the cutoff fires even when the
+// completion-phase ObservedResponse is empty.
+func TestTranslateCall_PhaseCompletion_NilScript_ReturnsEmptyResponse(t *testing.T) {
+	a := fake.New(fake.Options{
+		Capabilities: domain.HarnessCapabilities{SupportsReplyRecovery: true},
+		Script:       nil,
+	})
+
+	call, err := a.TranslateCall(domain.PhaseCompletion, nativeCompletion(workerID, "agent-1"))
+	if err != nil {
+		t.Fatalf("TranslateCall(PhaseCompletion) with nil Script: %v", err)
+	}
+	if call.ObservedResponse != "" {
+		t.Errorf("ObservedResponse = %q, want empty — a nil Script means unscripted and yields an empty response", call.ObservedResponse)
+	}
+}
+
+// TestRemainingScript_AfterReplyRecoveryRun_IsZero verifies that after a
+// reply-recovery run that consumed every scripted turn exactly once — one turn
+// consumed at completion per collaborator dispatch, none consumed at post — the
+// remaining-script count is zero. Double consumption is therefore detectable
+// without a second accessor.
+func TestRemainingScript_AfterReplyRecoveryRun_IsZero(t *testing.T) {
+	a := fake.New(fake.Options{
+		Capabilities: domain.HarnessCapabilities{SupportsReplyRecovery: true},
+		Script: map[string][]fake.Turn{
+			workerID.Key():     {{Body: "worker reply"}},
+			researcherID.Key(): {{Body: "researcher reply"}},
+		},
+	})
+
+	// Simulate a reply-recovery run: for each dispatch, drive pre (no
+	// consumption), post (no consumption), then completion (consumption).
+	for i, id := range []domain.CollaboratorIdentity{workerID, researcherID} {
+		token := fmt.Sprintf("token-%d", i+1)
+		agentID := fmt.Sprintf("fake-agent-%d", i+1)
+
+		// Pre: no turn consumed.
+		if _, err := a.TranslateCall(domain.PhasePre, nativePre(id, domain.TaskMessage{}, token)); err != nil {
+			t.Fatalf("pre(%s): %v", id.Key(), err)
+		}
+		// Post: no turn consumed (SupportsReplyRecovery defers to completion).
+		if _, err := a.TranslateCall(domain.PhasePost, nativePost(id, token)); err != nil {
+			t.Fatalf("post(%s): %v", id.Key(), err)
+		}
+		// Completion: turn consumed.
+		if _, err := a.TranslateCall(domain.PhaseCompletion, nativeCompletion(id, agentID)); err != nil {
+			t.Fatalf("completion(%s): %v", id.Key(), err)
+		}
+	}
+
+	if got := a.RemainingScript(); got != 0 {
+		t.Errorf("RemainingScript() after reply-recovery run = %d, want 0 — every scripted turn must be consumed exactly once at the completion phase", got)
 	}
 }
 

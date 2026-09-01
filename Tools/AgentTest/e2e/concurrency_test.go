@@ -76,7 +76,7 @@ func TestConcurrency_OverlappingInvocations_ReconstructsPeakBothWays(t *testing.
 
 	byID := map[string]wireTestReportDoc{}
 	for _, tr := range out.Result.Tests {
-		byID[tr.TestID] = tr
+		byID[tr.TestName] = tr
 	}
 	if len(byID) != 2 {
 		t.Fatalf("Result.Tests has %d entries, want 2\nstdout: %s", len(byID), out.Stdout)
@@ -90,10 +90,10 @@ func assertMinConcurrency(t *testing.T, out Outcome, tr wireTestReportDoc, wantV
 	t.Helper()
 
 	if got := tr.Aggregate.Verdict; got != string(wantVerdict) {
-		t.Errorf("test %q: aggregate verdict = %q, want %q\nstdout: %s", tr.TestID, got, wantVerdict, out.Stdout)
+		t.Errorf("test %q: aggregate verdict = %q, want %q\nstdout: %s", tr.TestName, got, wantVerdict, out.Stdout)
 	}
 	if len(tr.Runs) != 1 {
-		t.Fatalf("test %q: Runs = %+v, want exactly one run", tr.TestID, tr.Runs)
+		t.Fatalf("test %q: Runs = %+v, want exactly one run", tr.TestName, tr.Runs)
 	}
 
 	var found bool
@@ -104,10 +104,10 @@ func assertMinConcurrency(t *testing.T, out Outcome, tr wireTestReportDoc, wantV
 		found = true
 		if a.Outcome != string(wantOutcome) {
 			t.Errorf("test %q: min_concurrency assertion outcome = %q, want %q\nstdout: %s",
-				tr.TestID, a.Outcome, wantOutcome, out.Stdout)
+				tr.TestName, a.Outcome, wantOutcome, out.Stdout)
 		}
 	}
 	if !found {
-		t.Errorf("test %q: no min_concurrency assertion found among %+v", tr.TestID, tr.Runs[0].Assertions)
+		t.Errorf("test %q: no min_concurrency assertion found among %+v", tr.TestName, tr.Runs[0].Assertions)
 	}
 }

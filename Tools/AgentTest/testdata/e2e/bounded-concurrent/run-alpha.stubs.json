@@ -1,0 +1,15 @@
+{
+  "schema_version": 1,
+  "test_id": "run-alpha",
+  "on_unmatched": "halt",
+  "stubs": [
+    {
+      "match": { "tool": "dispatch", "agent": "worker", "invocation": 1 },
+      "response": {
+        "agent_instance_id": "worker#1",
+        "status_code": "SUCCESS",
+        "status_message": "Alpha-worker completed."
+      }
+    }
+  ]
+}

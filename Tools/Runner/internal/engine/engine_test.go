@@ -120,28 +120,28 @@ const quickFixContent = `## Quick Fix Workflow
 
 | Phase | Subagent | HITL | On Success | On Findings | Input | Output |
 |-------|----------|:----:|------------|-------------|-------|--------|
-| PLANNING | planner-tdd-soft | ✅ | plan-review | - | - | Plan.md, Stage-*/Plan.md, Stage-*/PlanProgress.md |
-| PLANNING | plan-review | ❌ | implementation-tdd | planner-tdd-soft | Plan.md, Stage-*/Plan.md, Stage-*/PlanProgress.md | plan-review.md |
-| EXECUTION.[StageNumber] | implementation-tdd | ❌ | test-runner | - | Stage-{StageNumber}/Plan.md, Stage-{StageNumber}/PlanProgress.md | Stage-{StageNumber}/PlanProgress.md |
-| REVIEW | test-runner | ❌ | COMPLETE | implementation-tdd | - | TestResults.md |
+| PLANNING | planner-tdd-soft | TRUE | plan-review | - | - | Plan.md, Stage-*/Plan.md, Stage-*/PlanProgress.md |
+| PLANNING | plan-review | FALSE | implementation-tdd | planner-tdd-soft | Plan.md, Stage-*/Plan.md, Stage-*/PlanProgress.md | plan-review.md |
+| EXECUTION.[StageNumber] | implementation-tdd | FALSE | test-runner | - | Stage-{StageNumber}/Plan.md, Stage-{StageNumber}/PlanProgress.md | Stage-{StageNumber}/PlanProgress.md |
+| REVIEW | test-runner | FALSE | COMPLETE | implementation-tdd | - | TestResults.md |
 `
 
 const brownfieldTDDContent = `## Brownfield TDD Workflow
 
 | Phase | Subagent | HITL | On Success | On Findings | Input | Output |
 |-------|----------|:----:|------------|-------------|-------|--------|
-| RESEARCH | codebase-research | ❌ | requirements-refinement | - | Requirements.md | Research.md |
-| RESEARCH | requirements-refinement | ✅ | requirements-review | - | Research.md, Requirements.md | Requirements.md |
-| RESEARCH | requirements-review | ❌ | planner-tdd-soft | requirements-refinement | Requirements.md | requirements-review.md |
-| PLANNING | planner-tdd-soft | ✅ | plan-review | - | Research.md, Requirements.md | Plan.md, Stage-*/Plan.md, Stage-*/PlanProgress.md |
-| PLANNING | plan-review | ❌ | contracts-designer | planner-tdd-soft | Requirements.md, Plan.md, Stage-*/Plan.md, Stage-*/PlanProgress.md | plan-review.md |
-| DESIGN | contracts-designer | ✅ | contracts-review | - | Research.md, Requirements.md, Plan.md, Stage-*/Plan.md | ContractsDesign.md |
-| DESIGN | contracts-review | ❌ | test-writer-tdd | contracts-designer | Plan.md, Stage-*/Plan.md, ContractsDesign.md | contracts-review.md |
-| EXECUTION.Test.[StageNumber] | test-writer-tdd | ❌ | tests-review-tdd | - | Stage-{StageNumber}/Plan.md, ContractsDesign.md, Stage-{StageNumber}/PlanProgress.md | Stage-{StageNumber}/PlanProgress.md |
-| EXECUTION.Test.[StageNumber] | tests-review-tdd | ❌ | implementation-tdd | test-writer-tdd | Stage-{StageNumber}/Plan.md, ContractsDesign.md, Stage-{StageNumber}/PlanProgress.md | Stage-{StageNumber}/tests-review-tdd.md |
-| EXECUTION.Implementation.[StageNumber] | implementation-tdd | ❌ | implementation-review | - | Stage-{StageNumber}/Plan.md, ContractsDesign.md, Stage-{StageNumber}/PlanProgress.md | Stage-{StageNumber}/PlanProgress.md |
-| EXECUTION.Implementation.[StageNumber] | implementation-review | ❌ | test-runner | implementation-tdd (or other based on issue) | Stage-{StageNumber}/Plan.md, ContractsDesign.md, Stage-{StageNumber}/PlanProgress.md | Stage-{StageNumber}/implementation-review.md |
-| REVIEW | test-runner | ❌ | COMPLETE | implementation-tdd | - | TestResults.md |
+| RESEARCH | codebase-research | FALSE | requirements-refinement | - | Requirements.md | Research.md |
+| RESEARCH | requirements-refinement | TRUE | requirements-review | - | Research.md, Requirements.md | Requirements.md |
+| RESEARCH | requirements-review | FALSE | planner-tdd-soft | requirements-refinement | Requirements.md | requirements-review.md |
+| PLANNING | planner-tdd-soft | TRUE | plan-review | - | Research.md, Requirements.md | Plan.md, Stage-*/Plan.md, Stage-*/PlanProgress.md |
+| PLANNING | plan-review | FALSE | contracts-designer | planner-tdd-soft | Requirements.md, Plan.md, Stage-*/Plan.md, Stage-*/PlanProgress.md | plan-review.md |
+| DESIGN | contracts-designer | TRUE | contracts-review | - | Research.md, Requirements.md, Plan.md, Stage-*/Plan.md | ContractsDesign.md |
+| DESIGN | contracts-review | FALSE | test-writer-tdd | contracts-designer | Plan.md, Stage-*/Plan.md, ContractsDesign.md | contracts-review.md |
+| EXECUTION.Test.[StageNumber] | test-writer-tdd | FALSE | tests-review-tdd | - | Stage-{StageNumber}/Plan.md, ContractsDesign.md, Stage-{StageNumber}/PlanProgress.md | Stage-{StageNumber}/PlanProgress.md |
+| EXECUTION.Test.[StageNumber] | tests-review-tdd | FALSE | implementation-tdd | test-writer-tdd | Stage-{StageNumber}/Plan.md, ContractsDesign.md, Stage-{StageNumber}/PlanProgress.md | Stage-{StageNumber}/tests-review-tdd.md |
+| EXECUTION.Implementation.[StageNumber] | implementation-tdd | FALSE | implementation-review | - | Stage-{StageNumber}/Plan.md, ContractsDesign.md, Stage-{StageNumber}/PlanProgress.md | Stage-{StageNumber}/PlanProgress.md |
+| EXECUTION.Implementation.[StageNumber] | implementation-review | FALSE | test-runner | implementation-tdd (or other based on issue) | Stage-{StageNumber}/Plan.md, ContractsDesign.md, Stage-{StageNumber}/PlanProgress.md | Stage-{StageNumber}/implementation-review.md |
+| REVIEW | test-runner | FALSE | COMPLETE | implementation-tdd | - | TestResults.md |
 
 **Execution Groups:**
 
@@ -157,19 +157,19 @@ const brownfieldBuildVerifiedContent = `## Brownfield TDD Build-Verified Workflo
 
 | Phase | Subagent | HITL | On Success | On Findings | Input | Output |
 |-------|----------|:----:|------------|-------------|-------|--------|
-| RESEARCH | codebase-research | ❌ | requirements-refinement | - | Requirements.md | Research.md |
-| RESEARCH | requirements-refinement | ✅ | requirements-review | - | Research.md, Requirements.md | Requirements.md |
-| RESEARCH | requirements-review | ❌ | planner-tdd-soft | requirements-refinement | Requirements.md | requirements-review.md |
-| PLANNING | planner-tdd-soft | ✅ | plan-review | - | Research.md, Requirements.md | Plan.md, Stage-*/Plan.md, Stage-*/PlanProgress.md |
-| PLANNING | plan-review | ❌ | contracts-designer | planner-tdd-soft | Requirements.md, Plan.md, Stage-*/Plan.md, Stage-*/PlanProgress.md | plan-review.md |
-| DESIGN | contracts-designer | ✅ | contracts-review | - | Research.md, Requirements.md, Plan.md, Stage-*/Plan.md | ContractsDesign.md |
-| DESIGN | contracts-review | ❌ | test-writer-tdd | contracts-designer | Plan.md, Stage-*/Plan.md, ContractsDesign.md | contracts-review.md |
-| EXECUTION.Test.[StageNumber] | test-writer-tdd | ❌ | build-review | - | Stage-{StageNumber}/Plan.md, ContractsDesign.md, Stage-{StageNumber}/PlanProgress.md | Stage-{StageNumber}/PlanProgress.md |
-| EXECUTION.Test.[StageNumber] | build-review | ❌ | tests-review-tdd | test-writer-tdd | Stage-{StageNumber}/PlanProgress.md | Stage-{StageNumber}/build-review-tests.md |
-| EXECUTION.Test.[StageNumber] | tests-review-tdd | ❌ | implementation-tdd | test-writer-tdd | Stage-{StageNumber}/Plan.md, ContractsDesign.md, Stage-{StageNumber}/PlanProgress.md, Stage-{StageNumber}/build-review-tests.md | Stage-{StageNumber}/tests-review-tdd.md |
-| EXECUTION.Implementation.[StageNumber] | implementation-tdd | ❌ | build-review | - | Stage-{StageNumber}/Plan.md, ContractsDesign.md, Stage-{StageNumber}/PlanProgress.md | Stage-{StageNumber}/PlanProgress.md |
-| EXECUTION.Implementation.[StageNumber] | build-review | ❌ | implementation-review | implementation-tdd | Stage-{StageNumber}/PlanProgress.md | Stage-{StageNumber}/build-review-impl.md |
-| EXECUTION.Implementation.[StageNumber] | implementation-review | ❌ | COMPLETE | implementation-tdd (or other based on issue) | Stage-{StageNumber}/Plan.md, ContractsDesign.md, Stage-{StageNumber}/PlanProgress.md, Stage-{StageNumber}/build-review-impl.md | Stage-{StageNumber}/implementation-review.md |
+| RESEARCH | codebase-research | FALSE | requirements-refinement | - | Requirements.md | Research.md |
+| RESEARCH | requirements-refinement | TRUE | requirements-review | - | Research.md, Requirements.md | Requirements.md |
+| RESEARCH | requirements-review | FALSE | planner-tdd-soft | requirements-refinement | Requirements.md | requirements-review.md |
+| PLANNING | planner-tdd-soft | TRUE | plan-review | - | Research.md, Requirements.md | Plan.md, Stage-*/Plan.md, Stage-*/PlanProgress.md |
+| PLANNING | plan-review | FALSE | contracts-designer | planner-tdd-soft | Requirements.md, Plan.md, Stage-*/Plan.md, Stage-*/PlanProgress.md | plan-review.md |
+| DESIGN | contracts-designer | TRUE | contracts-review | - | Research.md, Requirements.md, Plan.md, Stage-*/Plan.md | ContractsDesign.md |
+| DESIGN | contracts-review | FALSE | test-writer-tdd | contracts-designer | Plan.md, Stage-*/Plan.md, ContractsDesign.md | contracts-review.md |
+| EXECUTION.Test.[StageNumber] | test-writer-tdd | FALSE | build-review | - | Stage-{StageNumber}/Plan.md, ContractsDesign.md, Stage-{StageNumber}/PlanProgress.md | Stage-{StageNumber}/PlanProgress.md |
+| EXECUTION.Test.[StageNumber] | build-review | FALSE | tests-review-tdd | test-writer-tdd | Stage-{StageNumber}/PlanProgress.md | Stage-{StageNumber}/build-review-tests.md |
+| EXECUTION.Test.[StageNumber] | tests-review-tdd | FALSE | implementation-tdd | test-writer-tdd | Stage-{StageNumber}/Plan.md, ContractsDesign.md, Stage-{StageNumber}/PlanProgress.md, Stage-{StageNumber}/build-review-tests.md | Stage-{StageNumber}/tests-review-tdd.md |
+| EXECUTION.Implementation.[StageNumber] | implementation-tdd | FALSE | build-review | - | Stage-{StageNumber}/Plan.md, ContractsDesign.md, Stage-{StageNumber}/PlanProgress.md | Stage-{StageNumber}/PlanProgress.md |
+| EXECUTION.Implementation.[StageNumber] | build-review | FALSE | implementation-review | implementation-tdd | Stage-{StageNumber}/PlanProgress.md | Stage-{StageNumber}/build-review-impl.md |
+| EXECUTION.Implementation.[StageNumber] | implementation-review | FALSE | COMPLETE | implementation-tdd (or other based on issue) | Stage-{StageNumber}/Plan.md, ContractsDesign.md, Stage-{StageNumber}/PlanProgress.md, Stage-{StageNumber}/build-review-impl.md | Stage-{StageNumber}/implementation-review.md |
 
 **Execution Groups:**
 
@@ -185,28 +185,28 @@ const implOnlyContent = `## Implementation Only Workflow
 
 | Phase | Subagent | HITL | On Success | On Findings | Input | Output |
 |-------|----------|:----:|------------|-------------|-------|--------|
-| EXECUTION.[StageNumber] | implementation-tdd | ❌ | implementation-review | - | Stage-{StageNumber}/Plan.md, ContractsDesign.md, Stage-{StageNumber}/PlanProgress.md | Stage-{StageNumber}/PlanProgress.md |
-| EXECUTION.[StageNumber] | implementation-review | ❌ | test-runner | implementation-tdd | Stage-{StageNumber}/Plan.md, ContractsDesign.md, Stage-{StageNumber}/PlanProgress.md | Stage-{StageNumber}/implementation-review.md |
-| REVIEW | test-runner | ❌ | COMPLETE | implementation-tdd | - | TestResults.md |
+| EXECUTION.[StageNumber] | implementation-tdd | FALSE | implementation-review | - | Stage-{StageNumber}/Plan.md, ContractsDesign.md, Stage-{StageNumber}/PlanProgress.md | Stage-{StageNumber}/PlanProgress.md |
+| EXECUTION.[StageNumber] | implementation-review | FALSE | test-runner | implementation-tdd | Stage-{StageNumber}/Plan.md, ContractsDesign.md, Stage-{StageNumber}/PlanProgress.md | Stage-{StageNumber}/implementation-review.md |
+| REVIEW | test-runner | FALSE | COMPLETE | implementation-tdd | - | TestResults.md |
 `
 
 const greenfieldTDDContent = `## Greenfield TDD Workflow
 
 | Phase | Subagent | HITL | On Success | On Findings | Input | Output |
 |-------|----------|:----:|------------|-------------|-------|--------|
-| RESEARCH | requirements-refinement | ✅ | requirements-review | - | Requirements.md | Requirements.md |
-| RESEARCH | requirements-review | ❌ | system-designer | requirements-refinement | Requirements.md | requirements-review.md |
-| ARCHITECTURE | system-designer | ✅ | system-design-review | - | Requirements.md | SystemDesign.md |
-| ARCHITECTURE | system-design-review | ❌ | planner-tdd-soft | system-designer | Requirements.md, SystemDesign.md | system-design-review.md |
-| PLANNING | planner-tdd-soft | ✅ | plan-review | - | Requirements.md, SystemDesign.md | Plan.md, Stage-*/Plan.md, Stage-*/PlanProgress.md |
-| PLANNING | plan-review | ❌ | contracts-designer | planner-tdd-soft | Requirements.md, Plan.md, Stage-*/Plan.md, Stage-*/PlanProgress.md | plan-review.md |
-| DESIGN | contracts-designer | ✅ | contracts-review | - | Requirements.md, Plan.md, Stage-*/Plan.md, SystemDesign.md | ContractsDesign.md |
-| DESIGN | contracts-review | ❌ | test-writer-tdd | contracts-designer | Plan.md, Stage-*/Plan.md, ContractsDesign.md | contracts-review.md |
-| EXECUTION.Test.[StageNumber] | test-writer-tdd | ❌ | tests-review-tdd | - | Stage-{StageNumber}/Plan.md, ContractsDesign.md, Stage-{StageNumber}/PlanProgress.md | Stage-{StageNumber}/PlanProgress.md |
-| EXECUTION.Test.[StageNumber] | tests-review-tdd | ❌ | implementation-tdd | test-writer-tdd | Stage-{StageNumber}/Plan.md, ContractsDesign.md, Stage-{StageNumber}/PlanProgress.md | Stage-{StageNumber}/tests-review-tdd.md |
-| EXECUTION.Implementation.[StageNumber] | implementation-tdd | ❌ | implementation-review | - | Stage-{StageNumber}/Plan.md, ContractsDesign.md, Stage-{StageNumber}/PlanProgress.md | Stage-{StageNumber}/PlanProgress.md |
-| EXECUTION.Implementation.[StageNumber] | implementation-review | ❌ | test-runner | implementation-tdd (or other based on issue) | Stage-{StageNumber}/Plan.md, ContractsDesign.md, Stage-{StageNumber}/PlanProgress.md | Stage-{StageNumber}/implementation-review.md |
-| REVIEW | test-runner | ❌ | COMPLETE | implementation-tdd | - | TestResults.md |
+| RESEARCH | requirements-refinement | TRUE | requirements-review | - | Requirements.md | Requirements.md |
+| RESEARCH | requirements-review | FALSE | system-designer | requirements-refinement | Requirements.md | requirements-review.md |
+| ARCHITECTURE | system-designer | TRUE | system-design-review | - | Requirements.md | SystemDesign.md |
+| ARCHITECTURE | system-design-review | FALSE | planner-tdd-soft | system-designer | Requirements.md, SystemDesign.md | system-design-review.md |
+| PLANNING | planner-tdd-soft | TRUE | plan-review | - | Requirements.md, SystemDesign.md | Plan.md, Stage-*/Plan.md, Stage-*/PlanProgress.md |
+| PLANNING | plan-review | FALSE | contracts-designer | planner-tdd-soft | Requirements.md, Plan.md, Stage-*/Plan.md, Stage-*/PlanProgress.md | plan-review.md |
+| DESIGN | contracts-designer | TRUE | contracts-review | - | Requirements.md, Plan.md, Stage-*/Plan.md, SystemDesign.md | ContractsDesign.md |
+| DESIGN | contracts-review | FALSE | test-writer-tdd | contracts-designer | Plan.md, Stage-*/Plan.md, ContractsDesign.md | contracts-review.md |
+| EXECUTION.Test.[StageNumber] | test-writer-tdd | FALSE | tests-review-tdd | - | Stage-{StageNumber}/Plan.md, ContractsDesign.md, Stage-{StageNumber}/PlanProgress.md | Stage-{StageNumber}/PlanProgress.md |
+| EXECUTION.Test.[StageNumber] | tests-review-tdd | FALSE | implementation-tdd | test-writer-tdd | Stage-{StageNumber}/Plan.md, ContractsDesign.md, Stage-{StageNumber}/PlanProgress.md | Stage-{StageNumber}/tests-review-tdd.md |
+| EXECUTION.Implementation.[StageNumber] | implementation-tdd | FALSE | implementation-review | - | Stage-{StageNumber}/Plan.md, ContractsDesign.md, Stage-{StageNumber}/PlanProgress.md | Stage-{StageNumber}/PlanProgress.md |
+| EXECUTION.Implementation.[StageNumber] | implementation-review | FALSE | test-runner | implementation-tdd (or other based on issue) | Stage-{StageNumber}/Plan.md, ContractsDesign.md, Stage-{StageNumber}/PlanProgress.md | Stage-{StageNumber}/implementation-review.md |
+| REVIEW | test-runner | FALSE | COMPLETE | implementation-tdd | - | TestResults.md |
 
 **Execution Groups:**
 
@@ -228,10 +228,10 @@ const onSuccessDivergentContent = `## On-Success-Divergent Workflow
 
 | Phase | Subagent | HITL | On Success | On Findings | Input | Output |
 |-------|----------|:----:|------------|-------------|-------|--------|
-| EXECUTION.[StageNumber] | test-writer-tdd | ❌ | implementation-tdd | - | Stage-{StageNumber}/Plan.md | Stage-{StageNumber}/PlanProgress.md |
-| EXECUTION.[StageNumber] | tests-review-tdd | ❌ | implementation-tdd | test-writer-tdd | Stage-{StageNumber}/PlanProgress.md | Stage-{StageNumber}/tests-review-tdd.md |
-| EXECUTION.[StageNumber] | implementation-tdd | ❌ | implementation-review | - | Stage-{StageNumber}/Plan.md | Stage-{StageNumber}/PlanProgress.md |
-| EXECUTION.[StageNumber] | implementation-review | ❌ | COMPLETE | implementation-tdd | Stage-{StageNumber}/PlanProgress.md | Stage-{StageNumber}/implementation-review.md |
+| EXECUTION.[StageNumber] | test-writer-tdd | FALSE | implementation-tdd | - | Stage-{StageNumber}/Plan.md | Stage-{StageNumber}/PlanProgress.md |
+| EXECUTION.[StageNumber] | tests-review-tdd | FALSE | implementation-tdd | test-writer-tdd | Stage-{StageNumber}/PlanProgress.md | Stage-{StageNumber}/tests-review-tdd.md |
+| EXECUTION.[StageNumber] | implementation-tdd | FALSE | implementation-review | - | Stage-{StageNumber}/Plan.md | Stage-{StageNumber}/PlanProgress.md |
+| EXECUTION.[StageNumber] | implementation-review | FALSE | COMPLETE | implementation-tdd | Stage-{StageNumber}/PlanProgress.md | Stage-{StageNumber}/implementation-review.md |
 `
 
 // ---- Helper functions ----
@@ -692,8 +692,8 @@ func TestNext_PreExecution_AbsentOnSuccess_ReturnsDeviation(t *testing.T) {
 
 | Phase | Subagent | HITL | Input | Output |
 |-------|----------|:----:|-------|--------|
-| PLANNING | agent-a | ❌ | - | out.md |
-| PLANNING | agent-b | ❌ | out.md | final.md |
+| PLANNING | agent-a | FALSE | - | out.md |
+| PLANNING | agent-b | FALSE | out.md | final.md |
 `
 	info := domain.WorkflowInfo{ID: "no-hint", Version: "1.0"}
 	table, err := workflow.Parse([]byte(noHintContent), info)
@@ -781,7 +781,7 @@ func TestNext_AgentInstanceID_ZeroSeqProducesOne(t *testing.T) {
 // TestNext_HITL_RowTrue_EffectiveTrue verifies that row-level HITL=true
 // produces an effective HITL=true regardless of stage HITL.
 func TestNext_HITL_RowTrue_EffectiveTrue(t *testing.T) {
-	// quick-fix row 0: planner-tdd-soft has HITL=✅ (true)
+	// quick-fix row 0: planner-tdd-soft has HITL=TRUE (true)
 	aw := mustParseAndAdmit(t, quickFixContent, "quick-fix", "3.0")
 	stages := singleStageSet("Implementation-Only")
 	agents := makeAgents("planner-tdd-soft", "plan-review", "implementation-tdd", "test-runner")
@@ -806,7 +806,7 @@ func TestNext_HITL_RowTrue_EffectiveTrue(t *testing.T) {
 // TestNext_HITL_BothFalse_EffectiveFalse verifies that when both row HITL and
 // stage HITL are false, effective HITL is false.
 func TestNext_HITL_BothFalse_EffectiveFalse(t *testing.T) {
-	// quick-fix row 1: plan-review has HITL=❌ (false), stage HITL=false
+	// quick-fix row 1: plan-review has HITL=FALSE (false), stage HITL=false
 	aw := mustParseAndAdmit(t, quickFixContent, "quick-fix", "3.0")
 	stagesNoHITL := makeStageSet([]domain.StageEntry{
 		{Number: 1, HITL: false, Approach: "Implementation-Only"},
@@ -1591,7 +1591,7 @@ func TestNext_OnFindings_AbsentColumn_CNA_ReturnsDeviation(t *testing.T) {
 
 | Phase | Subagent | HITL | On Success | Input | Output |
 |-------|----------|:----:|------------|-------|--------|
-| PLANNING | agent-a | ❌ | COMPLETE | - | out.md |
+| PLANNING | agent-a | FALSE | COMPLETE | - | out.md |
 `
 	info := domain.WorkflowInfo{ID: "no-findings", Version: "1.0"}
 	table, err := workflow.Parse([]byte(noFindingsContent), info)
@@ -2321,7 +2321,7 @@ func TestNext_Paths_UnresolvableStageNumber_ReturnsStop(t *testing.T) {
 
 | Phase | Subagent | HITL | On Success | On Findings | Input | Output |
 |-------|----------|:----:|------------|-------------|-------|--------|
-| PLANNING | agent-a | ❌ | COMPLETE | - | Stage-{StageNumber}/Plan.md | out.md |
+| PLANNING | agent-a | FALSE | COMPLETE | - | Stage-{StageNumber}/Plan.md | out.md |
 `
 	info := domain.WorkflowInfo{ID: "unresolvable-template", Version: "1.0"}
 	table, err := workflow.Parse([]byte(unresolvableTemplateContent), info)
@@ -2365,8 +2365,8 @@ func TestNext_PreExecution_FreeFormOnSuccess_ReturnsDeviation(t *testing.T) {
 
 | Phase | Subagent | HITL | On Success | On Findings | Input | Output |
 |-------|----------|:----:|------------|-------------|-------|--------|
-| PLANNING | agent-a | ❌ | agent-b (or other based on issue) | - | - | out.md |
-| PLANNING | agent-b | ❌ | COMPLETE | - | out.md | final.md |
+| PLANNING | agent-a | FALSE | agent-b (or other based on issue) | - | - | out.md |
+| PLANNING | agent-b | FALSE | COMPLETE | - | out.md | final.md |
 `
 	info := domain.WorkflowInfo{ID: "free-form-on-success", Version: "1.0"}
 	table, err := workflow.Parse([]byte(freeFormOnSuccessContent), info)
@@ -2536,8 +2536,8 @@ func TestNext_HITL_RowTrue_StageTrue_EffectiveTrue(t *testing.T) {
 
 | Phase | Subagent | HITL | On Success | On Findings | Input | Output |
 |-------|----------|:----:|------------|-------------|-------|--------|
-| EXECUTION.[StageNumber] | agent-a | ✅ | agent-b | - | Stage-{StageNumber}/Plan.md | Stage-{StageNumber}/out.md |
-| EXECUTION.[StageNumber] | agent-b | ❌ | COMPLETE | - | Stage-{StageNumber}/out.md | Stage-{StageNumber}/final.md |
+| EXECUTION.[StageNumber] | agent-a | TRUE | agent-b | - | Stage-{StageNumber}/Plan.md | Stage-{StageNumber}/out.md |
+| EXECUTION.[StageNumber] | agent-b | FALSE | COMPLETE | - | Stage-{StageNumber}/out.md | Stage-{StageNumber}/final.md |
 `
 	info := domain.WorkflowInfo{ID: "both-hitl-true", Version: "1.0"}
 	table, err := workflow.Parse([]byte(bothHITLTrueContent), info)
@@ -2595,9 +2595,9 @@ const threeGroupContent = `## Three-Group Workflow
 
 | Phase | Subagent | HITL | On Success | On Findings | Input | Output |
 |-------|----------|:----:|------------|-------------|-------|--------|
-| EXECUTION.Alpha.[StageNumber] | agent-alpha | ❌ | - | - | - | - |
-| EXECUTION.Beta.[StageNumber] | agent-beta | ❌ | - | - | - | - |
-| EXECUTION.Gamma.[StageNumber] | agent-gamma | ❌ | - | - | - | - |
+| EXECUTION.Alpha.[StageNumber] | agent-alpha | FALSE | - | - | - | - |
+| EXECUTION.Beta.[StageNumber] | agent-beta | FALSE | - | - | - | - |
+| EXECUTION.Gamma.[StageNumber] | agent-gamma | FALSE | - | - | - | - |
 
 **Execution Groups:**
 
@@ -4545,4 +4545,495 @@ func TestNext_ArtifactInjection_AutoReview_CNA_EmptyLastOutputArtifacts(t *testi
 				a, step.Request.InputArtifacts)
 		}
 	}
+}
+
+// ===== D1 fix: RowNotInGroupError when row not in any ordered group =====
+//
+// computeNextFromExecution used to return a -1 sentinel when the current row
+// was not found in any group of the resolved stage, causing an out-of-bounds
+// panic in the caller (buildDispatchStep). These tests verify that after the
+// fix the engine returns a StopDecision with a diagnostic message instead.
+//
+// Scenario: Tests-Only approach limits orderedGroupsForStage to the Test group
+// only ([7,9) in brownfield-tdd). When the recorded state places an
+// Implementation group row (implementation-tdd, row 9) as the current row,
+// that row does not appear in any ordered group, triggering the error.
+
+// creatorInjectionContent is a minimal EXECUTION-only workflow used to exercise
+// the FR-7/FR-8 creator-artifact injection path. test-writer-tdd's output
+// artifact (Stage-{StageNumber}/PlanProgress.md) is intentionally absent from
+// its input artifact list so that creator-artifact injection produces a
+// genuinely new entry that would not be present without it.
+const creatorInjectionContent = `## Creator Injection Workflow
+
+| Phase | Subagent | HITL | On Success | On Findings | Input | Output |
+|-------|----------|:----:|------------|-------------|-------|--------|
+| EXECUTION.Test.[StageNumber] | test-writer-tdd | FALSE | tests-review-tdd | - | Stage-{StageNumber}/Plan.md, ContractsDesign.md | Stage-{StageNumber}/PlanProgress.md |
+| EXECUTION.Test.[StageNumber] | tests-review-tdd | FALSE | implementation-tdd | test-writer-tdd | Stage-{StageNumber}/PlanProgress.md | Stage-{StageNumber}/tests-review-tdd.md |
+| EXECUTION.Implementation.[StageNumber] | implementation-tdd | FALSE | - | - | Stage-{StageNumber}/Plan.md | Stage-{StageNumber}/impl.md |
+
+**Execution Groups:**
+
+| Approach | Groups |
+|----------|--------|
+| TDD | Test, Implementation |
+`
+
+// brownfieldTDDAgents returns a full agent map for brownfield-tdd rows.
+func brownfieldTDDAgents() map[string]domain.AgentReference {
+	return makeAgents(
+		"codebase-research", "requirements-refinement", "requirements-review",
+		"planner-tdd-soft", "plan-review", "contracts-designer", "contracts-review",
+		"test-writer-tdd", "tests-review-tdd", "implementation-tdd", "implementation-review",
+		"test-runner",
+	)
+}
+
+// TestNext_RowNotInGroup_ReturnsStopDecision verifies that when the current
+// EXECUTION row is not found in any ordered group of the resolved stage,
+// handleExecutionSuccess returns a StopDecision rather than panicking via
+// an out-of-bounds slice access on the -1 sentinel row index.
+//
+// Setup: brownfield-tdd with Tests-Only approach (only the Test group is
+// ordered for stage 1: rows [7,9)). State records implementation-tdd (row 9)
+// as the last completed agent. Row 9 is outside [7,9), so no group contains
+// it -- the "row not in group" condition.
+func TestNext_RowNotInGroup_ReturnsStopDecision(t *testing.T) {
+	aw := mustParseAndAdmit(t, brownfieldTDDContent, "brownfield-tdd", "2.0")
+	// Tests-Only: orderedGroupsForStage returns only the Test group [7,9).
+	stages := singleStageSet("Tests-Only")
+	agents := brownfieldTDDAgents()
+	state := stateAfter("EXECUTION.[StageNumber]", "Stage-1", "implementation-tdd#5", domain.StatusSUCCESS, 5)
+
+	dec := engine.Next(engine.NextInput{
+		Workflow:     aw,
+		Stages:       stages,
+		State:        state,
+		LastResponse: successResponse("implementation-tdd#5"),
+		Agents:       agents,
+		Seq:          5,
+		Now:          fixedNow,
+		Mode:         domain.ExecutionModeAutoReview,
+	})
+
+	// Must return StopDecision, not panic from buildDispatchStep(-1).
+	stop := requireStop(t, dec)
+	if stop.Reason == "" {
+		t.Error("StopDecision.Reason must be non-empty for diagnostics")
+	}
+}
+
+// TestNext_RowNotInGroup_StopReasonContainsDiagnostics verifies that the
+// StopDecision reason produced when the current row is not in any ordered
+// group includes the row index, the stage number, and group information so
+// the failure is diagnosable without reproducing the run.
+func TestNext_RowNotInGroup_StopReasonContainsDiagnostics(t *testing.T) {
+	aw := mustParseAndAdmit(t, brownfieldTDDContent, "brownfield-tdd", "2.0")
+	stages := singleStageSet("Tests-Only")
+	agents := brownfieldTDDAgents()
+	// implementation-tdd is row 9; stage 1 with Tests-Only has only [7,9).
+	state := stateAfter("EXECUTION.[StageNumber]", "Stage-1", "implementation-tdd#5", domain.StatusSUCCESS, 5)
+
+	dec := engine.Next(engine.NextInput{
+		Workflow:     aw,
+		Stages:       stages,
+		State:        state,
+		LastResponse: successResponse("implementation-tdd#5"),
+		Agents:       agents,
+		Seq:          5,
+		Now:          fixedNow,
+		Mode:         domain.ExecutionModeAutoReview,
+	})
+
+	stop := requireStop(t, dec)
+	// Reason must mention the row index (9), the stage (1), and at least one
+	// group so the caller can diagnose the routing failure.
+	for _, want := range []string{"9", "1"} {
+		if !strings.Contains(stop.Reason, want) {
+			t.Errorf("StopDecision.Reason %q does not contain expected diagnostic %q", stop.Reason, want)
+		}
+	}
+}
+
+// TestNext_RowNotInGroup_ErrorIsRowNotInGroupError verifies that the underlying
+// error produced by computeNextFromExecution is a *domain.RowNotInGroupError
+// whose fields identify the failing row and stage precisely.
+//
+// Because Next embeds the error message in StopDecision.Reason, we verify
+// field-level diagnostics by constructing the expected error and comparing
+// its Error() string against the stop reason (equivalent to asserting the
+// structured fields without coupling to message format beyond key identifiers).
+func TestNext_RowNotInGroup_ErrorIsRowNotInGroupError(t *testing.T) {
+	aw := mustParseAndAdmit(t, brownfieldTDDContent, "brownfield-tdd", "2.0")
+	stages := singleStageSet("Tests-Only")
+	agents := brownfieldTDDAgents()
+	state := stateAfter("EXECUTION.[StageNumber]", "Stage-1", "implementation-tdd#5", domain.StatusSUCCESS, 5)
+
+	dec := engine.Next(engine.NextInput{
+		Workflow:     aw,
+		Stages:       stages,
+		State:        state,
+		LastResponse: successResponse("implementation-tdd#5"),
+		Agents:       agents,
+		Seq:          5,
+		Now:          fixedNow,
+		Mode:         domain.ExecutionModeAutoReview,
+	})
+
+	stop := requireStop(t, dec)
+	// The domain error message format from RowNotInGroupError.Error() includes
+	// the stage number and the row index. Verify both appear in the reason.
+	// This also confirms the error type (not a generic string) was used.
+	if !strings.Contains(stop.Reason, "stage 1") {
+		t.Errorf("StopDecision.Reason %q: expected stage number in RowNotInGroupError format", stop.Reason)
+	}
+	if !strings.Contains(stop.Reason, "row 9") {
+		t.Errorf("StopDecision.Reason %q: expected row index in RowNotInGroupError format", stop.Reason)
+	}
+}
+
+// ===== FR-1b fix: ResumePoint errors on RowNotInGroupError (non-complete workflow) =====
+
+// TestResumePoint_RowNotInGroup_NonCompleteWorkflow_ReturnsError verifies that
+// when computeNextFromExecution returns a *domain.RowNotInGroupError (because
+// the current EXECUTION row is not in any ordered group), ResumePoint wraps
+// it and returns an error rather than silently treating the situation as
+// end-of-run (the pre-fix behavior via the adv.RowIndex < 0 branch).
+//
+// Before the fix: computeNextFromExecution returns {RowIndex:-1, nil} and
+// ResumePoint falls through to the adv.RowIndex < 0 guard at line 308,
+// returning a spurious end-of-run ResumeInfo with no error.
+// After the fix: computeNextFromExecution returns *RowNotInGroupError and
+// ResumePoint wraps it via the existing advErr != nil guard (lines 304-306).
+func TestResumePoint_RowNotInGroup_NonCompleteWorkflow_ReturnsError(t *testing.T) {
+	aw := mustParseAndAdmit(t, brownfieldTDDContent, "brownfield-tdd", "2.0")
+	stages := singleStageSet("Tests-Only")
+	// implementation-tdd (row 9) is not in the Test-Only ordered group [7,9).
+	state := stateAfter("EXECUTION.[StageNumber]", "Stage-1", "implementation-tdd#5", domain.StatusSUCCESS, 5)
+
+	_, err := engine.ResumePoint(aw, stages, state, nil)
+	if err == nil {
+		t.Fatal("want error when EXECUTION row is not in any ordered group of a non-complete workflow, got nil")
+	}
+	// The error must wrap *domain.RowNotInGroupError so callers can inspect it.
+	var rnigErr *domain.RowNotInGroupError
+	if !errors.As(err, &rnigErr) {
+		t.Errorf("want error wrapping *domain.RowNotInGroupError, got %T: %v", err, err)
+	}
+}
+
+// TestResumePoint_RowNotInGroup_ErrorMessageContainsDiagnostics verifies that
+// the error returned by ResumePoint when a row is not in any ordered group
+// contains enough context to diagnose the failure: the row index and stage.
+func TestResumePoint_RowNotInGroup_ErrorMessageContainsDiagnostics(t *testing.T) {
+	aw := mustParseAndAdmit(t, brownfieldTDDContent, "brownfield-tdd", "2.0")
+	stages := singleStageSet("Tests-Only")
+	state := stateAfter("EXECUTION.[StageNumber]", "Stage-1", "implementation-tdd#5", domain.StatusSUCCESS, 5)
+
+	_, err := engine.ResumePoint(aw, stages, state, nil)
+	if err == nil {
+		t.Fatal("want error, got nil")
+	}
+	msg := err.Error()
+	for _, want := range []string{"9", "1"} {
+		if !strings.Contains(msg, want) {
+			t.Errorf("error %q does not contain expected diagnostic %q (row index or stage)", msg, want)
+		}
+	}
+}
+
+// TestResumePoint_CompleteWorkflow_EndOfRunBehaviorUnchanged verifies that
+// when the workflow is genuinely complete (computeNextFromExecution returns
+// adv.Complete=true), ResumePoint still returns the end-of-run info with no
+// error. The D1/FR-1b fix must not disturb this path.
+//
+// Setup: onSuccessDivergentContent has no post-execution rows. After the last
+// EXECUTION row (implementation-review, row 3) completes, computeNextFromExecution
+// exhausts all groups, all stages, and all post-execution rows, returning
+// {Complete: true}. ResumePoint should return (ResumeInfo{RowIndex=4}, nil).
+func TestResumePoint_CompleteWorkflow_EndOfRunBehaviorUnchanged(t *testing.T) {
+	aw := mustParseAndAdmit(t, onSuccessDivergentContent, "on-success-divergent", "1.0")
+	// No groups declared; any approach works since groups are implicit.
+	stages := singleStageSet("Implementation-Only")
+	agents := makeAgents("test-writer-tdd", "tests-review-tdd", "implementation-tdd", "implementation-review")
+	_ = agents // agents not needed for ResumePoint; declared for clarity
+	// implementation-review is the last EXECUTION row (row 3); no post-execution rows.
+	state := stateAfter("EXECUTION.[StageNumber]", "Stage-1", "implementation-review#4", domain.StatusSUCCESS, 4)
+
+	info, err := engine.ResumePoint(aw, stages, state, nil)
+	if err != nil {
+		t.Fatalf("want nil error for complete workflow, got: %v", err)
+	}
+	// RowIndex should be len(rows) = 4, signaling end-of-run.
+	wantRowIndex := 4 // len(workflow.Table.Rows) for onSuccessDivergentContent
+	if info.RowIndex != wantRowIndex {
+		t.Errorf("complete workflow: want RowIndex=%d (end-of-run), got %d", wantRowIndex, info.RowIndex)
+	}
+	if info.RerunLast {
+		t.Error("complete workflow: want RerunLast=false, got true")
+	}
+}
+
+// ===== FR-7/FR-8: Creator-artifact injection on review loop-back =====
+//
+// On auto-review COMPLETED_NEEDS_ACTION auto-route-back, the engine must inject
+// the target (creator) agent's own previously-produced output artifacts from
+// NextInput.ArtifactRegistry into the dispatched step's InputArtifacts,
+// alongside the existing review-artifact injection.
+//
+// The comparison is against step.Request.OutputArtifacts (the resolved, bare
+// paths from buildDispatchStep), not against raw row.OutputArtifacts (which
+// may contain unresolved template tokens).
+//
+// creatorInjectionContent: test-writer-tdd's output is Stage-{StageNumber}/PlanProgress.md
+// (resolved: Stage-1/PlanProgress.md). Its input list does NOT include this
+// artifact, so injection adds a genuinely new entry to the dispatched step.
+
+// TestNext_CreatorArtifactInjection_RegistryPresent_InjectsOutputArtifact
+// verifies that when ArtifactRegistry contains an entry matching the target
+// row's resolved output artifact path, that path is injected into the
+// dispatched step's InputArtifacts.
+//
+// Scenario: tests-review-tdd returns CNA with OnFindings=test-writer-tdd.
+// ArtifactRegistry carries Stage-1/PlanProgress.md (test-writer-tdd's prior
+// output, bare path as session would supply after StripRunPrefix). After
+// the existing review-artifact injection, the creator output must also appear.
+func TestNext_CreatorArtifactInjection_RegistryPresent_InjectsOutputArtifact(t *testing.T) {
+	aw := mustParseAndAdmit(t, creatorInjectionContent, "creator-injection", "1.0")
+	stages := singleStageSet("TDD")
+	agents := makeAgents("test-writer-tdd", "tests-review-tdd", "implementation-tdd")
+	// tests-review-tdd (row 1) completed with CNA; OnFindings=test-writer-tdd.
+	state := stateAfter("EXECUTION.[StageNumber]", "Stage-1", "tests-review-tdd#5", domain.StatusCOMPLETED_NEEDS_ACTION, 5)
+
+	// Registry entry: test-writer-tdd's prior output, bare path after StripRunPrefix.
+	registry := []domain.ArtifactRegistryEntry{
+		{Artifact: "Stage-1/PlanProgress.md", CreatedIn: "Test.1", CreatedBy: "test-writer-tdd#1"},
+	}
+	// Review agent's last output artifacts (injected by existing review logic).
+	reviewOutputs := []string{"Stage-1/tests-review-tdd.md"}
+
+	dec := engine.Next(engine.NextInput{
+		Workflow:            aw,
+		Stages:              stages,
+		State:               state,
+		LastResponse:        cnaResponse("tests-review-tdd#5"),
+		LastOutputArtifacts: reviewOutputs,
+		Agents:              agents,
+		Seq:                 5,
+		Now:                 fixedNow,
+		Mode:                domain.ExecutionModeAutoReview,
+		ArtifactRegistry:    registry,
+	})
+
+	step := requireDispatch(t, dec)
+	// The creator's prior output artifact must appear in the dispatched
+	// test-writer-tdd step's InputArtifacts (it is not a table row entry,
+	// so deduplication does not suppress it).
+	found := false
+	for _, a := range step.Request.InputArtifacts {
+		if a == "Stage-1/PlanProgress.md" {
+			found = true
+			break
+		}
+	}
+	if !found {
+		t.Errorf("creator-artifact injection: want %q in dispatched InputArtifacts %v",
+			"Stage-1/PlanProgress.md", step.Request.InputArtifacts)
+	}
+}
+
+// TestNext_CreatorArtifactInjection_RegistryAbsent_NoInjection verifies that
+// when ArtifactRegistry is nil (first invocation of the creator agent), no
+// creator-artifact injection occurs -- the dispatched step's InputArtifacts
+// contain only the table row entries and the review agent's LastOutputArtifacts.
+func TestNext_CreatorArtifactInjection_RegistryAbsent_NoInjection(t *testing.T) {
+	aw := mustParseAndAdmit(t, creatorInjectionContent, "creator-injection", "1.0")
+	stages := singleStageSet("TDD")
+	agents := makeAgents("test-writer-tdd", "tests-review-tdd", "implementation-tdd")
+	state := stateAfter("EXECUTION.[StageNumber]", "Stage-1", "tests-review-tdd#5", domain.StatusCOMPLETED_NEEDS_ACTION, 5)
+	reviewOutputs := []string{"Stage-1/tests-review-tdd.md"}
+
+	dec := engine.Next(engine.NextInput{
+		Workflow:            aw,
+		Stages:              stages,
+		State:               state,
+		LastResponse:        cnaResponse("tests-review-tdd#5"),
+		LastOutputArtifacts: reviewOutputs,
+		Agents:              agents,
+		Seq:                 5,
+		Now:                 fixedNow,
+		Mode:                domain.ExecutionModeAutoReview,
+		ArtifactRegistry:    nil, // first invocation: no prior outputs in registry
+	})
+
+	step := requireDispatch(t, dec)
+	// Stage-1/PlanProgress.md is NOT in the table input for test-writer-tdd
+	// and is NOT in reviewOutputs. With no registry, it must not appear.
+	for _, a := range step.Request.InputArtifacts {
+		if a == "Stage-1/PlanProgress.md" {
+			t.Errorf("creator-artifact injection: no registry supplied, but %q appeared in InputArtifacts %v (spurious injection)",
+				"Stage-1/PlanProgress.md", step.Request.InputArtifacts)
+		}
+	}
+}
+
+// TestNext_CreatorArtifactInjection_TemplatedOutput_MatchesResolvedPath verifies
+// that creator-artifact injection fires correctly when the target row's declared
+// output artifact contains a {StageNumber} template token. The comparison must
+// use the resolved path (Stage-1/PlanProgress.md) rather than the raw template
+// (Stage-{StageNumber}/PlanProgress.md), so a registry entry with the bare
+// resolved path triggers injection.
+func TestNext_CreatorArtifactInjection_TemplatedOutput_MatchesResolvedPath(t *testing.T) {
+	aw := mustParseAndAdmit(t, creatorInjectionContent, "creator-injection", "1.0")
+	// Stage 2: resolved output would be Stage-2/PlanProgress.md.
+	stages := makeStageSet([]domain.StageEntry{
+		{Number: 1, HITL: false, Approach: "TDD"},
+		{Number: 2, HITL: false, Approach: "TDD"},
+	})
+	agents := makeAgents("test-writer-tdd", "tests-review-tdd", "implementation-tdd")
+	// State: tests-review-tdd completed for stage 2 (CNA).
+	state := stateAfter("EXECUTION.[StageNumber]", "Stage-2", "tests-review-tdd#7", domain.StatusCOMPLETED_NEEDS_ACTION, 7)
+	// Registry carries the bare resolved path for stage 2 (as session provides
+	// after StripRunPrefix -- the resolved path, not the raw template).
+	registry := []domain.ArtifactRegistryEntry{
+		{Artifact: "Stage-2/PlanProgress.md", CreatedIn: "Test.2", CreatedBy: "test-writer-tdd#5"},
+	}
+	reviewOutputs := []string{"Stage-2/tests-review-tdd.md"}
+
+	dec := engine.Next(engine.NextInput{
+		Workflow:            aw,
+		Stages:              stages,
+		State:               state,
+		LastResponse:        cnaResponse("tests-review-tdd#7"),
+		LastOutputArtifacts: reviewOutputs,
+		Agents:              agents,
+		Seq:                 7,
+		Now:                 fixedNow,
+		Mode:                domain.ExecutionModeAutoReview,
+		ArtifactRegistry:    registry,
+	})
+
+	step := requireDispatch(t, dec)
+	// Stage-2/PlanProgress.md must be injected (resolved path match).
+	found := false
+	for _, a := range step.Request.InputArtifacts {
+		if a == "Stage-2/PlanProgress.md" {
+			found = true
+			break
+		}
+	}
+	if !found {
+		t.Errorf("templated-output creator injection: want %q in dispatched InputArtifacts %v",
+			"Stage-2/PlanProgress.md", step.Request.InputArtifacts)
+	}
+}
+
+// ===== ResolveArtifacts export: codify existing behavior (T1.4) =====
+//
+// These tests call engine.ResolveArtifacts (the newly exported name) to
+// codify the existing template-expansion behavior so that the rename
+// (I1.6) does not regress it. Tests are placed in the engine_test package
+// (black-box) to verify the exported name is accessible from outside the
+// engine package.
+
+// TestResolveArtifacts_StageNumber_Substitution_InputArtifact verifies that
+// {StageNumber} in an input artifact path is replaced with the current stage
+// number when a stage context is present.
+func TestResolveArtifacts_StageNumber_Substitution_InputArtifact(t *testing.T) {
+	arts := []string{"Stage-{StageNumber}/Plan.md", "ContractsDesign.md"}
+	stages := singleStageSet("TDD")
+	got, err := engine.ResolveArtifacts(arts, 2, "Stage-2", stages, nil, true)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	want := []string{"Stage-2/Plan.md", "ContractsDesign.md"}
+	if !stringSlicesEqual(got, want) {
+		t.Errorf("got %v, want %v", got, want)
+	}
+}
+
+// TestResolveArtifacts_StageNumber_Substitution_OutputArtifact verifies that
+// {StageNumber} in an output artifact path is also replaced with the current
+// stage number (same substitution rule for both directions).
+func TestResolveArtifacts_StageNumber_Substitution_OutputArtifact(t *testing.T) {
+	arts := []string{"Stage-{StageNumber}/PlanProgress.md"}
+	stages := singleStageSet("TDD")
+	got, err := engine.ResolveArtifacts(arts, 3, "Stage-3", stages, nil, false)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	want := []string{"Stage-3/PlanProgress.md"}
+	if !stringSlicesEqual(got, want) {
+		t.Errorf("got %v, want %v", got, want)
+	}
+}
+
+// TestResolveArtifacts_StageWildcard_Input_ExpandedPerStage verifies that
+// Stage-* in an input artifact path is expanded to one path per stage in
+// the effective stage set.
+func TestResolveArtifacts_StageWildcard_Input_ExpandedPerStage(t *testing.T) {
+	arts := []string{"Stage-*/Plan.md"}
+	stages := makeStageSet([]domain.StageEntry{
+		{Number: 1, HITL: false, Approach: "TDD"},
+		{Number: 2, HITL: false, Approach: "TDD"},
+		{Number: 3, HITL: false, Approach: "TDD"},
+	})
+	// Non-EXECUTION context (stageNum=0, stageStr="") uses refreshedStages for expansion.
+	got, err := engine.ResolveArtifacts(arts, 0, "", stages, nil, true)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	want := []string{"Stage-1/Plan.md", "Stage-2/Plan.md", "Stage-3/Plan.md"}
+	if !stringSlicesEqual(got, want) {
+		t.Errorf("got %v, want %v", got, want)
+	}
+}
+
+// TestResolveArtifacts_StageWildcard_Output_PassThrough verifies that Stage-*
+// in an output artifact path is passed through unexpanded (output artifacts
+// use the wildcard as a literal declaration, not a glob expansion).
+func TestResolveArtifacts_StageWildcard_Output_PassThrough(t *testing.T) {
+	arts := []string{"Stage-*/PlanProgress.md"}
+	stages := makeStageSet([]domain.StageEntry{
+		{Number: 1, HITL: false, Approach: "TDD"},
+		{Number: 2, HITL: false, Approach: "TDD"},
+	})
+	got, err := engine.ResolveArtifacts(arts, 1, "Stage-1", stages, nil, false)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	want := []string{"Stage-*/PlanProgress.md"}
+	if !stringSlicesEqual(got, want) {
+		t.Errorf("got %v, want %v", got, want)
+	}
+}
+
+// TestResolveArtifacts_UnresolvablePlaceholder_ReturnsError verifies that
+// {StageNumber} in an artifact path without a stage context (stageNum=0,
+// stageStr="") returns an error rather than leaving the placeholder literal.
+func TestResolveArtifacts_UnresolvablePlaceholder_ReturnsError(t *testing.T) {
+	arts := []string{"Stage-{StageNumber}/Plan.md"}
+	stages := singleStageSet("TDD")
+	// No stage context: stageNum=0, stageStr="" (non-EXECUTION row).
+	_, err := engine.ResolveArtifacts(arts, 0, "", stages, nil, true)
+	if err == nil {
+		t.Fatal("want error for {StageNumber} without stage context, got nil")
+	}
+	if !strings.Contains(err.Error(), "{StageNumber}") {
+		t.Errorf("error %q: want mention of the unresolvable placeholder {StageNumber}", err.Error())
+	}
+}
+
+// stringSlicesEqual returns true when a and b have the same length and equal
+// elements in the same order.
+func stringSlicesEqual(a, b []string) bool {
+	if len(a) != len(b) {
+		return false
+	}
+	for i := range a {
+		if a[i] != b[i] {
+			return false
+		}
+	}
+	return true
 }

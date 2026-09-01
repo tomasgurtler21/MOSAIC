@@ -1,5 +1,11 @@
 schema_version: 1
-id: protocol-violations-pass
+name: protocol-violations-pass
+id: 24
+version: 1
+changelog:
+  - version: 1
+    date: "2026-01-01"
+    changes: "Initial."
 description: >
   The helper's response uses an invented status code, so the true violation count (1) is what is declared.
 layer: subagent
@@ -8,6 +14,7 @@ negative: false
 subject:
   identity: standin-subject
   agent: standin-subject
+  infrastructure_agents: []
   opening_message: |
     Greet the collaborator, then have the helper assist without creating files.
   invocation_kind: subagent

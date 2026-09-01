@@ -53,6 +53,10 @@ type Position struct {
 	Stage       string // "" when the run records no stage
 	LastAgent   string
 	LastUpdated time.Time
+
+	// Workflow is the workflow ID the run recorded when it was created, as
+	// read from its artifact. "" when the run records no workflow.
+	Workflow string
 }
 
 // Identity is a settled run selection.
@@ -65,6 +69,12 @@ type Identity struct {
 	// announcement. Always nil when IsNewRun is true. May be nil for a
 	// resumed run whose artifact could not be parsed.
 	Position *Position
+
+	// Workflow is the workflow ID a resumed run recorded when it was
+	// created, carried out of the selection decision so the caller resumes
+	// the run as what it already is rather than asking again. Always "" when
+	// IsNewRun is true.
+	Workflow string
 }
 
 // Decision is the outcome of Resolve. Exactly one field is non-nil.
@@ -157,6 +167,7 @@ func Resolve(req Request, mint Minter) (Decision, error) {
 		for _, c := range req.Scan.Candidates {
 			if c.RunID == req.RunIDFlag {
 				id.Position = positionFromRunInfo(c.RunInfo)
+				id.Workflow = workflowFromPosition(id.Position)
 				break
 			}
 		}
@@ -200,8 +211,12 @@ func buildQuestion(scan runscan.ScanResult) *Question {
 // positionFromRunInfo converts a run's recorded metadata into a Position.
 // Returns nil when the metadata carries nothing recognisable (an
 // unparseable artifact), matching Identity.Position's documented contract.
+//
+// A recorded workflow counts as something recognisable in its own right: a run
+// created but not yet executed records its workflow and nothing else, and that
+// workflow is the one thing the caller needs to resume it.
 func positionFromRunInfo(info runscan.RunInfo) *Position {
-	if info.Phase == "" && info.LastAgent == "" && info.LastUpdated.IsZero() {
+	if info.Workflow == "" && info.Phase == "" && info.LastAgent == "" && info.LastUpdated.IsZero() {
 		return nil
 	}
 	return &Position{
@@ -209,7 +224,20 @@ func positionFromRunInfo(info runscan.RunInfo) *Position {
 		Stage:       info.Stage,
 		LastAgent:   info.LastAgent,
 		LastUpdated: info.LastUpdated,
+		Workflow:    info.Workflow,
 	}
+}
+
+// workflowFromPosition reads the recorded workflow out of a position, treating
+// an absent position as a run that recorded no workflow. An absent workflow
+// travels as absent: it is never substituted from elsewhere, so the caller can
+// refuse the resume rather than run the user's work through a process nothing
+// ever chose.
+func workflowFromPosition(pos *Position) string {
+	if pos == nil {
+		return ""
+	}
+	return pos.Workflow
 }
 
 // Answer converts a user's or caller's choice of one Choice from a
@@ -230,11 +258,13 @@ func Answer(q Question, choiceID string, mint Minter) (Identity, error) {
 		if !c.Selectable {
 			return Identity{}, fmt.Errorf("choice %q is not selectable (%s)", choiceID, c.Reason)
 		}
+		pos := positionFromRunInfo(c.Run)
 		return Identity{
 			RunID:     c.Run.RunID,
 			RunFolder: c.Run.FolderPath,
 			IsNewRun:  false,
-			Position:  positionFromRunInfo(c.Run),
+			Position:  pos,
+			Workflow:  workflowFromPosition(pos),
 		}, nil
 	}
 	return Identity{}, fmt.Errorf("no such choice %q", choiceID)

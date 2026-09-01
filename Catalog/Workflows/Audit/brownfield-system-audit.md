@@ -1,5 +1,5 @@
 ---
-version: "1.0"
+version: "1.1"
 name: "Brownfield System Audit Workflow"
 description: "High-level quality assessment of an existing codebase or major subsystem — architecture and contracts audit without file-level analysis."
 hint: "Theoretical, at most field-tested once — treat as unproven. Essentially the fixed architecture/contracts tracks trimmed out of brownfield-pr-audit, with the expensive staged per-file audits and PR comment integration removed. Use to scope out problem areas cheaply before committing to a deeper, per-file audit."
@@ -19,7 +19,7 @@ artifacts:
   - ContractsAudit.md
 ---
 
-<Workflow type="core" name="brownfield-system-audit" version="1.0">
+<Workflow type="core" name="brownfield-system-audit" version="1.1">
 ## Brownfield System Audit Workflow
 
 > **Version:** 1.0
@@ -28,12 +28,12 @@ artifacts:
 
 | Phase | Subagent | HITL | On Success | On Findings | Waits For | Input | Output |
 |-------|----------|:----:|------------|-------------|-----------|-------|--------|
-| RESEARCH | requirements-refinement | ✅ | codebase-research | - | - | Requirements.md | Requirements.md |
-| RESEARCH | codebase-research | ❌ | codebase-research(architecture) | - | - | Requirements.md | Research.md |
-| RESEARCH | codebase-research(architecture) | ❌ | codebase-research(contracts), architecture-audit | - | - | Requirements.md, Research.md | ResearchArchitecture.md |
-| RESEARCH | codebase-research(contracts) | ❌ | contracts-audit | - | - | Requirements.md, Research.md, ResearchArchitecture.md | ResearchContracts.md |
-| EXECUTION | architecture-audit | ❌ | COMPLETE | - | - | Requirements.md, Research.md, ResearchArchitecture.md | ArchitectureAudit.md |
-| EXECUTION | contracts-audit | ❌ | COMPLETE | - | - | Requirements.md, Research.md, ResearchContracts.md | ContractsAudit.md |
+| RESEARCH | requirements-refinement | TRUE | codebase-research | - | - | Requirements.md | Requirements.md |
+| RESEARCH | codebase-research | FALSE | codebase-research(architecture) | - | - | Requirements.md | Research.md |
+| RESEARCH | codebase-research(architecture) | FALSE | codebase-research(contracts), architecture-audit | - | - | Requirements.md, Research.md | ResearchArchitecture.md |
+| RESEARCH | codebase-research(contracts) | FALSE | contracts-audit | - | - | Requirements.md, Research.md, ResearchArchitecture.md | ResearchContracts.md |
+| EXECUTION | architecture-audit | FALSE | COMPLETE | - | - | Requirements.md, Research.md, ResearchArchitecture.md | ArchitectureAudit.md |
+| EXECUTION | contracts-audit | FALSE | COMPLETE | - | - | Requirements.md, Research.md, ResearchContracts.md | ContractsAudit.md |
 
 **Parallel execution:** This workflow uses the Waits For column for parallel dispatch (see Workflow Table Format above).
 
@@ -62,6 +62,7 @@ Theoretical in practice — tested at most once. Treat any claims about its real
 | Version | Date | Author | Summary |
 |---------|------|--------|---------|
 | 1.0 | 2026-08-17 | MOSAIC | Changelog tracking begins here; earlier revisions predate this record. |
+| 1.1 | 2026-08-26 | MOSAIC | Replace Unicode emoji with ASCII tokens in HITL column (TRUE/FALSE). |
 
 ---
 

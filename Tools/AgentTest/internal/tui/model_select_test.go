@@ -79,10 +79,15 @@ func newModelSelectOptions(suites []string, runner *fakeSuiteRunner) Options {
 }
 
 // advanceToModelSelect drives m from ScreenHarnessSelect to ScreenModelSelect
-// (subject phase) by selecting the first offered harness. The test is failed
-// and the helper returns early if the screen does not reach ScreenModelSelect.
+// (subject phase) by selecting the first offered harness. It handles the
+// mode-select entry point: if the model is at ScreenModeSelect, it first
+// presses Enter to select "Run Tests" and land on ScreenHarnessSelect. The
+// test is failed and the helper returns early if the screen does not reach
+// ScreenModelSelect.
 func advanceToModelSelect(t *testing.T, m Model) Model {
 	t.Helper()
+	// Navigate through mode-select if needed.
+	m = advanceToRunFlow(t, m)
 	if m.Screen() != ScreenHarnessSelect {
 		t.Fatalf("advanceToModelSelect: Screen() = %q, want %q (must start at harness-select)", m.Screen(), ScreenHarnessSelect)
 	}
@@ -284,8 +289,8 @@ func TestModelSelect_ChosenSubjectModel_ReachesPreflightOverrides(t *testing.T) 
 		t.Fatalf("Screen() after completing model-select = %q, want %q", m.Screen(), ScreenSuiteSelect)
 	}
 
-	// Start the suite to trigger the preflight call.
-	m, cmd := safeUpdate(t, m, keyMsg("\r"))
+	// Start the suite through the full settings flow to trigger the preflight call.
+	m, cmd := startSuiteFromSuiteSelect(t, m)
 	if cmd != nil {
 		_ = runCmd(t, cmd)
 	}
@@ -327,7 +332,7 @@ func TestModelSelect_ChosenStubModel_ReachesPreflightOverrides(t *testing.T) {
 		t.Fatalf("Screen() after completing model-select = %q, want %q", m.Screen(), ScreenSuiteSelect)
 	}
 
-	m, cmd := safeUpdate(t, m, keyMsg("\r"))
+	m, cmd := startSuiteFromSuiteSelect(t, m)
 	if cmd != nil {
 		_ = runCmd(t, cmd)
 	}
@@ -363,7 +368,7 @@ func TestModelSelect_DefaultStub_LeavesStubModelEmpty(t *testing.T) {
 		t.Fatalf("Screen() after completing model-select = %q, want %q", m.Screen(), ScreenSuiteSelect)
 	}
 
-	m, cmd := safeUpdate(t, m, keyMsg("\r"))
+	m, cmd := startSuiteFromSuiteSelect(t, m)
 	if cmd != nil {
 		_ = runCmd(t, cmd)
 	}
@@ -405,7 +410,7 @@ func TestModelSelect_BothModels_ReachDistinctOverrideFields(t *testing.T) {
 		t.Fatalf("Screen() after completing model-select = %q, want %q", m.Screen(), ScreenSuiteSelect)
 	}
 
-	m, cmd := safeUpdate(t, m, keyMsg("\r"))
+	m, cmd := startSuiteFromSuiteSelect(t, m)
 	if cmd != nil {
 		_ = runCmd(t, cmd)
 	}
@@ -434,6 +439,7 @@ func TestModelSelect_SubjectModel_ReachesHarnessID(t *testing.T) {
 	}
 
 	m := NewModel(o)
+	m = advanceToRunFlow(t, m) // navigate through mode-select to ScreenHarnessSelect
 	if m.Screen() != ScreenHarnessSelect {
 		t.Fatalf("initial Screen() = %q, want %q", m.Screen(), ScreenHarnessSelect)
 	}
@@ -446,8 +452,8 @@ func TestModelSelect_SubjectModel_ReachesHarnessID(t *testing.T) {
 	m, _ = safeUpdate(t, m, keyMsg("\r")) // subject phase
 	m, _ = safeUpdate(t, m, keyMsg("\r")) // stub phase
 
-	// Start the suite.
-	m, cmd := safeUpdate(t, m, keyMsg("\r"))
+	// Start the suite through the full settings flow.
+	m, cmd := startSuiteFromSuiteSelect(t, m)
 	if cmd != nil {
 		_ = runCmd(t, cmd)
 	}
@@ -467,6 +473,7 @@ func TestModelSelect_SubjectModel_ReachesHarnessID(t *testing.T) {
 // new stage between harness selection and suite selection.
 func TestNavigation_HarnessSelect_AdvancesToModelSelect(t *testing.T) {
 	m := NewModel(newModelSelectOptions([]string{"suite-a.yaml"}, newFakeSuiteRunner()))
+	m = advanceToRunFlow(t, m) // navigate through mode-select to ScreenHarnessSelect
 	if m.Screen() != ScreenHarnessSelect {
 		t.Fatalf("initial Screen() = %q, want %q", m.Screen(), ScreenHarnessSelect)
 	}
@@ -668,6 +675,7 @@ func TestModelSelect_ChangeHarness_PreviousSubjectModelSelectionCleared(t *testi
 	}
 
 	m := NewModel(o)
+	m = advanceToRunFlow(t, m) // navigate through mode-select to ScreenHarnessSelect
 
 	// Select harness A (first entry = "claude-code") and enter model-select.
 	m, _ = safeUpdate(t, m, keyMsg("\r")) // harness-select: select first harness
@@ -703,8 +711,8 @@ func TestModelSelect_ChangeHarness_PreviousSubjectModelSelectionCleared(t *testi
 		t.Fatalf("Screen() after completing model-select for harness B = %q, want %q", m.Screen(), ScreenSuiteSelect)
 	}
 
-	// Start the suite to trigger the preflight call.
-	m, cmd := safeUpdate(t, m, keyMsg("\r"))
+	// Start the suite through the full settings flow to trigger the preflight call.
+	m, cmd := startSuiteFromSuiteSelect(t, m)
 	if cmd != nil {
 		_ = runCmd(t, cmd)
 	}
@@ -767,7 +775,8 @@ func TestNavigation_ModelSelect_SubjectEscape_ThenReselect_CursorResets(t *testi
 		t.Fatalf("Screen() after model-select = %q, want %q", m.Screen(), ScreenSuiteSelect)
 	}
 
-	m, cmd := safeUpdate(t, m, keyMsg("\r")) // start the suite
+	// Start the suite through the full settings flow.
+	m, cmd := startSuiteFromSuiteSelect(t, m)
 	if cmd != nil {
 		_ = runCmd(t, cmd)
 	}
@@ -785,6 +794,7 @@ func TestNavigation_ModelSelect_SubjectEscape_ThenReselect_CursorResets(t *testi
 func TestNavigation_FullFlow_HarnessToResultsViaModelSelect(t *testing.T) {
 	runner := newFakeSuiteRunner()
 	m := NewModel(newModelSelectOptions([]string{"suite-a.yaml"}, runner))
+	m = advanceToRunFlow(t, m) // navigate through mode-select to ScreenHarnessSelect
 
 	// Harness-select: choose first harness.
 	m, _ = safeUpdate(t, m, keyMsg("\r"))

@@ -1,5 +1,11 @@
 schema_version: 1
-id: never-finishes
+name: never-finishes
+id: 47
+version: 1
+changelog:
+  - version: 1
+    date: "2026-01-01"
+    changes: "Initial."
 description: >
   The scripted subject never reaches a Result turn: this suite's own stand-in
   sleeps well past the declared timeout before it would otherwise process
@@ -12,6 +18,7 @@ negative: false
 subject:
   identity: standin-subject
   agent: standin-subject
+  infrastructure_agents: []
   opening_message: |
     Do something that never finishes.
   invocation_kind: subagent

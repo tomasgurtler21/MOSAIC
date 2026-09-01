@@ -3,6 +3,7 @@ package suite_test
 import (
 	"context"
 	"fmt"
+	"reflect"
 	"testing"
 	"time"
 
@@ -60,7 +61,7 @@ func TestSuiteRun_EmitsCompleteOrderedStream(t *testing.T) {
 				t.Errorf("ProgressSuiteFinished.Counts[%v] = %d, want %d (result.Counts[%v])", verdict, last.Counts[verdict], wantCount, verdict)
 			}
 		}
-		if last.TotalCost != result.TotalCost {
+		if !reflect.DeepEqual(last.TotalCost, result.TotalCost) {
 			t.Errorf("ProgressSuiteFinished.TotalCost = %+v, want %+v (result.TotalCost)", last.TotalCost, result.TotalCost)
 		}
 	}
@@ -196,6 +197,43 @@ func TestSuiteRun_FailingSinkDoesNotFailRun(t *testing.T) {
 	}
 	if result.Tests[0].Aggregate.Verdict != domain.VerdictPass {
 		t.Errorf("verdict = %v, want PASS: a failing progress sink must not change any verdict", result.Tests[0].Aggregate.Verdict)
+	}
+}
+
+// TestSuiteRun_SuiteStartedCarriesTotalRuns asserts the suite-started event
+// carries the sum of explicit repetitions across all tests in the plan.
+// This pins the TotalRuns value so a behavioral difference introduced when
+// the inline summation is replaced by Plan.TotalRuns() is caught immediately.
+func TestSuiteRun_SuiteStartedCarriesTotalRuns(t *testing.T) {
+	// Arrange
+	runner := newScriptedRunner()
+	runner.scriptFor("test-a", scriptedOutcome{evidence: passingEvidence()})
+	runner.scriptFor("test-b", scriptedOutcome{evidence: passingEvidence()})
+	sink := &recordingSink{}
+	s := newSuite(runner, newFakeClock(), sink)
+	// Plan: test-a runs 3 times, test-b runs 2 times -> TotalRuns must be 5.
+	plan := buildPlan(
+		resolvedTest("test-a", 3, 1.0),
+		resolvedTest("test-b", 2, 1.0),
+	)
+
+	// Act
+	_, err := runSuite(t, s, context.Background(), plan)
+
+	// Assert
+	if err != nil {
+		t.Fatalf("Suite.Run returned an error: %v", err)
+	}
+	events := sink.all()
+	if len(events) == 0 {
+		t.Fatalf("no progress events were emitted")
+	}
+	if events[0].Kind != domain.ProgressSuiteStarted {
+		t.Fatalf("first event kind = %v, want ProgressSuiteStarted", events[0].Kind)
+	}
+	const want = 5 // 3 repetitions for test-a + 2 for test-b
+	if events[0].TotalRuns != want {
+		t.Errorf("ProgressSuiteStarted.TotalRuns = %d, want %d (3 repetitions for test-a + 2 for test-b)", events[0].TotalRuns, want)
 	}
 }
 

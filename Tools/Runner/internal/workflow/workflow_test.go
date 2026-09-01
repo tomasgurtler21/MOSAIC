@@ -6,7 +6,7 @@ package workflow_test
 //   Happy path – quick-fix workflow (two PLANNING rows, one EXECUTION, one REVIEW):
 //   - Returns the correct number of rows.
 //   - Row indices are zero-based and consecutive in declaration order.
-//   - HITL column decoded: ✅ → true, ❌ → false.
+//   - HITL column decoded: TRUE → true, FALSE → false.
 //   - Non-EXECUTION row Phase is not staged (PhaseParsed.IsStaged == false).
 //   - Non-EXECUTION row PhaseParsed.Name matches the literal phase string.
 //   - EXECUTION.[StageNumber] row is staged (PhaseParsed.IsStaged == true).
@@ -129,10 +129,10 @@ const quickFixContent = `## Quick Fix Workflow
 
 | Phase | Subagent | HITL | On Success | On Findings | Input | Output |
 |-------|----------|:----:|------------|-------------|-------|--------|
-| PLANNING | planner-tdd-soft | ✅ | plan-review | - | - | Plan.md, Stage-*/Plan.md, Stage-*/PlanProgress.md |
-| PLANNING | plan-review | ❌ | implementation-tdd | planner-tdd-soft | Plan.md, Stage-*/Plan.md, Stage-*/PlanProgress.md | plan-review.md |
-| EXECUTION.[StageNumber] | implementation-tdd | ❌ | test-runner | - | Stage-{StageNumber}/Plan.md, Stage-{StageNumber}/PlanProgress.md | Stage-{StageNumber}/PlanProgress.md |
-| REVIEW | test-runner | ❌ | COMPLETE | implementation-tdd | - | TestResults.md |
+| PLANNING | planner-tdd-soft | TRUE | plan-review | - | - | Plan.md, Stage-*/Plan.md, Stage-*/PlanProgress.md |
+| PLANNING | plan-review | FALSE | implementation-tdd | planner-tdd-soft | Plan.md, Stage-*/Plan.md, Stage-*/PlanProgress.md | plan-review.md |
+| EXECUTION.[StageNumber] | implementation-tdd | FALSE | test-runner | - | Stage-{StageNumber}/Plan.md, Stage-{StageNumber}/PlanProgress.md | Stage-{StageNumber}/PlanProgress.md |
+| REVIEW | test-runner | FALSE | COMPLETE | implementation-tdd | - | TestResults.md |
 
 **Notes:**
 - Single-stage plans use Stage-1/ folder for consistency (Decision 15)
@@ -146,19 +146,19 @@ const brownfieldContent = `## Brownfield TDD Build-Verified Workflow
 
 | Phase | Subagent | HITL | On Success | On Findings | Input | Output |
 |-------|----------|:----:|------------|-------------|-------|--------|
-| RESEARCH | codebase-research | ❌ | requirements-refinement | - | Requirements.md | Research.md |
-| RESEARCH | requirements-refinement | ✅ | requirements-review | - | Research.md, Requirements.md | Requirements.md |
-| RESEARCH | requirements-review | ❌ | planner-tdd-soft | requirements-refinement | Requirements.md | requirements-review.md |
-| PLANNING | planner-tdd-soft | ✅ | plan-review | - | Research.md, Requirements.md | Plan.md, Stage-*/Plan.md, Stage-*/PlanProgress.md |
-| PLANNING | plan-review | ❌ | contracts-designer | planner-tdd-soft | Requirements.md, Plan.md, Stage-*/Plan.md, Stage-*/PlanProgress.md | plan-review.md |
-| DESIGN | contracts-designer | ✅ | contracts-review | - | Research.md, Requirements.md, Plan.md, Stage-*/Plan.md | ContractsDesign.md |
-| DESIGN | contracts-review | ❌ | test-writer-tdd | contracts-designer | Plan.md, Stage-*/Plan.md, ContractsDesign.md | contracts-review.md |
-| EXECUTION.[StageNumber] | test-writer-tdd | ❌ | build-review | - | Stage-{StageNumber}/Plan.md, ContractsDesign.md, Stage-{StageNumber}/PlanProgress.md | Stage-{StageNumber}/PlanProgress.md |
-| EXECUTION.[StageNumber] | build-review | ❌ | tests-review-tdd | test-writer-tdd | Stage-{StageNumber}/PlanProgress.md | Stage-{StageNumber}/build-review-tests.md |
-| EXECUTION.[StageNumber] | tests-review-tdd | ❌ | implementation-tdd | test-writer-tdd | Stage-{StageNumber}/Plan.md, ContractsDesign.md, Stage-{StageNumber}/PlanProgress.md, Stage-{StageNumber}/build-review-tests.md | Stage-{StageNumber}/tests-review-tdd.md |
-| EXECUTION.[StageNumber] | implementation-tdd | ❌ | build-review | - | Stage-{StageNumber}/Plan.md, ContractsDesign.md, Stage-{StageNumber}/PlanProgress.md | Stage-{StageNumber}/PlanProgress.md |
-| EXECUTION.[StageNumber] | build-review | ❌ | implementation-review | implementation-tdd | Stage-{StageNumber}/PlanProgress.md | Stage-{StageNumber}/build-review-impl.md |
-| EXECUTION.[StageNumber] | implementation-review | ❌ | COMPLETE | implementation-tdd (or other based on issue) | Stage-{StageNumber}/Plan.md, ContractsDesign.md, Stage-{StageNumber}/PlanProgress.md, Stage-{StageNumber}/build-review-impl.md | Stage-{StageNumber}/implementation-review.md |
+| RESEARCH | codebase-research | FALSE | requirements-refinement | - | Requirements.md | Research.md |
+| RESEARCH | requirements-refinement | TRUE | requirements-review | - | Research.md, Requirements.md | Requirements.md |
+| RESEARCH | requirements-review | FALSE | planner-tdd-soft | requirements-refinement | Requirements.md | requirements-review.md |
+| PLANNING | planner-tdd-soft | TRUE | plan-review | - | Research.md, Requirements.md | Plan.md, Stage-*/Plan.md, Stage-*/PlanProgress.md |
+| PLANNING | plan-review | FALSE | contracts-designer | planner-tdd-soft | Requirements.md, Plan.md, Stage-*/Plan.md, Stage-*/PlanProgress.md | plan-review.md |
+| DESIGN | contracts-designer | TRUE | contracts-review | - | Research.md, Requirements.md, Plan.md, Stage-*/Plan.md | ContractsDesign.md |
+| DESIGN | contracts-review | FALSE | test-writer-tdd | contracts-designer | Plan.md, Stage-*/Plan.md, ContractsDesign.md | contracts-review.md |
+| EXECUTION.[StageNumber] | test-writer-tdd | FALSE | build-review | - | Stage-{StageNumber}/Plan.md, ContractsDesign.md, Stage-{StageNumber}/PlanProgress.md | Stage-{StageNumber}/PlanProgress.md |
+| EXECUTION.[StageNumber] | build-review | FALSE | tests-review-tdd | test-writer-tdd | Stage-{StageNumber}/PlanProgress.md | Stage-{StageNumber}/build-review-tests.md |
+| EXECUTION.[StageNumber] | tests-review-tdd | FALSE | implementation-tdd | test-writer-tdd | Stage-{StageNumber}/Plan.md, ContractsDesign.md, Stage-{StageNumber}/PlanProgress.md, Stage-{StageNumber}/build-review-tests.md | Stage-{StageNumber}/tests-review-tdd.md |
+| EXECUTION.[StageNumber] | implementation-tdd | FALSE | build-review | - | Stage-{StageNumber}/Plan.md, ContractsDesign.md, Stage-{StageNumber}/PlanProgress.md | Stage-{StageNumber}/PlanProgress.md |
+| EXECUTION.[StageNumber] | build-review | FALSE | implementation-review | implementation-tdd | Stage-{StageNumber}/PlanProgress.md | Stage-{StageNumber}/build-review-impl.md |
+| EXECUTION.[StageNumber] | implementation-review | FALSE | COMPLETE | implementation-tdd (or other based on issue) | Stage-{StageNumber}/Plan.md, ContractsDesign.md, Stage-{StageNumber}/PlanProgress.md, Stage-{StageNumber}/build-review-impl.md | Stage-{StageNumber}/implementation-review.md |
 `
 
 // implOnlyContent is the raw bytes of the <Workflow type="core" name="implementation-only" version="3.1">
@@ -170,17 +170,17 @@ const implOnlyContent = `## Implementation Only Workflow
 
 | Phase | Subagent | HITL | On Success | On Findings | Input | Output |
 |-------|----------|:----:|------------|-------------|-------|--------|
-| EXECUTION.[StageNumber] | implementation-tdd | ❌ | implementation-review | - | Stage-{StageNumber}/Plan.md, ContractsDesign.md, Stage-{StageNumber}/PlanProgress.md | Stage-{StageNumber}/PlanProgress.md |
-| EXECUTION.[StageNumber] | implementation-review | ❌ | test-runner | implementation-tdd | Stage-{StageNumber}/Plan.md, ContractsDesign.md, Stage-{StageNumber}/PlanProgress.md | Stage-{StageNumber}/implementation-review.md |
-| REVIEW | test-runner | ❌ | COMPLETE | implementation-tdd | - | TestResults.md |
+| EXECUTION.[StageNumber] | implementation-tdd | FALSE | implementation-review | - | Stage-{StageNumber}/Plan.md, ContractsDesign.md, Stage-{StageNumber}/PlanProgress.md | Stage-{StageNumber}/PlanProgress.md |
+| EXECUTION.[StageNumber] | implementation-review | FALSE | test-runner | implementation-tdd | Stage-{StageNumber}/Plan.md, ContractsDesign.md, Stage-{StageNumber}/PlanProgress.md | Stage-{StageNumber}/implementation-review.md |
+| REVIEW | test-runner | FALSE | COMPLETE | implementation-tdd | - | TestResults.md |
 `
 
 // minimalContent is a minimal routing table with only required columns.
 // Used to test that optional columns are absent (ColumnPresent == false).
 const minimalContent = `| Phase | Subagent | HITL | Input | Output |
 |-------|----------|:----:|-------|--------|
-| PLANNING | planner | ✅ | - | Plan.md |
-| EXECUTION.[StageNumber] | implementer | ❌ | Stage-{StageNumber}/Plan.md | Stage-{StageNumber}/PlanProgress.md |
+| PLANNING | planner | TRUE | - | Plan.md |
+| EXECUTION.[StageNumber] | implementer | FALSE | Stage-{StageNumber}/Plan.md | Stage-{StageNumber}/PlanProgress.md |
 `
 
 // emptyTableContent has a header and separator row but no data rows.
@@ -194,7 +194,7 @@ const emptyTableContent = `| Phase | Subagent | HITL | Input | Output |
 // OptionalHint{ColumnPresent: true, Value: ""}.
 const onSuccessDashContent = `| Phase | Subagent | HITL | On Success | On Findings | Input | Output |
 |-------|----------|:----:|------------|-------------|-------|--------|
-| PLANNING | planner | ✅ | - | next-step | - | Plan.md |
+| PLANNING | planner | TRUE | - | next-step | - | Plan.md |
 `
 
 // outputDashContent is a routing table where the Output cell is "-",
@@ -202,7 +202,7 @@ const onSuccessDashContent = `| Phase | Subagent | HITL | On Success | On Findin
 // symmetric with the Input column behavior tested in TestParse_QuickFix_DashInput_ProducesEmptyArtifacts.
 const outputDashContent = `| Phase | Subagent | HITL | Input | Output |
 |-------|----------|:----:|-------|--------|
-| PLANNING | planner | ✅ | Plan.md | - |
+| PLANNING | planner | TRUE | Plan.md | - |
 `
 
 // ---- Helpers ----
@@ -259,20 +259,20 @@ func TestParse_QuickFix_RowIndices_ZeroBasedConsecutive(t *testing.T) {
 }
 
 func TestParse_QuickFix_HITL_False_ForCrossmark(t *testing.T) {
-	// Row 1 (plan-review) has ❌ in the HITL column → HITL must be false.
+	// Row 1 (plan-review) has FALSE in the HITL column → HITL must be false.
 	table := mustParseQuickFix(t)
 
 	if table.Rows[1].HITL {
-		t.Errorf("Rows[1].HITL: want false (❌ plan-review), got true")
+		t.Errorf("Rows[1].HITL: want false (FALSE plan-review), got true")
 	}
 }
 
 func TestParse_QuickFix_HITL_True_ForCheckmark(t *testing.T) {
-	// Row 0 (planner-tdd-soft) has ✅ in the HITL column → HITL must be true.
+	// Row 0 (planner-tdd-soft) has TRUE in the HITL column → HITL must be true.
 	table := mustParseQuickFix(t)
 
 	if !table.Rows[0].HITL {
-		t.Errorf("Rows[0].HITL: want true (✅ planner-tdd-soft), got false")
+		t.Errorf("Rows[0].HITL: want true (TRUE planner-tdd-soft), got false")
 	}
 }
 
@@ -696,7 +696,7 @@ func TestParse_NoTable_ReturnsRefusalError(t *testing.T) {
 func TestParse_MissingRequiredColumn_Phase_ReturnsRefusalError(t *testing.T) {
 	content := []byte(`| Subagent | HITL | Input | Output |
 |----------|:----:|-------|--------|
-| planner | ✅ | - | Plan.md |
+| planner | TRUE | - | Plan.md |
 `)
 	info := domain.WorkflowInfo{ID: "missing-phase", Version: "1.0"}
 
@@ -711,7 +711,7 @@ func TestParse_MissingRequiredColumn_Phase_ReturnsRefusalError(t *testing.T) {
 func TestParse_MissingRequiredColumn_Subagent_ReturnsRefusalError(t *testing.T) {
 	content := []byte(`| Phase | HITL | Input | Output |
 |-------|:----:|-------|--------|
-| PLANNING | ✅ | - | Plan.md |
+| PLANNING | TRUE | - | Plan.md |
 `)
 	info := domain.WorkflowInfo{ID: "missing-subagent", Version: "1.0"}
 
@@ -741,7 +741,7 @@ func TestParse_MissingRequiredColumn_HITL_ReturnsRefusalError(t *testing.T) {
 func TestParse_MissingRequiredColumn_Input_ReturnsRefusalError(t *testing.T) {
 	content := []byte(`| Phase | Subagent | HITL | Output |
 |-------|----------|:----:|--------|
-| PLANNING | planner | ✅ | Plan.md |
+| PLANNING | planner | TRUE | Plan.md |
 `)
 	info := domain.WorkflowInfo{ID: "missing-input", Version: "1.0"}
 
@@ -756,7 +756,7 @@ func TestParse_MissingRequiredColumn_Input_ReturnsRefusalError(t *testing.T) {
 func TestParse_MissingRequiredColumn_Output_ReturnsRefusalError(t *testing.T) {
 	content := []byte(`| Phase | Subagent | HITL | Input |
 |-------|----------|:----:|-------|
-| PLANNING | planner | ✅ | - |
+| PLANNING | planner | TRUE | - |
 `)
 	info := domain.WorkflowInfo{ID: "missing-output", Version: "1.0"}
 
@@ -777,7 +777,7 @@ func TestParse_MissingRequiredColumn_Output_ReturnsRefusalError(t *testing.T) {
 func TestParse_MissingRequiredColumn_Phase_RefusalError_ComponentAndResource(t *testing.T) {
 	content := []byte(`| Subagent | HITL | Input | Output |
 |----------|:----:|-------|--------|
-| planner | ✅ | - | Plan.md |
+| planner | TRUE | - | Plan.md |
 `)
 	info := domain.WorkflowInfo{ID: "missing-phase", Version: "1.0"}
 
@@ -795,7 +795,7 @@ func TestParse_MissingRequiredColumn_Phase_RefusalError_ComponentAndResource(t *
 func TestParse_MissingRequiredColumn_Subagent_RefusalError_ComponentAndResource(t *testing.T) {
 	content := []byte(`| Phase | HITL | Input | Output |
 |-------|:----:|-------|--------|
-| PLANNING | ✅ | - | Plan.md |
+| PLANNING | TRUE | - | Plan.md |
 `)
 	info := domain.WorkflowInfo{ID: "missing-subagent", Version: "1.0"}
 
@@ -831,7 +831,7 @@ func TestParse_MissingRequiredColumn_HITL_RefusalError_ComponentAndResource(t *t
 func TestParse_MissingRequiredColumn_Input_RefusalError_ComponentAndResource(t *testing.T) {
 	content := []byte(`| Phase | Subagent | HITL | Output |
 |-------|----------|:----:|--------|
-| PLANNING | planner | ✅ | Plan.md |
+| PLANNING | planner | TRUE | Plan.md |
 `)
 	info := domain.WorkflowInfo{ID: "missing-input", Version: "1.0"}
 
@@ -849,7 +849,7 @@ func TestParse_MissingRequiredColumn_Input_RefusalError_ComponentAndResource(t *
 func TestParse_MissingRequiredColumn_Output_RefusalError_ComponentAndResource(t *testing.T) {
 	content := []byte(`| Phase | Subagent | HITL | Input |
 |-------|----------|:----:|-------|
-| PLANNING | planner | ✅ | - |
+| PLANNING | planner | TRUE | - |
 `)
 	info := domain.WorkflowInfo{ID: "missing-output", Version: "1.0"}
 
@@ -909,18 +909,18 @@ func TestParse_RefusalError_ResourceNamesWorkflow(t *testing.T) {
 // grouped EXECUTION rows (Test and Implementation groups). No approach table.
 const groupedPhasesContent = `| Phase | Subagent | HITL | Input | Output |
 |-------|----------|:----:|-------|--------|
-| RESEARCH | agent-a | ❌ | - | out.md |
-| EXECUTION.[StageNumber] | agent-b | ❌ | - | out.md |
-| EXECUTION.Test.[StageNumber] | agent-c | ❌ | - | out.md |
-| EXECUTION.Implementation.[StageNumber] | agent-d | ❌ | - | out.md |
+| RESEARCH | agent-a | FALSE | - | out.md |
+| EXECUTION.[StageNumber] | agent-b | FALSE | - | out.md |
+| EXECUTION.Test.[StageNumber] | agent-c | FALSE | - | out.md |
+| EXECUTION.Implementation.[StageNumber] | agent-d | FALSE | - | out.md |
 `
 
 // approachTableContent has a routing table with grouped EXECUTION rows followed
 // by a **Execution Groups:** heading and a two-row approach table.
 const approachTableContent = `| Phase | Subagent | HITL | Input | Output |
 |-------|----------|:----:|-------|--------|
-| EXECUTION.Test.[StageNumber] | agent-a | ❌ | - | out.md |
-| EXECUTION.Implementation.[StageNumber] | agent-b | ❌ | - | out.md |
+| EXECUTION.Test.[StageNumber] | agent-a | FALSE | - | out.md |
+| EXECUTION.Implementation.[StageNumber] | agent-b | FALSE | - | out.md |
 
 **Execution Groups:**
 
@@ -934,8 +934,8 @@ const approachTableContent = `| Phase | Subagent | HITL | Input | Output |
 // group, testing that absent groups are correctly omitted.
 const approachTableSingleGroupRowContent = `| Phase | Subagent | HITL | Input | Output |
 |-------|----------|:----:|-------|--------|
-| EXECUTION.Test.[StageNumber] | agent-a | ❌ | - | out.md |
-| EXECUTION.Implementation.[StageNumber] | agent-b | ❌ | - | out.md |
+| EXECUTION.Test.[StageNumber] | agent-a | FALSE | - | out.md |
+| EXECUTION.Implementation.[StageNumber] | agent-b | FALSE | - | out.md |
 
 **Execution Groups:**
 
@@ -949,9 +949,9 @@ const approachTableSingleGroupRowContent = `| Phase | Subagent | HITL | Input | 
 // verifying that more than two groups are decoded correctly.
 const approachTableThreeGroupsContent = `| Phase | Subagent | HITL | Input | Output |
 |-------|----------|:----:|-------|--------|
-| EXECUTION.Alpha.[StageNumber] | agent-a | ❌ | - | out.md |
-| EXECUTION.Beta.[StageNumber] | agent-b | ❌ | - | out.md |
-| EXECUTION.Gamma.[StageNumber] | agent-c | ❌ | - | out.md |
+| EXECUTION.Alpha.[StageNumber] | agent-a | FALSE | - | out.md |
+| EXECUTION.Beta.[StageNumber] | agent-b | FALSE | - | out.md |
+| EXECUTION.Gamma.[StageNumber] | agent-c | FALSE | - | out.md |
 
 **Execution Groups:**
 
@@ -964,28 +964,28 @@ const approachTableThreeGroupsContent = `| Phase | Subagent | HITL | Input | Out
 // segment following the group token (refusal P1).
 const malformedPhaseGroupNoStageContent = `| Phase | Subagent | HITL | Input | Output |
 |-------|----------|:----:|-------|--------|
-| EXECUTION.Test | agent-a | ❌ | - | out.md |
+| EXECUTION.Test | agent-a | FALSE | - | out.md |
 `
 
 // malformedPhaseEmptyGroupContent has EXECUTION..[StageNumber] where the group
 // segment between the two dots is empty (refusal P2).
 const malformedPhaseEmptyGroupContent = `| Phase | Subagent | HITL | Input | Output |
 |-------|----------|:----:|-------|--------|
-| EXECUTION..[StageNumber] | agent-a | ❌ | - | out.md |
+| EXECUTION..[StageNumber] | agent-a | FALSE | - | out.md |
 `
 
 // malformedPhaseStageNotBracketedContent has EXECUTION.Test.1 where the segment
 // after the group token does not begin with "[" (refusal P1).
 const malformedPhaseStageNotBracketedContent = `| Phase | Subagent | HITL | Input | Output |
 |-------|----------|:----:|-------|--------|
-| EXECUTION.Test.1 | agent-a | ❌ | - | out.md |
+| EXECUTION.Test.1 | agent-a | FALSE | - | out.md |
 `
 
 // approachTableHeadingPresentNoTableContent has the reserved heading but no
 // markdown table follows it (refusal P3).
 const approachTableHeadingPresentNoTableContent = `| Phase | Subagent | HITL | Input | Output |
 |-------|----------|:----:|-------|--------|
-| EXECUTION.[StageNumber] | agent-a | ❌ | - | out.md |
+| EXECUTION.[StageNumber] | agent-a | FALSE | - | out.md |
 
 **Execution Groups:**
 
@@ -996,7 +996,7 @@ This is not a table.
 // missing the required "Approach" column (refusal P4).
 const approachTableMissingApproachColumnContent = `| Phase | Subagent | HITL | Input | Output |
 |-------|----------|:----:|-------|--------|
-| EXECUTION.[StageNumber] | agent-a | ❌ | - | out.md |
+| EXECUTION.[StageNumber] | agent-a | FALSE | - | out.md |
 
 **Execution Groups:**
 
@@ -1009,7 +1009,7 @@ const approachTableMissingApproachColumnContent = `| Phase | Subagent | HITL | I
 // missing the required "Groups" column (refusal P5).
 const approachTableMissingGroupsColumnContent = `| Phase | Subagent | HITL | Input | Output |
 |-------|----------|:----:|-------|--------|
-| EXECUTION.[StageNumber] | agent-a | ❌ | - | out.md |
+| EXECUTION.[StageNumber] | agent-a | FALSE | - | out.md |
 
 **Execution Groups:**
 
@@ -1022,7 +1022,7 @@ const approachTableMissingGroupsColumnContent = `| Phase | Subagent | HITL | Inp
 // separator row but no data rows (refusal P6).
 const approachTableZeroDataRowsContent = `| Phase | Subagent | HITL | Input | Output |
 |-------|----------|:----:|-------|--------|
-| EXECUTION.[StageNumber] | agent-a | ❌ | - | out.md |
+| EXECUTION.[StageNumber] | agent-a | FALSE | - | out.md |
 
 **Execution Groups:**
 
@@ -1034,7 +1034,7 @@ const approachTableZeroDataRowsContent = `| Phase | Subagent | HITL | Input | Ou
 // cell (refusal P7).
 const approachTableEmptyApproachCellContent = `| Phase | Subagent | HITL | Input | Output |
 |-------|----------|:----:|-------|--------|
-| EXECUTION.[StageNumber] | agent-a | ❌ | - | out.md |
+| EXECUTION.[StageNumber] | agent-a | FALSE | - | out.md |
 
 **Execution Groups:**
 
@@ -1047,7 +1047,7 @@ const approachTableEmptyApproachCellContent = `| Phase | Subagent | HITL | Input
 // (refusal P7).
 const approachTableEmptyGroupsCellContent = `| Phase | Subagent | HITL | Input | Output |
 |-------|----------|:----:|-------|--------|
-| EXECUTION.[StageNumber] | agent-a | ❌ | - | out.md |
+| EXECUTION.[StageNumber] | agent-a | FALSE | - | out.md |
 
 **Execution Groups:**
 
@@ -1060,7 +1060,7 @@ const approachTableEmptyGroupsCellContent = `| Phase | Subagent | HITL | Input |
 // token between commas: "Test, , Implementation" (refusal P7).
 const approachTableEmptyTokenInGroupsCellContent = `| Phase | Subagent | HITL | Input | Output |
 |-------|----------|:----:|-------|--------|
-| EXECUTION.[StageNumber] | agent-a | ❌ | - | out.md |
+| EXECUTION.[StageNumber] | agent-a | FALSE | - | out.md |
 
 **Execution Groups:**
 
@@ -1073,7 +1073,7 @@ const approachTableEmptyTokenInGroupsCellContent = `| Phase | Subagent | HITL | 
 // token (refusal P8).
 const approachTableDuplicateApproachContent = `| Phase | Subagent | HITL | Input | Output |
 |-------|----------|:----:|-------|--------|
-| EXECUTION.[StageNumber] | agent-a | ❌ | - | out.md |
+| EXECUTION.[StageNumber] | agent-a | FALSE | - | out.md |
 
 **Execution Groups:**
 
@@ -1087,7 +1087,7 @@ const approachTableDuplicateApproachContent = `| Phase | Subagent | HITL | Input
 // same group token twice: "Test, Implementation, Test" (refusal P8).
 const approachTableDuplicateGroupWithinRowContent = `| Phase | Subagent | HITL | Input | Output |
 |-------|----------|:----:|-------|--------|
-| EXECUTION.[StageNumber] | agent-a | ❌ | - | out.md |
+| EXECUTION.[StageNumber] | agent-a | FALSE | - | out.md |
 
 **Execution Groups:**
 
@@ -1689,7 +1689,7 @@ func TestParse_ApproachTable_Refusal_ResourceNamesWorkflow(t *testing.T) {
 // trimming, or contains whitespace → error."
 const malformedPhaseWhitespaceGroupContent = `| Phase | Subagent | HITL | Input | Output |
 |-------|----------|:----:|-------|--------|
-| EXECUTION.Te st.[StageNumber] | agent-a | ❌ | - | out.md |
+| EXECUTION.Te st.[StageNumber] | agent-a | FALSE | - | out.md |
 `
 
 func TestParse_MalformedPhase_WhitespaceGroupSegment_ReturnsError(t *testing.T) {
@@ -1723,7 +1723,7 @@ func TestParse_MalformedPhase_WhitespaceGroupSegment_ReturnsRefusalError(t *test
 // The approach table that follows this near-miss line must NOT be decoded.
 const approachTableNearMissHeadingContent = `| Phase | Subagent | HITL | Input | Output |
 |-------|----------|:----:|-------|--------|
-| EXECUTION.[StageNumber] | agent-a | ❌ | - | out.md |
+| EXECUTION.[StageNumber] | agent-a | FALSE | - | out.md |
 
 **Execution Groups:** and more text
 

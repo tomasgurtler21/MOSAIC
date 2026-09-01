@@ -1,0 +1,23 @@
+{
+  "schema_version": 1,
+  "test_id": "reply-recovery-stubbed",
+  "on_unmatched": "halt",
+  "stubs": [
+    {
+      "match": { "tool": "dispatch", "agent": "greeter", "invocation": 1 },
+      "response": {
+        "agent_instance_id": "greeter#1",
+        "status_code": "SUCCESS",
+        "status_message": "Greeted."
+      }
+    },
+    {
+      "match": { "tool": "dispatch", "agent": "helper", "invocation": 2 },
+      "response": {
+        "agent_instance_id": "helper#1",
+        "status_code": "SUCCESS",
+        "status_message": "Helped."
+      }
+    }
+  ]
+}

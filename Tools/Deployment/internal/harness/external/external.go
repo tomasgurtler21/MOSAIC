@@ -454,7 +454,7 @@ type liveConn struct {
 
 func (c *liveConn) kill() {
 	if c.cmd != nil && c.cmd.Process != nil {
-		c.cmd.Process.Kill() //nolint:errcheck
+		killProcessTree(c.cmd.Process)
 	}
 }
 

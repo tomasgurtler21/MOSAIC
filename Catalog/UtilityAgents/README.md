@@ -13,7 +13,7 @@ This directory contains utility agents for creating and maintaining the multi-ag
 
 ---
 
-## ⚠️ Important: Follow the Agent's Guidance for Production-Quality Output
+## [WARN] Important: Follow the Agent's Guidance for Production-Quality Output
 
 These agents are designed to produce **production-grade results** — but only when you actively engage with their process. Each agent is built around iterative collaboration: it asks targeted questions, presents drafts for your review, flags concerns, and waits for your approval before proceeding. That process is not optional ceremony — it is what makes the output reliable.
 

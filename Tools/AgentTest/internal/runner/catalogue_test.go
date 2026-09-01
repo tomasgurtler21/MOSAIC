@@ -13,7 +13,9 @@ package runner_test
 //   - Deploy receives a tier-model map covering both the subject and stub
 //     tiers, keyed by the domain tier constants (T7.6)
 //   - An absent StubModel falls back to the subject's Model (T7.6)
-//   - Subject version is recorded as empty on the catalogue path (T7.7)
+//   - Subject version is threaded from the Deploy result when the agent
+//     declares a version (T7.7)
+//   - Subject version is empty when the agent declares no version (T7.7)
 //   - Subject definition path is derived from the matching DeployedAgent
 //     entry, not reconstructed (T7.7)
 //
@@ -399,17 +401,77 @@ func TestSetup_CataloguePathDeploy_TierMapHasExactlyTwoEntries(t *testing.T) {
 
 // --- T7.7: subject version and definition path on the catalogue path ---
 
-// TestSetup_CataloguePathRecordsSubjectVersionAsEmpty asserts that the
-// catalogue path records the subject version as empty in RunEvidence, because
-// the Deploy result carries no version information. The report layer renders
-// an empty version as "unknown"; the runner's job is to carry it empty, not
-// to invent or reconstruct a value.
-func TestSetup_CataloguePathRecordsSubjectVersionAsEmpty(t *testing.T) {
+// TestSetup_CataloguePathRecordsSubjectVersionFromDeployReport asserts that
+// when the Deploy result's matching agent carries a SourceVersion, the runner
+// threads that value through to result.SubjectVersion. The runner must carry
+// the reported version as-is; it must never reconstruct or fabricate a value.
+//
+// This test references DeployedAgent.SourceVersion, which is added in Stage 3
+// (I3.1). It will fail to compile (TDD RED) until that field exists and the
+// runner threads it through (I3.3).
+func TestSetup_CataloguePathRecordsSubjectVersionFromDeployReport(t *testing.T) {
 	h := newHarness(t)
-	req := catalogueRequest("catalogue-subject-version-empty")
+	req := catalogueRequest("catalogue-subject-version-reported")
 
-	// Default deployFn returns a result with no version — by contract, deploy
-	// never reports a source version. No extra configuration needed.
+	const wantVersion = "1.2.3"
+
+	// Fake deployer returns a version for the deployed subject agent.
+	h.Deployer.deployFn = func(dr domain.DeployRequest) (domain.DeployResult, error) {
+		return domain.DeployResult{
+			Agents: []domain.DeployedAgent{
+				{
+					Key:             "orchestrator",
+					DestinationPath: filepath.Join(dr.WorkspaceRoot, ".claude", "agents", "orchestrator.md"),
+					SourceVersion:   wantVersion,
+				},
+			},
+		}, nil
+	}
+
+	result, err := runner.Run(context.Background(), h.Deps, req, nil)
+	if err != nil {
+		t.Fatalf("Run returned unexpected error: %v", err)
+	}
+
+	// Prerequisite guard: Deploy must have been called exactly once.
+	if len(h.Deployer.allDeployCalls()) != 1 {
+		t.Fatalf("Deploy called %d time(s), want exactly 1; "+
+			"this test cannot validate catalogue-path subject-version threading unless "+
+			"the branching implementation calls Deploy exactly once",
+			len(h.Deployer.allDeployCalls()))
+	}
+
+	if result.SubjectVersion != wantVersion {
+		t.Errorf("result.SubjectVersion = %q, want %q; "+
+			"when the Deploy result's matching agent carries a SourceVersion, "+
+			"the runner must thread that value to result.SubjectVersion — "+
+			"it must not discard it or substitute an empty string.",
+			result.SubjectVersion, wantVersion)
+	}
+}
+
+// TestSetup_CataloguePathRecordsSubjectVersionAsEmptyWhenAgentDeclaresNone
+// asserts that when the matching deployed agent declares no version (SourceVersion
+// is empty), result.SubjectVersion remains empty. The report layer maps an empty
+// SubjectVersion to "unknown"; the runner's job is to carry what Deploy reports,
+// never to reconstruct or invent a value.
+func TestSetup_CataloguePathRecordsSubjectVersionAsEmptyWhenAgentDeclaresNone(t *testing.T) {
+	h := newHarness(t)
+	req := catalogueRequest("catalogue-subject-version-unversioned")
+
+	// Fake deployer returns a result with no SourceVersion — the agent declares
+	// no version, which is legal. The runner must pass this empty value through.
+	h.Deployer.deployFn = func(dr domain.DeployRequest) (domain.DeployResult, error) {
+		return domain.DeployResult{
+			Agents: []domain.DeployedAgent{
+				{
+					Key:             "orchestrator",
+					DestinationPath: filepath.Join(dr.WorkspaceRoot, ".claude", "agents", "orchestrator.md"),
+					SourceVersion:   "", // no version declared — legal state
+				},
+			},
+		}, nil
+	}
 
 	result, err := runner.Run(context.Background(), h.Deps, req, nil)
 	if err != nil {
@@ -417,21 +479,19 @@ func TestSetup_CataloguePathRecordsSubjectVersionAsEmpty(t *testing.T) {
 	}
 
 	// Prerequisite guard: Deploy must have been called exactly once for this
-	// test to be meaningful. If Deploy was never called, the assertion below
-	// passes trivially (because the current implementation never sets
-	// SubjectVersion), not because the catalogue path correctly omits it.
-	// Fail immediately so the RED phase is visible.
+	// test to be meaningful. Without the branching implementation, Deploy is
+	// never called and the assertion below may pass trivially. Fail immediately
+	// so the RED phase is visible.
 	if len(h.Deployer.allDeployCalls()) != 1 {
 		t.Fatalf("Deploy called %d time(s), want exactly 1; "+
-			"this test cannot validate catalogue-path subject-version behavior unless "+
-			"the branching implementation calls Deploy exactly once — "+
-			"the prerequisite (I7.2 catalogue-path branching) is not yet implemented",
+			"this test cannot validate unversioned catalogue-path behavior unless "+
+			"the branching implementation calls Deploy exactly once",
 			len(h.Deployer.allDeployCalls()))
 	}
 
 	if result.SubjectVersion != "" {
 		t.Errorf("result.SubjectVersion = %q, want empty string; "+
-			"the catalogue path records no source version because Deploy reports none — "+
+			"when the deployed agent declares no version, SubjectVersion must remain empty — "+
 			"the report layer renders empty as 'unknown'. "+
 			"The runner must NOT reconstruct the version by parsing the deployed file.",
 			result.SubjectVersion)
@@ -587,6 +647,151 @@ func TestSetup_CataloguePathDeployResult_SubjectKeyNotFound_ReturnsError(t *test
 			"proceeding with an empty or wrong definition path would silently corrupt the run " +
 			"and the test author would have no indication of what went wrong")
 	}
+}
+
+// TestSetup_CataloguePath_DeployRequestCarriesSandboxDeployLogDir asserts that
+// the runner sets DeployRequest.LogDir to the sandbox's per-run deploy log
+// directory before calling the deployer. Without this wiring, every concurrent
+// run's deploy invocation would write to the deployment tool's shared fixed
+// location under the repository root, creating a write-contention window between
+// concurrent runs — the precise risk this stage was introduced to close.
+//
+// The expected value is derived from the same sandbox object that setup creates
+// in step 1 and passes to the deployer in step 2: sandbox.DeployLogDir() is
+// pure path arithmetic over ControlDir, so the test needs no knowledge of the
+// workspace layout.
+func TestSetup_CataloguePath_DeployRequestCarriesSandboxDeployLogDir(t *testing.T) {
+	h := newHarness(t)
+	req := catalogueRequest("catalogue-deploy-log-dir")
+
+	if _, err := runner.Run(context.Background(), h.Deps, req, nil); err != nil {
+		t.Fatalf("Run returned unexpected error: %v", err)
+	}
+
+	// Prerequisite guard: Deploy must have been called exactly once. Without
+	// the catalogue-path branching, Deploy is never called (Render is used
+	// instead), so the assertion below would fire on a missing call rather
+	// than a missing LogDir. Fail immediately to surface the RED phase.
+	deployCalls := h.Deployer.allDeployCalls()
+	if len(deployCalls) != 1 {
+		t.Fatalf("Deploy called %d time(s), want exactly 1; "+
+			"this test requires the catalogue-path branching to call Deploy exactly once — "+
+			"without it this assertion cannot distinguish 'LogDir not set' from 'Deploy not called'",
+			len(deployCalls))
+	}
+
+	// The sandbox passed to Provision (step 6 of setup) is the same sandbox
+	// created in step 1 and used for the Deploy call in step 2. Both operate
+	// on the same domain.Sandbox value, so its DeployLogDir() is the expected
+	// LogDir the runner must have provided to the deployer.
+	sb := h.Adapter.lastProvisionReq.Sandbox
+	wantLogDir := sb.DeployLogDir()
+
+	if wantLogDir == "" {
+		// Guard against a misconfigured sandbox whose ControlDir is empty,
+		// which would make the assertion below trivially pass (both sides
+		// would be empty) without validating anything real.
+		t.Fatal("sandbox.DeployLogDir() is empty; " +
+			"the workspace manager must populate Sandbox.ControlDir so " +
+			"DeployLogDir() produces a non-empty per-run path")
+	}
+
+	gotLogDir := deployCalls[0].LogDir
+	if gotLogDir != wantLogDir {
+		t.Errorf("Deploy LogDir = %q, want %q (sandbox.DeployLogDir()); "+
+			"the runner must set DeployRequest.LogDir = sandbox.DeployLogDir() before "+
+			"calling the deployer so each run's deploy logs are governed by the run's "+
+			"retention policy and concurrent runs cannot contend on a shared log location",
+			gotLogDir, wantLogDir)
+	}
+}
+
+// TestSetup_CataloguePathDeployCallCarriesInfrastructureAgentIDs asserts that
+// the single Deploy call for a catalogue-path test carries the subject's
+// declared InfrastructureAgentIDs, preserving the nil/non-nil-empty/populated
+// distinction. The runner must forward the field verbatim; it must never
+// interpret, default, or transform it. This is the same direct passthrough
+// contract as Workflows.
+func TestSetup_CataloguePathDeployCallCarriesInfrastructureAgentIDs(t *testing.T) {
+	t.Run("populated_infrastructure_agent_ids_passed_through", func(t *testing.T) {
+		h := newHarness(t)
+		req := catalogueRequest("catalogue-infra-agent-ids-populated")
+		req.Test.Definition.Subject.InfrastructureAgentIDs = []string{"checkpoint-manager-git", "commit-manager-git"}
+
+		if _, err := runner.Run(context.Background(), h.Deps, req, nil); err != nil {
+			t.Fatalf("Run returned unexpected error: %v", err)
+		}
+
+		deployCalls := h.Deployer.allDeployCalls()
+		if len(deployCalls) == 0 {
+			t.Fatal("Deploy was never called; want exactly one Deploy call for a catalogue-path test")
+		}
+		got := deployCalls[0].InfrastructureAgentIDs
+		want := req.Test.Definition.Subject.InfrastructureAgentIDs
+		if len(got) != len(want) {
+			t.Errorf("Deploy InfrastructureAgentIDs = %v, want %v; "+
+				"the subject's InfrastructureAgentIDs must be passed through to Deploy verbatim",
+				got, want)
+		} else {
+			for i := range want {
+				if got[i] != want[i] {
+					t.Errorf("Deploy InfrastructureAgentIDs[%d] = %q, want %q",
+						i, got[i], want[i])
+				}
+			}
+		}
+	})
+
+	t.Run("nil_infrastructure_agent_ids_stays_nil", func(t *testing.T) {
+		h := newHarness(t)
+		req := catalogueRequest("catalogue-infra-agent-ids-nil")
+		req.Test.Definition.Subject.InfrastructureAgentIDs = nil
+
+		if _, err := runner.Run(context.Background(), h.Deps, req, nil); err != nil {
+			t.Fatalf("Run returned unexpected error: %v", err)
+		}
+
+		deployCalls := h.Deployer.allDeployCalls()
+		if len(deployCalls) == 0 {
+			t.Fatal("Deploy was never called; want exactly one Deploy call for a catalogue-path test")
+		}
+		// nil means "not specified" — it must reach Deploy as nil, not empty.
+		// An implementor who writes `InfrastructureAgentIDs: []string{}` instead of
+		// copying the field verbatim would incorrectly trigger the selections file.
+		if deployCalls[0].InfrastructureAgentIDs != nil {
+			t.Errorf("Deploy InfrastructureAgentIDs = %v, want nil; "+
+				"a nil subject InfrastructureAgentIDs must reach Deploy as nil, not as an "+
+				"empty slice — nil means not-specified, empty means explicitly-none",
+				deployCalls[0].InfrastructureAgentIDs)
+		}
+	})
+
+	t.Run("non_nil_empty_infrastructure_agent_ids_stays_non_nil_empty", func(t *testing.T) {
+		h := newHarness(t)
+		req := catalogueRequest("catalogue-infra-agent-ids-non-nil-empty")
+		req.Test.Definition.Subject.InfrastructureAgentIDs = []string{} // explicitly none
+
+		if _, err := runner.Run(context.Background(), h.Deps, req, nil); err != nil {
+			t.Fatalf("Run returned unexpected error: %v", err)
+		}
+
+		deployCalls := h.Deployer.allDeployCalls()
+		if len(deployCalls) == 0 {
+			t.Fatal("Deploy was never called; want exactly one Deploy call for a catalogue-path test")
+		}
+		got := deployCalls[0].InfrastructureAgentIDs
+		// Non-nil empty is the "explicitly none" sentinel. It must reach Deploy as
+		// non-nil so the deploy guard writes the selections file and the deploy tool
+		// receives a pre-answer rather than firing an interactive prompt.
+		if got == nil {
+			t.Error("Deploy InfrastructureAgentIDs = nil, want non-nil empty; " +
+				"non-nil empty (explicitly none) must reach Deploy as non-nil — " +
+				"an implementor who drops the value to nil would suppress the selections file")
+		} else if len(got) != 0 {
+			t.Errorf("Deploy InfrastructureAgentIDs = %v (len %d), want empty slice; "+
+				"the verbatim passthrough must not add elements", got, len(got))
+		}
+	})
 }
 
 // TestSetup_CataloguePathNilDeploy_SkipsDeployGracefully asserts that when

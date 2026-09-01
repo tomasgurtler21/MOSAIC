@@ -47,6 +47,22 @@ type CompletedStep struct {
 	// dispatch. The dispatch loop uses this to enforce the no-cascades rule:
 	// when true, trigger evaluation is skipped after recording the step.
 	IsInfrastructure bool
+	// HITLRejected is true when this step was persisted as the result of an
+	// HITL non-compliance rejection (redispatch or escalation), rather than as
+	// a final accepted step. When true, the execution-log row records a
+	// dispatch attempt that was subsequently superseded by a redispatch or
+	// escalation -- it is not the step's final outcome.
+	//
+	// Resume semantics: a row with HITLRejected=true is "completed with
+	// rejection". Because it is always recorded with IsInfrastructure=true,
+	// Store.Apply does not update CurrentState for rejected rows. This means
+	// ResumePoint sees the rejected row as a workflow log entry whose agent
+	// does not match CurrentState.LastAgent, correctly concluding the step
+	// was interrupted and setting RerunLast=true.
+	//
+	// The zero value (false) preserves backward compatibility: all existing
+	// CompletedStep construction sites produce HITLRejected=false.
+	HITLRejected bool
 }
 
 // ArtifactStore is the single component that touches Orchestration.md.
@@ -193,6 +209,52 @@ type Clock interface {
 	Now() time.Time
 }
 
+// DispatchLogger records subagent dispatch requests and responses to a
+// dedicated log. Each method serialises its argument as a complete JSON
+// object and writes it as a single line (JSON Lines format).
+//
+// Contract: implementations never return an error, never panic, and never
+// block a run. A logging failure (unwritable folder, closed file, disk full)
+// must degrade silently to a no-op. Callers therefore never check a result
+// and never guard a call.
+//
+// Implementations must be safe for concurrent use by multiple goroutines.
+type DispatchLogger interface {
+	// LogRequest records the full protocol request dispatched to a subagent.
+	// Called immediately before the harness invocation. The request is
+	// serialised as-is with no field omission or truncation.
+	LogRequest(req ProtocolRequest)
+
+	// LogResponse records the full protocol response returned by a subagent.
+	// Called immediately after the harness invocation succeeds. The response
+	// is serialised as-is with no field omission or truncation.
+	LogResponse(resp ProtocolResponse)
+
+	// LogError records a harness-level error for an invocation that never
+	// produced a ProtocolResponse. The agentInstanceID ties the error entry
+	// to the preceding LogRequest entry for the same invocation. errText is
+	// the result of err.Error() on the harness error.
+	LogError(agentInstanceID string, errText string)
+
+	// SetRunID associates the log with a run_id. Called before the first
+	// write, it creates the file at RunnerLogs/{run_id}/{run_id}-dispatch.log;
+	// called after, it records a correlation entry into the existing
+	// out-of-run file (RunnerLogs/startup-{timestamp}-dispatch.log). An invalid
+	// or empty runID is silently ignored. Safe to call more than once; only the
+	// first effective call names the file.
+	SetRunID(runID string)
+
+	// Close permanently disables the logger. No further entries are written.
+	// Safe to call on a disabled or never-used logger, and safe to call more
+	// than once. Never returns an error.
+	Close()
+
+	// Path returns the absolute path of the log file. Returns "" only if no
+	// file has ever been successfully created. Once a file has been created,
+	// Path continues to return that path even after Close.
+	Path() string
+}
+
 // DebugLogger is the seam between the runner and its always-on file-based
 // debug log. It exists so that harness I/O, parse failures and dispatch events
 // — including steps that never reach Orchestration.md — leave a diagnosable
@@ -268,4 +330,7 @@ const (
 	EventSessionHITLRedispatch  = "session.hitl.redispatch"
 	EventSessionHITLEscalate    = "session.hitl.escalate"
 	EventSessionManualResolve   = "session.manual.resolve"
+
+	// Snapshot event names.
+	EventSnapshotCleanupFailed = "session.snapshot.cleanup_failed"
 )

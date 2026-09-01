@@ -25,6 +25,7 @@ It never modifies MOSAIC sources.
   - [Deploy — create a new workspace](#deploy--create-a-new-workspace)
   - [Update — bring a workspace up to date](#update--bring-a-workspace-up-to-date)
   - [Utility/infrastructure only — deploy a subset without workflows](#utilityinfrastructure-only--deploy-a-subset-without-workflows)
+  - [Runner deployment](#runner-deployment)
 - [Harness-only agents](#harness-only-agents)
   - [How Update detects harness-only agents](#how-update-detects-harness-only-agents)
   - [Refresh-scope prompt](#refresh-scope-prompt)
@@ -220,6 +221,59 @@ Workflow-driven agents, the orchestrator, and hook bundles are not touched.
 ```
 
 Pass `--dry-run` to see the plan without writing any files. See the [CLI Reference](docs/cli.md#utility-infra-subcommand) for the full flag list and nil/empty pre-answer convention.
+
+### Runner deployment
+
+The MOSAIC Runner (`mosaic-run`) executes workflows by invoking agents via the
+harness CLI (e.g., `opencode run --agent <id>`). Some harnesses block CLI
+invocation of agents deployed with restrictive frontmatter — for example,
+OpenCode refuses to run agents marked `mode: subagent` from the command line
+because that mode is reserved for agents spawned as child tasks by another agent.
+
+Runner deployment produces a **second parallel directory** of agent files with
+Runner-compatible transformations applied. Both the deploy and update flows
+support this via the `--runner` flag:
+
+```sh
+# First deploy — opt in to Runner support.
+./mosaic-deploy deploy \
+  --harness opencode \
+  --workspace /path/to/my-project \
+  --runner \
+  --selections selections.yaml \
+  --auto-confirm
+
+# Subsequent updates — auto-detected (no --runner needed).
+./mosaic-deploy update \
+  --harness opencode \
+  --workspace /path/to/my-project \
+  --auto-confirm
+```
+
+**What changes:**
+
+| | Regular directory | Runner directory |
+|---|---|---|
+| **Path** | `.opencode/agents/` | `.opencode/agents-runner/` |
+| **Subagents** | Standard frontmatter (e.g., `mode: subagent`) | Runner-compatible frontmatter (e.g., `mode: primary`) |
+| **Orchestrator** | Regular orchestrator | Script-mode orchestrator only |
+
+The regular directory is unchanged — interactive orchestration works exactly as
+before. The runner directory is invisible to the harness's interactive agent
+selection because harnesses only discover agents in their standard directory.
+
+**Auto-detection on update:** Once a runner directory exists in the workspace,
+the deploy tool automatically includes it in every subsequent deploy and update
+run. No repeated `--runner` flag is needed — directory presence is the opt-in
+signal. This prevents stale runner agents when you forget the flag.
+
+**Known Runner-specific transformations:**
+
+| Harness | Field | Regular | Runner | Why |
+|---------|-------|---------|--------|-----|
+| OpenCode | `mode` | `subagent` | `primary` | `mode: subagent` blocks CLI invocation via `opencode run` |
+
+This set is expected to grow as new harness-specific constraints are discovered.
 
 ---
 
@@ -721,6 +775,25 @@ Run logs are written to:
 - `MosaicDeploy/logs/history.log` — summary of all runs, newest first
 
 The log directory is created on first run if it does not exist.
+
+To write logs to a different directory for one invocation, pass `--log-dir`:
+
+```sh
+./mosaic-deploy --log-dir /path/to/my-logs deploy ...
+```
+
+Both flag forms are accepted:
+
+```sh
+./mosaic-deploy --log-dir /path/to/my-logs deploy ...
+./mosaic-deploy --log-dir=/path/to/my-logs deploy ...
+```
+
+When `--log-dir` is supplied, the two sink files are written there and the
+default `MosaicDeploy/logs` location is not created or written to. The
+supplied directory is created on demand. Write failures accumulate as
+degradation rather than stopping the run, consistent with the default location.
+Omitting `--log-dir` preserves the existing behaviour exactly.
 
 ### TODO file
 

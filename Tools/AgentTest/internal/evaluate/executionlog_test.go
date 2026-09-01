@@ -52,6 +52,27 @@ func TestEvaluate_ExecutionLogAgentIDs_OrderMismatch_Fails(t *testing.T) {
 	}
 }
 
+// TestEvaluate_ExecutionLogAllStatus_Pass_PopulatesActual verifies that Actual
+// is non-empty on the pass path, not only on the fail path. When every row
+// matches the declared status, Actual must reflect that observation (e.g. equal
+// to Expected) rather than being left empty, so the evidence is always present
+// regardless of outcome.
+func TestEvaluate_ExecutionLogAllStatus_Pass_PopulatesActual(t *testing.T) {
+	ev := baseEvidence()
+	ev.Orchestration.ExecutionLog = executionLogRows() // all rows have status "SUCCESS"
+	ev.Definition.Assertions.ExecutionLogAllStatus = strp("SUCCESS")
+
+	got := evaluate.Evaluate(ev)
+
+	ar := findAssertion(t, got.Assertions, domain.ClassExecutionLogAllStatus, "")
+	if ar.Outcome != domain.AssertionPass {
+		t.Fatalf("Outcome = %q, want pass — every execution-log row's status is SUCCESS", ar.Outcome)
+	}
+	if ar.Actual == "" {
+		t.Errorf("Actual = %q; want non-empty on pass — Actual must be populated unconditionally, not only on fail, for diagnostic context", ar.Actual)
+	}
+}
+
 func TestEvaluate_ExecutionLogAllStatus_AllRowsMatch_Passes(t *testing.T) {
 	ev := baseEvidence()
 	ev.Orchestration.ExecutionLog = executionLogRows()

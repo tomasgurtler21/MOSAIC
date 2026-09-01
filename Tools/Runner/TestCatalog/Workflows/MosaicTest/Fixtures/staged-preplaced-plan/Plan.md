@@ -1,6 +1,6 @@
 # Plan: MosaicTest Staged Pre-placed Plan
 
-> ⚠️ **FIXTURE ARTIFACT** — pre-placed by hand before the run, not produced by a planner agent.
+> [WARN] **FIXTURE ARTIFACT** — pre-placed by hand before the run, not produced by a planner agent.
 > This file exists so the runner has a stage table to read in a workflow with no pre-EXECUTION rows.
 
 ## Overview
@@ -10,8 +10,8 @@ Two stages of fixture work, so that stage progression can be distinguished from 
 
 | Stage | Name | Goal | Depends On | HITL | Approach |
 |-------|------|------|------------|:----:|----------|
-| 1 | First fixture stage | Run both EXECUTION rows once and write Stage-1/MosaicTestStage.md | - | ❌ | TDD |
-| 2 | Second fixture stage | Run both EXECUTION rows again and write Stage-2/MosaicTestStage.md | 1 | ❌ | TDD |
+| 1 | First fixture stage | Run both EXECUTION rows once and write Stage-1/MosaicTestStage.md | - | FALSE | TDD |
+| 2 | Second fixture stage | Run both EXECUTION rows again and write Stage-2/MosaicTestStage.md | 1 | FALSE | TDD |
 
 ## Unresolved Questions
 <!-- Empty = plan is complete. -->

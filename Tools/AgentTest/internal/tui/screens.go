@@ -130,78 +130,114 @@ func (m Model) viewModelSelect() string {
 // Suite selection
 // ---------------------------------------------------------------------------
 
-// suiteSelectHelp is EntryScreenHelp with the Space/toggle entry and the
-// pane-scroll entry inserted, so both affordances are discoverable the same
-// way every other key binding on this screen is.
+// suiteSelectHelp returns help entries for the suite-select screen, combining
+// the multiselect key hints (up/down/space/enter/esc/ctrl+c) with the
+// detail-pane scroll affordance.
 func suiteSelectHelp() []tuicommon.HelpEntry {
-	spaceEntry := tuicommon.HelpEntry{
-		Key:  tuicommon.GlobalKeys.Space.Help().Key,
-		Desc: tuicommon.GlobalKeys.Space.Help().Desc,
-	}
 	scrollEntry := tuicommon.HelpEntry{
 		Key:  "pgup/pgdn",
 		Desc: "scroll detail",
 	}
-	return append([]tuicommon.HelpEntry{spaceEntry, scrollEntry}, tuicommon.EntryScreenHelp()...)
+	return append([]tuicommon.HelpEntry{scrollEntry}, tuicommon.MultiSelectHelp()...)
 }
 
 func (m Model) viewSuiteSelect() string {
-	width := m.contentWidth()
-
-	var b strings.Builder
-	if len(m.opts.Suites) == 0 {
-		b.WriteString(tuicommon.Truncate("no suites discovered", width))
-	}
-	for i, s := range m.opts.Suites {
-		prefix := "  "
-		if i == m.suiteCursor {
-			prefix = "> "
-		}
-		if i > 0 {
-			b.WriteString("\n")
-		}
-		b.WriteString(tuicommon.Truncate(prefix+s, width))
-	}
-	b.WriteString("\n")
-	b.WriteString(tuicommon.Truncate(fmt.Sprintf("Retain sandbox: %s", m.retention), width))
-	b.WriteString("\n")
-	if m.editingReportPath {
-		b.WriteString(tuicommon.Truncate(fmt.Sprintf("Report [editing]: %s", m.reportPathDraft), width))
-	} else {
-		b.WriteString(tuicommon.Truncate(fmt.Sprintf("Report: %s", m.reportPath), width))
+	var body string
+	if m.suiteMultiSelect != nil {
+		body = m.suiteMultiSelect.View()
+	} else if len(m.opts.Suites) == 0 {
+		body = tuicommon.Truncate("no suites discovered", m.contentWidth())
 	}
 
-	body := b.String()
 	if m.showFailureDetail && m.detailPane != nil {
 		body = body + "\n" + m.detailPane.View()
 	}
 
-	return m.renderScreen("Select a Suite", "", body, suiteSelectHelp())
+	return m.renderScreen("Select Suite(s)", "", body, suiteSelectHelp())
+}
+
+// ---------------------------------------------------------------------------
+// Pre-flight notice
+// ---------------------------------------------------------------------------
+
+// viewPreflightNotice renders the notice shown while all selected suites are
+// being pre-flighted. It accepts no navigation keys beyond the shared cancel
+// binding. The body tells the user that pre-flight is in progress across all
+// selected suites so they do not interpret the pause as a hang.
+func (m Model) viewPreflightNotice() string {
+	body := "Pre-flighting all selected suites, please wait..."
+	return m.renderScreen("Pre-flight in Progress", "", body, tuicommon.EntryScreenHelp())
 }
 
 // ---------------------------------------------------------------------------
 // Live progress
 // ---------------------------------------------------------------------------
 
+// progressHelp returns help entries for the live-progress screen, adding the
+// pause/resume toggle to the standard entry-screen keys so the keybind is
+// discoverable without reading source code.
+func progressHelp() []tuicommon.HelpEntry {
+	pauseEntry := tuicommon.HelpEntry{
+		Key:  "p",
+		Desc: "pause/resume",
+	}
+	return append([]tuicommon.HelpEntry{pauseEntry}, tuicommon.EntryScreenHelp()...)
+}
+
 func (m Model) viewProgress() string {
 	width := m.contentWidth()
 
-	lines := []string{fmt.Sprintf("Total tests: %d", m.totalTests)}
-	if testID, rep, reps, ok := m.Running(); ok {
-		lines = append(lines, tuicommon.Truncate(
-			fmt.Sprintf("Running: %s (repetition %d/%d)", testID, rep, reps), width))
-		lines = append(lines, fmt.Sprintf("Invocations observed: %d", m.observedInvocations))
+	lines := []string{fmt.Sprintf("Total tests: %d", m.TotalTests())}
+
+	// Queue-position indicator: only shown when more than one suite was selected.
+	if len(m.selectedSuites) > 1 {
+		pos := m.selectedSuiteIdx + 1
+		total := len(m.selectedSuites)
+		suiteName := ""
+		if m.selectedSuiteIdx < len(m.selectedSuites) {
+			suiteName = m.selectedSuites[m.selectedSuiteIdx]
+		}
+		lines = append(lines, tuicommon.Truncate(fmt.Sprintf("Suite %d of %d: %s", pos, total, suiteName), width))
+	}
+
+	// Queue-level figures: total runs across all selected suites and how many remain.
+	tally := m.Tally()
+	queueRemaining := m.queueRunsTotal - m.completedSuiteRuns - tally.Running - tally.Finished
+	if queueRemaining < 0 {
+		queueRemaining = 0
+	}
+	lines = append(lines, fmt.Sprintf("Queue: Total: %d | Remaining: %d", m.queueRunsTotal, queueRemaining))
+
+	// In-flight tests for the current suite.
+	running := m.Running()
+	if len(running) > 0 {
+		for _, rp := range running {
+			lines = append(lines, tuicommon.Truncate(
+				fmt.Sprintf("Running: %s (repetition %d/%d)", rp.Key.TestName, rp.Key.RunNumber, rp.Repetitions), width))
+			inv := m.ObservedInvocations(rp.Key)
+			if inv > 0 {
+				lines = append(lines, fmt.Sprintf("Invocations observed: %d", inv))
+			}
+		}
 	} else {
 		lines = append(lines, "Waiting for the next test to start...")
 	}
-	lines = append(lines, fmt.Sprintf("Finished: %d", len(m.finished)))
+
+	// Suite-level tally with scope label, distinguishable from the queue-level figures.
+	lines = append(lines, fmt.Sprintf("Suite: Running: %d | Finished: %d | Remaining: %d", tally.Running, tally.Finished, tally.Remaining))
+
+	// Pause indicator: shown when the suite scheduler is paused. Workers
+	// already in progress complete normally; new ones wait until resumed.
+	if m.pauseCtl != nil && m.pauseCtl.IsPaused() {
+		lines = append(lines, "PAUSED -- press 'p' to resume scheduling")
+	}
 
 	body := strings.Join(lines, "\n")
 	if m.showFailureDetail && m.detailPane != nil {
 		body = body + "\n" + m.detailPane.View()
 	}
 
-	return m.renderScreen("Suite Progress", "", body, tuicommon.EntryScreenHelp())
+	return m.renderScreen("Suite Progress", "", body, progressHelp())
 }
 
 // ---------------------------------------------------------------------------
@@ -221,25 +257,67 @@ func resultsHelp() []tuicommon.HelpEntry {
 
 func (m Model) viewResults() string {
 	width := m.contentWidth()
-	tests := m.resultTests()
 
 	var b strings.Builder
-	if len(tests) == 0 {
-		b.WriteString(tuicommon.Truncate("no test results available", width))
-	}
-	for i, t := range tests {
-		verdict := "?"
-		if len(t.Runs) > 0 {
-			verdict = string(t.Runs[len(t.Runs)-1].Verdict)
-		}
-		prefix := "  "
-		if i == m.resultsCursor {
-			prefix = "> "
-		}
-		if i > 0 {
+
+	// Session roll-up: rendered when the session model has been built on
+	// reaching the results screen. The figures are read directly from the
+	// session model; none is computed here.
+	if m.session != nil {
+		b.WriteString(tuicommon.Truncate(fmt.Sprintf("Session: %s", m.session.Outcome), width))
+		passCount := m.session.Counts[domain.VerdictPass]
+		failCount := m.session.Counts[domain.VerdictFail]
+		b.WriteString("\n")
+		b.WriteString(tuicommon.Truncate(
+			fmt.Sprintf("Session counts: %d passed, %d failed | Cost: %.4f USD",
+				passCount, failCount, m.session.TotalCost.TotalUSD), width))
+		if m.session.Aborted {
 			b.WriteString("\n")
+			b.WriteString(tuicommon.Truncate(
+				"Queue aborted. Suites not run: "+strings.Join(m.session.UnrunSuites, ", "), width))
 		}
-		b.WriteString(tuicommon.Truncate(fmt.Sprintf("%s%-8s %s", prefix, verdict, t.TestID), width))
+		b.WriteString("\n")
+	}
+
+	if len(m.suiteResults) > 0 {
+		// Grouped view: one suite heading per suite, with aggregate-derived rows
+		// for each test. The cursor addresses the flat test index (no heading
+		// occupies a cursor position).
+		flatIdx := 0
+		for _, sr := range m.suiteResults {
+			if b.Len() > 0 {
+				b.WriteString("\n")
+			}
+			b.WriteString(tuicommon.Truncate("["+sr.SuiteID+"]", width))
+			for _, t := range sr.Tests {
+				prefix := "  "
+				if flatIdx == m.resultsCursor {
+					prefix = "> "
+				}
+				b.WriteString("\n")
+				b.WriteString(tuicommon.Truncate(prefix+formatTestRow(t), width))
+				flatIdx++
+			}
+		}
+		if b.Len() == 0 {
+			b.WriteString(tuicommon.Truncate("no test results available", width))
+		}
+	} else {
+		// Fallback: flat list for in-progress state or event-stream-only tests.
+		tests := m.resultTests()
+		if len(tests) == 0 {
+			b.WriteString(tuicommon.Truncate("no test results available", width))
+		}
+		for i, t := range tests {
+			prefix := "  "
+			if i == m.resultsCursor {
+				prefix = "> "
+			}
+			if i > 0 {
+				b.WriteString("\n")
+			}
+			b.WriteString(tuicommon.Truncate(prefix+formatTestRow(t), width))
+		}
 	}
 
 	body := b.String()
@@ -248,6 +326,22 @@ func (m Model) viewResults() string {
 	}
 
 	return m.renderScreen("Results", "", body, resultsHelp())
+}
+
+// formatTestRow builds the display line for one test on the results screen.
+// The content matches the command-line text report's per-test line wording
+// (from internal/report/text.go): name, aggregate verdict, passed/counted,
+// achieved pass rate, and required pass rate. No value here is computed from
+// individual runs; every figure comes from the pre-computed aggregate.
+func formatTestRow(t report.TestReport) string {
+	achievedPct := "n/a"
+	if t.Aggregate.Counted > 0 {
+		achievedPct = fmt.Sprintf("%.0f%%", t.Aggregate.PassRate*100)
+	}
+	requiredPct := fmt.Sprintf("%.0f%%", t.Aggregate.RequiredPassRate*100)
+	stats := fmt.Sprintf("%d/%d passed (%s, required %s)",
+		t.Aggregate.Passed, t.Aggregate.Counted, achievedPct, requiredPct)
+	return fmt.Sprintf("%s: %s %s", t.TestName, t.Aggregate.Verdict, stats)
 }
 
 // ---------------------------------------------------------------------------
@@ -302,16 +396,51 @@ func (m Model) viewDetail() string {
 	// formatting because they are short and one line per field keeps the layout
 	// readable.
 	logicalLines := []string{
-		tuicommon.Wrap("Test: "+test.TestID, width),
+		tuicommon.Wrap("Test: "+test.TestName, width),
 		fmt.Sprintf("Verdict: %s", run.Verdict),
 		tuicommon.Wrap("Outcome: "+strings.Join(classNames, ", "), width),
 		fmt.Sprintf("Duration: %s", run.Duration),
 		fmt.Sprintf("Cost: %.2f USD (%s)", run.Cost.TotalUSD, run.Cost.Attribution),
 	}
+
+	// Catalog folder (suite-level, from the terminal result model).
+	if m.result != nil && m.result.CatalogFolder != "" {
+		logicalLines = append(logicalLines, tuicommon.Wrap("Catalog: "+m.result.CatalogFolder, width))
+	}
+
+	// Retained sandbox path -- show explicitly even when absent so the user
+	// knows whether retention was active for this run.
+	if run.RetainedSandboxPath != "" {
+		logicalLines = append(logicalLines, tuicommon.Wrap("Sandbox: "+run.RetainedSandboxPath, width))
+	} else {
+		logicalLines = append(logicalLines, "Sandbox: no sandbox retained")
+	}
+
+	// All assertions with their full diagnostic fields, for both passing and
+	// failing outcomes. Data comes directly from report.RunReport -- no
+	// re-derivation here.
 	for _, a := range run.Assertions {
-		if a.Outcome == domain.AssertionFail {
-			logicalLines = append(logicalLines, tuicommon.Wrap("Failed assertion: "+a.Detail, width))
+		line := fmt.Sprintf("Assertion %s %s", a.Outcome, string(a.Class))
+		if a.Target != "" {
+			line += " [" + a.Target + "]"
 		}
+		if a.Expected != "" || a.Actual != "" {
+			line += fmt.Sprintf(": expected %q, got %q", a.Expected, a.Actual)
+		}
+		if a.Detail != "" {
+			line += " (" + a.Detail + ")"
+		}
+		logicalLines = append(logicalLines, tuicommon.Wrap(line, width))
+	}
+
+	// Failure reasons when present.
+	for _, reason := range run.Reasons {
+		logicalLines = append(logicalLines, fmt.Sprintf("Reason: %s", string(reason)))
+	}
+
+	// Run conditions when present.
+	for _, c := range run.Conditions {
+		logicalLines = append(logicalLines, tuicommon.Wrap(fmt.Sprintf("Condition %s: %s", c.Kind, c.Detail), width))
 	}
 
 	// Expand logical lines into physical lines: Wrap may introduce embedded

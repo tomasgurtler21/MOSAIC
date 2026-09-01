@@ -49,6 +49,8 @@ func (a *Adapter) TranslateCall(phase domain.InterceptionPhase, native []byte) (
 		return a.translatePost(native)
 	case domain.PhaseCompletion:
 		return a.translateCompletion(native)
+	case domain.PhaseAgentStart:
+		return a.translateAgentStart(native)
 	default:
 		return domain.InterceptedCall{}, fmt.Errorf("%w: interception phase %q", ErrPayloadUnrecognised, phase)
 	}
@@ -120,13 +122,13 @@ func (a *Adapter) translatePost(native []byte) (domain.InterceptedCall, error) {
 }
 
 // translateCompletion translates the harness's SubagentStop completion signal
-// into a call carrying the recovered collaborator reply and the correlation
-// token. See correlation.go for the full mechanism basis documentation.
+// into a call carrying the recovered collaborator reply. See correlation.go
+// for the full mechanism basis documentation.
 //
-// CorrelationToken is populated directly from ToolUseID, the dispatch-scoped
-// identifier the harness sends on both the originating PreToolUse event and
-// this SubagentStop event. An absent ToolUseID produces an empty token — a
-// legitimate outcome for an un-stubbed dispatch — and is never an error.
+// CorrelationToken is left empty: SubagentStop carries no tool_use_id — the
+// field is absent from the payload entirely on every observed firing against
+// harness version 2.1.240. Completion correlation is recovered through the
+// agent-start association (agent_id), not from a shared dispatch identifier.
 // Only a malformed payload or a wrong hook_event_name is an error, mirroring
 // translatePre/translatePost's own validation.
 func (a *Adapter) translateCompletion(native []byte) (domain.InterceptedCall, error) {
@@ -140,10 +142,35 @@ func (a *Adapter) translateCompletion(native []byte) (domain.InterceptedCall, er
 
 	return domain.InterceptedCall{
 		Phase:            domain.PhaseCompletion,
-		CorrelationToken: payload.ToolUseID,
+		AgentID:          payload.AgentID,
+		CorrelationToken: "",
 		RawPayload:       json.RawMessage(native),
 		Capabilities:     a.Capabilities(),
 		ObservedResponse: payload.LastAssistantMessage,
+	}, nil
+}
+
+// translateAgentStart translates the harness's SubagentStart agent-start signal
+// into a call carrying the agent identifier. CorrelationToken is left empty:
+// SubagentStart carries no tool_use_id. ObservedResponse is left empty: there
+// is no collaborator reply at the agent-start point.
+func (a *Adapter) translateAgentStart(native []byte) (domain.InterceptedCall, error) {
+	var payload AgentStartPayload
+	if err := json.Unmarshal(native, &payload); err != nil {
+		return domain.InterceptedCall{}, fmt.Errorf("%w: %v", ErrPayloadMalformed, err)
+	}
+	if payload.HookEventName != "SubagentStart" {
+		return domain.InterceptedCall{}, fmt.Errorf("%w: hook_event_name %q", ErrPayloadUnrecognised, payload.HookEventName)
+	}
+	if payload.AgentID == "" {
+		return domain.InterceptedCall{}, fmt.Errorf("%w: agent_id is empty", ErrIdentityUndetermined)
+	}
+
+	return domain.InterceptedCall{
+		Phase:        domain.PhaseAgentStart,
+		AgentID:      payload.AgentID,
+		RawPayload:   json.RawMessage(native),
+		Capabilities: a.Capabilities(),
 	}, nil
 }
 
@@ -165,6 +192,13 @@ func decodeTaskToolInput(raw json.RawMessage) (TaskToolInput, error) {
 // a dispatch tool's prompt text. raw is preserved verbatim regardless of
 // whether it parses, so protocol validation downstream can still inspect
 // what was actually sent.
+//
+// When the entire raw string is not valid JSON, the function scans for
+// embedded JSON objects by locating each '{' and walking forward to its
+// matching '}' (tracking nested braces). Each candidate is attempted in
+// order; the first one that unmarshals successfully and carries a non-empty
+// agent_instance_id is returned as ExtractionRecovered. If no candidate
+// satisfies the requirement, ExtractionDegraded is returned.
 func parseTaskMessage(raw string) domain.TaskMessage {
 	if raw == "" {
 		return domain.TaskMessage{Extraction: domain.ExtractionDegraded}
@@ -175,7 +209,54 @@ func parseTaskMessage(raw string) domain.TaskMessage {
 		tm.Extraction = domain.ExtractionParsed
 		return tm
 	}
+	// Fallback: scan for embedded JSON objects within prose.
+	if recovered, ok := extractJSONObject(raw); ok {
+		recovered.Raw = raw
+		recovered.Extraction = domain.ExtractionRecovered
+		return recovered
+	}
 	return domain.TaskMessage{Raw: raw, Extraction: domain.ExtractionDegraded}
+}
+
+// extractJSONObject scans s for all top-level '{...}' substrings (handling
+// nested braces) and returns the first domain.TaskMessage that unmarshals
+// successfully and carries a non-empty AgentInstanceID. The second return
+// value is false when no such object is found.
+func extractJSONObject(s string) (domain.TaskMessage, bool) {
+	for i := 0; i < len(s); i++ {
+		if s[i] != '{' {
+			continue
+		}
+		// Walk forward tracking brace depth to find the matching '}'.
+		depth := 0
+		end := -1
+		for j := i; j < len(s); j++ {
+			switch s[j] {
+			case '{':
+				depth++
+			case '}':
+				depth--
+				if depth == 0 {
+					end = j
+				}
+			}
+			if end >= 0 {
+				break
+			}
+		}
+		if end < 0 {
+			// No closing brace found from this '{'; no further candidates possible.
+			break
+		}
+		candidate := s[i : end+1]
+		var tm domain.TaskMessage
+		if err := json.Unmarshal([]byte(candidate), &tm); err == nil && tm.AgentInstanceID != "" {
+			return tm, true
+		}
+		// Advance past this object to try the next one.
+		i = end
+	}
+	return domain.TaskMessage{}, false
 }
 
 // extractText recovers a plain string from a native JSON value that may be

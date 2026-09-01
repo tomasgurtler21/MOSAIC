@@ -30,11 +30,18 @@ func TestParseTestDefinition_SubjectAgent_ParsesIntoCatalogAgentKey(t *testing.T
 		Path: "d.test.yaml",
 		Data: []byte(`
 schema_version: 1
-id: d
+name: d
+id: 1
+version: 1
+changelog:
+  - version: 1
+    date: "2026-01-01"
+    changes: "Initial."
 layer: orchestrator
 subject:
   identity: orchestrator
   agent: orchestrator
+  infrastructure_agents: []
   opening_message: "Build the thing."
   invocation_kind: orchestrator
 stub_registry: stubs/d.stubs.json
@@ -59,11 +66,18 @@ func TestParseTestDefinition_SubjectAgentWithWorkflows_DefinitionPathNotAuthored
 		Path: "d.test.yaml",
 		Data: []byte(`
 schema_version: 1
-id: d
+name: d
+id: 1
+version: 1
+changelog:
+  - version: 1
+    date: "2026-01-01"
+    changes: "Initial."
 layer: orchestrator
 subject:
   identity: orchestrator
   agent: orchestrator
+  infrastructure_agents: []
   workflows: [tdd-soft]
 stub_registry: stubs/d.stubs.json
 `),
@@ -89,11 +103,18 @@ func TestParseTestDefinition_SubjectWorkflowsPinned_ParsesIntoSlice(t *testing.T
 		Path: "d.test.yaml",
 		Data: []byte(`
 schema_version: 1
-id: d
+name: d
+id: 1
+version: 1
+changelog:
+  - version: 1
+    date: "2026-01-01"
+    changes: "Initial."
 layer: orchestrator
 subject:
   identity: orchestrator
   agent: orchestrator
+  infrastructure_agents: []
   workflows: [tdd-soft, tdd-hard]
 stub_registry: stubs/d.stubs.json
 `),
@@ -122,11 +143,18 @@ func TestParseTestDefinition_SubjectWorkflowsAbsent_IsNil(t *testing.T) {
 		Path: "d.test.yaml",
 		Data: []byte(`
 schema_version: 1
-id: d
+name: d
+id: 1
+version: 1
+changelog:
+  - version: 1
+    date: "2026-01-01"
+    changes: "Initial."
 layer: orchestrator
 subject:
   identity: orchestrator
   agent: orchestrator
+  infrastructure_agents: []
 stub_registry: stubs/d.stubs.json
 `),
 	}
@@ -149,11 +177,18 @@ func TestParseTestDefinition_SubjectWorkflowsExplicitlyEmpty_IsNonNilSlice(t *te
 		Path: "d.test.yaml",
 		Data: []byte(`
 schema_version: 1
-id: d
+name: d
+id: 1
+version: 1
+changelog:
+  - version: 1
+    date: "2026-01-01"
+    changes: "Initial."
 layer: orchestrator
 subject:
   identity: orchestrator
   agent: orchestrator
+  infrastructure_agents: []
   workflows: []
 stub_registry: stubs/d.stubs.json
 `),
@@ -179,11 +214,18 @@ func TestParseTestDefinition_StubAgents_ParseIntoDefinition(t *testing.T) {
 		Path: "d.test.yaml",
 		Data: []byte(`
 schema_version: 1
-id: d
+name: d
+id: 1
+version: 1
+changelog:
+  - version: 1
+    date: "2026-01-01"
+    changes: "Initial."
 layer: orchestrator
 subject:
   identity: orchestrator
   agent: orchestrator
+  infrastructure_agents: []
 stub_registry: stubs/d.stubs.json
 stub_agents:
   - identity:
@@ -233,11 +275,18 @@ func TestParseTestDefinition_StubAgentEmptyAgentIdentity_ParsesAsPlainToolCall(t
 		Path: "d.test.yaml",
 		Data: []byte(`
 schema_version: 1
-id: d
+name: d
+id: 1
+version: 1
+changelog:
+  - version: 1
+    date: "2026-01-01"
+    changes: "Initial."
 layer: orchestrator
 subject:
   identity: orchestrator
   agent: orchestrator
+  infrastructure_agents: []
 stub_registry: stubs/d.stubs.json
 stub_agents:
   - identity:
@@ -277,11 +326,18 @@ func TestParseTestDefinition_StubAgentsAbsent_IsNil(t *testing.T) {
 		Path: "d.test.yaml",
 		Data: []byte(`
 schema_version: 1
-id: d
+name: d
+id: 1
+version: 1
+changelog:
+  - version: 1
+    date: "2026-01-01"
+    changes: "Initial."
 layer: orchestrator
 subject:
   identity: orchestrator
   agent: orchestrator
+  infrastructure_agents: []
 stub_registry: stubs/d.stubs.json
 `),
 	}
@@ -304,7 +360,13 @@ func TestParseTestDefinition_SubjectDefinitionKey_RejectedAsRemovedKey(t *testin
 		Path: "d.test.yaml",
 		Data: []byte(`
 schema_version: 1
-id: d
+name: d
+id: 1
+version: 1
+changelog:
+  - version: 1
+    date: "2026-01-01"
+    changes: "Initial."
 layer: orchestrator
 subject:
   identity: orchestrator
@@ -335,7 +397,13 @@ func TestParseTestDefinition_SubjectDefinitionKey_DiagnosticHasCorrectPointer(t 
 		Path: "d.test.yaml",
 		Data: []byte(`
 schema_version: 1
-id: d
+name: d
+id: 1
+version: 1
+changelog:
+  - version: 1
+    date: "2026-01-01"
+    changes: "Initial."
 layer: orchestrator
 subject:
   identity: orchestrator
@@ -364,6 +432,157 @@ stub_registry: stubs/d.stubs.json
 	}
 }
 
+// --- subject.infrastructure_agents (InfrastructureAgentIDs) ---
+
+// TestParseTestDefinition_SubjectInfrastructureAgentsPopulated_ParsesIntoSlice
+// verifies that a declared infrastructure_agents list parses into
+// SubjectUnderTest.InfrastructureAgentIDs with the correct identifiers.
+func TestParseTestDefinition_SubjectInfrastructureAgentsPopulated_ParsesIntoSlice(t *testing.T) {
+	src := authoring.Source{
+		Path: "d.test.yaml",
+		Data: []byte(`
+schema_version: 1
+name: d
+id: 1
+version: 1
+changelog:
+  - version: 1
+    date: "2026-01-01"
+    changes: "Initial."
+layer: orchestrator
+subject:
+  identity: orchestrator
+  agent: orchestrator
+  infrastructure_agents: [id-a, id-b]
+stub_registry: stubs/d.stubs.json
+`),
+	}
+
+	def, _ := authoring.ParseTestDefinition(src)
+
+	if len(def.Subject.InfrastructureAgentIDs) != 2 {
+		t.Fatalf("len(Subject.InfrastructureAgentIDs) = %d, want 2; infrastructure_agents must parse into the InfrastructureAgentIDs slice",
+			len(def.Subject.InfrastructureAgentIDs))
+	}
+	if def.Subject.InfrastructureAgentIDs[0] != "id-a" {
+		t.Errorf("Subject.InfrastructureAgentIDs[0] = %q, want %q", def.Subject.InfrastructureAgentIDs[0], "id-a")
+	}
+	if def.Subject.InfrastructureAgentIDs[1] != "id-b" {
+		t.Errorf("Subject.InfrastructureAgentIDs[1] = %q, want %q", def.Subject.InfrastructureAgentIDs[1], "id-b")
+	}
+}
+
+// TestParseTestDefinition_SubjectInfrastructureAgentsExplicitlyEmpty_IsNonNilSlice
+// verifies that infrastructure_agents: [] yields a non-nil empty slice —
+// "explicitly none" — distinct from nil meaning "not specified". This
+// distinction matters because the deployment tool treats nil and empty
+// infrastructure agent lists differently.
+func TestParseTestDefinition_SubjectInfrastructureAgentsExplicitlyEmpty_IsNonNilSlice(t *testing.T) {
+	src := authoring.Source{
+		Path: "d.test.yaml",
+		Data: []byte(`
+schema_version: 1
+name: d
+id: 1
+version: 1
+changelog:
+  - version: 1
+    date: "2026-01-01"
+    changes: "Initial."
+layer: orchestrator
+subject:
+  identity: orchestrator
+  agent: orchestrator
+  infrastructure_agents: []
+stub_registry: stubs/d.stubs.json
+`),
+	}
+
+	def, _ := authoring.ParseTestDefinition(src)
+
+	if def.Subject.InfrastructureAgentIDs == nil {
+		t.Error("Subject.InfrastructureAgentIDs = nil, want non-nil empty slice; infrastructure_agents: [] means 'explicitly none', not 'not specified'")
+	}
+	if len(def.Subject.InfrastructureAgentIDs) != 0 {
+		t.Errorf("len(Subject.InfrastructureAgentIDs) = %d, want 0 for an explicit empty declaration", len(def.Subject.InfrastructureAgentIDs))
+	}
+}
+
+// TestParseTestDefinition_SubjectInfrastructureAgentsAbsent_ProducesMissingRequiredFieldDiagnostic
+// verifies that a test definition omitting infrastructure_agents entirely
+// produces a diagnostic with code "missing-required-field". Unlike
+// subject.workflows (where absence is legal and means "not specified"),
+// infrastructure_agents must always be explicitly declared so every test
+// controls what the sandbox contains.
+func TestParseTestDefinition_SubjectInfrastructureAgentsAbsent_ProducesMissingRequiredFieldDiagnostic(t *testing.T) {
+	src := authoring.Source{
+		Path: "d.test.yaml",
+		Data: []byte(`
+schema_version: 1
+name: d
+id: 1
+version: 1
+changelog:
+  - version: 1
+    date: "2026-01-01"
+    changes: "Initial."
+layer: orchestrator
+subject:
+  identity: orchestrator
+  agent: orchestrator
+stub_registry: stubs/d.stubs.json
+`),
+	}
+
+	_, report := authoring.ParseTestDefinition(src)
+
+	if !report.HasErrors() {
+		t.Fatal("expected a test definition omitting infrastructure_agents to be rejected with an error; " +
+			"infrastructure_agents is a required subject field — every test must explicitly declare " +
+			"which infrastructure agents (if any) the sandbox contains")
+	}
+	if !hasDiagnosticCode(report, "missing-required-field") {
+		t.Errorf("expected a diagnostic with code %q, got: %v; the diagnostic must use the same "+
+			"error code as other missing required fields (e.g. absent 'id')",
+			"missing-required-field", report.Diagnostics)
+	}
+}
+
+// TestParseTestDefinition_SubjectInfrastructureAgents_AcceptedAsKnownField
+// verifies that infrastructure_agents is accepted as a known subject field,
+// producing no "unknown-field" diagnostic. This test is the authoring-layer
+// confirmation that the field has been added to subjectKnownFields.
+func TestParseTestDefinition_SubjectInfrastructureAgents_AcceptedAsKnownField(t *testing.T) {
+	src := authoring.Source{
+		Path: "d.test.yaml",
+		Data: []byte(`
+schema_version: 1
+name: d
+id: 1
+version: 1
+changelog:
+  - version: 1
+    date: "2026-01-01"
+    changes: "Initial."
+layer: orchestrator
+subject:
+  identity: orchestrator
+  agent: orchestrator
+  infrastructure_agents: []
+stub_registry: stubs/d.stubs.json
+`),
+	}
+
+	_, report := authoring.ParseTestDefinition(src)
+
+	for _, d := range report.Diagnostics {
+		if d.Code == "unknown-field" && d.Pointer == "subject.infrastructure_agents" {
+			t.Errorf("got unexpected 'unknown-field' diagnostic for infrastructure_agents; "+
+				"infrastructure_agents must be registered as a known subject field, got diagnostic: %+v", d)
+		}
+	}
+}
+
 // TestParseTestDefinition_SubjectDefinitionKey_DiagnosticNamesReplacement
 // verifies that the removed-key-subject-definition diagnostic's message names
 // subject.agent as the replacement and conveys that the path is now resolved
@@ -373,7 +592,13 @@ func TestParseTestDefinition_SubjectDefinitionKey_DiagnosticNamesReplacement(t *
 		Path: "d.test.yaml",
 		Data: []byte(`
 schema_version: 1
-id: d
+name: d
+id: 1
+version: 1
+changelog:
+  - version: 1
+    date: "2026-01-01"
+    changes: "Initial."
 layer: orchestrator
 subject:
   identity: orchestrator

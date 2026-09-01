@@ -10,6 +10,8 @@ package tui
 import (
 	"context"
 	"errors"
+	"os"
+	"path/filepath"
 	"testing"
 	"time"
 
@@ -74,26 +76,116 @@ func makeChoiceQuestion(title string, optionIDs []string) interaction.ChoiceQues
 // Initial state
 // ---------------------------------------------------------------------------
 
-func TestNavigation_InitialScreen_IsSetupFile(t *testing.T) {
+func TestNavigation_InitialScreen_IsSetupHarness(t *testing.T) {
 	m := newTestModel()
-	if m.screen != screenSetupFile {
-		t.Errorf("initial screen = %v, want screenSetupFile (%v)", m.screen, screenSetupFile)
+	if m.screen != screenSetupHarness {
+		t.Errorf("initial screen = %v, want screenSetupHarness (%v)", m.screen, screenSetupHarness)
 	}
 }
 
-func TestNavigation_FileScreen_ViewNonEmpty(t *testing.T) {
+func TestNavigation_HarnessScreen_ViewNonEmpty(t *testing.T) {
 	m := newTestModel()
 	view := m.View()
 	if view == "" {
-		t.Error("View() returned empty string on file screen; want non-empty output")
+		t.Error("View() returned empty string on harness screen; want non-empty output")
 	}
 }
 
-func TestNavigation_FileScreen_ViewContainsTitleText(t *testing.T) {
+func TestNavigation_HarnessScreen_ViewContainsTitleText(t *testing.T) {
 	m := newTestModel()
 	view := m.View()
-	if !containsAny(view, "Orchestrator", "orchestrator", "File", "file") {
-		t.Errorf("file screen view does not contain expected title text:\n%s", view)
+	if !containsAny(view, "Harness", "harness", "Select", "select") {
+		t.Errorf("harness screen view does not contain expected title text:\n%s", view)
+	}
+}
+
+// newTestModelWithDiscoverer creates a rootModel with the given OrchestratorDiscoverer
+// injected via Options so that harness-screen Enter-key paths can be exercised.
+func newTestModelWithDiscoverer(discoverer func(workDir, harnessID string) (string, error)) *rootModel {
+	sess := &stubNavSession{outcome: domain.RunOutcome{Status: domain.RunCompleted, Message: "ok"}}
+	return newRootModel(context.Background(), sess, Options{
+		Theme:                  tuicommon.DefaultTheme(),
+		OrchestratorDiscoverer: discoverer,
+	})
+}
+
+// ---------------------------------------------------------------------------
+// Harness screen: Enter-key outcome paths
+// ---------------------------------------------------------------------------
+
+// TestHarnessScreen_Enter_DiscoveryFailure_TransitionsToDoneScreen verifies that
+// when OrchestratorDiscoverer returns an error after the user presses Enter on
+// the harness screen, the model transitions to screenDone with the error
+// displayed (AC3.4, TUI side).
+func TestHarnessScreen_Enter_DiscoveryFailure_TransitionsToDoneScreen(t *testing.T) {
+	failDiscoverer := func(workDir, harnessID string) (string, error) {
+		return "", errors.New("workspace not deployed for harness " + harnessID +
+			": expected orchestrator-script at " + workDir)
+	}
+	m := newTestModelWithDiscoverer(failDiscoverer)
+
+	if m.screen != screenSetupHarness {
+		t.Fatalf("precondition: screen = %v, want screenSetupHarness", m.screen)
+	}
+
+	// The harness screen has at least one item pre-selected; pressing Enter
+	// causes Done() == true and triggers auto-discovery.
+	sendKey(m, tea.KeyEnter)
+
+	if m.screen != screenDone {
+		t.Errorf("screen = %v after Enter with failing discoverer, want screenDone (%v)",
+			m.screen, screenDone)
+	}
+	if m.doneScreen == nil {
+		t.Error("doneScreen = nil after discovery failure; must be populated with the error")
+	}
+}
+
+// TestHarnessScreen_Enter_DiscoverySuccess_TransitionsToWorkflowScreen verifies
+// that when OrchestratorDiscoverer returns a valid orchestrator path, pressing
+// Enter on the harness screen transitions to screenSetupWorkflow and populates
+// selections.orchestratorFile (AC3.2, TUI side integration).
+//
+// This is a new-run test: the workflow screen is only ever shown to a run that
+// has recorded no workflow of its own. The subject here is orchestrator
+// discovery, not run-mode routing, so the run mode is set explicitly rather
+// than left at its zero value -- which now means "resumed".
+func TestHarnessScreen_Enter_DiscoverySuccess_TransitionsToWorkflowScreen(t *testing.T) {
+	// Write a minimal orchestrator file with one workflow region so that
+	// orchfile.EnumerateWorkflows returns successfully.
+	orchDir := t.TempDir()
+	orchFilePath := filepath.Join(orchDir, "orchestrator-script.md")
+	orchContent := `<Workflow type="core" name="test-workflow" version="1.0">
+## Test Workflow
+
+| Phase | Subagent | HITL | Input | Output |
+|-------|----------|:----:|-------|--------|
+| PLANNING | planner | TRUE | - | Plan.md |
+</Workflow>
+`
+	if err := os.WriteFile(orchFilePath, []byte(orchContent), 0o644); err != nil {
+		t.Fatalf("WriteFile: %v", err)
+	}
+
+	succeedDiscoverer := func(workDir, harnessID string) (string, error) {
+		return orchFilePath, nil
+	}
+	m := newTestModelWithDiscoverer(succeedDiscoverer)
+	m.selections.isNewRun = true
+
+	if m.screen != screenSetupHarness {
+		t.Fatalf("precondition: screen = %v, want screenSetupHarness", m.screen)
+	}
+
+	sendKey(m, tea.KeyEnter)
+
+	if m.screen != screenSetupWorkflow {
+		t.Errorf("screen = %v after Enter with successful discoverer, want screenSetupWorkflow (%v)",
+			m.screen, screenSetupWorkflow)
+	}
+	if m.selections.orchestratorFile != orchFilePath {
+		t.Errorf("selections.orchestratorFile = %q, want %q",
+			m.selections.orchestratorFile, orchFilePath)
 	}
 }
 
@@ -153,14 +245,14 @@ func TestNavigation_WindowResize_WithProgressScreenDoesNotPanic(t *testing.T) {
 }
 
 // ---------------------------------------------------------------------------
-// Esc from file screen
+// Esc from harness screen
 // ---------------------------------------------------------------------------
 
-func TestNavigation_EscFromFileScreen_ReturnsQuitCommand(t *testing.T) {
+func TestNavigation_EscFromHarnessScreen_ReturnsQuitCommand(t *testing.T) {
 	m := newTestModel()
 	_, cmd := sendKey(m, tea.KeyEsc)
 	if cmd == nil {
-		t.Error("cmd = nil after Esc from file screen; want tea.Quit (non-nil command)")
+		t.Error("cmd = nil after Esc from harness screen; want tea.Quit (non-nil command)")
 	}
 }
 
@@ -215,18 +307,24 @@ func TestNavigation_DoneScreen_EnterKeyQuits(t *testing.T) {
 // Progress screen
 // ---------------------------------------------------------------------------
 
-func TestNavigation_ProgressScreen_GracefulStop_CancelsContext(t *testing.T) {
+func TestNavigation_ProgressScreen_GracefulStop_SignalsStopSignalWithoutCancellingContext(t *testing.T) {
+	stopSignal := session.NewStopSignal()
 	m := newTestModel()
+	m.stopSignal = stopSignal
 	m.progressScreen = newProgressScreen(m)
 	m.screen = screenProgress
 
 	m.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("s")})
+	m.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("y")})
 
 	if !m.progressScreen.GracefulStop() {
-		t.Error("GracefulStop() = false after 's' key; want true")
+		t.Error("GracefulStop() = false after 's' then 'y'; want true")
 	}
-	if m.ctx.Err() == nil {
-		t.Error("ctx.Err() = nil after graceful stop; context must be cancelled")
+	if !stopSignal.Requested() {
+		t.Error("stopSignal.Requested() = false after a confirmed graceful stop; want true")
+	}
+	if m.ctx.Err() != nil {
+		t.Errorf("m.ctx.Err() = %v after a confirmed graceful stop; want nil (ctx must remain usable for resume)", m.ctx.Err())
 	}
 }
 
@@ -424,10 +522,13 @@ func TestNavigation_AskTextQuestion_EnterSendsTextAnswer(t *testing.T) {
 // Setup screen back-navigation
 // ---------------------------------------------------------------------------
 
-// TestNavigation_WorkflowScreen_EscReturnsToFileScreen verifies that pressing Esc on the
-// workflow selection screen transitions back to the orchestrator file entry screen.
-func TestNavigation_WorkflowScreen_EscReturnsToFileScreen(t *testing.T) {
-	m := newTestModel()
+// TestNavigation_WorkflowScreen_EscReturnsToHarnessScreen verifies that pressing Esc on the
+// workflow selection screen transitions back to the harness selection screen.
+//
+// This is a new-run test: the workflow screen is only ever reached by a run that
+// has no recorded workflow, so a resumed run has no back-navigation out of it.
+func TestNavigation_WorkflowScreen_EscReturnsToHarnessScreen(t *testing.T) {
+	m := newTestModelNewRun()
 	style := stylesFromTheme(m.theme)
 	m.workflowScreen = screens.NewWorkflowSelectScreen(
 		[]domain.WorkflowRegion{{Info: domain.WorkflowInfo{ID: "wf1"}}},
@@ -437,15 +538,18 @@ func TestNavigation_WorkflowScreen_EscReturnsToFileScreen(t *testing.T) {
 
 	sendKey(m, tea.KeyEsc)
 
-	if m.screen != screenSetupFile {
-		t.Errorf("screen = %v after Esc from workflow screen, want screenSetupFile (%v)", m.screen, screenSetupFile)
+	if m.screen != screenSetupHarness {
+		t.Errorf("screen = %v after Esc from workflow screen, want screenSetupHarness (%v)", m.screen, screenSetupHarness)
 	}
 }
 
 // TestNavigation_TaskScreen_EscReturnsToWorkflowScreen verifies that pressing Esc on the
 // task description screen transitions back to the workflow selection screen.
+//
+// This is a new-run test: both screens belong to the new-run path, and a resumed
+// run is shown neither.
 func TestNavigation_TaskScreen_EscReturnsToWorkflowScreen(t *testing.T) {
-	m := newTestModel()
+	m := newTestModelNewRun()
 	m.screen = screenSetupTask
 
 	sendKey(m, tea.KeyEsc)
@@ -455,51 +559,34 @@ func TestNavigation_TaskScreen_EscReturnsToWorkflowScreen(t *testing.T) {
 	}
 }
 
-// TestNavigation_ConfigScreen_EscReturnsToTaskScreen verifies that pressing Esc on the
-// first configuration prompt transitions back to the task description screen.
-func TestNavigation_ConfigScreen_EscReturnsToTaskScreen(t *testing.T) {
-	m := newTestModel()
-	m.screen = screenSetupConfig
-
-	sendKey(m, tea.KeyEsc)
-
-	if m.screen != screenSetupTask {
-		t.Errorf("screen = %v after Esc from config screen, want screenSetupTask (%v)", m.screen, screenSetupTask)
-	}
-}
+// Back-navigation out of the configuration screen is covered per run mode
+// elsewhere: TestNavigation_ConfigScreen_NewRun_EscReturnsToSeedScreen in
+// seed_nav_test.go for a new run, and
+// TestSetupFlow_ResumedRun_BackFromConfiguration_ReturnsToTheHarnessQuestion in
+// resume_skip_test.go for a resumed one. There is no run-mode-independent
+// answer to state here: the two paths pass through different screens on the way
+// in and must return to different screens on the way out.
 
 // ---------------------------------------------------------------------------
 // Setup sequence: forward navigation
 // ---------------------------------------------------------------------------
 
-// TestSetupSequence_ForwardNavigation_ReachesProgressScreen verifies the complete
-// forward-navigation path: workflow selection → task entry → configuration → progress
-// screen. The file-selection step is bypassed by pre-populating the model's workflow
-// list and jumping directly to the workflow screen.
-func TestSetupSequence_ForwardNavigation_ReachesProgressScreen(t *testing.T) {
-	m := newTestModel()
-	style := stylesFromTheme(m.theme)
+// TestSetupSequence_ResumedRun_ForwardNavigation_ReachesProgressScreen verifies
+// the complete forward-navigation path for a resumed run:
+// harness → configuration → progress screen. The workflow and task screens are
+// not steps on this path; a resumed run brings both values with it.
+//
+// This is the resumed-run counterpart of
+// TestSetupSequence_NewRun_ForwardNavigation_ReachesProgressScreen in
+// seed_nav_test.go, which walks the longer new-run path.
+func TestSetupSequence_ResumedRun_ForwardNavigation_ReachesProgressScreen(t *testing.T) {
+	m := newResumedRunModel(t)
 
-	// Bypass file selection: directly populate workflow regions and transition to
-	// the workflow screen, replicating what updateSetupFile would do after loading.
-	testWorkflows := []domain.WorkflowRegion{
-		{Info: domain.WorkflowInfo{ID: "test-workflow"}},
-	}
-	m.workflows = testWorkflows
-	m.workflowScreen = screens.NewWorkflowSelectScreen(testWorkflows, m.width, m.height, style)
-	m.screen = screenSetupWorkflow
-
-	// Select the first (and only) workflow.
-	m.Update(tea.KeyMsg{Type: tea.KeyEnter})
-	if m.screen != screenSetupTask {
-		t.Fatalf("after workflow selection: screen = %v, want screenSetupTask", m.screen)
-	}
-
-	// Type one character to satisfy the non-empty task validator, then confirm.
-	m.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'T'}})
-	m.Update(tea.KeyMsg{Type: tea.KeyEnter})
+	// Answer the harness question. A resumed run has nothing further to answer
+	// before configuration.
+	sendKey(m, tea.KeyEnter)
 	if m.screen != screenSetupConfig {
-		t.Fatalf("after task entry: screen = %v, want screenSetupConfig", m.screen)
+		t.Fatalf("after the harness question on a resumed run: screen = %v, want screenSetupConfig", m.screen)
 	}
 
 	// Accept all configuration prompts.  The timeout step is always present
@@ -532,11 +619,12 @@ func TestSetupSequence_ForwardNavigation_ReachesProgressScreen(t *testing.T) {
 	if m.progressScreen == nil {
 		t.Error("progressScreen = nil after reaching progress screen; must be constructed")
 	}
-	if m.selections.workflowID != domain.WorkflowID("test-workflow") {
-		t.Errorf("workflowID = %q, want %q", m.selections.workflowID, "test-workflow")
+	if m.selections.workflowID != domain.WorkflowID(recordedWorkflowID) {
+		t.Errorf("workflowID = %q, want %q", m.selections.workflowID, recordedWorkflowID)
 	}
-	if m.selections.task != "T" {
-		t.Errorf("task = %q, want %q", m.selections.task, "T")
+	if m.selections.task != "" {
+		t.Errorf("task = %q, want empty; a resumed run reads its task from its own artifact "+
+			"and must not collect one during setup", m.selections.task)
 	}
 }
 
@@ -592,6 +680,22 @@ func newModelWithScan(candidates []runscan.RunCandidate) *rootModel {
 	})
 }
 
+// newModelWithScanAndDiscoverer creates a rootModel that both starts on the
+// run-selection screen and can discover an orchestrator file, so a test can walk
+// the whole path from choosing a run through to the setup screens.
+func newModelWithScanAndDiscoverer(
+	candidates []runscan.RunCandidate,
+	discoverer func(workDir, harnessID string) (string, error),
+) *rootModel {
+	sess := &stubNavSession{outcome: domain.RunOutcome{Status: domain.RunCompleted, Message: "ok"}}
+	scanResult := &runscan.ScanResult{Candidates: candidates}
+	return newRootModel(context.Background(), sess, Options{
+		Theme:                  tuicommon.DefaultTheme(),
+		ScanResult:             scanResult,
+		OrchestratorDiscoverer: discoverer,
+	})
+}
+
 // TestRunSelect_InitialScreen_IsRunSelectWithMultipleCandidates verifies that when the
 // scan result carries more than one candidate and no run is pre-resolved, the TUI starts
 // on the run-selection screen.
@@ -609,12 +713,12 @@ func TestRunSelect_InitialScreen_IsRunSelectWithMultipleCandidates(t *testing.T)
 	}
 }
 
-// TestRunSelect_InitialScreen_IsSetupFileWithZeroCandidates verifies that an empty scan
-// result (no resumable runs) skips the run-selection screen and goes to the file screen.
-func TestRunSelect_InitialScreen_IsSetupFileWithZeroCandidates(t *testing.T) {
+// TestRunSelect_InitialScreen_IsSetupHarnessWithZeroCandidates verifies that an empty scan
+// result (no resumable runs) skips the run-selection screen and goes to the harness screen.
+func TestRunSelect_InitialScreen_IsSetupHarnessWithZeroCandidates(t *testing.T) {
 	m := newModelWithScan(nil)
-	if m.screen != screenSetupFile {
-		t.Errorf("initial screen = %v, want screenSetupFile (%v) for zero candidates", m.screen, screenSetupFile)
+	if m.screen != screenSetupHarness {
+		t.Errorf("initial screen = %v, want screenSetupHarness (%v) for zero candidates", m.screen, screenSetupHarness)
 	}
 	if m.runSelectScreen != nil {
 		t.Error("runSelectScreen should be nil when there are zero candidates")
@@ -644,7 +748,7 @@ func TestRunSelect_InitialScreen_IsRunSelectWithOneCandidate(t *testing.T) {
 }
 
 // TestRunSelect_SkippedWhenResolvedRunIDSet verifies that when ResolvedRunID is populated
-// (i.e. --run was given), the TUI starts directly on the file screen.
+// (i.e. --run was given), the TUI starts directly on the harness screen.
 func TestRunSelect_SkippedWhenResolvedRunIDSet(t *testing.T) {
 	candidates := []runscan.RunCandidate{
 		makeCandidate("20260701T120000Z-a3f9", "/ws/Orchestration-20260701T120000Z-a3f9"),
@@ -656,13 +760,13 @@ func TestRunSelect_SkippedWhenResolvedRunIDSet(t *testing.T) {
 		ScanResult:    &runscan.ScanResult{Candidates: candidates},
 		ResolvedRunID: "20260701T120000Z-a3f9",
 	})
-	if m.screen != screenSetupFile {
-		t.Errorf("initial screen = %v, want screenSetupFile (%v) when ResolvedRunID is set", m.screen, screenSetupFile)
+	if m.screen != screenSetupHarness {
+		t.Errorf("initial screen = %v, want screenSetupHarness (%v) when ResolvedRunID is set", m.screen, screenSetupHarness)
 	}
 }
 
 // TestRunSelect_SkippedWhenIsNewRunSet verifies that when IsNewRun is true
-// (i.e. --new-run was given), the TUI starts directly on the file screen.
+// (i.e. --new-run was given), the TUI starts directly on the harness screen.
 func TestRunSelect_SkippedWhenIsNewRunSet(t *testing.T) {
 	candidates := []runscan.RunCandidate{
 		makeCandidate("20260701T120000Z-a3f9", "/ws/Orchestration-20260701T120000Z-a3f9"),
@@ -674,8 +778,8 @@ func TestRunSelect_SkippedWhenIsNewRunSet(t *testing.T) {
 		ScanResult: &runscan.ScanResult{Candidates: candidates},
 		IsNewRun:   true,
 	})
-	if m.screen != screenSetupFile {
-		t.Errorf("initial screen = %v, want screenSetupFile (%v) when IsNewRun is set", m.screen, screenSetupFile)
+	if m.screen != screenSetupHarness {
+		t.Errorf("initial screen = %v, want screenSetupHarness (%v) when IsNewRun is set", m.screen, screenSetupHarness)
 	}
 }
 
@@ -732,8 +836,8 @@ func TestRunSelect_EnterOnNewRun_SetsIsNewRunAndAdvances(t *testing.T) {
 	// The first item is "Start a new run" (NewRunSentinelID). Press Enter to select it.
 	sendKey(m, tea.KeyEnter)
 
-	if m.screen != screenSetupFile {
-		t.Errorf("screen = %v after selecting 'Start new run', want screenSetupFile (%v)", m.screen, screenSetupFile)
+	if m.screen != screenSetupHarness {
+		t.Errorf("screen = %v after selecting 'Start new run', want screenSetupHarness (%v)", m.screen, screenSetupHarness)
 	}
 	if !m.selections.isNewRun {
 		t.Error("selections.isNewRun = false after selecting 'Start new run'; want true")
@@ -756,8 +860,8 @@ func TestRunSelect_EnterOnCandidate_SetsRunIDAndAdvances(t *testing.T) {
 	sendKey(m, tea.KeyDown)
 	sendKey(m, tea.KeyEnter)
 
-	if m.screen != screenSetupFile {
-		t.Errorf("screen = %v after selecting candidate, want screenSetupFile (%v)", m.screen, screenSetupFile)
+	if m.screen != screenSetupHarness {
+		t.Errorf("screen = %v after selecting candidate, want screenSetupHarness (%v)", m.screen, screenSetupHarness)
 	}
 	if m.selections.isNewRun {
 		t.Error("selections.isNewRun = true after selecting an existing candidate; want false")
@@ -1430,6 +1534,195 @@ func TestRunSelect_Resume_WithMinter_MinterNotCalled(t *testing.T) {
 	if m.selections.runID != "20260701T120000Z-a3f9" {
 		t.Errorf("selections.runID = %q, want candidate run ID %q (resume path must use candidate identity)",
 			m.selections.runID, "20260701T120000Z-a3f9")
+	}
+}
+
+// ---------------------------------------------------------------------------
+// Run selection screen: OnRunIDResolved callback
+// ---------------------------------------------------------------------------
+
+// newModelWithScanMinterFactoryCallback creates a rootModel pre-wired with:
+//   - a multi-candidate scan result (shows the run-select screen),
+//   - an injectable RunIdentityMinter,
+//   - a session factory that records each call in *calls, and
+//   - an OnRunIDResolved callback.
+//
+// This lets tests drive the run-select screen and inspect callback invocations
+// from the OnRunIDResolved path alongside normal selections state.
+func newModelWithScanMinterFactoryCallback(
+	candidates []runscan.RunCandidate,
+	minter RunIdentityMinter,
+	calls *[]factoryCall,
+	capSess *capturingSession,
+	onRunIDResolved func(runID string),
+) *rootModel {
+	scanResult := &runscan.ScanResult{Candidates: candidates}
+	return newRootModel(context.Background(), capSess, Options{
+		Theme:           tuicommon.DefaultTheme(),
+		ScanResult:      scanResult,
+		MintRunIdentity: minter,
+		SessionFactory: func(runFolder string, isNewRun bool, orchFile string, cfg screens.ConfigSelection) session.Session {
+			*calls = append(*calls, factoryCall{runFolder: runFolder, isNewRun: isNewRun})
+			return capSess
+		},
+		OnRunIDResolved: onRunIDResolved,
+	})
+}
+
+// TestRunSelect_NewRun_WithMinter_OnRunIDResolved_CalledWithMintedRunID verifies that
+// when OnRunIDResolved is set and the user picks "new run" on the run-select screen with
+// a minter provided, the callback receives exactly the minted run_id.
+//
+// In RED (compile failure): OnRunIDResolved field does not exist on Options (I1.1 not done).
+// After I1.1 (compile OK): callback is never invoked because updateRunSelect does not call
+// it yet (I1.2 not done) — test still fails at runtime.
+// In GREEN (after I1.1+I1.2): callback receives fixedMintedRunID.
+func TestRunSelect_NewRun_WithMinter_OnRunIDResolved_CalledWithMintedRunID(t *testing.T) {
+	candidates := []runscan.RunCandidate{
+		makeCandidate("20260701T120000Z-a3f9", "/ws/Orchestration-20260701T120000Z-a3f9"),
+		makeCandidate("20260702T120000Z-b4e8", "/ws/Orchestration-20260702T120000Z-b4e8"),
+	}
+	calls := make([]factoryCall, 0)
+	capSess := newCapturingSession()
+
+	var callbackRunIDs []string
+	onResolved := func(runID string) {
+		callbackRunIDs = append(callbackRunIDs, runID)
+	}
+
+	m := newModelWithScanMinterFactoryCallback(candidates, fixedMinter(), &calls, capSess, onResolved)
+	if m.screen != screenRunSelect {
+		t.Fatalf("precondition: screen = %v, want screenRunSelect", m.screen)
+	}
+
+	// "Start a new run" is the first item in the run-select list. Enter selects it.
+	sendKey(m, tea.KeyEnter)
+
+	if len(callbackRunIDs) == 0 {
+		t.Fatal("OnRunIDResolved was not called after 'new run' with minter; want exactly one call with the minted run_id")
+	}
+	if len(callbackRunIDs) > 1 {
+		t.Errorf("OnRunIDResolved was called %d times; want exactly 1", len(callbackRunIDs))
+	}
+	if callbackRunIDs[0] != fixedMintedRunID {
+		t.Errorf("OnRunIDResolved received %q, want minted value %q", callbackRunIDs[0], fixedMintedRunID)
+	}
+}
+
+// TestRunSelect_NewRun_NilMinter_OnRunIDResolved_NotCalled verifies that when the minter
+// is nil (the legacy/backward-compat path), OnRunIDResolved is NOT called after "new run"
+// is selected, because the resolved run_id is empty and the guard must prevent the callback
+// from firing with an empty string.
+//
+// In RED (compile failure): OnRunIDResolved field does not exist on Options (I1.1 not done).
+// In GREEN (after I1.1+I1.2): callback is never invoked because selections.runID stays "".
+func TestRunSelect_NewRun_NilMinter_OnRunIDResolved_NotCalled(t *testing.T) {
+	candidates := []runscan.RunCandidate{
+		makeCandidate("20260701T120000Z-a3f9", "/ws/Orchestration-20260701T120000Z-a3f9"),
+		makeCandidate("20260702T120000Z-b4e8", "/ws/Orchestration-20260702T120000Z-b4e8"),
+	}
+	sess := &stubNavSession{outcome: domain.RunOutcome{Status: domain.RunCompleted, Message: "ok"}}
+	scanResult := &runscan.ScanResult{Candidates: candidates}
+
+	callbackInvoked := false
+	onResolved := func(runID string) {
+		callbackInvoked = true
+	}
+
+	// MintRunIdentity is intentionally nil so selections.runID will be "" after "new run" selection.
+	m := newRootModel(context.Background(), sess, Options{
+		Theme:           tuicommon.DefaultTheme(),
+		ScanResult:      scanResult,
+		OnRunIDResolved: onResolved,
+	})
+	if m.screen != screenRunSelect {
+		t.Fatalf("precondition: screen = %v, want screenRunSelect", m.screen)
+	}
+
+	// Select "Start a new run" — the first item; Enter confirms.
+	sendKey(m, tea.KeyEnter)
+
+	if callbackInvoked {
+		t.Error("OnRunIDResolved was called when run_id is empty (nil-minter path); " +
+			"callback must not fire when the resolved run_id is empty")
+	}
+}
+
+// TestRunSelect_Resume_OnRunIDResolved_CalledWithCandidateRunID verifies that when
+// OnRunIDResolved is set and the user selects an existing candidate on the run-select
+// screen, the callback receives that candidate's run_id.
+//
+// In RED (compile failure): OnRunIDResolved field does not exist on Options (I1.1 not done).
+// After I1.1 (compile OK): callback is never invoked because updateRunSelect does not call
+// it yet (I1.2 not done) — test still fails at runtime.
+// In GREEN (after I1.1+I1.2): callback receives candidateRunID.
+func TestRunSelect_Resume_OnRunIDResolved_CalledWithCandidateRunID(t *testing.T) {
+	const candidateRunID = "20260701T120000Z-a3f9"
+	candidates := []runscan.RunCandidate{
+		makeCandidate(candidateRunID, "/ws/Orchestration-"+candidateRunID),
+		makeCandidate("20260702T120000Z-b4e8", "/ws/Orchestration-20260702T120000Z-b4e8"),
+	}
+	calls := make([]factoryCall, 0)
+	capSess := newCapturingSession()
+
+	var callbackRunIDs []string
+	onResolved := func(runID string) {
+		callbackRunIDs = append(callbackRunIDs, runID)
+	}
+
+	m := newModelWithScanMinterFactoryCallback(candidates, fixedMinter(), &calls, capSess, onResolved)
+	if m.screen != screenRunSelect {
+		t.Fatalf("precondition: screen = %v, want screenRunSelect", m.screen)
+	}
+
+	// Navigate down once past "Start a new run" to reach the first candidate, then select.
+	sendKey(m, tea.KeyDown)
+	sendKey(m, tea.KeyEnter)
+
+	if len(callbackRunIDs) == 0 {
+		t.Fatal("OnRunIDResolved was not called after selecting an existing candidate; " +
+			"want exactly one call with the candidate's run_id")
+	}
+	if len(callbackRunIDs) > 1 {
+		t.Errorf("OnRunIDResolved was called %d times; want exactly 1", len(callbackRunIDs))
+	}
+	if callbackRunIDs[0] != candidateRunID {
+		t.Errorf("OnRunIDResolved received %q, want candidate run_id %q", callbackRunIDs[0], candidateRunID)
+	}
+}
+
+// TestRunSelect_OnRunIDResolved_NilCallback_NewRun_NoopNoPanic verifies that when
+// OnRunIDResolved is nil (not provided in Options), selecting "new run" with a minter
+// does not panic and still populates selections.runID normally.
+//
+// This test is expected to pass in both RED and GREEN states — it guards against
+// regressions where a nil-check is omitted and the code panics on nil dereference.
+func TestRunSelect_OnRunIDResolved_NilCallback_NewRun_NoopNoPanic(t *testing.T) {
+	candidates := []runscan.RunCandidate{
+		makeCandidate("20260701T120000Z-a3f9", "/ws/Orchestration-20260701T120000Z-a3f9"),
+		makeCandidate("20260702T120000Z-b4e8", "/ws/Orchestration-20260702T120000Z-b4e8"),
+	}
+	calls := make([]factoryCall, 0)
+	capSess := newCapturingSession()
+
+	// OnRunIDResolved is nil — the old-path / no-callback behaviour.
+	m := newModelWithScanMinterFactory(candidates, fixedMinter(), &calls, capSess)
+	if m.screen != screenRunSelect {
+		t.Fatalf("precondition: screen = %v, want screenRunSelect", m.screen)
+	}
+
+	defer func() {
+		if r := recover(); r != nil {
+			t.Errorf("selecting 'new run' with nil OnRunIDResolved caused a panic: %v", r)
+		}
+	}()
+
+	sendKey(m, tea.KeyEnter)
+
+	// selections.runID must still be populated by the minter regardless of nil callback.
+	if m.selections.runID != fixedMintedRunID {
+		t.Errorf("selections.runID = %q, want %q (minting must work even with nil OnRunIDResolved)",
+			m.selections.runID, fixedMintedRunID)
 	}
 }
 

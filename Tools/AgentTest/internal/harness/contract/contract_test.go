@@ -122,10 +122,36 @@ func (a *loyalAdapter) Provision(ctx context.Context, req domain.ProvisionReques
 	if err := os.WriteFile(markerFile, []byte(`{"installed":true}`), 0o644); err != nil {
 		return domain.Provisioning{}, fmt.Errorf("loyal: write marker: %w", err)
 	}
+
+	// Populate ScopeFindings with sandbox-derived scope paths so
+	// CheckScopeAccounting can verify that every non-sandbox scope is
+	// accounted for. The loyal double's "user" scope is neutralized and lives
+	// under the sandbox's control directory so the paths are sandbox-specific,
+	// which CheckScopeIsolationAcrossRuns requires.
+	userScopePath := filepath.Join(req.Sandbox.ControlDir, "loyal-user-scope", "settings.json")
+	findings, _ := a.InspectScopes(ctx)
+	// Replace the abstract paths with sandbox-resolved ones so the provisioning
+	// carries real, distinct paths per run rather than the empty strings the
+	// port-method returns.
+	for i, f := range findings {
+		if f.Scope.Name == "user" {
+			findings[i].Scope.Path = userScopePath
+		}
+	}
+	if a.rewritingScope {
+		enterpriseScopePath := filepath.Join(req.Sandbox.ControlDir, "loyal-enterprise-scope", "config.json")
+		for i, f := range findings {
+			if f.Scope.Name == "enterprise" {
+				findings[i].Scope.Path = enterpriseScopePath
+			}
+		}
+	}
+
 	return domain.Provisioning{
-		Sandbox: req.Sandbox,
-		Files:   []string{markerFile},
-		Dirs:    []string{markerDir},
+		Sandbox:       req.Sandbox,
+		Files:         []string{markerFile},
+		Dirs:          []string{markerDir},
+		ScopeFindings: findings,
 	}, nil
 }
 
@@ -470,5 +496,71 @@ func TestRun_AdapterThatOnlyInspectsCleanly_PreservesSubjectFunctionByDefault(t 
 
 	if err := contract.CheckPreservesSubjectFunction(t, cfg); err != nil {
 		t.Errorf("neutralization check failed against a loyal double that honestly declares PreservesSubjectFunction=true for its neutralized scope: %v", err)
+	}
+}
+
+// unaccountedScopeAdapter declares one non-sandbox scope via ConfigScopes but
+// its Provision returns empty ScopeFindings, leaving that scope unaccounted
+// for. This is the exact failure mode CheckScopeAccounting exists to catch:
+// an adapter that enumerates a scope it never inspects reads like "there was
+// nothing there" rather than "we did not look."
+type unaccountedScopeAdapter struct {
+	loyalAdapter
+}
+
+func (a *unaccountedScopeAdapter) ConfigScopes() []domain.ConfigScope {
+	return []domain.ConfigScope{
+		{Name: "user", InSandbox: false, Isolatable: true},
+	}
+}
+
+func (a *unaccountedScopeAdapter) Provision(ctx context.Context, req domain.ProvisionRequest) (domain.Provisioning, error) {
+	markerDir := filepath.Join(req.Sandbox.SubjectDir, "unaccounted-adapter")
+	if err := os.MkdirAll(markerDir, 0o755); err != nil {
+		return domain.Provisioning{}, fmt.Errorf("unaccounted: mkdir: %w", err)
+	}
+	markerFile := filepath.Join(markerDir, "installed.json")
+	if err := os.WriteFile(markerFile, []byte(`{"installed":true}`), 0o644); err != nil {
+		return domain.Provisioning{}, fmt.Errorf("unaccounted: write marker: %w", err)
+	}
+	// ScopeFindings is deliberately left empty: the "user" scope declared by
+	// ConfigScopes is never reported in the provisioning output, which is the
+	// condition CheckScopeAccounting must detect and reject.
+	return domain.Provisioning{
+		Sandbox:       req.Sandbox,
+		Files:         []string{markerFile},
+		Dirs:          []string{markerDir},
+		ScopeFindings: nil,
+	}, nil
+}
+
+// TestRun_AdapterThatLeavesNonSandboxScopeUnaccounted_FailsTheScopeAccountingCheck
+// pins AC9.3: an adapter whose Provision emits zero ScopeFindings while
+// ConfigScopes() declares at least one non-sandbox scope must fail
+// CheckScopeAccounting. This is the meta-test proving the check actually
+// catches violations rather than always succeeding.
+func TestRun_AdapterThatLeavesNonSandboxScopeUnaccounted_FailsTheScopeAccountingCheck(t *testing.T) {
+	caps := domain.HarnessCapabilities{
+		SupportsDirectSubstitution: true,
+		SupportsPostInterception:   true,
+		CorrelationField:           "token",
+	}
+	cfg := contract.Config{
+		Name: "unaccounted-scope",
+		New: func(t *testing.T, dir string) domain.HarnessAdapter {
+			return &unaccountedScopeAdapter{loyalAdapter{caps: caps}}
+		},
+		NativePre:  loyalNativePre,
+		NativePost: loyalNativePost,
+		Observe:    loyalObserve,
+		Subject:    loyalSubject(),
+	}
+
+	// Direct call, no t.Run subtest, for the same reason the other negative
+	// tests above call the check* functions directly: a failing verdict here
+	// must not mark this test's own *testing.T failed as an unwanted side
+	// effect.
+	if err := contract.CheckScopeAccounting(t, cfg); err == nil {
+		t.Error("expected CheckScopeAccounting to fail against an adapter whose Provision leaves a declared non-sandbox scope unaccounted for in ScopeFindings, but it reported no error")
 	}
 }

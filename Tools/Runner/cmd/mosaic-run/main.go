@@ -25,6 +25,7 @@ import (
 	"mosaic-run/internal/artifact"
 	"mosaic-run/internal/cli"
 	"mosaic-run/internal/debuglog"
+	"mosaic-run/internal/dispatchlog"
 	"mosaic-run/internal/domain"
 	"mosaic-run/internal/harness"
 	"mosaic-run/internal/runscan"
@@ -76,6 +77,12 @@ func main() {
 	logger := debuglog.New(workDir)
 	defer logger.Close()
 
+	// Construct the process-level dispatch logger. One logger per process;
+	// records every subagent ProtocolRequest/ProtocolResponse pair as JSONL.
+	// File is created lazily on first use and closed via defer.
+	dispLogger := dispatchlog.New(workDir)
+	defer dispLogger.Close()
+
 	// CLI mode: pre-scan flags needed for dependency wiring before cobra parses them,
 	// then resolve run identity (run_id, run folder, is-new-run) before constructing
 	// the session. Resolving run identity here ensures the session's ArtifactStore is
@@ -116,8 +123,9 @@ func main() {
 		os.Exit(2)
 	}
 
-	// Associate the run_id with the log file now that identity is resolved.
+	// Associate the run_id with both log files now that identity is resolved.
 	logger.SetRunID(runIdentity.RunID)
+	dispLogger.SetRunID(runIdentity.RunID)
 
 	// Build the artifact store with the process logger so that path anomalies
 	// (non-absolute or non-run-scoped paths) are captured in the debug log.
@@ -127,9 +135,25 @@ func main() {
 	// Interaction (for per-step progress and notices) and writes to os.Stdout.
 	interact := cli.NewInteraction(os.Stdout)
 
+	// Pre-scan the GHCP CLI permission mode flag. Only relevant when
+	// --harness=ghcp-cli; ignored for other harnesses. The flag is optional;
+	// an absent or unrecognised value defaults to blanket mode inside buildAdapter.
+	ghcpPermissionMode := scanFlag(args, "--ghcp-permission-mode")
+
+	// FR-8: Reject a GHCP CLI run without a resolved mode before spawning.
+	// In CLI mode the flag must be supplied when the harness is ghcp-cli.
+	if harnessStr == commonharness.HarnessIDGHCPCLI && ghcpPermissionMode == "" {
+		fmt.Fprintf(os.Stderr, "error: --ghcp-permission-mode is required when --harness=ghcp-cli (accepted values: blanket, allowlist)\n")
+		os.Exit(2)
+	}
+	if ghcpPermissionMode != "" && ghcpPermissionMode != "blanket" && ghcpPermissionMode != "allowlist" {
+		fmt.Fprintf(os.Stderr, "error: --ghcp-permission-mode must be \"blanket\" or \"allowlist\", got %q\n", ghcpPermissionMode)
+		os.Exit(2)
+	}
+
 	// Build the harness adapter via buildAdapter, passing the process logger
 	// so that invocation I/O is captured in the debug log.
-	h := buildAdapter(harnessStr, claudePathStr, invocationTimeout, logger)
+	h := buildAdapter(harnessStr, claudePathStr, ghcpPermissionMode, invocationTimeout, logger)
 
 	// Extract the raw-JSON transport if the selected harness adapter implements it.
 	// Production adapters implement both HarnessAdapter and RawInvoker over the same
@@ -148,21 +172,22 @@ func main() {
 		ManualResolution: manualResolution,
 		PreConsultation:  preConsult,
 	}
-	routingDeps := buildDeps(cliSettings, rawInvoker, interact, artifact.NewApprovalReader())
+	routingDeps := buildDeps(cliSettings, rawInvoker, interact, artifact.NewApprovalReader(), dispLogger)
 
 	// Wire the session with the resolved run-scoped store and all port dependencies.
 	// The store path matches runIdentity.RunFolder, so session I/O and the COMPLETED
 	// marker write both target the same Orchestration-{run_id}/Orchestration.md file.
 	sess := session.New(session.Deps{
-		Harness:    h,
-		Store:      store,
-		Clock:      &realClock{},
-		Interact:   interact,
-		Debug:      logger,
-		Routing:    routingDeps.Routing,
-		Manual:     routingDeps.Manual,
-		PreConsult: routingDeps.PreConsult,
-		Approvals:  routingDeps.Approvals,
+		Harness:     h,
+		Store:       store,
+		Clock:       &realClock{},
+		Interact:    interact,
+		Debug:       logger,
+		DispatchLog: dispLogger,
+		Routing:     routingDeps.Routing,
+		Manual:      routingDeps.Manual,
+		PreConsult:  routingDeps.PreConsult,
+		Approvals:   routingDeps.Approvals,
 	})
 
 	// Pass the pre-resolved store and identity so that cli.Run skips its own
@@ -186,6 +211,11 @@ func runTUIMode(args []string) {
 	// runs more than once per process), ensuring exactly one log file per run.
 	logger := debuglog.New(workDir)
 	defer logger.Close()
+
+	// Construct the process-level dispatch logger once here, shared across all
+	// sessFactory calls, ensuring exactly one dispatch log file per process/run.
+	dispLogger := dispatchlog.New(workDir)
+	defer dispLogger.Close()
 
 	// Pre-scan --claude-path so it is available to the session factory.
 	claudePathTUI := scanFlag(args, "--claude-path")
@@ -218,7 +248,7 @@ func runTUIMode(args []string) {
 		if execPath == "" {
 			execPath = claudePathTUI
 		}
-		h := buildAdapter(cfg.Harness, execPath, cfg.Timeout, logger)
+		h := buildAdapter(cfg.Harness, execPath, cfg.GHCPCLIMode, cfg.Timeout, logger)
 
 		artifactPath, err := resolveTUIArtifactPath(runFolder)
 		if errors.Is(err, errUnresolvedRunFolder) {
@@ -245,18 +275,19 @@ func runTUIMode(args []string) {
 		// share one place where consultant selection is expressed. The orchestrator
 		// reference and routing table are not known here; they reach every consultant
 		// that implements domain.RunContextBinder later, on the session's run-start path.
-		routingDeps := buildDeps(cfg.Settings, rawInvoker, programRef, artifact.NewApprovalReader())
+		routingDeps := buildDeps(cfg.Settings, rawInvoker, programRef, artifact.NewApprovalReader(), dispLogger)
 
 		return session.New(session.Deps{
-			Harness:    h,
-			Store:      store,
-			Clock:      &realClock{},
-			Interact:   programRef,
-			Debug:      logger,
-			Routing:    routingDeps.Routing,
-			Manual:     routingDeps.Manual,
-			PreConsult: routingDeps.PreConsult,
-			Approvals:  routingDeps.Approvals,
+			Harness:     h,
+			Store:       store,
+			Clock:       &realClock{},
+			Interact:    programRef,
+			Debug:       logger,
+			DispatchLog: dispLogger,
+			Routing:     routingDeps.Routing,
+			Manual:      routingDeps.Manual,
+			PreConsult:  routingDeps.PreConsult,
+			Approvals:   routingDeps.Approvals,
 		})
 	}
 
@@ -272,12 +303,13 @@ func runTUIMode(args []string) {
 		os.Exit(1)
 	}
 
-	// Associate the run_id with the log file if identity is already resolved
+	// Associate the run_id with both log files if identity is already resolved
 	// (single-candidate auto-resume, --run flag, or --new-run flag). When
 	// identity is deferred to the run-select screen (multi-candidate), the
 	// run_id will be associated via a separate SetRunID call once selected.
 	if identity.RunID != "" {
 		logger.SetRunID(identity.RunID)
+		dispLogger.SetRunID(identity.RunID)
 	}
 
 	// Construct the initial session using the resolved identity (or placeholder for multi-candidate).
@@ -286,18 +318,24 @@ func runTUIMode(args []string) {
 
 	ctx := context.Background()
 	if err := tui.Run(ctx, initSess, tui.Options{
-		Interaction:      programRef,
-		Selection:        identity.Selection,
-		ScanResult:       identity.ScanResult,
-		ResolvedRunID:    identity.RunID,
-		IsNewRun:         identity.IsNewRun,
-		InitialRunFolder: identity.RunFolder,
-		SessionFactory:   sessFactory,
-		MintRunIdentity:  minter,
+		Interaction:            programRef,
+		Selection:              identity.Selection,
+		ScanResult:             identity.ScanResult,
+		ResolvedRunID:          identity.RunID,
+		IsNewRun:               identity.IsNewRun,
+		RecordedWorkflowID:     domain.WorkflowID(identity.Workflow),
+		InitialRunFolder:       identity.RunFolder,
+		SessionFactory:         sessFactory,
+		MintRunIdentity:        minter,
+		OrchestratorDiscoverer: harness.DiscoverOrchestrator,
 		ArtifactStoreFactory: func(runFolder string) domain.ArtifactStore {
 			return newLoggedArtifactStore(filepath.Join(runFolder, "Orchestration.md"), logger)
 		},
 		Clock: &realClock{},
+		OnRunIDResolved: func(runID string) {
+			logger.SetRunID(runID)
+			dispLogger.SetRunID(runID)
+		},
 	}); err != nil {
 		fmt.Fprintf(os.Stderr, "tui: %v\n", err)
 		os.Exit(1)
@@ -559,11 +597,6 @@ func hasPositionalArg(args []string) bool {
 	return false
 }
 
-// orchFileDir returns the directory containing the orchestrator file.
-func orchFileDir(orchFile string) string {
-	return filepath.Dir(orchFile)
-}
-
 // scanFlag does a minimal pre-scan of args for a named flag. It understands both
 // "--flag value" and "--flag=value" forms, consistent with cobra's flag parsing.
 func scanFlag(args []string, flag string) string {
@@ -619,11 +652,17 @@ func newLoggedArtifactStore(path string, logger domain.DebugLogger) domain.Artif
 // returned. Unknown values are not rejected here; cli.Run validates the
 // --harness flag and surfaces usage errors for unknown values (AC3.8).
 //
+// ghcpMode selects the GHCP CLI permission strategy when harnessStr is
+// "ghcp-cli". Accepted values are "blanket" and "allowlist". An empty or
+// unrecognised value defaults to GHCPCLIModeBlanket (preserving pre-Stage-4
+// behavior). The TUI path always supplies a resolved mode; the CLI path
+// resolves it from --ghcp-permission-mode.
+//
 // An optional logger may be passed as the last argument. When provided, the
 // CLI adapter is constructed with the logger so that invocation I/O is
 // captured in the debug log. When omitted, the adapter uses a no-op logger.
 // The fake adapter ignores the logger in all cases.
-func buildAdapter(harnessStr, claudePathStr string, timeout time.Duration, loggers ...domain.DebugLogger) domain.HarnessAdapter {
+func buildAdapter(harnessStr, claudePathStr, ghcpMode string, timeout time.Duration, loggers ...domain.DebugLogger) domain.HarnessAdapter {
 	var logger domain.DebugLogger = domain.NopDebugLogger{}
 	if len(loggers) > 0 && loggers[0] != nil {
 		logger = loggers[0]
@@ -655,7 +694,11 @@ func buildAdapter(harnessStr, claudePathStr string, timeout time.Duration, logge
 		if timeout <= 0 {
 			timeout = 30 * time.Minute
 		}
-		return harness.NewGHCPCLIAdapterWithLogger(exe, timeout, logger)
+		mode := commonharness.GHCPCLIPermissionMode(ghcpMode)
+		if mode != commonharness.GHCPCLIModeBlanket && mode != commonharness.GHCPCLIModePartialAllowlist {
+			mode = commonharness.GHCPCLIModeBlanket
+		}
+		return harness.NewGHCPCLIAdapterWithMode(exe, timeout, logger, mode)
 	default: // "fake" or unknown
 		return harness.NewFakeAdapter()
 	}

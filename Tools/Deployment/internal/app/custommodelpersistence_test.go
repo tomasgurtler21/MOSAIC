@@ -282,15 +282,76 @@ func TestDeployNew_SameCustomModelIDEnteredByTwoAgents_StoredOnlyOnceInUserConfi
 }
 
 // ---------------------------------------------------------------------------
+// Pre-answered agent models — NOT persisted as custom model IDs
+// ---------------------------------------------------------------------------
+
+// TestDeployNew_PreAnsweredAgentModels_CustomIDNotPersisted verifies that when an agent
+// model is pre-answered via AgentModels in the DeployRequest (not entered interactively
+// through Interaction), the model ID does NOT appear in UserConfig.CustomModelIDs after the
+// run. Pre-answered model IDs are caller-supplied overrides for this run only and must not
+// be treated as user-entered custom IDs eligible for persistence.
+//
+// This locks in the invariant that appendCustomID is only called from ans.Custom branches
+// in resolveModels — never from the pre-answer merge path. A pre-answered AgentModels value
+// bypasses the interactive SelectOne question and therefore never enters the ans.Custom path
+// that feeds accumulatedOptions and ultimately persistCustomModelIDs.
+func TestDeployNew_PreAnsweredAgentModels_CustomIDNotPersisted(t *testing.T) {
+	// Arrange — "pre-answered-agent-model-xyz" is supplied as a pre-answer for test-runner
+	// via AgentModels. No interaction is scripted for QAgentModel, confirming the pre-answer
+	// is used directly without going through the interactive ans.Custom branch.
+	stub := interactiontest.NewBuilder().
+		AnswerReview(true).
+		Build()
+	spy := &spyUserConfig{}
+	deps, workspace := newBaseDeps(t, stub)
+	deps.UserConfig = spy
+	svc := app.New(deps)
+
+	// Act
+	_, err := svc.DeployNew(context.Background(), app.DeployRequest{
+		HarnessID:       "stub-harness",
+		WorkspacePath:   workspace,
+		WorkflowIDs:     []string{"quick-fix"},
+		SkipAll:         map[domain.QuestionID]bool{domain.QTierModel: true},
+		AgentModels:     map[string]string{"test-runner": "pre-answered-agent-model-xyz"},
+		AutoConfirmPlan: true,
+	})
+	if err != nil {
+		t.Fatalf("DeployNew: %v", err)
+	}
+
+	// Assert — "pre-answered-agent-model-xyz" must NOT appear in any saved CustomModelIDs.
+	// Pre-answered agent models bypass the interactive ans.Custom branch in resolveModels
+	// and must not be accumulated into the custom IDs that are persisted to UserConfig.
+	for i, saved := range spy.saved {
+		ids := saved.CustomModelIDs["stub-harness"]
+		if containsCustomModelID(ids, "pre-answered-agent-model-xyz") {
+			t.Errorf("saved[%d].CustomModelIDs[\"stub-harness\"] = %v; "+
+				"want to NOT contain \"pre-answered-agent-model-xyz\" which was supplied as a "+
+				"pre-answer via AgentModels, not entered through interactive custom-ID input — "+
+				"only custom model IDs entered via ans.Custom are eligible for persistence (R1)", i, ids)
+		}
+	}
+}
+
+// ---------------------------------------------------------------------------
 // Update flow persistence
 // ---------------------------------------------------------------------------
 
-// TestUpdate_CustomModelIDs_PersistedAfterRun verifies that after an Update run, the
-// custom model IDs already stored in UserConfig.CustomModelIDs are preserved (not lost).
-// This requires the Update flow to call persistCustomModelIDs, which also ensures Save is
-// invoked so future Load calls include all accumulated custom IDs.
+// TestUpdate_CustomModelIDs_PersistedAfterRun verifies that when a new custom model ID is
+// entered interactively during an Update run, UserConfig.Save is called and the saved
+// config contains both the pre-existing custom model IDs (loaded from UserConfig before
+// the run) and the new ID entered during the run. persistCustomModelIDs merges
+// interactively-entered IDs with any IDs already in UserConfig so prior custom IDs are
+// never lost.
+//
+// Under R1 (interactive-only persistence), persistCustomModelIDs only calls Save when at
+// least one custom ID was entered via an interactive question during the current run. This
+// test scripts a QAgentModel custom answer to trigger that path; without an interactive
+// answer no Save occurs (the pre-existing IDs are unchanged and safe in UserConfig).
 func TestUpdate_CustomModelIDs_PersistedAfterRun(t *testing.T) {
-	// Arrange — seed UserConfig with a prior custom model ID.
+	// Arrange — seed UserConfig with a prior custom model ID and script a new custom ID
+	// entry via QAgentModel so that persistCustomModelIDs is triggered during the run.
 	spy := &spyUserConfig{
 		cfg: config.UserConfig{
 			CustomModelIDs: map[string][]string{
@@ -299,42 +360,39 @@ func TestUpdate_CustomModelIDs_PersistedAfterRun(t *testing.T) {
 		},
 	}
 	stub := interactiontest.NewBuilder().
-		AnswerReview(true).
+		AnswerSelectOneCustom(domain.QAgentModel, "test-runner", "new-custom-update-xyz").
 		Build()
 	deps, workspace := newBaseDeps(t, stub)
 	deps.UserConfig = spy
-	deps.Planner = &stubPlanner{plan: domain.Plan{
-		Mode:          domain.ModeUpdateWorkspace,
-		Harness:       minimalHarness,
-		WorkspacePath: workspace,
-		Scope:         domain.ScopeProject,
-		Items:         []domain.PlanItem{},
-		Workflows:     []string{"quick-fix"},
-	}}
 	svc := app.New(deps)
 
-	// Act
+	// Act — AddWorkflowIDs drives resolveModels to ask about model selection for the
+	// workflow's agents; SkipAll for QTierModel forces the per-agent QAgentModel path.
 	_, err := svc.Update(context.Background(), app.UpdateRequest{
 		HarnessID:       "stub-harness",
 		WorkspacePath:   workspace,
+		AddWorkflowIDs:  []string{"quick-fix"},
+		SkipAll:         map[domain.QuestionID]bool{domain.QTierModel: true},
 		AutoConfirmPlan: true,
 	})
 	if err != nil {
 		t.Fatalf("Update: %v", err)
 	}
 
-	// Assert — UserConfig.Save must have been called, and the last save must preserve
-	// the custom model IDs that existed before the Update run.
+	// Assert — Save must have been called because a custom ID was entered interactively,
+	// and the saved config must contain both the pre-existing and newly-entered IDs.
 	if len(spy.saved) == 0 {
 		t.Fatal("UserConfig.Save was not called during Update; " +
-			"the Update flow must call persistCustomModelIDs to preserve custom model IDs across runs")
+			"persistCustomModelIDs must call Save when a custom model ID is entered " +
+			"interactively during the run")
 	}
 	lastSave := spy.saved[len(spy.saved)-1]
 	ids := lastSave.CustomModelIDs["stub-harness"]
 	if !containsCustomModelID(ids, "prior-run-custom-model") {
 		t.Errorf("UserConfig.CustomModelIDs[\"stub-harness\"] = %v after Update; "+
 			"want to contain \"prior-run-custom-model\" that was set before the Update run; "+
-			"Update must not lose custom model IDs persisted by prior runs", ids)
+			"persistCustomModelIDs must merge interactively-entered IDs with pre-existing ones "+
+			"so prior custom model IDs are not lost", ids)
 	}
 }
 
@@ -379,6 +437,6 @@ func TestUpdate_NewCustomAgentModel_EnteredDuringRun_IsPersistedToUserConfig(t *
 		t.Errorf("UserConfig.CustomModelIDs[\"stub-harness\"] = %v after Update; "+
 			"want to contain \"update-run-new-custom-xyz\" entered during the Update run; "+
 			"new custom model IDs entered during an Update run must be persisted to UserConfig "+
-			"(AC1.5: persistence works identically for DeployNew and Update flows)", ids)
+			"(AC1.3: only custom model IDs entered interactively are persisted)", ids)
 	}
 }

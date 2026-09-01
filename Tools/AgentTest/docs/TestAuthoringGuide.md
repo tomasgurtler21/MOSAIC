@@ -50,16 +50,21 @@ tests/
       requirements.md
 ```
 
-Stub agent definitions are shared across suites and live in `Tools/AgentTest/agents/`:
+Stub agent definitions are shared across suites and live in the test catalogue at `Tools/AgentTest/catalog/Subagents/TestStubs/`. This includes both workflow agent stubs and infrastructure agent stubs — the deploy tool classifies agents by frontmatter fields, not by subdirectory:
 
 ```
 Tools/AgentTest/
-  agents/
-    README.md
-    researcher.md                # stub agent placeholder
-    planner.md
-    requirements-refinement.md
-    library-researcher.md
+  catalog/
+    Subagents/
+      TestStubs/
+        codebase-research.md
+        requirements-refinement.md
+        planner-tdd-soft.md
+        checkpoint-manager-git.md   # infrastructure agent stub
+        commit-manager-git.md       # infrastructure agent stub
+        orchestration-review.md     # infrastructure agent stub
+        checkpoint-restore-git.md   # infrastructure agent stub
+        ...
   tests/
     my-suite/
       ...
@@ -129,7 +134,13 @@ The simplest useful test — one dispatch, one assertion. Uses the `brownfield-t
 
 ```yaml
 schema_version: 1
-id: research-dispatch
+name: research-dispatch
+id: 1
+version: 1
+changelog:
+  - version: 1
+    date: "2026-01-01"
+    changes: "Initial version"
 description: >
   Orchestrator dispatches codebase-research as the first workflow step in brownfield-tdd.
 layer: orchestrator
@@ -139,6 +150,7 @@ subject:
   identity: orchestrator
   agent: orchestrator
   workflows: [brownfield-tdd]
+  infrastructure_agents: []
   opening_message: |
     Task: Add rate limiting to the API gateway in src/gateway/
     Workflow: brownfield-tdd
@@ -159,7 +171,35 @@ assertions:
       - { tool: dispatch, agent: codebase-research }
 ```
 
+Note: The `infrastructure_agents: []` field is **required** — omitting it is a parse error. Use an empty list when the test does not involve infrastructure agents.
+
 Note: The `opening_message` must include the fields the orchestrator requires to begin — task, workflow type, and checkpoints preference. Without these, the orchestrator prompts the user for configuration instead of dispatching.
+
+#### Fresh-Start vs Resume Opening Messages
+
+The `opening_message` framing determines whether the orchestrator initializes a new workflow or resumes from existing state. This distinction is critical when tests seed an `Orchestration.md` fixture:
+
+**Fresh-start** (no seeded Orchestration.md — testing the first dispatch):
+```yaml
+opening_message: |
+    Task: Add rate limiting to the API gateway
+    Workflow: brownfield-tdd
+    Checkpoints: disabled
+```
+
+**Resume** (seeded Orchestration.md — testing a mid-workflow routing decision):
+```yaml
+opening_message: |
+    Continue the existing workflow run. Read the Orchestration.md in the
+    run-scoped folder and resume from where it left off. Do not ask me any
+    further questions - proceed immediately and autonomously.
+```
+
+**Why this matters:** If you seed an Orchestration.md with prior execution state but use a fresh-start opening message, the orchestrator will overwrite the seeded file with a blank one and start from scratch — dispatching `codebase-research` instead of the agent your test expects. The harness prepends `run_id: {actual_run_id}` to every opening message, so the orchestrator can always derive the run-scoped folder path.
+
+Do NOT include Task/Workflow/Checkpoints fields in a resume message — those fields signal "new workflow" to the orchestrator and trigger the initialization path regardless of existing state.
+
+Note: `exact: true` with N declared steps is the normal shape for a single-decision test. `stop_after_invocations: N` terminates the subject immediately after it receives the Nth reply, so exactly N invocation-log entries are recorded and no phantom entry appears. Do not assert on `final_state`, `execution_log`, or `artifact_created` for artifacts the subject writes after receiving the final reply — the subject is terminated before it can complete that bookkeeping, and its absence is expected behaviour, not evidence corruption.
 
 ### Full Example
 
@@ -179,7 +219,16 @@ This test exercises the RESEARCH and PLANNING phases — five agents dispatched 
 
 ```yaml
 schema_version: 1
-id: research-planning-happy-path
+name: research-planning-happy-path
+id: 2
+version: 2
+changelog:
+  - version: 1
+    date: "2026-01-01"
+    changes: "Initial version covering RESEARCH phase only"
+  - version: 2
+    date: "2026-06-01"
+    changes: "Extended to cover PLANNING phase; added planner-tdd-soft and plan-review assertions"
 description: >
   Brownfield-tdd RESEARCH + PLANNING phases: codebase-research -> requirements-refinement
   -> requirements-review -> planner-tdd-soft -> plan-review, all returning SUCCESS.
@@ -191,6 +240,7 @@ subject:
   identity: orchestrator
   agent: orchestrator
   workflows: [brownfield-tdd]
+  infrastructure_agents: []
   opening_message: |
     Task: Add rate limiting to the API gateway in src/gateway/
     Workflow: brownfield-tdd
@@ -200,28 +250,6 @@ subject:
   allowed_tools: [Task, Read, Write, Edit]
 
 stub_registry: research-planning-happy-path.stubs.json
-
-stub_agents:
-  - identity:
-      tool: dispatch
-      agent: codebase-research
-    source: ../../agents/codebase-research.md
-  - identity:
-      tool: dispatch
-      agent: requirements-refinement
-    source: ../../agents/requirements-refinement.md
-  - identity:
-      tool: dispatch
-      agent: requirements-review
-    source: ../../agents/requirements-review.md
-  - identity:
-      tool: dispatch
-      agent: planner-tdd-soft
-    source: ../../agents/planner-tdd-soft.md
-  - identity:
-      tool: dispatch
-      agent: plan-review
-    source: ../../agents/plan-review.md
 
 timeout: 15m
 turn_limit: 60
@@ -236,17 +264,6 @@ assertions:
       - { tool: dispatch, agent: requirements-review }
       - { tool: dispatch, agent: planner-tdd-soft }
       - { tool: dispatch, agent: plan-review }
-  final_state:
-    phase: PLANNING
-    last_status: SUCCESS
-  execution_log:
-    agent_ids:
-      - "codebase-research#1"
-      - "requirements-refinement#2"
-      - "requirements-review#3"
-      - "planner-tdd-soft#4"
-      - "plan-review#5"
-    all_status: SUCCESS
   artifact_created:
     - Orchestration-{run_id}/Research.md
     - Orchestration-{run_id}/Requirements.md
@@ -276,7 +293,10 @@ assertions:
 | Field | Required | Type | Notes |
 |-------|----------|------|-------|
 | `schema_version` | No | int | Always `1` |
-| `id` | Yes | string | Unique test identifier |
+| `name` | Yes | string | Human-readable display name for the test. This is what the stub registry's `test_id` field must match |
+| `id` | Yes | int | Stable numeric identity, positive, unique across all test definitions in the repository. Never changes even if `name` changes |
+| `version` | Yes | int | Content version. Start at `1`; increment when assertions, stubs, fixtures, or seed files change |
+| `changelog` | Yes | list | Version history. Must contain at least one entry whose `version` field matches the top-level `version` field |
 | `description` | No | string | Human-readable description |
 | `layer` | Yes | string | `orchestrator` or `subagent` |
 | `negative` | No | bool | Default `false`. When `true`, assertion outcomes are inverted (except echo fidelity) |
@@ -287,7 +307,7 @@ assertions:
 | `turn_limit` | No | int | Max LLM turns |
 | `repetitions` | No | int | Override suite-level repetitions |
 | `pass_rate` | No | float | Override suite-level pass rate |
-| `stop_after_invocations` | No | int | Force-stop after N collaborator dispatches |
+| `stop_after_invocations` | No | int | Force-stop after N collaborator dispatches. Termination fires immediately after the subject receives the Nth reply. Use `exact: true` with exactly N declared steps as the normal single-decision shape. Do not assert on `final_state`, `execution_log`, or artifacts the subject writes after receiving reply N — those may be absent. |
 | `seed_files` | No | list | Files to place in sandbox before run |
 | `parallel_groups` | No | list | Declare which collaborators may run concurrently |
 | `assertions` | No | object | What to verify after the run |
@@ -299,6 +319,7 @@ assertions:
 | `identity` | Yes | string | The subject's identity name |
 | `agent` | Yes | string | Catalogue agent key used for deployment |
 | `workflows` | No | list of strings | Workflow IDs to inject. `null`/absent = all, `[]` = none, `["id"]` = exactly these |
+| `infrastructure_agents` | **Yes** | list of strings | Infrastructure agent IDs to deploy. `[]` = none (region stays empty), `["id"]` = exactly these. **Absent field is a parse error** — every test must declare this explicitly |
 | `opening_message` | Yes | string | The initial message the subject receives |
 | `invocation_kind` | Yes | string | `orchestrator` or `subagent` |
 | `model` | No | string | Model identifier for the subject (e.g. `sonnet`, `claude-sonnet-4-5`) |
@@ -340,6 +361,40 @@ assertions:
 When `negative: true`, every assertion's pass/fail outcome is **inverted after evaluation** — a test that would normally fail now passes, and vice versa. This is for testing that the orchestrator does *not* do something under specific conditions.
 
 Exception: **echo fidelity** is never inverted. A negative test cannot "expect" the tool's own echo mechanism to be broken.
+
+### Versioning Discipline
+
+Every test definition has a `version` (content version) and a `changelog` (version history). These track what changed in the test itself, independent of the test tool or schema format.
+
+**`version` vs `schema_version`:**
+- `schema_version` is the format version — always `1`, incremented only when the test definition schema changes. You do not control this.
+- `version` is the content version — starts at `1`, incremented by you when the test's assertions, stubs, fixtures, or seed files change.
+
+**When to bump `version`:**
+
+Bump `version` and add a changelog entry when you modify any of these:
+- Assertions (adding, removing, or changing `invocation_sequence`, `task_messages`, `final_state`, etc.)
+- The stub registry file referenced by the test
+- Fixture files referenced by `seed_files` or stub side effects
+- Seed file paths or content
+
+Do not bump `version` for cosmetic edits (whitespace, comment changes, description rewording) that do not affect what the test asserts.
+
+**Changelog format:**
+
+Each `changelog` entry has three fields:
+```yaml
+changelog:
+  - version: 2
+    date: "2026-06-15"
+    changes: "Added task_messages assertion for the plan-review invocation"
+```
+
+At least one entry must have a `version` that matches the top-level `version` field. Additional entries document prior versions. Keep entries in descending version order (newest first) by convention.
+
+**Why versioning matters:**
+
+The test results storage system records `test_version` alongside each run's results. When you bump a test's version after changing its assertions, stored results from the old version are flagged as potentially stale by the summary generator — they were measured against a different set of assertions. This lets you distinguish "this test was always passing" from "this test passed before we made it stricter."
 
 ---
 
@@ -461,7 +516,7 @@ A complete stub registry for the brownfield-tdd RESEARCH+PLANNING happy-path tes
 | Field | Required | Type | Notes |
 |-------|----------|------|-------|
 | `schema_version` | No | int | Always `1` |
-| `test_id` | Yes | string | Must match the test definition's `id` |
+| `test_id` | Yes | string | Must match the test definition's `name` field (the human-readable display name, not the numeric `id`) |
 | `on_unmatched` | Yes | string | `"halt"`, `"passthrough"`, or `"generic-response"` |
 | `generic_response` | Conditional | object | Required when `on_unmatched` is `"generic-response"` |
 | `stubs` | Yes | array | The stub entries |
@@ -613,28 +668,50 @@ assertions:
     - Orchestration-{run_id}/Plan.md
 ```
 
-`{run_id}` is expanded in stub side effect paths (`side_effects.create_files[].path`) — the interception pipeline replaces the placeholder with the actual run ID before writing files. Stub response JSON (`response` object) is returned verbatim to the orchestrator without expansion, since the orchestrator manages its own run ID internally.
+`{run_id}` is expanded by the interception pipeline in three places:
+
+1. **Stub side-effect paths** (`side_effects.create_files[].path`) — before writing files.
+2. **Stub side-effect content** (`side_effects.create_files[].content`) — before materialising inline content.
+3. **Stub response JSON** (`response` object fields) — before returning the response to the orchestrator.
+
+Always use `"{run_id}"` for the `run_id` field in stub responses, not a hardcoded literal. The orchestrator can validate that the echoed `run_id` matches its own, and a mismatch causes nondeterministic re-dispatch.
 
 ---
 
 ## Stub Agent Definitions
 
-Stub agent definitions are placeholder `.md` files in `Tools/AgentTest/agents/`. They exist solely to make a dispatch "legal" from the harness's perspective — the harness needs an agent file to exist for the dispatch target. **All actual behavior comes from the stub registry, not from these files.**
+Stub agent definitions live in the test catalogue at `Tools/AgentTest/catalog/Subagents/TestStubs/`. They exist solely to make a dispatch "legal" from the harness's perspective — the harness needs an agent file to exist for the dispatch target. **All actual behavior comes from the stub registry, not from these files.**
+
+When using the `--catalog-folder` deployment path (see Design.md §3), all agents referenced by the test workflow are deployed from the test catalogue in a single `mosaic-deploy deploy` call. Individual `stub_agents` entries in the test definition are not needed — the catalogue contains the stub definitions.
 
 ### When You Need One
 
-You need a stub agent definition when your test's `stub_agents` list references a collaborator. If the collaborator already has a definition in `agents/`, reuse it. If not, create one.
+You need a stub agent definition when a test workflow references an agent that does not yet have a file in `catalog/Subagents/TestStubs/`. All 11 agents from the `brownfield-tdd` workflow already have stubs. If your test uses a custom workflow with a new agent name, create a stub for it.
 
 ### File Format
 
-Stub agent definitions are minimal — just enough for the deployment tool's validation to pass:
+Stub agent definitions follow the standard generic-form agent structure with echo instructions:
 
 ```markdown
-# stub: <agent-key>
-# Placeholder generic-form stub agent definition.
-# This file exists so preflight's os.Stat check passes for stub_agents entries
-# that reference this collaborator. The deployment tool renders it when Deploy
-# is wired; the os.Stat check is the only check run when Deploy is nil.
+---
+id: {next-available-id}
+version: 1.0.0
+name: {agent-name}
+description: Test stub standing in for the {agent-name} collaborator
+role: subagent
+model: "{model-identifier}"
+recommended_tier: TEST-STUB
+tier_rationale: Test stub receiving cheap model via shared TEST-STUB tier mapping
+tools: []
+---
+
+<Identity type="core">
+# {Agent Display Name} — Test Echo Agent
+
+You are a test echo agent in an automated test scenario. Your only job is exact reproduction.
+
+When you receive a prompt asking you to respond with specific content, reproduce that content exactly as given. Do not add commentary, explanation, formatting, or wrapping. Do not modify, summarize, or interpret the content. Output only the requested content and nothing else.
+</Identity>
 ```
 
 ### Naming Convention
@@ -642,34 +719,19 @@ Stub agent definitions are minimal — just enough for the deployment tool's val
 File name = `<agent-key>.md`, where `<agent-key>` matches the `agent` field of the collaborator identity. Use the exact agent key from the workflow table's `Subagent` column:
 
 ```
-agents/codebase-research.md          -> matches agent: codebase-research
-agents/requirements-refinement.md    -> matches agent: requirements-refinement
-agents/requirements-review.md        -> matches agent: requirements-review
-agents/planner-tdd-soft.md           -> matches agent: planner-tdd-soft
-agents/plan-review.md                -> matches agent: plan-review
-agents/implementation-tdd.md         -> matches agent: implementation-tdd
-agents/test-runner.md                -> matches agent: test-runner
-```
-
-### Referencing from Test Definitions
-
-The `source` path is relative to the test definition file:
-
-```yaml
-stub_agents:
-  - identity:
-      tool: dispatch
-      agent: codebase-research
-    source: ../../agents/codebase-research.md
-  - identity:
-      tool: dispatch
-      agent: requirements-refinement
-    source: ../../agents/requirements-refinement.md
+catalog/Subagents/TestStubs/codebase-research.md          -> matches agent: codebase-research
+catalog/Subagents/TestStubs/requirements-refinement.md    -> matches agent: requirements-refinement
+catalog/Subagents/TestStubs/requirements-review.md        -> matches agent: requirements-review
+catalog/Subagents/TestStubs/planner-tdd-soft.md           -> matches agent: planner-tdd-soft
+catalog/Subagents/TestStubs/plan-review.md                -> matches agent: plan-review
+catalog/Subagents/TestStubs/implementation-tdd.md         -> matches agent: implementation-tdd
+catalog/Subagents/TestStubs/implementation-review.md      -> matches agent: implementation-review
+catalog/Subagents/TestStubs/test-runner.md                -> matches agent: test-runner
 ```
 
 ### ID Assignment
 
-Each stub agent file carries a numeric ID unique within the `agents/` directory. See `agents/README.md` for the current assignment table. When adding a new stub, assign the next available integer.
+Each stub agent file carries a numeric ID unique within the `TestStubs/` directory. When adding a new stub, assign the next available integer.
 
 ### Current Inventory
 
@@ -679,6 +741,111 @@ Each stub agent file carries a numeric ID unique within the `agents/` directory.
 | 2 | `researcher.md` | `researcher` |
 | 3 | `library-researcher.md` | `library-researcher` |
 | 4 | `planner.md` | `planner` |
+| 5 | `codebase-research.md` | `codebase-research` |
+| 6 | `requirements-review.md` | `requirements-review` |
+| 7 | `planner-tdd-soft.md` | `planner-tdd-soft` |
+| 8 | `plan-review.md` | `plan-review` |
+| 9 | `contracts-designer.md` | `contracts-designer` |
+| 10 | `contracts-review.md` | `contracts-review` |
+| 11 | `test-writer-tdd.md` | `test-writer-tdd` |
+| 12 | `tests-review-tdd.md` | `tests-review-tdd` |
+| 13 | `implementation-tdd.md` | `implementation-tdd` |
+| 14 | `implementation-review.md` | `implementation-review` |
+| 15 | `test-runner.md` | `test-runner` |
+| 16 | `checkpoint-manager-git.md` | `checkpoint-manager-git` |
+| 17 | `commit-manager-git.md` | `commit-manager-git` |
+| 18 | `orchestration-review.md` | `orchestration-review` |
+| 19 | `checkpoint-restore-git.md` | `checkpoint-restore-git` |
+| 20 | `orchestration-review-interval-10.md` | `orchestration-review-interval-10` |
+| 21 | `infra-phase-end.md` | `infra-phase-end` |
+| 22 | `restore-stage-end.md` | `restore-stage-end` |
+| 23 | `orchestration-review-interval-3.md` | `orchestration-review-interval-3` |
+| 24 | `checkpoint-stage-end-only.md` | `checkpoint-stage-end-only` |
+
+Infrastructure agent stubs (IDs 16-19) live in the same `TestStubs/` directory — the deploy tool classifies them by frontmatter (`infrastructure`, `triggers`, `on_failure` fields), not by subdirectory. Variant stubs (IDs 20+) are test-specific configurations with different trigger parameters. See the [Infrastructure Agent Stubs](#infrastructure-agent-stubs) section below.
+
+---
+
+## Infrastructure Agent Stubs
+
+Infrastructure agents fire on trigger conditions (not workflow routing) and perform orchestration-support work such as checkpointing and periodic review. They are declared in the orchestrator's `<InfrastructureAgents>` region, which the deploy tool populates from agent frontmatter when infrastructure agent IDs are specified.
+
+### Default Set
+
+The test catalogue ships four infrastructure agent stubs in `catalog/Subagents/TestStubs/`, alongside the workflow agent stubs. They mirror the production agents with production-equivalent triggers:
+
+| ID | File | Agent Key | Class | Triggers | On Failure |
+|----|------|-----------|-------|----------|------------|
+| 16 | `checkpoint-manager-git.md` | `checkpoint-manager-git` | `checkpoint` | STAGE_END, INVOCATION_INTERVAL(10) | halt |
+| 17 | `commit-manager-git.md` | `commit-manager-git` | `commit` | STAGE_END | continue |
+| 18 | `orchestration-review.md` | `orchestration-review` | `review` | INVOCATION_INTERVAL(30) | continue |
+| 19 | `checkpoint-restore-git.md` | `checkpoint-restore-git` | `restore` | MANUAL | halt |
+
+These stubs use the same echo-agent body as workflow stub agents — all actual response behaviour comes from the stub registry. The infrastructure-specific frontmatter fields (`infrastructure`, `triggers`, `on_failure`) are what the deploy tool reads to assemble the `<InfrastructureAgent>` declaration block in the orchestrator.
+
+### Using Infrastructure Agents in Tests
+
+Declare the agents you need in `subject.infrastructure_agents`:
+
+```yaml
+subject:
+  agent: orchestrator
+  workflows: [brownfield-tdd]
+  infrastructure_agents: [checkpoint-manager-git, commit-manager-git]
+  # ...
+```
+
+Each listed agent must have a stub registry entry in `.stubs.json` so the interception pipeline knows what to return when the orchestrator dispatches it. Infrastructure agent dispatches consume sequence numbers and appear in the invocation log just like workflow agent dispatches.
+
+### Creating Trigger Variants
+
+The default stubs carry production-equivalent triggers, but tests often need different trigger configurations. For example:
+
+- **I-2** tests `INVOCATION_INTERVAL` — production uses interval 10, but a test with `stop_after_invocations: 3` needs interval 2 to fire within the test's lifespan.
+- **I-5** tests `PHASE_END` — no production agent uses this trigger, so a synthetic test-only agent is needed.
+
+Create variant stubs directly in `catalog/Subagents/TestStubs/` with descriptive names:
+
+```markdown
+---
+id: 20
+version: 1.0.0
+name: checkpoint-interval-3
+description: Test variant — checkpoint agent with INVOCATION_INTERVAL(3) for short tests
+role: subagent
+model: "{model-identifier}"
+recommended_tier: TEST-STUB
+tier_rationale: Test stub receiving cheap model via shared TEST-STUB tier mapping
+tools: []
+infrastructure: checkpoint
+triggers:
+  - trigger: INVOCATION_INTERVAL
+    trigger_param: 3
+on_failure: halt
+---
+
+<Identity type="core">
+# CheckpointInterval3 — Test Echo Agent
+
+You are a test echo agent in an automated test scenario. Your only job is exact reproduction.
+
+When you receive a prompt asking you to respond with specific content, reproduce that content exactly as given. Do not add commentary, explanation, formatting, or wrapping. Do not modify, summarize, or interpret the content. Output only the requested content and nothing else.
+</Identity>
+```
+
+The agent name is arbitrary — it is the `infrastructure` class field that classifies the agent, not the name. A test references the variant by its name:
+
+```yaml
+infrastructure_agents: [checkpoint-interval-3]
+```
+
+**Guidelines for variants:**
+
+- Keep the echo-agent body identical across all variants — only frontmatter differs.
+- Use descriptive names that encode the variant's purpose: `checkpoint-interval-3`, `infra-phase-end`, `checkpoint-stage-end-only`.
+- Assign the next available ID in `TestStubs/` (continuing from 19).
+- Variants are cheap — one file per configuration. Create as many as your tests need.
+- A gated class (checkpoint, commit, restore) allows at most one active agent per class. Two agents of the same gated class in `infrastructure_agents` is a deployment error.
 
 ---
 
@@ -716,7 +883,7 @@ assertions:
       - { tool: dispatch, agent: planner-tdd }
 ```
 
-When `exact: true`, the observed sequence must contain exactly these steps and nothing else. When `exact: false`, these steps must appear as a subsequence of the observed sequence (other dispatches may appear between them).
+When `exact: true`, the observed sequence must contain exactly these steps and nothing else. This is the normal shape for tests that use `stop_after_invocations: N` — declare exactly N steps with `exact: true`, and the assertion matches the pipeline's record precisely. When `exact: false`, these steps must appear as a subsequence of the observed sequence (other dispatches may appear between them).
 
 ### `final_state`
 
@@ -813,6 +980,24 @@ assertions:
 
 **Artifact assertions** follow set semantics: every `required_*` entry must be present, each `optional_*` entry may be. Anything present that is in neither list fails the assertion.
 
+#### Artifact Path Leniency
+
+The orchestrator sometimes includes extra artifacts beyond the workflow table's declared set (e.g., stage sub-plans alongside the top-level Plan.md), or uses glob-style paths like `Stage-*/Plan.md`. It may also inconsistently omit the `Orchestration-{run_id}/` prefix from artifact paths, passing bare names like `Stage-1/Plan.md` instead of the fully-qualified `Orchestration-{run_id}/Stage-1/Plan.md`.
+
+When your test's purpose is **routing correctness** (did the orchestrator dispatch the right agent?), not artifact path hygiene, handle these variations pragmatically:
+
+- Put the core routing-relevant artifacts in `required_*` (e.g., the review findings file that proves On Findings routing was used)
+- Put predictable but non-essential extras in `optional_*` (e.g., stage plans the planner also produces)
+- When the orchestrator inconsistently prefixes paths, list both forms in `optional_*`:
+
+```yaml
+optional_input_artifacts:
+  - Orchestration-{run_id}/Stage-1/Plan.md   # fully-qualified form
+  - Stage-1/Plan.md                           # bare form (orchestrator sometimes omits prefix)
+```
+
+This keeps the test focused on its routing assertion while tolerating LLM variance in path formatting. If you want to separately assert path correctness, write a dedicated test for that concern.
+
 **`task_description_contains`** checks that each listed substring appears somewhere in the task description of the invocation message.
 
 ### Echo Fidelity (Automatic)
@@ -850,17 +1035,7 @@ A good test scenario: "When `requirements-review` returns `COMPLETED_NEEDS_ACTIO
 
 ### 3. Create Stub Agent Definitions (if needed)
 
-Check `Tools/AgentTest/agents/` for existing stubs. If your test dispatches a collaborator that does not have a stub file yet, create one:
-
-```markdown
-# stub: requirements-review
-# Placeholder generic-form stub agent definition.
-# This file exists so preflight's os.Stat check passes for stub_agents entries
-# that reference this collaborator. The deployment tool renders it when Deploy
-# is wired; the os.Stat check is the only check run when Deploy is nil.
-```
-
-Add it to the ID assignment table in `agents/README.md`.
+Check `Tools/AgentTest/catalog/Subagents/TestStubs/` for existing stubs. All 11 `brownfield-tdd` agents already have stubs (IDs 5-15). If your test uses a custom workflow with agent names not yet in the catalogue, create a stub following the format in the [Stub Agent Definitions](#stub-agent-definitions) section and assign the next available ID.
 
 ### 4. Write the Stub Registry
 
@@ -983,13 +1158,29 @@ current_state:
 </WorkflowNotes>
 ```
 
+### 5b. Assign a Numeric ID
+
+Before writing the test definition, check the repository for the highest numeric `id` already in use across all `.test.yaml` files and use the next available integer. Numeric IDs must be unique across the entire repository, not just within your suite.
+
+```bash
+grep -r "^id:" Tools/AgentTest/tests/ --include="*.test.yaml"
+```
+
+Pick the next unused integer. Once assigned, never reuse a numeric ID even if the test is deleted — numeric IDs are stable identifiers for the results storage system.
+
 ### 6. Write the Test Definition
 
 Create `my-routing-tests/findings-reroute.test.yaml`:
 
 ```yaml
 schema_version: 1
-id: findings-reroute
+name: findings-reroute
+id: 25
+version: 1
+changelog:
+  - version: 1
+    date: "2026-01-15"
+    changes: "Initial version"
 description: >
   COMPLETED_NEEDS_ACTION from requirements-review should route back to
   requirements-refinement per the On Findings column, not forward to
@@ -1001,6 +1192,7 @@ subject:
   identity: orchestrator
   agent: orchestrator
   workflows: [brownfield-tdd]
+  infrastructure_agents: []
   opening_message: |
     Task: Add rate limiting to the API gateway in src/gateway/
     Workflow: brownfield-tdd
@@ -1010,19 +1202,6 @@ subject:
   allowed_tools: [Task, Read, Write, Edit]
 
 stub_registry: findings-reroute.stubs.json
-stub_agents:
-  - identity:
-      tool: dispatch
-      agent: codebase-research
-    source: ../../agents/codebase-research.md
-  - identity:
-      tool: dispatch
-      agent: requirements-refinement
-    source: ../../agents/requirements-refinement.md
-  - identity:
-      tool: dispatch
-      agent: requirements-review
-    source: ../../agents/requirements-review.md
 
 timeout: 10m
 turn_limit: 30
@@ -1286,7 +1465,11 @@ The parser validates thoroughly and reports every problem it finds (it does not 
 
 | Code | Meaning | Fix |
 |------|---------|-----|
-| `missing-required-field` | A required field like `id` or `test_id` is absent | Add the field |
+| `missing-required-field` | A required field is absent. For test definitions: `name` (display name), `id` (numeric), `version`, or `changelog`. For stub registries: `test_id`. For suites: `id` | Add the missing field |
+| `non-positive-id` | The numeric `id` field is zero or negative | Set `id` to a positive integer unique across all test definitions in the repository |
+| `non-positive-version` | The `version` field is zero or negative | Set `version` to a positive integer; new tests start at `1` |
+| `missing-changelog-match` | No `changelog` entry has a `version` that matches the top-level `version` | Add a changelog entry whose `version` field matches the top-level `version` |
+| `duplicate-numeric-id` | Two test definitions in the same suite run share the same numeric `id` | Each test definition must have a unique numeric `id` across the entire repository |
 | `unknown-field` | A top-level key is not recognized | Check for typos. The format is strict — only documented fields are allowed |
 | `malformed-document` | YAML/JSON parse failure | Fix syntax |
 | `malformed-field` | A field value is wrong type/format (e.g. `timeout: "not-a-duration"`) | Fix the value |

@@ -1,5 +1,5 @@
 ---
-version: 0.1
+version: 0.2
 name: Knowledge Base Correction Workflow
 description: Apply known corrections to an existing knowledge base. Input is user-provided correction instructions in Requirements.md — could be pasted verification findings, direct feedback, or change descriptions.
 hint: "Theoretical — no confirmed real use. Its niche may be narrower than it looks: kb-generation already refreshes an existing KB and flags drift on re-run, and in practice a planner can often fold small doc corrections into a normal feature plan without a dedicated pass. Consider whether generation's own refresh path already covers your case before reaching for this."
@@ -13,15 +13,15 @@ artifacts:
   - KBProgress.md
 ---
 
-<Workflow type="core" name="kb-correction" version="0.1">
+<Workflow type="core" name="kb-correction" version="0.2">
 ## Knowledge Base Correction Workflow
 
 **Use when:** Apply known corrections to an existing knowledge base. Input is user-provided correction instructions in Requirements.md — could be pasted verification findings, direct feedback, or change descriptions. Generator navigates existing KB via KnowledgeBase/Index.md, determines what needs updating, and applies corrections.
 
 | Phase | Subagent | HITL | On Success | On Findings | Input | Output |
 |-------|----------|:----:|------------|-------------|-------|--------|
-| EXECUTION.[StageNumber] | knowledge-base-generator(update) | ✅ | knowledge-base-index-assembler | - | Requirements.md | KBProgress.md |
-| COMPLETION | knowledge-base-index-assembler | ❌ | COMPLETE | - | KBProgress.md | KBProgress.md |
+| EXECUTION.[StageNumber] | knowledge-base-generator(update) | TRUE | knowledge-base-index-assembler | - | Requirements.md | KBProgress.md |
+| COMPLETION | knowledge-base-index-assembler | FALSE | COMPLETE | - | KBProgress.md | KBProgress.md |
 
 **EXECUTION Stages:** First invocation reads Requirements.md and existing KB structure (KnowledgeBase/Index.md), creates KBProgress.md with one stage per KB document that needs updating. Subsequent stages update one KB document each.
 
@@ -47,6 +47,7 @@ Its actual necessity is unclear. `kb-generation` already handles refreshing an e
 | Version | Date | Author | Summary |
 |---------|------|--------|---------|
 | 0.1 | 2026-08-17 | MOSAIC | Changelog tracking begins here; earlier revisions predate this record. |
+| 0.2 | 2026-08-26 | MOSAIC | Replace Unicode emoji with ASCII tokens in HITL column (TRUE/FALSE). |
 
 ---
 

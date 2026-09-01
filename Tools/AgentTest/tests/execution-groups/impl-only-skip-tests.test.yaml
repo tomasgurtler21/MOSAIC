@@ -1,0 +1,76 @@
+schema_version: 1
+name: impl-only-skip-tests
+id: 51
+version: 1
+changelog:
+  - version: 1
+    date: "2026-01-01"
+    changes: "Initial."
+description: >
+  Scenario E-2. Stage 1 has Approach = Implementation-Only in Plan.md. The
+  orchestrator must skip test-writer-tdd and tests-review-tdd entirely and
+  dispatch implementation-tdd as the first EXECUTION agent for this stage.
+
+layer: orchestrator
+negative: false
+
+subject:
+  identity: orchestrator
+  agent: orchestrator
+  workflows: [brownfield-tdd]
+  infrastructure_agents: []
+  opening_message: |
+    Continue the existing workflow run. Read the Orchestration.md in the
+    run-scoped folder and resume from where it left off. Do not ask me any
+    further questions - proceed immediately and autonomously.
+  invocation_kind: orchestrator
+  allowed_tools: [Read, Write, Edit, Bash, Glob, Grep, Task]
+
+stub_registry: impl-only-skip-tests.stubs.json
+
+timeout: 10m
+turn_limit: 5
+stop_after_invocations: 1
+
+seed_files:
+  - path: Orchestration-{run_id}/Orchestration.md
+    ref: design-complete.md
+  - path: Orchestration-{run_id}/Research.md
+    ref: Research.md
+  - path: Orchestration-{run_id}/Requirements.md
+    ref: Requirements.md
+  - path: Orchestration-{run_id}/Plan.md
+    ref: Plan-impl-only.md
+  - path: Orchestration-{run_id}/Stage-1/Plan.md
+    ref: Stage-1-Plan.md
+  - path: Orchestration-{run_id}/Stage-1/PlanProgress.md
+    ref: Stage-1-PlanProgress.md
+  - path: Orchestration-{run_id}/Stage-2/Plan.md
+    ref: Stage-2-Plan.md
+  - path: Orchestration-{run_id}/Stage-2/PlanProgress.md
+    ref: Stage-2-PlanProgress.md
+  - path: Orchestration-{run_id}/ContractsDesign.md
+    ref: ContractsDesign.md
+  - path: Orchestration-{run_id}/plan-review.md
+    ref: plan-review.md
+  - path: Orchestration-{run_id}/contracts-review.md
+    ref: contracts-review.md
+  - path: Orchestration-{run_id}/requirements-review.md
+    ref: requirements-review.md
+
+assertions:
+  invocation_sequence:
+    exact: true
+    steps:
+      - { tool: dispatch, agent: implementation-tdd }
+
+  task_messages:
+    # Dispatch 1: implementation-tdd directly (skipping test-writer-tdd and tests-review-tdd)
+    - at: 1
+      identity: { tool: dispatch, agent: implementation-tdd }
+      human_in_the_loop: false
+      required_input_artifacts:
+        - Orchestration-{run_id}/Stage-1/Plan.md
+        - Orchestration-{run_id}/ContractsDesign.md
+      optional_input_artifacts:
+        - Orchestration-{run_id}/Stage-1/PlanProgress.md

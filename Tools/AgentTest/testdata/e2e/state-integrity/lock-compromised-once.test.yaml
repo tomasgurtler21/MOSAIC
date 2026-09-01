@@ -1,5 +1,11 @@
 schema_version: 1
-id: lock-compromised-once
+name: lock-compromised-once
+id: 45
+version: 1
+changelog:
+  - version: 1
+    date: "2026-01-01"
+    changes: "Initial."
 description: >
   The scripted subject dispatches one collaborator. The sandbox's run-state
   lock is compromised before the first interception runs, causing a
@@ -13,6 +19,7 @@ negative: false
 subject:
   identity: standin-subject
   agent: standin-subject
+  infrastructure_agents: []
   opening_message: |
     Greet the one collaborator.
   invocation_kind: subagent

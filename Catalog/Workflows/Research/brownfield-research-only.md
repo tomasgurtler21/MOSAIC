@@ -1,5 +1,5 @@
 ---
-version: "0.1"
+version: "0.2"
 name: "Brownfield Research Only Workflow"
 description: "Exploration, feasibility studies, or codebase analysis for an existing codebase without implementation."
 hint: "Never used for real research work as far as known — its practical value has been as the simplest possible real workflow (one phase, one subagent, one HITL gate) to smoke-test that the orchestrator itself works end-to-end, distinct from the MosaicTest harness-conformance fixtures."
@@ -11,7 +11,7 @@ artifacts:
   - Research.md
 ---
 
-<Workflow type="core" name="brownfield-research-only" version="0.1">
+<Workflow type="core" name="brownfield-research-only" version="0.2">
 ## Brownfield Research Only Workflow
 
 > **Version:** 0.1
@@ -20,7 +20,7 @@ artifacts:
 
 | Phase | Subagent | HITL | On Success | On Findings | Input | Output |
 |-------|----------|:----:|------------|-------------|-------|--------|
-| RESEARCH | codebase-research | ✅ | COMPLETE | - | - | Research.md |
+| RESEARCH | codebase-research | TRUE | COMPLETE | - | - | Research.md |
 
 **Notes:**
 - **Brownfield** = existing codebase to analyze
@@ -40,6 +40,7 @@ Structurally trivial by design: one phase, one subagent (`codebase-research`), o
 | Version | Date | Author | Summary |
 |---------|------|--------|---------|
 | 0.1 | 2026-08-17 | MOSAIC | Changelog tracking begins here; earlier revisions predate this record. |
+| 0.2 | 2026-08-26 | MOSAIC | Replace Unicode emoji with ASCII tokens in HITL column (TRUE/FALSE). |
 
 ---
 

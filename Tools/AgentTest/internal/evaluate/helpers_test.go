@@ -75,7 +75,7 @@ func plainMessage(agentInstanceID string) domain.TaskMessage {
 func baseDefinition() domain.TestDefinition {
 	return domain.TestDefinition{
 		SchemaVersion: 1,
-		ID:            "example",
+		Name:          "example",
 		Layer:         domain.LayerSubagent,
 	}
 }
@@ -83,7 +83,7 @@ func baseDefinition() domain.TestDefinition {
 // baseKey is the RunKey every builder below uses, so tests can assert
 // Evaluate carries it through unchanged.
 func baseKey() domain.RunKey {
-	return domain.RunKey{RunID: "run-1", TestID: "example", RunNumber: 1}
+	return domain.RunKey{RunID: "run-1", TestName: "example", RunNumber: 1}
 }
 
 // baseEvidence is a minimal, internally consistent, otherwise-clean run: one

@@ -5,6 +5,7 @@ description: Tool-light fixture for golden file tests — exercises skill-maps-t
 model: Claude Sonnet 4.6
 tools: ['read/readFile', 'edit/createFile', 'edit/editFiles', 'search/fileSearch', 'search/textSearch', 'search/listDirectory', 'vscode/askQuestions']
 disable-model-invocation: false
+user-invocable: false
 mosaic_harness_version: 3.0.0
 mosaic_role: subagent
 mosaic_version: 1.0.0

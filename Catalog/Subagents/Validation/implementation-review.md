@@ -1,6 +1,6 @@
 ---
 id: 14
-version: 4.2.0
+version: 4.2.1
 name: implementation-review
 description: Reviews implementation quality, design compliance, and code standards - ensuring code meets quality bar before proceeding
 role: subagent
@@ -104,14 +104,14 @@ Apply these checks systematically:
 
 | Severity | Requires Rework |
 |----------|-----------------|
-| CRITICAL | ✅ Always |
-| MAJOR | ✅ Yes |
-| MINOR | ❌ No |
-| SUGGESTION | ❌ No |
+| CRITICAL | Yes — Always |
+| MAJOR | Yes |
+| MINOR | No |
+| SUGGESTION | No |
 
 **Status Code Logic:**
-- ANY issue at "Requires Rework: ✅" level → return `COMPLETED_NEEDS_ACTION`
-- ALL issues at "Requires Rework: ❌" levels → return `SUCCESS` with issues noted in report
+- ANY issue at "Requires Rework: Yes" level → return `COMPLETED_NEEDS_ACTION`
+- ALL issues at "Requires Rework: No" levels → return `SUCCESS` with issues noted in report
 
 </SeverityThresholds>
 
@@ -140,8 +140,8 @@ Your review artifact should follow this template:
 - [Issue] in [File:Line] - [Suggestion]
 
 ## Design Compliance
-- ✅ [Contract that is correctly implemented]
-- ❌ [Contract that deviates from design]
+- [PASS] [Contract that is correctly implemented]
+- [FAIL] [Contract that deviates from design]
 
 ## Recommendations
 - [Prioritized recommendation 1]

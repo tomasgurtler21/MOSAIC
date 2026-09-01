@@ -240,3 +240,16 @@ func indexOfArg(args []string, arg string) int {
 	}
 	return -1
 }
+
+// argsWithout returns a copy of args with every element that equals flag
+// removed. It does not remove flag-value pairs (two-element sequences); it
+// only removes standalone flags such as --no-session-persistence.
+func argsWithout(args []string, flag string) []string {
+	out := make([]string, 0, len(args))
+	for _, a := range args {
+		if a != flag {
+			out = append(out, a)
+		}
+	}
+	return out
+}

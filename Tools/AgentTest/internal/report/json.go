@@ -24,10 +24,15 @@ type wireResult struct {
 	Counts                 map[string]int   `json:"counts"`
 	TotalCost              wireCost         `json:"total_cost"`
 	InfrastructureFailures int              `json:"infrastructure_failures"`
+
+	// CatalogFolder is the agent catalog directory used for this run.
+	// Additive-only: new field, never removed or retyped.
+	CatalogFolder string `json:"catalog_folder"`
 }
 
 type wireTestReport struct {
-	TestID      string          `json:"test_id"`
+	TestName    string          `json:"test_name"` // human-readable display name (renamed from test_id string)
+	TestID      int             `json:"test_id"`   // stable numeric identity
 	Description string          `json:"description"`
 	Layer       string          `json:"layer"`
 	Aggregate   wireAggregate   `json:"aggregate"`
@@ -35,16 +40,28 @@ type wireTestReport struct {
 }
 
 type wireAggregate struct {
-	TestID                string   `json:"test_id"`
-	Verdict               string   `json:"verdict"`
-	Reasons               []string `json:"reasons"`
-	Counted               int      `json:"counted"`
-	Passed                int      `json:"passed"`
-	Excluded              int      `json:"excluded"`
-	PassRate              float64  `json:"pass_rate"`
-	RequiredPassRate      float64  `json:"required_pass_rate"`
-	InfrastructureFailure bool     `json:"infrastructure_failure"`
-	TotalCost             wireCost `json:"total_cost"`
+	TestName              string            `json:"test_name"` // human-readable display name (renamed from test_id string)
+	TestID                int               `json:"test_id"`   // stable numeric identity
+	Verdict               string            `json:"verdict"`
+	Reasons               []string          `json:"reasons"`
+	Counted               int               `json:"counted"`
+	Passed                int               `json:"passed"`
+	Excluded              int               `json:"excluded"`
+	PassRate              float64           `json:"pass_rate"`
+	RequiredPassRate      float64           `json:"required_pass_rate"`
+	InfrastructureFailure bool              `json:"infrastructure_failure"`
+	TotalCost             wireCost          `json:"total_cost"`
+	// Exclusions describes every run excluded from the denominator, in the
+	// order the runs were attempted. Always an array, never null.
+	Exclusions            []wireExcludedRun `json:"exclusions"`
+}
+
+// wireExcludedRun is the stable wire shape for one excluded run.
+type wireExcludedRun struct {
+	Key               wireRunKey `json:"key"`
+	Reason            string     `json:"reason"`
+	TerminationReason string     `json:"termination_reason"`
+	Detail            string     `json:"detail"`
 }
 
 type wireRunReport struct {
@@ -76,6 +93,22 @@ type wireRunReport struct {
 	// on. Always present; the literal "unknown" when no model was recorded.
 	SubjectModel string `json:"subject_model"`
 	StubModel    string `json:"stub_model"`
+
+	// HarnessID names the harness adapter that produced this run. Always
+	// present; the literal "unknown" when no harness identity was recorded.
+	HarnessID string `json:"harness_id"`
+
+	// TerminationReason names why this run ended. Always present; the literal
+	// "unknown" when no disposition was recorded.
+	TerminationReason string `json:"termination_reason"`
+
+	// TestVersion is the content version of the test definition this run
+	// exercised. Zero means the value was not recorded.
+	TestVersion int `json:"test_version"`
+
+	// TestID (numeric) is the stable numeric identity of the test definition
+	// this run exercised. Zero means the value was not recorded.
+	TestID int `json:"test_id"`
 }
 
 // wireSubjectFailure is what a subject that exited non-zero told us.
@@ -89,7 +122,7 @@ type wireSubjectFailure struct {
 
 type wireRunKey struct {
 	RunID     string `json:"run_id"`
-	TestID    string `json:"test_id"`
+	TestName  string `json:"test_name"` // human-readable display name (renamed from test_id string)
 	RunNumber int    `json:"run_number"`
 }
 
@@ -140,6 +173,7 @@ func toWireResult(r Result) wireResult {
 		Counts:                 counts,
 		TotalCost:              toWireCost(r.TotalCost),
 		InfrastructureFailures: r.InfrastructureFailures,
+		CatalogFolder:          r.CatalogFolder,
 	}
 }
 
@@ -149,7 +183,8 @@ func toWireTestReport(t TestReport) wireTestReport {
 		runs = append(runs, toWireRunReport(run))
 	}
 	return wireTestReport{
-		TestID:      t.TestID,
+		TestName:    t.TestName,
+		TestID:      t.NumericID,
 		Description: t.Description,
 		Layer:       string(t.Layer),
 		Aggregate:   toWireAggregate(t.Aggregate),
@@ -158,8 +193,22 @@ func toWireTestReport(t TestReport) wireTestReport {
 }
 
 func toWireAggregate(a domain.AggregateResult) wireAggregate {
+	exclusions := make([]wireExcludedRun, 0, len(a.Exclusions))
+	for _, e := range a.Exclusions {
+		exclusions = append(exclusions, wireExcludedRun{
+			Key: wireRunKey{
+				RunID:     e.Key.RunID,
+				TestName:  e.Key.TestName,
+				RunNumber: e.Key.RunNumber,
+			},
+			Reason:            string(e.Reason),
+			TerminationReason: e.TerminationReason,
+			Detail:            e.Detail,
+		})
+	}
 	return wireAggregate{
-		TestID:                a.TestID,
+		TestName:              a.TestName,
+		TestID:                a.NumericID,
 		Verdict:               string(a.Verdict),
 		Reasons:               reasonStrings(a.Reasons),
 		Counted:               a.Counted,
@@ -169,6 +218,7 @@ func toWireAggregate(a domain.AggregateResult) wireAggregate {
 		RequiredPassRate:      a.RequiredPassRate,
 		InfrastructureFailure: a.InfrastructureFailure,
 		TotalCost:             toWireCost(a.TotalCost),
+		Exclusions:            exclusions,
 	}
 }
 
@@ -185,7 +235,7 @@ func toWireRunReport(r RunReport) wireRunReport {
 	return wireRunReport{
 		Run: wireRunKey{
 			RunID:     r.Key.RunID,
-			TestID:    r.Key.TestID,
+			TestName:  r.Key.TestName,
 			RunNumber: r.Key.RunNumber,
 		},
 		Verdict:             string(r.Verdict),
@@ -200,6 +250,10 @@ func toWireRunReport(r RunReport) wireRunReport {
 		SubjectVersion:      subjectVersionOrUnknown(r.SubjectVersion),
 		SubjectModel:        subjectVersionOrUnknown(r.SubjectModel),
 		StubModel:           subjectVersionOrUnknown(r.StubModel),
+		HarnessID:           subjectVersionOrUnknown(r.HarnessID),
+		TerminationReason:   subjectVersionOrUnknown(r.TerminationReason),
+		TestVersion:         r.TestVersion,
+		TestID:              r.NumericID,
 	}
 }
 

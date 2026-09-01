@@ -47,6 +47,10 @@ func Evaluate(ev domain.RunEvidence) domain.TestResult {
 			SubjectVersion:      ev.SubjectVersion,
 			SubjectModel:        ev.SubjectModel,
 			StubModel:           ev.StubModel,
+			HarnessID:           ev.HarnessID,
+			TerminationReason:   string(ev.SubjectResult.Disposition),
+			Version:             ev.Definition.Version,
+			NumericID:           ev.Definition.NumericID,
 		}
 	}
 
@@ -83,11 +87,13 @@ func Evaluate(ev domain.RunEvidence) domain.TestResult {
 	// something was declared.
 	vacuousAssertions := assertionsDeclared(ev.Definition.Assertions) && len(assertions) == 0
 
+	echoFidelityMode := domain.EffectiveEchoFidelity(ev.Definition.Settings)
+
 	var reasons []domain.FailureReason
 	if assertionFailed || vacuousAssertions {
 		reasons = append(reasons, domain.ReasonAssertion)
 	}
-	if echoFailed {
+	if echoFailed && echoFidelityMode != domain.EchoFidelityAdvisory {
 		reasons = append(reasons, domain.ReasonEchoMismatch)
 	}
 	if stateIntegrity {
@@ -119,6 +125,10 @@ func Evaluate(ev domain.RunEvidence) domain.TestResult {
 		SubjectVersion:      ev.SubjectVersion,
 		SubjectModel:        ev.SubjectModel,
 		StubModel:           ev.StubModel,
+		HarnessID:           ev.HarnessID,
+		TerminationReason:   string(ev.SubjectResult.Disposition),
+		Version:             ev.Definition.Version,
+		NumericID:           ev.Definition.NumericID,
 	}
 }
 
@@ -152,13 +162,18 @@ func hasRunEvent(records []domain.LogRecord, kind domain.RunEventKind) bool {
 // NeedsRetry reports whether a result is an infrastructure fault the caller
 // should retry rather than count. Pure predicate, so the retry rule is
 // testable without a runner.
+//
+// True for two cases, both of which are evidence about the tool's environment
+// rather than about the subject:
+//
+//   - the state-integrity failure reason: a run whose lock was reclaimed may
+//     rest on lost state;
+//   - the spawn-failed subject disposition: the harness process exited
+//     non-zero, so the subject may never have run at all.
+//
+// NeedsRetry(r) is true exactly when ExclusionOf(r) is non-empty.
 func NeedsRetry(r domain.TestResult) bool {
-	for _, reason := range r.Reasons {
-		if reason == domain.ReasonStateIntegrity {
-			return true
-		}
-	}
-	return false
+	return ExclusionOf(r) != ""
 }
 
 // findConditionDetail returns the Detail of the first condition matching kind,

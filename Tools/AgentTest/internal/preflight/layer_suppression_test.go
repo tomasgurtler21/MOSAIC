@@ -26,11 +26,18 @@ import (
 
 const orchestratorLayerProtocolViolationsDefinition = `
 schema_version: 1
-id: happy-path
+name: happy-path
+id: 1
+version: 1
+changelog:
+  - version: 1
+    date: "2026-01-01"
+    changes: "Initial."
 layer: orchestrator
 subject:
   identity: orchestrator
   agent: orchestrator
+  infrastructure_agents: []
 stub_registry: happy-path.stubs.json
 stub_agents:
   - identity:
@@ -43,11 +50,18 @@ assertions:
 
 const subagentLayerProtocolViolationsDefinition = `
 schema_version: 1
-id: happy-path
+name: happy-path
+id: 1
+version: 1
+changelog:
+  - version: 1
+    date: "2026-01-01"
+    changes: "Initial."
 layer: subagent
 subject:
   identity: researcher
   agent: researcher
+  infrastructure_agents: []
 stub_registry: happy-path.stubs.json
 stub_agents:
   - identity:
@@ -60,11 +74,18 @@ assertions:
 
 const integrationLayerProtocolViolationsDefinition = `
 schema_version: 1
-id: happy-path
+name: happy-path
+id: 1
+version: 1
+changelog:
+  - version: 1
+    date: "2026-01-01"
+    changes: "Initial."
 layer: integration
 subject:
   identity: orchestrator
   agent: orchestrator
+  infrastructure_agents: []
 stub_registry: happy-path.stubs.json
 stub_agents:
   - identity:

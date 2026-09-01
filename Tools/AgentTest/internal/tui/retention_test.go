@@ -38,64 +38,61 @@ func TestNewModel_Retention_StartsAtOptionsRetention(t *testing.T) {
 	}
 }
 
-// TestSuiteSelect_Space_CyclesTheRetentionPolicy drives the chosen toggle
-// affordance through a full cycle and back to its start, so the mapping
-// from repeated toggles to domain.RetentionPolicy values is pinned exactly.
-func TestSuiteSelect_Space_CyclesTheRetentionPolicy(t *testing.T) {
+// TestSettings_Space_CyclesTheRetentionPolicy verifies that ScreenRetention
+// cycles through the full sequence Never → OnFailure → Always → Never when
+// Space is pressed repeatedly, and that each confirmed value is reflected by
+// Model.Retention() after confirming the entire settings flow.
+func TestSettings_Space_CyclesTheRetentionPolicy(t *testing.T) {
 	o := newFixtureOptions([]string{"suite-a.yaml"}, newFakeSuiteRunner())
 	o.Retention = domain.RetainNever
 
 	m := NewModel(o)
-	if m.Screen() != ScreenSuiteSelect {
-		t.Fatalf("initial Screen() = %q, want %q", m.Screen(), ScreenSuiteSelect)
+
+	// Navigate to ScreenRetention.
+	m = advanceToSettingsFlow(t, m)
+	if m.Screen() != ScreenRetention {
+		t.Fatalf("Screen() after Enter = %q, want %q", m.Screen(), ScreenRetention)
 	}
 
+	// Space cycles: RetainNever → RetainOnFailure.
 	m, _ = safeUpdate(t, m, keyMsg(" "))
-	if got := m.Retention(); got != domain.RetainOnFailure {
-		t.Errorf("Retention() after one toggle = %q, want %q", got, domain.RetainOnFailure)
+	// Space again: RetainOnFailure → RetainAlways.
+	m, _ = safeUpdate(t, m, keyMsg(" "))
+	// Space again: RetainAlways → RetainNever.
+	m, _ = safeUpdate(t, m, keyMsg(" "))
+
+	// Confirm RetainNever on ScreenRetention and advance through the remaining
+	// screens to verify the final confirmed value reaches Retention().
+	m, cmd := advanceThroughSettingsToProgress(t, m)
+	if cmd != nil {
+		_ = runCmd(t, cmd)
 	}
 
-	m, _ = safeUpdate(t, m, keyMsg(" "))
-	if got := m.Retention(); got != domain.RetainAlways {
-		t.Errorf("Retention() after two toggles = %q, want %q", got, domain.RetainAlways)
-	}
-
-	m, _ = safeUpdate(t, m, keyMsg(" "))
 	if got := m.Retention(); got != domain.RetainNever {
-		t.Errorf("Retention() after three toggles = %q, want %q (back to the start)", got, domain.RetainNever)
+		t.Errorf("Retention() after three Space presses (back to start) = %q, want %q", got, domain.RetainNever)
 	}
 }
 
-// TestSuiteSelect_ToggledRetention_ReachesTheStartedRun is a regression test
-// for the gap implementation-review#105 found: the toggle changing what
-// Model.Retention() reports and what the screen renders while the value the
-// started run actually executed under stayed fixed at construction. It
-// exercises the whole path ContractsDesign.md's Retention affordance
-// contract names ("The value Model.Retention() holds when the suite starts
-// is the suite.Options.Retention the TUI passes. There is no second path.")
-// by toggling the policy away from the invocation's starting value and then
-// starting the run, asserting on what the SuiteRunner actually received
-// rather than only on Model.Retention()'s own fold.
-func TestSuiteSelect_ToggledRetention_ReachesTheStartedRun(t *testing.T) {
+// TestSettings_ToggledRetention_ReachesTheStartedRun verifies that a
+// retention value changed on ScreenRetention reaches the SuiteRunner when the
+// run starts. This exercises the full path: Space twice on ScreenRetention to
+// reach RetainAlways, then complete the remaining screens and assert the
+// runner received RetainAlways.
+func TestSettings_ToggledRetention_ReachesTheStartedRun(t *testing.T) {
 	runner := newFakeSuiteRunner()
 	o := newFixtureOptions([]string{"suite-a.yaml"}, runner)
 	o.Retention = domain.RetainNever
 
 	m := NewModel(o)
 
-	// Toggle twice: RetainNever -> RetainOnFailure -> RetainAlways. The run
-	// must start under RetainAlways, not under the RetainNever the model was
-	// constructed with.
-	m, _ = safeUpdate(t, m, keyMsg(" "))
-	m, _ = safeUpdate(t, m, keyMsg(" "))
-	if got := m.Retention(); got != domain.RetainAlways {
-		t.Fatalf("Retention() after two toggles = %q, want %q", got, domain.RetainAlways)
-	}
+	// Navigate to ScreenRetention and cycle twice:
+	// RetainNever → RetainOnFailure → RetainAlways.
+	m = advanceToSettingsFlow(t, m)
+	m, _ = safeUpdate(t, m, keyMsg(" ")) // Never → OnFailure
+	m, _ = safeUpdate(t, m, keyMsg(" ")) // OnFailure → Always
 
-	m, cmd := safeUpdate(t, m, keyMsg("\r")) // enter: start the selected suite
-	if m.Screen() != ScreenProgress {
-		t.Fatalf("Screen() after starting the suite = %q, want %q", m.Screen(), ScreenProgress)
-	}
+	// Complete the remaining settings screens and start the suite.
+	m, cmd := advanceThroughSettingsToProgress(t, m)
 	msg := runCmd(t, cmd)
 	if msg == nil {
 		t.Fatalf("starting the suite produced no tea.Cmd to await the run")
@@ -106,6 +103,6 @@ func TestSuiteSelect_ToggledRetention_ReachesTheStartedRun(t *testing.T) {
 		t.Fatalf("SuiteRunner.Run was never called")
 	}
 	if got := runner.gotRetention; got != domain.RetainAlways {
-		t.Errorf("SuiteRunner.Run received retention %q, want %q (the toggled on-screen value at the moment the run started, not Options.Retention)", got, domain.RetainAlways)
+		t.Errorf("SuiteRunner.Run received retention %q, want %q (the value cycled on ScreenRetention must reach the run)", got, domain.RetainAlways)
 	}
 }

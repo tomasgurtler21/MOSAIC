@@ -26,6 +26,12 @@ type Input struct {
 	// Overrides applied on top of suite defaults, from CLI flags.
 	Overrides Overrides
 
+	// CatalogFolder is the process-wide default catalog folder resolved
+	// by the composition root (WiringConfig.CatalogFolder). Preflight
+	// resolves Overrides.CatalogFolder against this to produce
+	// Plan.CatalogFolder.
+	CatalogFolder string
+
 	// Capabilities are the selected adapter's declared capabilities, supplied
 	// by the composition root. Preflight decides on these values alone; no
 	// harness name reaches a decision here.
@@ -53,6 +59,23 @@ type Input struct {
 	// rather than a constant so a test can assert the value the port received.
 	// Supplied by the composition root alongside Deploy.
 	DeployScratchRoot string
+
+	// MosaicRootProvenance is the human-readable description of which
+	// configuration tier produced the MosaicRoot value passed to the
+	// deployment tool. It is embedded in delegate-tool failure diagnostics
+	// so the user can identify which configuration to change.
+	// Supplied by the composition root.
+	MosaicRootProvenance string
+
+	// ResolverFactory constructs a per-document Resolver. When non-nil,
+	// preflight uses it to build a resolver rooted at each referencing
+	// document's own directory: checkSeedFileRefs calls factory(defDir) and
+	// checkSideEffectRefs calls factory(filepath.Dir(regPath)).
+	//
+	// When nil, preflight falls back to a single Resolver built from
+	// FixtureRoot (backward compatibility for callers that do not supply a
+	// factory).
+	ResolverFactory fixtures.ResolverFactory
 }
 
 // Overrides are CLI-flag-sourced values applied on top of a suite's
@@ -73,6 +96,15 @@ type Overrides struct {
 	// and means the stubs run on the subject's model.
 	SubjectModel string
 	StubModel    string
+
+	// CatalogFolder, when non-nil, overrides the process-wide default
+	// catalog folder for the run about to start. The pointed-to string
+	// is an absolute path to the catalog directory. A nil pointer means
+	// "use the process-wide default from WiringConfig.CatalogFolder".
+	//
+	// This follows the same pointer-means-override convention as
+	// Repetitions, Timeout, and TurnLimit.
+	CatalogFolder *string
 }
 
 // Plan is a fully resolved, cross-validated set of tests ready to run. It is
@@ -80,6 +112,13 @@ type Overrides struct {
 type Plan struct {
 	Suite domain.TestSuite
 	Tests []ResolvedTest
+
+	// CatalogFolder is the resolved catalog folder for this run: the
+	// override from Overrides.CatalogFolder if set, otherwise the
+	// process-wide default from Input.CatalogFolder (the WiringConfig
+	// value threaded through Input). The composition root uses this to
+	// decide whether a per-run deployer is needed.
+	CatalogFolder string
 }
 
 // ResolvedTest is one test definition plus its stub registry and the
@@ -113,6 +152,14 @@ func Validate(in Input) (Plan, authoring.Report) {
 	var report authoring.Report
 	var plan Plan
 
+	// Resolve CatalogFolder unconditionally, before any early return.
+	// Every returned Plan -- even one accompanying a non-empty Report
+	// (e.g. the missing-suite early return) -- carries a resolved value.
+	plan.CatalogFolder = in.CatalogFolder
+	if in.Overrides.CatalogFolder != nil {
+		plan.CatalogFolder = *in.Overrides.CatalogFolder
+	}
+
 	suiteData, err := os.ReadFile(in.SuitePath)
 	if err != nil {
 		report.Add(authoring.Diagnostic{
@@ -128,18 +175,30 @@ func Validate(in Input) (Plan, authoring.Report) {
 	report.Merge(suiteReport)
 	plan.Suite = suite
 
-	resolver, err := fixtures.NewResolver(in.FixtureRoot)
-	if err != nil {
-		report.Add(authoring.Diagnostic{
-			Severity: authoring.SeverityError,
-			Code:     "invalid-fixture-root",
-			Path:     in.FixtureRoot,
-			Message:  err.Error(),
-		})
-		resolver = nil
+	// When a ResolverFactory is supplied, per-document resolvers are built
+	// inside the per-test loop (where the document directory is known). When
+	// no factory is supplied, fall back to a single resolver built from
+	// FixtureRoot for backward compatibility with callers that do not set it.
+	var fallbackResolver fixtures.Resolver
+	if in.ResolverFactory == nil {
+		r, err := fixtures.NewResolver(in.FixtureRoot)
+		if err != nil {
+			report.Add(authoring.Diagnostic{
+				Severity: authoring.SeverityError,
+				Code:     "invalid-fixture-root",
+				Path:     in.FixtureRoot,
+				Message:  err.Error(),
+			})
+		} else {
+			fallbackResolver = r
+		}
 	}
 
 	suiteDir := filepath.Dir(in.SuitePath)
+
+	// seenNumericIDs accumulates numeric definition IDs across all parsed
+	// definitions in this run to detect cross-file duplicates.
+	seenNumericIDs := make(map[int]string)
 
 	for i, entry := range suite.Entries {
 		defPath := filepath.Join(suiteDir, filepath.FromSlash(entry.Path))
@@ -158,6 +217,22 @@ func Validate(in Input) (Plan, authoring.Report) {
 		def, defReport := authoring.ParseTestDefinition(authoring.Source{Path: defPath, Data: defData})
 		report.Merge(defReport)
 		defDir := filepath.Dir(defPath)
+
+		// Cross-definition duplicate numeric ID check. A zero NumericID means
+		// parsing failed or validation already rejected it; skip the check to
+		// avoid double-reporting a definition whose ID is already broken.
+		if def.NumericID > 0 {
+			if firstPath, dup := seenNumericIDs[def.NumericID]; dup {
+				report.Add(authoring.Diagnostic{
+					Severity: authoring.SeverityError,
+					Code:     "duplicate-numeric-id",
+					Path:     defPath,
+					Message:  fmt.Sprintf("duplicate numeric id %d: also used by %q", def.NumericID, firstPath),
+				})
+			} else {
+				seenNumericIDs[def.NumericID] = defPath
+			}
+		}
 
 		var registry domain.StubRegistry
 		var regPath string
@@ -188,13 +263,13 @@ func Validate(in Input) (Plan, authoring.Report) {
 				report.Merge(regReport)
 				haveRegistry = true
 
-				if registry.TestID != "" && registry.TestID != def.ID {
+				if registry.TestID != "" && registry.TestID != def.Name {
 					report.Add(authoring.Diagnostic{
 						Severity: authoring.SeverityError,
 						Code:     "test-id-mismatch",
 						Path:     regPath,
 						Pointer:  "test_id",
-						Message:  fmt.Sprintf("stub registry test_id %q does not match test definition id %q", registry.TestID, def.ID),
+						Message:  fmt.Sprintf("stub registry test_id %q does not match test definition name %q", registry.TestID, def.Name),
 					})
 				}
 			}
@@ -202,14 +277,63 @@ func Validate(in Input) (Plan, authoring.Report) {
 
 		if haveRegistry {
 			ids := registryIdentities(registry)
-			checkCollaboratorsKnown(&report, defPath, def, ids)
+			// checkDispatchToolsProducible validates that every collaborator
+			// identity in the stub registry uses a tool name the selected
+			// harness can produce. Only registry stubs are checked here;
+			// stub_agents entries are excluded because their producibility is
+			// validated when the deployment tool renders them, not here.
 			checkDispatchToolsProducible(&report, regPath, ids, in.Capabilities)
+
+			// checkCollaboratorsKnown validates that every collaborator an
+			// assertion names is declared somewhere in the fixture.
+			// stub_agents entries are explicitly declared collaborators even
+			// when they carry no response stub (the on_unmatched policy
+			// governs what happens at runtime). Add them so that assertions
+			// naming a passthrough-only collaborator are not rejected.
+			known := make(map[domain.CollaboratorIdentity]bool, len(ids)+len(def.StubAgents))
+			for id := range ids {
+				known[id] = true
+			}
+			for _, sa := range def.StubAgents {
+				known[sa.Identity] = true
+			}
+			checkCollaboratorsKnown(&report, defPath, def, known)
 		}
 
-		if resolver != nil {
-			checkSeedFileRefs(&report, resolver, defPath, def)
+		if in.ResolverFactory != nil {
+			// Per-document resolution: build a resolver rooted at the
+			// test definition's own directory for seed file refs, and a
+			// resolver rooted at the stub registry's own directory for
+			// side-effect refs.
+			defResolver, factoryErr := in.ResolverFactory(defDir)
+			if factoryErr != nil {
+				report.Add(authoring.Diagnostic{
+					Severity: authoring.SeverityError,
+					Code:     "invalid-fixture-root",
+					Path:     defDir,
+					Message:  factoryErr.Error(),
+				})
+			} else {
+				checkSeedFileRefs(&report, defResolver, defPath, def)
+			}
 			if haveRegistry {
-				checkSideEffectRefs(&report, resolver, regPath, registry)
+				regDir := filepath.Dir(regPath)
+				regResolver, factoryErr := in.ResolverFactory(regDir)
+				if factoryErr != nil {
+					report.Add(authoring.Diagnostic{
+						Severity: authoring.SeverityError,
+						Code:     "invalid-fixture-root",
+						Path:     regDir,
+						Message:  factoryErr.Error(),
+					})
+				} else {
+					checkSideEffectRefs(&report, regResolver, regPath, registry)
+				}
+			}
+		} else if fallbackResolver != nil {
+			checkSeedFileRefs(&report, fallbackResolver, defPath, def)
+			if haveRegistry {
+				checkSideEffectRefs(&report, fallbackResolver, regPath, registry)
 			}
 		}
 
@@ -256,7 +380,7 @@ func addEnvironmentDiagnostics(report *authoring.Report, env domain.EnvironmentR
 	}
 }
 
-// filterByTestIDs restricts tests to those whose Definition.ID is named in
+// filterByTestIDs restricts tests to those whose Definition.Name is named in
 // ids, preserving order. An empty ids leaves tests untouched: every test
 // runs unless a subset was explicitly declared. Cross-file validation above
 // still covers every entry regardless of this filter, so an authoring error
@@ -271,7 +395,7 @@ func filterByTestIDs(tests []ResolvedTest, ids []string) []ResolvedTest {
 	}
 	filtered := make([]ResolvedTest, 0, len(tests))
 	for _, t := range tests {
-		if wanted[t.Definition.ID] {
+		if wanted[t.Definition.Name] {
 			filtered = append(filtered, t)
 		}
 	}
@@ -530,6 +654,9 @@ func mergeSettings(base, override domain.RunSettings) domain.RunSettings {
 	if override.StopAfterInvocations != nil {
 		result.StopAfterInvocations = override.StopAfterInvocations
 	}
+	if override.EchoFidelity != nil {
+		result.EchoFidelity = override.EchoFidelity
+	}
 	return result
 }
 
@@ -707,13 +834,24 @@ func checkDeploymentDeclarations(report *authoring.Report, defPath, defDir strin
 					addDeployToolProblem(report, renderErr)
 					return
 				}
-				report.Add(authoring.Diagnostic{
-					Severity: authoring.SeverityError,
-					Code:     "unrenderable-stub-definition",
-					Path:     defPath,
-					Pointer:  fmt.Sprintf("stub_agents[%d].source", si),
-					Message:  fmt.Sprintf("stub definition %q failed dry-run render: %v", sa.SourcePath, renderErr),
-				})
+				var re *agentdeploy.RenderError
+				if errors.As(renderErr, &re) {
+					report.Add(DelegateToolDiagnostic(FailureContext{
+						Operation:      "stub definition dry-run render",
+						Provenance:     in.MosaicRootProvenance,
+						DiagnosticCode: "unrenderable-stub-definition",
+						Path:           defPath,
+						Pointer:        fmt.Sprintf("stub_agents[%d].source", si),
+					}, re))
+				} else {
+					report.Add(authoring.Diagnostic{
+						Severity: authoring.SeverityError,
+						Code:     "unrenderable-stub-definition",
+						Path:     defPath,
+						Pointer:  fmt.Sprintf("stub_agents[%d].source", si),
+						Message:  fmt.Sprintf("stub definition %q failed dry-run render: %v", sa.SourcePath, renderErr),
+					})
+				}
 			}
 		}
 	}
@@ -730,11 +868,12 @@ func checkDeploymentDeclarations(report *authoring.Report, defPath, defDir strin
 // reason codes that Deploy never produces.
 func checkSubjectDeploy(report *authoring.Report, defPath string, def domain.TestDefinition, in Input) {
 	_, err := in.Deploy.Deploy(context.Background(), domain.DeployRequest{
-		HarnessID:     in.HarnessID,
-		WorkspaceRoot: in.DeployScratchRoot,
-		Workflows:     def.Subject.Workflows,
-		TierModels:    preflightTierModelMap(def.Subject),
-		DryRun:        true,
+		HarnessID:              in.HarnessID,
+		WorkspaceRoot:          in.DeployScratchRoot,
+		Workflows:              def.Subject.Workflows,
+		InfrastructureAgentIDs: def.Subject.InfrastructureAgentIDs,
+		TierModels:             preflightTierModelMap(def.Subject),
+		DryRun:                 true,
 	})
 	if err == nil {
 		return
@@ -745,19 +884,24 @@ func checkSubjectDeploy(report *authoring.Report, defPath string, def domain.Tes
 		return
 	}
 
-	// Deploy path: no structured reason codes — carry the tool's own message.
-	toolMsg := err.Error()
 	var de *agentdeploy.DeployError
 	if errors.As(err, &de) {
-		toolMsg = de.ToolMessage
+		report.Add(DelegateToolDiagnostic(FailureContext{
+			Operation:      "subject declaration dry-run deploy",
+			Provenance:     in.MosaicRootProvenance,
+			DiagnosticCode: "undeployable-subject-declaration",
+			Path:           defPath,
+			Pointer:        "subject",
+		}, de))
+		return
 	}
-
+	// Fallback for unexpected error types without structured failure fields.
 	report.Add(authoring.Diagnostic{
 		Severity: authoring.SeverityError,
 		Code:     "undeployable-subject-declaration",
 		Path:     defPath,
 		Pointer:  "subject",
-		Message:  fmt.Sprintf("subject declaration failed dry-run deploy: %s", toolMsg),
+		Message:  fmt.Sprintf("subject declaration failed dry-run deploy: %s", err.Error()),
 	})
 }
 
@@ -826,13 +970,13 @@ func checkSubjectRender(report *authoring.Report, defPath string, def domain.Tes
 		// is treated as unrenderable-subject-declaration. This is the
 		// forward-compatibility rule: an unrecognised reason degrades to a less
 		// specific diagnostic rather than to a wrong one.
-		report.Add(authoring.Diagnostic{
-			Severity: authoring.SeverityError,
-			Code:     "unrenderable-subject-declaration",
-			Path:     defPath,
-			Pointer:  "subject",
-			Message:  fmt.Sprintf("subject declaration failed dry-run render: %s", re.ToolMessage),
-		})
+		report.Add(DelegateToolDiagnostic(FailureContext{
+			Operation:      "subject declaration dry-run render",
+			Provenance:     in.MosaicRootProvenance,
+			DiagnosticCode: "unrenderable-subject-declaration",
+			Path:           defPath,
+			Pointer:        "subject",
+		}, re))
 		return
 	}
 

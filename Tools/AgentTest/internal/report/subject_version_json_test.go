@@ -160,11 +160,11 @@ func fixtureResultWithSubjectVersion(version string) report.Result {
 		FinishedAt:    fixtureFinished(),
 		Tests: []report.TestReport{
 			{
-				TestID:      "version-attribution-test",
+				TestName:      "version-attribution-test",
 				Description: "subject version appears in the report",
 				Layer:       domain.LayerSubagent,
 				Aggregate: domain.AggregateResult{
-					TestID:   "version-attribution-test",
+					TestName:   "version-attribution-test",
 					Verdict:  domain.VerdictPass,
 					Counted:  1,
 					Passed:   1,
@@ -176,7 +176,7 @@ func fixtureResultWithSubjectVersion(version string) report.Result {
 				},
 				Runs: []report.RunReport{
 					{
-						Key:            domain.RunKey{RunID: "run-001", TestID: "version-attribution-test", RunNumber: 1},
+						Key:            domain.RunKey{RunID: "run-001", TestName: "version-attribution-test", RunNumber: 1},
 						Verdict:        domain.VerdictPass,
 						Duration:       1 * time.Second,
 						SubjectVersion: version,

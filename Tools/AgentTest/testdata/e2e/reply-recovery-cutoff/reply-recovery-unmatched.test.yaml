@@ -1,0 +1,50 @@
+schema_version: 1
+name: reply-recovery-unmatched
+id: 42
+version: 1
+changelog:
+  - version: 1
+    date: "2026-01-01"
+    changes: "Initial."
+description: >
+  A reply-recovery run with stop_after_invocations: 2 where the Nth (second)
+  dispatch matches no registered stub and the unmatched policy is passthrough.
+  The cutoff must fire at the completion event of the second dispatch just as it
+  does for a stubbed one: the count-based threshold comparison runs regardless of
+  whether a pending stub was found.
+layer: subagent
+negative: false
+
+subject:
+  identity: standin-subject
+  agent: standin-subject
+  infrastructure_agents: []
+  opening_message: |
+    Dispatch the greeter, then the helper.
+  invocation_kind: subagent
+  allowed_tools: [Task]
+
+stub_registry: reply-recovery-unmatched.stubs.json
+stub_agents:
+  - identity:
+      tool: dispatch
+      agent: greeter
+    source: ../stub-agent-placeholder.md
+  - identity:
+      tool: dispatch
+      agent: helper
+    source: ../stub-agent-placeholder.md
+timeout: 30s
+turn_limit: 10
+stop_after_invocations: 2
+
+seed_files:
+  - path: Orchestration-{run_id}/Orchestration.md
+    ref: orchestration.md
+
+assertions:
+  invocation_sequence:
+    exact: true
+    steps:
+      - { tool: dispatch, agent: greeter }
+      - { tool: dispatch, agent: helper }

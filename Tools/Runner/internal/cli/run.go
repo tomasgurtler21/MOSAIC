@@ -7,10 +7,13 @@ import (
 	"io"
 	"os"
 	"path/filepath"
+	"runtime/debug"
 	"strings"
 	"time"
 
 	"github.com/spf13/cobra"
+
+	commonharness "mosaic-common/harness"
 
 	"mosaic-run/internal/artifact"
 	"mosaic-run/internal/domain"
@@ -88,13 +91,27 @@ func Run(ctx context.Context, args []string, store domain.ArtifactStore, identit
 		SilenceErrors: true,
 		SilenceUsage:  true,
 		RunE: func(cmd *cobra.Command, _ []string) error {
+			// Recover from any panic in sess.Start so that a session-layer crash
+			// surfaces as a diagnostic error message rather than a silent process
+			// termination. The panic value and a truncated stack trace are written to
+			// errOut so the operator can diagnose the failure.
+			defer func() {
+				if p := recover(); p != nil {
+					stack := debug.Stack()
+					if len(stack) > 4096 {
+						stack = stack[:4096]
+					}
+					fmt.Fprintf(errOut, "error: panic in session: %v\n%s\n", p, stack)
+					exitCode = ExitFailure
+				}
+			}()
+
 			// Read all flag values from the parsed FlagSet. RegisterRunFlags
 			// registered every flag onto runCmd.Flags(), so cobra has already
 			// populated them before RunE is called. GetString/GetBool/GetStringArray
 			// errors are impossible here: every flag was registered with the correct
 			// type, so the only possible error is "flag does not exist", which would
 			// be a programming error caught immediately in testing.
-			orchestratorFile, _ := cmd.Flags().GetString("orchestrator-file")
 			workflowID, _ := cmd.Flags().GetString("workflow")
 			task, _ := cmd.Flags().GetString("task")
 			allowVersionDrift, _ := cmd.Flags().GetBool("allow-version-drift")
@@ -120,11 +137,6 @@ func Run(ctx context.Context, args []string, store domain.ArtifactStore, identit
 			}
 
 			// Validate required flags.
-			if orchestratorFile == "" {
-				fmt.Fprintf(errOut, "error: --orchestrator-file is required\n")
-				exitCode = ExitUsage
-				return nil
-			}
 			if workflowID == "" {
 				fmt.Fprintf(errOut, "error: --workflow is required\n")
 				exitCode = ExitUsage
@@ -340,6 +352,13 @@ func Run(ctx context.Context, args []string, store domain.ArtifactStore, identit
 				exitCode = ExitUsage
 				return nil
 			}
+			// CommitBranchVariant is only meaningful when commits are enabled.
+			// When commits are disabled and the flag was not explicitly provided,
+			// zero out the default so a disabled-commits run carries no spurious
+			// mosaic-owned default.
+			if !commitsEnabled && commitBranchFlag == "" {
+				parsedCommitBranch = domain.CommitBranchVariant("")
+			}
 
 			// Parse --infra-class into a class-to-agent map.
 			var infraClassSelections map[string]string
@@ -365,9 +384,32 @@ func Run(ctx context.Context, args []string, store domain.ArtifactStore, identit
 				}
 			}
 
+			// Auto-discover the orchestrator-script.md path from the harness convention.
+			// For CLI-backed harnesses, this verifies the workspace is deployed for
+			// the selected harness. For non-CLI harnesses (e.g. the "fake" test
+			// double), discovery is skipped and OrchestratorFilePath is left empty,
+			// since those harnesses have no agents directory convention.
+			var discoveredOrchPath string
+			if commonharness.IsCLIHarness(harnessFlag) {
+				discoveryWorkDir, wdErr := os.Getwd()
+				if wdErr != nil {
+					fmt.Fprintf(errOut, "error: getting working directory: %v\n", wdErr)
+					exitCode = ExitUsage
+					return nil
+				}
+				orchPath, orchErr := harness.DiscoverOrchestrator(discoveryWorkDir, harnessFlag)
+				if orchErr != nil {
+					fmt.Fprintf(errOut, "error: %v\n", orchErr)
+					exitCode = ExitRefused
+					return nil
+				}
+				discoveredOrchPath = orchPath
+			}
+
 			// Build the run configuration from parsed flags and resolved run identity.
 			config := domain.RunConfig{
-				OrchestratorFilePath: orchestratorFile,
+				OrchestratorFilePath: discoveredOrchPath,
+				HarnessID:            harnessFlag,
 				WorkflowID:           domain.WorkflowID(workflowID),
 				Task:                 task,
 				AllowVersionDrift:    allowVersionDrift,

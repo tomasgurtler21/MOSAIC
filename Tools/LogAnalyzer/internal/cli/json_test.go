@@ -15,6 +15,16 @@ package cli_test
 //   - Full report includes the data-quality summary
 //   - Full report represents provisional run flags
 //   - Unattributable bucket appears as a sibling of runs, not inside runs
+//
+// T5.2 additions — EncodeRunTotal wire extension for unpriced model identity:
+//   - unpriced_models is present and carries model names when RunTotal.UnpricedModels is non-empty
+//   - unpriced_models is absent (not an empty array) for a fully-priced run
+//   - partial_money is present with state+amount when RunTotal.PartialAmount is known
+//   - partial_money is absent when there is no partial amount
+//   - partial_money.amount is an exact decimal string, not a JSON number
+//   - All pre-existing fields (schema_version, run_id, provisional, currency, tokens,
+//     money, complete) keep their names, types, and encoding rules when new fields are added
+//   - A fully-priced run produces no new keys in the output
 
 import (
 	"bytes"
@@ -921,5 +931,347 @@ func TestEncodeReport_AbsentTokenCategoryInFullReportEncodesAsNull(t *testing.T)
 		t.Errorf("tokens.cache_read absent from full report; want null for absent category")
 	} else if cacheRead != nil {
 		t.Errorf("tokens.cache_read = %v in full report, want null for absent category", cacheRead)
+	}
+}
+
+// ---------------------------------------------------------------------------
+// EncodeRunTotal: unpriced model identity fields (T5.2)
+// ---------------------------------------------------------------------------
+
+func TestEncodeRunTotal_UnpricedModels_PresentWhenRunHasUnpricedModels(t *testing.T) {
+	// When RunTotal.UnpricedModels is non-empty, the encoder must emit
+	// "unpriced_models" as a JSON array containing exactly those model names.
+	total := app.RunTotal{
+		RunID:          cliTestRunID,
+		Money:          domain.UnpricedMoney(),
+		Complete:       false,
+		UnpricedModels: []domain.ModelID{"unknown-model-v1"},
+	}
+
+	var buf bytes.Buffer
+	if err := cli.EncodeRunTotal(&buf, total); err != nil {
+		t.Fatalf("EncodeRunTotal returned error: %v", err)
+	}
+
+	var m map[string]any
+	if err := json.Unmarshal(buf.Bytes(), &m); err != nil {
+		t.Fatalf("output is not valid JSON: %v", err)
+	}
+
+	models, ok := m["unpriced_models"].([]any)
+	if !ok {
+		t.Fatalf("unpriced_models field is missing or not an array; output: %s", buf.String())
+	}
+	if len(models) != 1 {
+		t.Fatalf("len(unpriced_models) = %d, want 1", len(models))
+	}
+	if got, _ := models[0].(string); got != "unknown-model-v1" {
+		t.Errorf("unpriced_models[0] = %q, want %q", got, "unknown-model-v1")
+	}
+}
+
+func TestEncodeRunTotal_UnpricedModels_AbsentForFullyPricedRun(t *testing.T) {
+	// When RunTotal.UnpricedModels is nil (fully priced), "unpriced_models" must
+	// be absent from the output entirely — not emitted as an empty array.
+	// A consumer reading an older analyser build that lacks this field must see
+	// exactly the same output it always did (omitempty, not []).
+	total := app.RunTotal{
+		RunID:    cliTestRunID,
+		Money:    domain.KnownMoney(domain.Money(1_000_000_000)),
+		Complete: true,
+		// UnpricedModels: nil (zero-value)
+	}
+
+	var buf bytes.Buffer
+	if err := cli.EncodeRunTotal(&buf, total); err != nil {
+		t.Fatalf("EncodeRunTotal returned error: %v", err)
+	}
+
+	var m map[string]any
+	if err := json.Unmarshal(buf.Bytes(), &m); err != nil {
+		t.Fatalf("output is not valid JSON: %v", err)
+	}
+
+	if _, present := m["unpriced_models"]; present {
+		t.Errorf("unpriced_models is present for a fully-priced run; want the key absent so an older consumer sees no change")
+	}
+}
+
+func TestEncodeRunTotal_UnpricedModels_MultipleModelsAllPresent(t *testing.T) {
+	// When two distinct models are unpriced, both must appear in the
+	// unpriced_models array. Order is not asserted; presence is.
+	total := app.RunTotal{
+		RunID:          cliTestRunID,
+		Money:          domain.UnpricedMoney(),
+		Complete:       false,
+		UnpricedModels: []domain.ModelID{"model-alpha", "model-beta"},
+	}
+
+	var buf bytes.Buffer
+	if err := cli.EncodeRunTotal(&buf, total); err != nil {
+		t.Fatalf("EncodeRunTotal returned error: %v", err)
+	}
+
+	var m map[string]any
+	if err := json.Unmarshal(buf.Bytes(), &m); err != nil {
+		t.Fatalf("output is not valid JSON: %v", err)
+	}
+
+	models, ok := m["unpriced_models"].([]any)
+	if !ok {
+		t.Fatalf("unpriced_models missing or not an array")
+	}
+	if len(models) != 2 {
+		t.Fatalf("len(unpriced_models) = %d, want 2; got %v", len(models), models)
+	}
+	foundAlpha, foundBeta := false, false
+	for _, v := range models {
+		switch v.(string) {
+		case "model-alpha":
+			foundAlpha = true
+		case "model-beta":
+			foundBeta = true
+		}
+	}
+	if !foundAlpha {
+		t.Errorf("unpriced_models missing %q; got %v", "model-alpha", models)
+	}
+	if !foundBeta {
+		t.Errorf("unpriced_models missing %q; got %v", "model-beta", models)
+	}
+}
+
+func TestEncodeRunTotal_PartialMoney_PresentForPartiallyPricedRun(t *testing.T) {
+	// When RunTotal.PartialAmount carries a known amount, "partial_money" must
+	// be present in the output with state="known" and the correct amount string.
+	total := app.RunTotal{
+		RunID:          cliTestRunID,
+		Money:          domain.UnpricedMoney(),
+		Complete:       false,
+		UnpricedModels: []domain.ModelID{"unknown-model"},
+		PartialAmount:  domain.KnownMoney(domain.Money(5_000_000_000)), // $5.00
+	}
+
+	var buf bytes.Buffer
+	if err := cli.EncodeRunTotal(&buf, total); err != nil {
+		t.Fatalf("EncodeRunTotal returned error: %v", err)
+	}
+
+	var m map[string]any
+	if err := json.Unmarshal(buf.Bytes(), &m); err != nil {
+		t.Fatalf("output is not valid JSON: %v", err)
+	}
+
+	partialMoney, ok := m["partial_money"].(map[string]any)
+	if !ok {
+		t.Fatalf("partial_money is missing or not an object; output: %s", buf.String())
+	}
+	if state, _ := partialMoney["state"].(string); state != "known" {
+		t.Errorf("partial_money.state = %q, want %q", state, "known")
+	}
+	if _, hasAmount := partialMoney["amount"]; !hasAmount {
+		t.Errorf("partial_money.amount is absent; want it present for a known partial amount")
+	}
+}
+
+func TestEncodeRunTotal_PartialMoney_AbsentForFullyPricedRun(t *testing.T) {
+	// A fully-priced run must not have a "partial_money" key in the output.
+	// Existing consumers that never saw this field must continue to decode the
+	// output successfully.
+	total := app.RunTotal{
+		RunID:    cliTestRunID,
+		Money:    domain.KnownMoney(domain.Money(3_000_000_000)),
+		Complete: true,
+		// PartialAmount: zero-valued MoneyValue (MoneyNoData)
+	}
+
+	var buf bytes.Buffer
+	if err := cli.EncodeRunTotal(&buf, total); err != nil {
+		t.Fatalf("EncodeRunTotal returned error: %v", err)
+	}
+
+	var m map[string]any
+	if err := json.Unmarshal(buf.Bytes(), &m); err != nil {
+		t.Fatalf("output is not valid JSON: %v", err)
+	}
+
+	if _, present := m["partial_money"]; present {
+		t.Errorf("partial_money is present for a fully-priced run; want the key absent")
+	}
+}
+
+func TestEncodeRunTotal_PartialMoney_AbsentWhenAllModelsUnpriced(t *testing.T) {
+	// When all models in the run are unpriced (no priced portion exists),
+	// "partial_money" must be absent. Unpriced models are named but there is no
+	// amount to carry alongside them.
+	total := app.RunTotal{
+		RunID:          cliTestRunID,
+		Money:          domain.UnpricedMoney(),
+		Complete:       false,
+		UnpricedModels: []domain.ModelID{"unknown-model"},
+		// PartialAmount: zero-valued (MoneyNoData) — nothing was priced
+	}
+
+	var buf bytes.Buffer
+	if err := cli.EncodeRunTotal(&buf, total); err != nil {
+		t.Fatalf("EncodeRunTotal returned error: %v", err)
+	}
+
+	var m map[string]any
+	if err := json.Unmarshal(buf.Bytes(), &m); err != nil {
+		t.Fatalf("output is not valid JSON: %v", err)
+	}
+
+	if _, present := m["partial_money"]; present {
+		t.Errorf("partial_money is present when PartialAmount is zero-valued; want the key absent")
+	}
+}
+
+func TestEncodeRunTotal_PartialMoney_AmountIsDecimalString(t *testing.T) {
+	// partial_money.amount must be a JSON string, never a JSON number, consistent
+	// with the money.amount encoding rule in the existing contract.
+	total := app.RunTotal{
+		RunID:          cliTestRunID,
+		Money:          domain.UnpricedMoney(),
+		Complete:       false,
+		UnpricedModels: []domain.ModelID{"some-unpriced-model"},
+		PartialAmount:  domain.KnownMoney(domain.Money(3_500_000_000)), // $3.50
+	}
+
+	var buf bytes.Buffer
+	if err := cli.EncodeRunTotal(&buf, total); err != nil {
+		t.Fatalf("EncodeRunTotal returned error: %v", err)
+	}
+
+	output := buf.String()
+	// The amount "$3.50" must appear as "3.5" quoted (trailing zero trimmed) —
+	// never as a bare numeric token like 3.5.
+	if !strings.Contains(output, `"partial_money"`) {
+		t.Fatalf("partial_money key absent from output; output: %s", output)
+	}
+	// A JSON string value for amount is quoted: "amount":"...".
+	if !strings.Contains(output, `"amount":"`) && !strings.Contains(output, `"amount": "`) {
+		t.Errorf("partial_money.amount appears to be a JSON number rather than a quoted string; output: %s", output)
+	}
+}
+
+func TestEncodeRunTotal_ExistingFields_UnchangedWhenNewFieldsAdded(t *testing.T) {
+	// When a partially-priced run carries unpriced model names and a partial
+	// amount, all pre-existing fields (schema_version, run_id, provisional,
+	// currency, tokens, money, complete) must still be present with the same
+	// names, types, and encoding rules. No field may be removed or retyped.
+	total := app.RunTotal{
+		RunID:       cliTestRunID,
+		Provisional: false,
+		Tokens: domain.TokenUsage{
+			Input:  domain.Tokens(2_000_000),
+			Output: domain.Tokens(800_000),
+		},
+		Money:          domain.UnpricedMoney(),
+		Complete:       false,
+		UnpricedModels: []domain.ModelID{"unknown-model"},
+		PartialAmount:  domain.KnownMoney(domain.Money(2_000_000_000)), // $2.00
+	}
+
+	var buf bytes.Buffer
+	if err := cli.EncodeRunTotal(&buf, total); err != nil {
+		t.Fatalf("EncodeRunTotal returned error: %v", err)
+	}
+
+	var m map[string]any
+	if err := json.Unmarshal(buf.Bytes(), &m); err != nil {
+		t.Fatalf("output is not valid JSON: %v", err)
+	}
+
+	// All pre-existing fields must still be present.
+	existing := []string{
+		"schema_version",
+		"run_id",
+		"provisional",
+		"currency",
+		"tokens",
+		"money",
+		"complete",
+	}
+	for _, field := range existing {
+		if _, ok := m[field]; !ok {
+			t.Errorf("pre-existing field %q is absent from EncodeRunTotal output when new fields are also present", field)
+		}
+	}
+
+	// money.state must still encode as "unpriced" (not corrupted by new fields).
+	money, ok := m["money"].(map[string]any)
+	if !ok {
+		t.Fatalf("money field missing or not an object")
+	}
+	if state, _ := money["state"].(string); state != "unpriced" {
+		t.Errorf("money.state = %q, want %q after adding new fields", state, "unpriced")
+	}
+
+	// schema_version must remain "1".
+	if ver, _ := m["schema_version"].(string); ver != "1" {
+		t.Errorf("schema_version = %q, want %q", ver, "1")
+	}
+}
+
+func TestEncodeRunTotal_FullyPricedRun_NoNewKeysInOutput(t *testing.T) {
+	// A consumer that decoded the output before Stage 5 must see exactly the
+	// same fields for a fully-priced run. No new keys may appear.
+	total := app.RunTotal{
+		RunID:    cliTestRunID,
+		Money:    domain.KnownMoney(domain.Money(1_500_000_000)), // $1.50
+		Complete: true,
+	}
+
+	var buf bytes.Buffer
+	if err := cli.EncodeRunTotal(&buf, total); err != nil {
+		t.Fatalf("EncodeRunTotal returned error: %v", err)
+	}
+
+	var m map[string]any
+	if err := json.Unmarshal(buf.Bytes(), &m); err != nil {
+		t.Fatalf("output is not valid JSON: %v", err)
+	}
+
+	newKeys := []string{"unpriced_models", "partial_money"}
+	for _, key := range newKeys {
+		if _, present := m[key]; present {
+			t.Errorf("new key %q is present for a fully-priced run; it must be absent so old consumers see no change", key)
+		}
+	}
+}
+
+func TestEncodeRunTotal_NoDataRun_UnchangedByNewFields(t *testing.T) {
+	// A run with no data (money.state == "no_data") must continue to encode
+	// without any new fields. The new fields are not relevant when there is no
+	// usage data at all.
+	total := app.RunTotal{
+		RunID: cliTestRunID,
+		Money: domain.NoMoneyData(),
+		// UnpricedModels: nil, PartialAmount: zero-valued
+	}
+
+	var buf bytes.Buffer
+	if err := cli.EncodeRunTotal(&buf, total); err != nil {
+		t.Fatalf("EncodeRunTotal returned error: %v", err)
+	}
+
+	var m map[string]any
+	if err := json.Unmarshal(buf.Bytes(), &m); err != nil {
+		t.Fatalf("output is not valid JSON: %v", err)
+	}
+
+	money, ok := m["money"].(map[string]any)
+	if !ok {
+		t.Fatalf("money field missing or not an object")
+	}
+	if state, _ := money["state"].(string); state != "no_data" {
+		t.Errorf("money.state = %q, want %q for no-data run", state, "no_data")
+	}
+	if _, present := m["unpriced_models"]; present {
+		t.Errorf("unpriced_models is present for a no-data run; want the key absent")
+	}
+	if _, present := m["partial_money"]; present {
+		t.Errorf("partial_money is present for a no-data run; want the key absent")
 	}
 }
