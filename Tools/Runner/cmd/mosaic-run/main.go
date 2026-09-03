@@ -207,13 +207,13 @@ func runTUIMode(args []string) {
 
 	// Construct the process-level debug logger once here, before any other
 	// operation, so that failures occurring before run identity is resolved are
-	// still captured. The logger is shared across all sessFactory calls (sessFactory
-	// runs more than once per process), ensuring exactly one log file per run.
+	// still captured. The logger is shared across all session constructions (the
+	// factory runs more than once per process), ensuring exactly one log file per run.
 	logger := debuglog.New(workDir)
 	defer logger.Close()
 
 	// Construct the process-level dispatch logger once here, shared across all
-	// sessFactory calls, ensuring exactly one dispatch log file per process/run.
+	// session constructions, ensuring exactly one dispatch log file per process/run.
 	dispLogger := dispatchlog.New(workDir)
 	defer dispLogger.Close()
 
@@ -222,74 +222,19 @@ func runTUIMode(args []string) {
 
 	programRef := tui.NewProgramRef()
 
+	// The graceful-stop flag is constructed exactly once per process, here,
+	// alongside the loggers and the ProgramRef and for the same reason: the
+	// session factory runs more than once per process (eager placeholder
+	// construction, config-screen completion, exec-override retry, done-screen
+	// continue), and every rebuilt session must observe the flag the TUI arms.
+	// Constructing it inside the factory would leave each rebuilt session on
+	// its own orphan flag.
+	stopSignal := session.NewStopSignal()
+
 	// minter mints run identity for new runs created from inside the TUI (run-select
 	// screen's "new run" choice). It is also used as the defensive fallback inside
-	// sessFactory when an unresolved run folder is encountered.
+	// the session factory when an unresolved run folder is encountered.
 	minter := newTUIRunIdentityMinter(workDir)
-
-	// SessionFactory builds the session with the run-scoped artifact store and the
-	// harness adapter selected in the config screen. orchFile is the path to the
-	// orchestrator agent file (empty when called before the file screen completes);
-	// it is accepted for interface compatibility but not currently used within this factory.
-	// cfg carries the harness selection and timeout from the config screen.
-	//
-	// The process logger (defined above) is closed over and shared across all calls.
-	// sessFactory is invoked more than once per process (once eagerly with a
-	// placeholder config and again when the config screen completes), so the logger
-	// must not be constructed here — doing so would produce multiple log files.
-	sessFactory := func(runFolder string, isNewRun bool, orchFile string, cfg screens.ConfigSelection) session.Session {
-		// Build the harness adapter via buildAdapter, passing the process logger
-		// so that invocation I/O is captured in the debug log. buildAdapter
-		// handles the timeout default and the logger injection internally.
-		// cfg.ExecutablePath is set when the user confirms an override on the
-		// exec-override screen. It wins over the pre-scanned claudePathTUI so
-		// that retrying with a different path actually takes effect.
-		execPath := cfg.ExecutablePath
-		if execPath == "" {
-			execPath = claudePathTUI
-		}
-		h := buildAdapter(cfg.Harness, execPath, cfg.GHCPCLIMode, cfg.Timeout, logger)
-
-		artifactPath, err := resolveTUIArtifactPath(runFolder)
-		if errors.Is(err, errUnresolvedRunFolder) {
-			// Defensive branch: an unresolved run folder is a contract violation
-			// by the caller. Mint a fresh identity, write a notice, and build the
-			// store at the minted scoped path rather than a bare CWD-relative path.
-			_, mintedFolder := minter()
-			logger.Log(domain.EventRunnerError, "run folder unresolved; minting new run",
-				domain.F("path", mintedFolder))
-			fmt.Fprintf(os.Stderr, "notice: run folder unresolved; minting new run at %s\n", mintedFolder)
-			artifactPath = filepath.Join(mintedFolder, "Orchestration.md")
-		}
-		store := newLoggedArtifactStore(artifactPath, logger)
-
-		// Extract the raw-JSON transport if the selected harness adapter implements it.
-		var rawInvoker domain.RawInvoker
-		if ri, ok := h.(domain.RawInvoker); ok {
-			rawInvoker = ri
-		}
-
-		// Build the session's routing consultant, manual resolver, pre-consultation
-		// capability and approval reader from the completed configuration selection.
-		// This is the same builder the non-interactive path uses, so both frontends
-		// share one place where consultant selection is expressed. The orchestrator
-		// reference and routing table are not known here; they reach every consultant
-		// that implements domain.RunContextBinder later, on the session's run-start path.
-		routingDeps := buildDeps(cfg.Settings, rawInvoker, programRef, artifact.NewApprovalReader(), dispLogger)
-
-		return session.New(session.Deps{
-			Harness:     h,
-			Store:       store,
-			Clock:       &realClock{},
-			Interact:    programRef,
-			Debug:       logger,
-			DispatchLog: dispLogger,
-			Routing:     routingDeps.Routing,
-			Manual:      routingDeps.Manual,
-			PreConsult:  routingDeps.PreConsult,
-			Approvals:   routingDeps.Approvals,
-		})
-	}
 
 	// Resolve run identity from flags and working-directory scan.
 	identity, identErr := resolveRunIdentityForTUI(args, workDir)
@@ -312,31 +257,34 @@ func runTUIMode(args []string) {
 		dispLogger.SetRunID(identity.RunID)
 	}
 
-	// Construct the initial session using the resolved identity (or placeholder for multi-candidate).
-	// Harness config is not yet known (config screen has not run); defaults to fake adapter.
-	initSess := sessFactory(identity.RunFolder, identity.IsNewRun, "", screens.ConfigSelection{})
-
-	ctx := context.Background()
-	if err := tui.Run(ctx, initSess, tui.Options{
-		Interaction:            programRef,
-		Selection:              identity.Selection,
-		ScanResult:             identity.ScanResult,
-		ResolvedRunID:          identity.RunID,
-		IsNewRun:               identity.IsNewRun,
-		RecordedWorkflowID:     domain.WorkflowID(identity.Workflow),
-		InitialRunFolder:       identity.RunFolder,
-		SessionFactory:         sessFactory,
-		MintRunIdentity:        minter,
-		OrchestratorDiscoverer: harness.DiscoverOrchestrator,
-		ArtifactStoreFactory: func(runFolder string) domain.ArtifactStore {
-			return newLoggedArtifactStore(filepath.Join(runFolder, "Orchestration.md"), logger)
-		},
-		Clock: &realClock{},
+	// Assemble the interactive composition. The seam is the single place where
+	// the interactive session.Deps and the tui.Options are constructed, so the
+	// stop signal reaches both consumers from one source. Nothing below adds to
+	// either value.
+	wiring := buildInteractiveWiring(interactiveWiringInput{
+		ClaudePath:  claudePathTUI,
+		ProgramRef:  programRef,
+		Minter:      minter,
+		Identity:    identity,
+		StopSignal:  stopSignal,
+		Debug:       logger,
+		DispatchLog: dispLogger,
+		Clock:       &realClock{},
+		// The run-id association needs SetRunID on the two concrete loggers,
+		// which are in scope here and not inside the seam.
 		OnRunIDResolved: func(runID string) {
 			logger.SetRunID(runID)
 			dispLogger.SetRunID(runID)
 		},
-	}); err != nil {
+	})
+
+	// Construct the initial session using the resolved identity (or placeholder for multi-candidate).
+	// Harness config is not yet known (config screen has not run); defaults to fake adapter.
+	// Built through the seam's own factory so no second construction path exists.
+	initSess := wiring.Options.SessionFactory(identity.RunFolder, identity.IsNewRun, "", screens.ConfigSelection{})
+
+	ctx := context.Background()
+	if err := tui.Run(ctx, initSess, wiring.Options); err != nil {
 		fmt.Fprintf(os.Stderr, "tui: %v\n", err)
 		os.Exit(1)
 	}

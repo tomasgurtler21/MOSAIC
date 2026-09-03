@@ -173,6 +173,17 @@ type Options struct {
 	// construction of session.Deps.StopRequested, otherwise the TUI's
 	// Request()/Reset() calls have no effect on the running session.
 	StopSignal *session.StopSignal
+
+	// Debug records the TUI-side stop-lifecycle events. It must be the same
+	// instance the session receives as session.Deps.Debug, so both halves of
+	// the stop lifecycle land in one ordered log and the sequence is
+	// reconstructible from a single file without cross-file timestamp
+	// correlation.
+	//
+	// Optional: nil is normalised to domain.NopDebugLogger in newRootModel,
+	// mirroring session.New's treatment of Deps.Debug, so the root model never
+	// nil-checks it.
+	Debug domain.DebugLogger
 }
 
 // runSetupSelections holds all inputs collected during the setup phase.
@@ -310,6 +321,12 @@ type rootModel struct {
 	// by SessionFactory so the TUI's Request()/Reset() calls reach the
 	// running session's dispatch loop.
 	stopSignal *session.StopSignal
+
+	// debug records the TUI-side stop-lifecycle entries. It is the same
+	// instance the session logs through, so both halves of the lifecycle land
+	// in one ordered log. See Options.Debug for the contract; never nil after
+	// newRootModel, which normalises an omitted logger to a no-op.
+	debug domain.DebugLogger
 }
 
 // Run owns the terminal for the lifetime of the call. It presents the setup screens,
@@ -408,9 +425,13 @@ func newRootModel(ctx context.Context, sess session.Session, opts Options) *root
 		clock:                  opts.Clock,
 		onRunIDResolved:        opts.OnRunIDResolved,
 		stopSignal:             opts.StopSignal,
+		debug:                  opts.Debug,
 	}
 	if m.stopSignal == nil {
 		m.stopSignal = session.NewStopSignal()
+	}
+	if m.debug == nil {
+		m.debug = domain.NopDebugLogger{}
 	}
 
 	// Always propagate InitialRunFolder so readArtifactContent and the COMPLETED-marker
@@ -1115,8 +1136,36 @@ func (m *rootModel) announceIdentity() runselect.Identity {
 func (m *rootModel) updateProgress(msg tea.Msg) (tea.Model, tea.Cmd) {
 	cmd := m.progressScreen.Update(msg)
 
+	// Drain the gate transitions this update produced and record them. Draining
+	// rather than polling is what keeps the log honest: each transition is
+	// reported exactly once, keys the gate ignores record nothing at all, and
+	// the arming entry below is driven by the confirmation itself rather than by
+	// the per-update poll.
+	confirmed := false
+	for _, ev := range m.progressScreen.TakeStopGateEvents() {
+		switch ev.Kind {
+		case screens.StopGateEntered:
+			m.debug.Log(domain.EventTUIStopGateEntered, "stop confirmation gate entered",
+				domain.F("key", ev.Key))
+		case screens.StopGateResolved:
+			outcome := "cancelled"
+			if ev.Confirmed {
+				outcome = "confirmed"
+				confirmed = true
+			}
+			m.debug.Log(domain.EventTUIStopGateResolved, "stop confirmation gate resolved",
+				domain.F("key", ev.Key), domain.F("outcome", outcome))
+		}
+	}
+
 	if m.progressScreen.GracefulStop() {
 		m.stopSignal.Request()
+		if confirmed {
+			// Only in the update that drained the confirmation, so the entry
+			// follows the arming it records and a resumed run's stop records its
+			// own. Request() itself is idempotent and runs on every update.
+			m.debug.Log(domain.EventTUIStopSignalArmed, "graceful-stop signal armed")
+		}
 	}
 
 	if m.progressScreen.ArtifactViewRequested() {
@@ -1299,6 +1348,30 @@ func (m *rootModel) replyToPendingQuestion(ans answerMsg) {
 }
 
 // ---------------------------------------------------------------------------
+// Restart-path stop-state reset
+// ---------------------------------------------------------------------------
+
+// resetStopStateForRestart returns the run to a clean stop state before a
+// session is rebuilt or restarted. It disarms the shared stop signal and clears
+// the progress screen's own latched confirm/stop state.
+//
+// Called from every session-restart path: the done-screen continue path, the
+// exec-override retry path, and the stop-recovery screen path. Two of the three
+// reuse the existing ProgressScreen instance, so disarming the signal alone is
+// not sufficient — the screen's latch is separate state. A carried-over latch
+// leaves the resumed run showing a notice for a stop that was just cancelled,
+// and makes the stop key inert, because the confirmation gate is only entered
+// when no stop is already latched.
+//
+// Idempotent and nil-safe: safe to call when no progress screen exists yet.
+func (m *rootModel) resetStopStateForRestart() {
+	m.stopSignal.Reset()
+	if m.progressScreen != nil {
+		m.progressScreen.ResetStopState()
+	}
+}
+
+// ---------------------------------------------------------------------------
 // Stop recovery screen handler
 // ---------------------------------------------------------------------------
 
@@ -1316,6 +1389,15 @@ func (m *rootModel) updateStop(msg tea.Msg) (tea.Model, tea.Cmd) {
 		return m, tea.Quit
 	}
 	if m.stopScreen.Done() {
+		// Return the run to a clean stop state before it is restarted.
+		//
+		// Reachable with an armed stop signal. This screen is reached only on a
+		// RunStoppedByConsultant outcome, which is decided within a step, while
+		// a user-confirmed graceful stop is only observed at the next dispatch
+		// checkpoint. A user who confirms a stop during a step the consultant
+		// then ends arrives here with the signal armed and the progress screen's
+		// stop latch set. The reset is unconditional regardless.
+		m.resetStopStateForRestart()
 		// Record which recovery action the user chose before clearing the screen,
 		// so startSession() can include ManualDispatch in the RunConfig.
 		if m.stopScreen.Choice() == screens.StopChoiceManualDispatch {
@@ -1367,6 +1449,15 @@ func (m *rootModel) updateExecOverride(msg tea.Msg) (tea.Model, tea.Cmd) {
 		return m, nil
 	}
 	if m.execOverrideScreen.Done() {
+		// Return the run to a clean stop state before the session is rebuilt, so
+		// the new session never observes the prior run's stop.
+		//
+		// Reachable with an armed stop signal. The launch-failure check in the
+		// runDoneMsg handler precedes all status-based branching, so any terminal
+		// outcome carrying a *domain.HarnessLaunchError routes here — including
+		// one produced while a user-confirmed graceful stop was still awaiting
+		// its dispatch checkpoint. The reset is unconditional regardless.
+		m.resetStopStateForRestart()
 		// Retry: hold the override path, rebuild the session, restart.
 		m.selections.config.ExecutablePath = m.execOverrideScreen.Path()
 		if m.sessionFactory != nil {
@@ -1395,8 +1486,11 @@ func (m *rootModel) updateDone(msg tea.Msg) (tea.Model, tea.Cmd) {
 		}
 		if m.doneScreen.Continue() {
 			// Resume: disarm the prior confirmed stop so the new run's dispatch
-			// loop does not see a stale stop signal on its very first boundary check.
-			m.stopSignal.Reset()
+			// loop does not see a stale stop signal on its very first boundary
+			// check. This path also rebuilds the progress screen below, so the
+			// screen half of the reset is redundant here; calling the shared
+			// helper anyway keeps one reset expression across all three paths.
+			m.resetStopStateForRestart()
 			// Rebuild the session via the factory if one is set, mirroring the
 			// updateExecOverride retry path. Reuse m.sess directly when no factory
 			// is set (test/backward-compat path).
