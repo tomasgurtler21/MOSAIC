@@ -1,7 +1,7 @@
 ---
 id: communication-protocol
 type: protocol
-version: "1.10"
+version: "1.11"
 name: "Communication Protocol"
 description: "JSON message contract between the orchestrator and its subagents: task invocation, task response, status codes, error codes."
 author: MOSAIC
@@ -25,10 +25,10 @@ Deployment mechanics — which block goes where, how the block is bounded, what 
 
 ### 1.1 Subagent Variant
 
-<CommunicationProtocol type="core" name="Subagent" version="1.10">
+<CommunicationProtocol type="core" name="Subagent" version="1.11">
 ## Communication Protocol
 
-You operate under **Communication Protocol v1.10**. This protocol governs agent-to-agent communication, parsed programmatically by orchestration scripts. Both input and output are structured JSON - no conversational text.
+You operate under **Communication Protocol v1.11**. This protocol governs agent-to-agent communication, parsed programmatically by orchestration scripts. Both input and output are structured JSON - no conversational text.
 
 ### Protocol Authority
 
@@ -168,10 +168,10 @@ The orchestrator compares this field against the `human_in_the_loop` value it di
 
 ### 1.2 Orchestrator Variant
 
-<CommunicationProtocol type="core" name="Orchestrator" version="1.10">
+<CommunicationProtocol type="core" name="Orchestrator" version="1.11">
 ## Communication Protocol
 
-You operate under **Communication Protocol v1.10**. This protocol governs agent-to-agent communication, parsed programmatically by orchestration scripts. Both input and output are structured JSON - no conversational text.
+You operate under **Communication Protocol v1.11**. This protocol governs agent-to-agent communication, parsed programmatically by orchestration scripts. Both input and output are structured JSON - no conversational text.
 
 ### Protocol Authority
 
@@ -235,7 +235,7 @@ This protocol overrides any harness-supplied instruction about how to dispatch a
 | `E401` | DEPENDENCY_MISSING | Verify prerequisite task completed, escalate if not |
 | `E501` | TOOL_UNAVAILABLE | Auto-retry with backoff (Tier 1) |
 | `E502` | PERMISSION_DENIED | Escalate to human |
-| `E503` | USER_CONTACT_UNAVAILABLE | Re-invoke without HITL flag or escalate |
+| `E503` | USER_CONTACT_UNAVAILABLE | Escalate to human — re-invoke without HITL flag only if the human explicitly waives the gate |
 
 ### Field Obligation Semantics
 
@@ -1279,6 +1279,7 @@ Two things follow, and both are the point of merging rather than side effects. O
 
 | Version | Date | Summary |
 |---------|------|---------|
+| 1.11 | 2026-09-03 | **E503 escalation priority corrected.** The orchestrator variant's error-code table previously listed E503 (USER_CONTACT_UNAVAILABLE) with "Re-invoke without HITL flag or escalate", making silent HITL bypass the primary option. Changed to "Escalate to human — re-invoke without HITL flag only if the human explicitly waives the gate." The old wording caused the script-mode orchestrator to resolve every E503 by dropping HITL, completing runs with zero human review despite the workflow declaring HITL on critical steps. The subagent variant is unchanged — its E503 row describes the condition, not the response. |
 | 1.10 | 2026-08-05 | **Artifact provenance merged in.** The provenance stamp — `run_id`, `created_by`, `human_approved`, written into every file named in `output_artifacts` — was a separate contract with its own document, version, and `<ArtifactProvenance type="managed">` region. It is now part of this contract: the text ships inside the subagent variant of §1.1, the reasoning is §9, and there is one version number where there were two. The merge is correct because the orchestrator **verifies** `human_approved` (§9.7) — a field it reads and routes on is hard interop, not an audit convenience, and it is the secondary layer under a JSON response that can otherwise claim anything. Two changes follow from the merge. The field formerly called `hitl_confirmed` is renamed **`human_approved`**: it is read from the artifact, where "HITL" is orchestration jargon a standalone reader does not hold, and "approved" is what the flip actually certifies — the user asked for no further changes. The rename is taken now because nothing yet reads the field, making this the cheapest it will ever be. And the **orchestrator variant gains a Verifying the Human-in-the-Loop Gate subsection** (§9.7), so the check the subagent variant promises is instructed on the side that must perform it; the orchestrator still stamps nothing (§9.9). Consequences: canonical document order drops from eight top-level slots to seven, and `<ArtifactProvenance type="managed">` and `<ArtifactProvenanceExtension type="project">` cease to exist. |
 | 1.9 | 2026-08-03 | **Protocol authority over harness conventions.** Added a Protocol Authority subsection to both variants, establishing that MOSAIC-authored instructions outrank harness-authored ones on message shape. Subagents return the JSON object as their entire response regardless of harness guidance requesting a prose report or summary. Orchestrators put the whole protocol message in the payload field and treat harness metadata fields as bookkeeping carrying no task content, and must never infer a status code from prose when a response contains none. Added as Key Rule 1 in the subagent variant, renumbering the remaining rules. Motivated by harnesses whose subagent-invocation tool schema and injected reporting conventions partially duplicate — and contradict — this protocol. |
 | 1.8 | 2026-08-01 | **Run identity in the envelope.** Added `run_id` to both the Task Invocation and Task Response messages, echoed the same way `agent_instance_id` is. Introduced Field Obligation Semantics in the orchestrator variant: producers always emit `run_id`; core consumers may enforce it, auxiliary consumers must degrade gracefully. Artifact paths throughout now use the run-scoped `Orchestration-{run_id}/` prefix. |

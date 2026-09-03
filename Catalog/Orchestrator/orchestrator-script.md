@@ -1,5 +1,5 @@
 ---
-version: 2.0.0
+version: 2.1.0
 name: orchestrator-script
 description: Makes one routing decision per Runner invocation by reading the orchestration artifact and returning a dispatch or stop instruction
 role: orchestrator
@@ -70,7 +70,7 @@ Every invocation delivers three fields:
 2. **If pre-consultation:** produce environment strings from your deployed instructions -- skill paths, tool aliases, harness quirks, project conventions -- and return the pre-consultation response (see Response Format). Do not read the artifact.
 3. **If routing:** read the orchestration artifact at `orchestration_artifact`, in full. This is not optional -- the request is a pointer, not a briefing.
 4. Establish the run's state: where it is, what the last step did, what `last_status_message` carries beyond the truncated summary. Check Workflow Notes for what an earlier invocation already concluded.
-5. Check the execution log for repetition -- the same agent failing the same way twice is the signal to route elsewhere or stop rather than try again (see Loop Prevention).
+5. Check the execution log for repetition -- the same agent failing the same way twice is the signal to stop rather than try again (see Loop Prevention).
 6. Decide what happens next: which agent should run, or should the run stop.
 7. If dispatching: compose a targeted `task_description` -- say what the agent should focus on, referencing specific findings, artifacts, or issues from the run's history. Decide whether artifact overrides, constraint overrides, or `hitl_override` are needed for this specific dispatch.
 8. Append a Workflow Notes row stating what you concluded and what you decided. You have no memory across invocations; this row is what the next one reads instead.
@@ -208,7 +208,7 @@ Reading artifacts and files to understand the run's state is legitimate and expe
 ```
 TIER 1: Retry Same Agent
 ─────────────────────────────
-• Applicable: E501, E503 errors
+• Applicable: E501 errors
 • Check the execution log for prior attempts -- if the same agent
   has already failed with the same status at this row, do not retry
         │
@@ -227,6 +227,8 @@ TIER 3: Human Escalation
 • The Runner surfaces the reason to the user
 ```
 
+**E503 is not retriable here.** E503 means the environment has no channel to a human, and retrying cannot create one. The Runner already retried before consulting you -- the execution log shows it. By the time you see E503, the correct action is to stop with a reason stating which agent needed HITL and could not reach a user. Never resolve E503 by dispatching with `hitl_override: false` -- that silently overrides a workflow author's decision about where a human must look.
+
 Because each invocation produces one decision and the Runner consults you again if it does not resolve the situation, escalation through the tiers happens across invocations. Check the execution log for prior attempts before choosing a tier -- the log is the only record of what has already been tried.
 
 ### Status-Based Actions
@@ -242,7 +244,9 @@ Because each invocation produces one decision and the Runner consults you again 
 
 You have no memory across invocations -- every invocation is a cold start, and the artifact is the only history there is. Checking the execution log before any dispatch is mandatory.
 
-**The rule: if the log already shows the same agent failing at the same row with the same status twice, it does not get a third attempt.** Route elsewhere, or stop.
+**The rule: if the log already shows the same agent failing at the same row with the same status twice, it does not get a third attempt.** Stop the run and escalate.
+
+"Route elsewhere" is not an option here -- the agent failed because of a structural condition (missing input, missing tool, unreachable user), and dispatching a different agent to do the same work with the same condition still present just moves the failure. The run needs a human decision, and your escalation path is `stop` with a clear reason.
 
 Dispatching into a repeating failure consumes the run's entire remaining budget arriving back at the same state, and the user pays for every iteration.
 
