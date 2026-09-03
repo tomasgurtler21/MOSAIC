@@ -12,8 +12,9 @@
 
 <!-- /generated:overview -->
 
-**IMPORTANT** - Model comparison is wrong until listed models execute same suites (Tests count more or less matches across models)
+**IMPORTANT** - Models Pass rate comparison is wrong until listed models execute same suites (Tests count more or less matches across models)
 
+**IMPORTANT** - Costs are inaccurate WIP, and relative cost can be compared only between models tested at same harness, and even that is inaccurate in same cases. Comparing models from different harnesses can be done only for Pass rate.
 <!-- generated:model-comparison -->
 ## Model Comparison
 
