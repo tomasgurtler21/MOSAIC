@@ -6,7 +6,8 @@ package resultsummary_test
 // InfrastructureFailure==true are routed to VersionSummary.InfraTests and
 // excluded from VersionSummary.ProblemTests. Tests use the existing fakeFS +
 // in-memory JSON fixture pattern and call Generate, then inspect the written
-// summary.md content.
+// internal-summary.md content (problem-areas and infrastructure-failures are
+// in the internal summary).
 //
 // Fixture design:
 //   - infra_routing_harness_a.json: claude-code / claude-sonnet-4.6
@@ -63,7 +64,7 @@ func TestGenerate_InfraFailedTest_ExcludedFromProblemAreas(t *testing.T) {
 		t.Fatalf("Generate returned unexpected error: %v", err)
 	}
 
-	content := readWrittenFile(t, fs, root+"/Orchestrator/v1.0.0/summary.md")
+	content := readWrittenFile(t, fs, root+"/Orchestrator/v1.0.0/internal-summary.md")
 
 	blockStart := strings.Index(content, "<!-- generated:problem-areas -->")
 	blockEnd := strings.Index(content, "<!-- /generated:problem-areas -->")
@@ -97,7 +98,7 @@ func TestGenerate_NormalTest_AppearsInProblemAreas(t *testing.T) {
 		t.Fatalf("Generate returned unexpected error: %v", err)
 	}
 
-	content := readWrittenFile(t, fs, root+"/Orchestrator/v1.0.0/summary.md")
+	content := readWrittenFile(t, fs, root+"/Orchestrator/v1.0.0/internal-summary.md")
 
 	blockStart := strings.Index(content, "<!-- generated:problem-areas -->")
 	blockEnd := strings.Index(content, "<!-- /generated:problem-areas -->")
@@ -130,13 +131,13 @@ func TestGenerate_InfraFailedTest_AppearsInInfraFailuresSection(t *testing.T) {
 		t.Fatalf("Generate returned unexpected error: %v", err)
 	}
 
-	content := readWrittenFile(t, fs, root+"/Orchestrator/v1.0.0/summary.md")
+	content := readWrittenFile(t, fs, root+"/Orchestrator/v1.0.0/internal-summary.md")
 
 	blockStart := strings.Index(content, "<!-- generated:infrastructure-failures -->")
 	blockEnd := strings.Index(content, "<!-- /generated:infrastructure-failures -->")
 	if blockStart < 0 || blockEnd < 0 || blockEnd <= blockStart {
 		t.Fatal("generated:infrastructure-failures block not found in rendered output; " +
-			"renderInfrastructureFailuresSection must be added to RenderVersionSummary between problem-areas and analysis:overall-analysis")
+			"renderInfrastructureFailuresSection must be present in RenderInternalSummary")
 	}
 	infraBlock := content[blockStart:blockEnd]
 
@@ -162,7 +163,7 @@ func TestGenerate_MixedSuite_OnlyNormalTestsInProblemAreas(t *testing.T) {
 		t.Fatalf("Generate returned unexpected error: %v", err)
 	}
 
-	content := readWrittenFile(t, fs, root+"/Orchestrator/v1.0.0/summary.md")
+	content := readWrittenFile(t, fs, root+"/Orchestrator/v1.0.0/internal-summary.md")
 
 	// Check problem-areas does not contain infra-test.
 	paStart := strings.Index(content, "<!-- generated:problem-areas -->")
@@ -213,12 +214,12 @@ func TestGenerate_InfraFailuresSection_AlwaysPresentEvenIfEmpty(t *testing.T) {
 		t.Fatalf("Generate returned unexpected error: %v", err)
 	}
 
-	content := readWrittenFile(t, fs, root+"/Orchestrator/v1.0.0/summary.md")
+	content := readWrittenFile(t, fs, root+"/Orchestrator/v1.0.0/internal-summary.md")
 
 	if !strings.Contains(content, "<!-- generated:infrastructure-failures -->") {
-		t.Error("generated:infrastructure-failures opening marker must always appear in summary.md, even when InfraTests is empty")
+		t.Error("generated:infrastructure-failures opening marker must always appear in internal-summary.md, even when InfraTests is empty")
 	}
 	if !strings.Contains(content, "<!-- /generated:infrastructure-failures -->") {
-		t.Error("generated:infrastructure-failures closing marker must always appear in summary.md, even when InfraTests is empty")
+		t.Error("generated:infrastructure-failures closing marker must always appear in internal-summary.md, even when InfraTests is empty")
 	}
 }

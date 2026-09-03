@@ -173,17 +173,39 @@ type TestReportWire struct {
 	Runs        []RunReportWire `json:"runs"`
 }
 
+// RunKeyWire holds run identification fields from an exclusion entry.
+// The exact sub-fields are an implementation detail; Reason, TerminationReason,
+// and Detail on ExclusionWire are the fields consumed by the rendering layer.
+type RunKeyWire struct {
+	RunID     string `json:"run_id"`
+	TestName  string `json:"test_name"`
+	RunNumber int    `json:"run_number"`
+}
+
+// ExclusionWire is the wire shape for one excluded run, deserialized from
+// stored report JSON at test.aggregate.exclusions[]. Absent in older stored
+// reports (the parent slice decodes to nil -- backward compatible).
+type ExclusionWire struct {
+	Key               RunKeyWire `json:"key"`
+	Reason            string     `json:"reason"`
+	TerminationReason string     `json:"termination_reason"`
+	Detail            string     `json:"detail"`
+}
+
 // AggregateWire is the minimal wire shape for aggregate stats.
 type AggregateWire struct {
-	Verdict               string   `json:"verdict"`
-	Counted               int      `json:"counted"`
-	Passed                int      `json:"passed"`
-	PassRate              float64  `json:"pass_rate"`
-	InfrastructureFailure bool     `json:"infrastructure_failure"`
-	TotalCost             CostWire `json:"total_cost"`
+	Verdict               string          `json:"verdict"`
+	Counted               int             `json:"counted"`
+	Passed                int             `json:"passed"`
+	PassRate              float64         `json:"pass_rate"`
+	InfrastructureFailure bool            `json:"infrastructure_failure"`
+	TotalCost             CostWire        `json:"total_cost"`
 	// Excluded is the number of runs excluded from the denominator.
 	// Absent in older report JSON; decodes to 0 (backward compatible).
 	Excluded int `json:"excluded"`
+	// Exclusions is the per-exclusion detail array. Absent in older stored
+	// reports (decodes to nil -- backward compatible). Additive-only.
+	Exclusions []ExclusionWire `json:"exclusions"`
 }
 
 // RunReportWire is the minimal wire shape for one run entry.

@@ -117,6 +117,24 @@ type TestStats struct {
 	WorstExcluded int
 }
 
+// ExclusionDetail holds one excluded run's detail for rendering in the
+// internal report's exclusions-detail section.
+type ExclusionDetail struct {
+	// Suite is the suite ID from the parent report.
+	Suite string
+	// TestName is the human-readable test name from TestReportWire.TestName.
+	TestName string
+	// Reason is the exclusion reason (e.g. "spawn_failed"). Empty for older
+	// reports where the field was absent.
+	Reason string
+	// TerminationReason is the run's termination reason. Empty when none was
+	// recorded.
+	TerminationReason string
+	// Detail is a human-readable explanation of why the run was excluded.
+	// Empty when not available.
+	Detail string
+}
+
 // VersionSummary holds all aggregated data for one orchestrator version,
 // ready for Markdown rendering by RenderVersionSummary.
 type VersionSummary struct {
@@ -138,6 +156,12 @@ type VersionSummary struct {
 	// from ProblemTests. Same TestStats shape as ProblemTests for rendering
 	// consistency.
 	InfraTests []TestStats
+
+	// ExclusionDetails lists every excluded run across all reports in this
+	// version, sorted by suite then test numeric ID then exclusion order within
+	// each test. Nil for versions whose stored reports predate the
+	// exclusion-detail wire field.
+	ExclusionDetails []ExclusionDetail
 }
 
 // RegressionFlag identifies one model+harness combination where the

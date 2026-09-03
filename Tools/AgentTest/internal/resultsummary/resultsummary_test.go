@@ -5,9 +5,9 @@ package resultsummary_test
 // generation, marker preservation, and determinism.
 //
 // All filesystem-dependent tests (Generate) use an in-memory fakeFS so no
-// real disk I/O occurs. Pure function tests (RenderVersionSummary,
-// RenderCrossVersionSummary, ParseMarkedDocument, MergeDocument) construct
-// their inputs directly and assert on returned values.
+// real disk I/O occurs. Pure function tests (RenderUserSummary,
+// RenderInternalSummary, RenderCrossVersionSummary, ParseMarkedDocument,
+// MergeDocument) construct their inputs directly and assert on returned values.
 //
 // Note on RED phase: Four boundary/negative tests pass vacuously during TDD RED
 // phase because the expected behavior ("write nothing," "return empty") happens
@@ -214,8 +214,8 @@ func TestGenerate_MissingTestResultsDir_ReturnsNoFilesNoError(t *testing.T) {
 }
 
 // TestGenerate_SingleVersionSingleReport_WritesPerVersionSummary verifies that
-// when a single version directory with one report is present, Generate writes a
-// per-version summary.md.
+// when a single version directory with one report is present, Generate writes
+// per-version user-summary.md and internal-summary.md files.
 func TestGenerate_SingleVersionSingleReport_WritesPerVersionSummary(t *testing.T) {
 	fs := newFakeFS()
 	seedReport(fs, "/TestResults", "v1.0.0", "happy-path", "claude-code",
@@ -228,7 +228,7 @@ func TestGenerate_SingleVersionSingleReport_WritesPerVersionSummary(t *testing.T
 		t.Fatalf("Generate returned unexpected error: %v", err)
 	}
 
-	perVersionPath := "/TestResults/Orchestrator/v1.0.0/summary.md"
+	perVersionPath := "/TestResults/Orchestrator/v1.0.0/user-summary.md"
 	allFiles := append(result.FilesWritten, result.FilesUpdated...)
 	if !containsPath(allFiles, perVersionPath) {
 		t.Errorf("expected %q in result files, got written=%v updated=%v",
@@ -278,13 +278,13 @@ func TestGenerate_VersionFilterMatching_OnlyScansMatchingVersion(t *testing.T) {
 		t.Fatalf("Generate returned unexpected error: %v", err)
 	}
 
-	// Only v1.0.0/summary.md should appear; v2.0.0/summary.md should not.
+	// Only v1.0.0/user-summary.md should appear; v2.0.0/user-summary.md should not.
 	allFiles := append(result.FilesWritten, result.FilesUpdated...)
-	if containsPath(allFiles, "/TestResults/Orchestrator/v2.0.0/summary.md") {
-		t.Errorf("VersionFilter=v1.0.0 should not produce v2.0.0/summary.md, but it did: %v", allFiles)
+	if containsPath(allFiles, "/TestResults/Orchestrator/v2.0.0/user-summary.md") {
+		t.Errorf("VersionFilter=v1.0.0 should not produce v2.0.0/user-summary.md, but it did: %v", allFiles)
 	}
-	if !containsPath(allFiles, "/TestResults/Orchestrator/v1.0.0/summary.md") {
-		t.Errorf("VersionFilter=v1.0.0 should produce v1.0.0/summary.md, but it did not: %v", allFiles)
+	if !containsPath(allFiles, "/TestResults/Orchestrator/v1.0.0/user-summary.md") {
+		t.Errorf("VersionFilter=v1.0.0 should produce v1.0.0/user-summary.md, but it did not: %v", allFiles)
 	}
 	// The cross-version summary must always be written, even when a version filter is active.
 	// An implementation that skips the cross-version write when a filter is set fails this test.
@@ -320,7 +320,7 @@ func TestGenerate_VersionFilterNotMatching_WritesNoPerVersionFiles(t *testing.T)
 }
 
 // TestGenerate_TwoVersions_WritesTwoPerVersionSummaries verifies that two
-// version directories each produce their own per-version summary.md.
+// version directories each produce their own per-version user-summary.md.
 func TestGenerate_TwoVersions_WritesTwoPerVersionSummaries(t *testing.T) {
 	fs := newFakeFS()
 	seedReport(fs, "/TestResults", "v1.0.0", "happy-path", "claude-code",
@@ -336,11 +336,11 @@ func TestGenerate_TwoVersions_WritesTwoPerVersionSummaries(t *testing.T) {
 	}
 
 	allFiles := append(result.FilesWritten, result.FilesUpdated...)
-	if !containsPath(allFiles, "/TestResults/Orchestrator/v1.0.0/summary.md") {
-		t.Errorf("expected v1.0.0/summary.md in result, got: %v", allFiles)
+	if !containsPath(allFiles, "/TestResults/Orchestrator/v1.0.0/user-summary.md") {
+		t.Errorf("expected v1.0.0/user-summary.md in result, got: %v", allFiles)
 	}
-	if !containsPath(allFiles, "/TestResults/Orchestrator/v2.0.0/summary.md") {
-		t.Errorf("expected v2.0.0/summary.md in result, got: %v", allFiles)
+	if !containsPath(allFiles, "/TestResults/Orchestrator/v2.0.0/user-summary.md") {
+		t.Errorf("expected v2.0.0/user-summary.md in result, got: %v", allFiles)
 	}
 }
 
@@ -362,7 +362,7 @@ func TestGenerate_MultipleHarnessModelCombos_BothAppearInOutput(t *testing.T) {
 		t.Fatalf("Generate returned unexpected error: %v", err)
 	}
 
-	content := readWrittenFile(t, fs, "/TestResults/Orchestrator/v1.0.0/summary.md")
+	content := readWrittenFile(t, fs, "/TestResults/Orchestrator/v1.0.0/user-summary.md")
 
 	if !strings.Contains(content, "claude-sonnet-4.6") {
 		t.Error("per-version summary should mention model claude-sonnet-4.6")
@@ -392,7 +392,7 @@ func TestGenerate_PartialReport_FlaggedInOutput(t *testing.T) {
 		t.Fatalf("Generate returned unexpected error: %v", err)
 	}
 
-	content := readWrittenFile(t, fs, "/TestResults/Orchestrator/v1.0.0/summary.md")
+	content := readWrittenFile(t, fs, "/TestResults/Orchestrator/v1.0.0/user-summary.md")
 
 	// Partial reports are processed without error. The [partial] marker is no
 	// longer rendered in tables (AC1.1 removes it); verify it is absent.
@@ -416,7 +416,7 @@ func TestGenerate_UnresolvedCostAttribution_ShowsWarningMarkerNotDollarZero(t *t
 		t.Fatalf("Generate returned unexpected error: %v", err)
 	}
 
-	content := readWrittenFile(t, fs, "/TestResults/Orchestrator/v1.0.0/summary.md")
+	content := readWrittenFile(t, fs, "/TestResults/Orchestrator/v1.0.0/user-summary.md")
 
 	// The cost warning marker "[cost?]" must appear; "$0.00" must not appear
 	// in a cost column for this harness+model combination.
@@ -440,7 +440,7 @@ func TestGenerate_UnavailableCostAttribution_ShowsWarningMarkerNotDollarZero(t *
 		t.Fatalf("Generate returned unexpected error: %v", err)
 	}
 
-	content := readWrittenFile(t, fs, "/TestResults/Orchestrator/v1.0.0/summary.md")
+	content := readWrittenFile(t, fs, "/TestResults/Orchestrator/v1.0.0/user-summary.md")
 
 	if !strings.Contains(content, "[cost?]") {
 		t.Errorf("per-version summary should contain [cost?] warning for 'unavailable' attribution, content:\n%s", content)
@@ -465,7 +465,7 @@ func TestGenerate_PassRateAggregated_TwoReports(t *testing.T) {
 		t.Fatalf("Generate returned unexpected error: %v", err)
 	}
 
-	content := readWrittenFile(t, fs, "/TestResults/Orchestrator/v1.0.0/summary.md")
+	content := readWrittenFile(t, fs, "/TestResults/Orchestrator/v1.0.0/user-summary.md")
 
 	// 100% pass rate for claude-code/claude-sonnet-4.6 should appear as a
 	// formatted percentage (e.g. "100%") — not just the bare digit "100" which
@@ -479,145 +479,37 @@ func TestGenerate_PassRateAggregated_TwoReports(t *testing.T) {
 	}
 }
 
-// ---- T2.3: Per-version summary Markdown generation ----
-
-// TestRenderVersionSummary_ContainsOverviewSection verifies that the output
-// contains a generated:overview block.
-func TestRenderVersionSummary_ContainsOverviewSection(t *testing.T) {
-	vs := minimalVersionSummary("v1.0.0")
-	output := resultsummary.RenderVersionSummary(vs)
-
-	if !strings.Contains(output, "<!-- generated:overview -->") {
-		t.Error("RenderVersionSummary output must contain <!-- generated:overview --> marker")
-	}
-	if !strings.Contains(output, "<!-- /generated:overview -->") {
-		t.Error("RenderVersionSummary output must contain <!-- /generated:overview --> closing marker")
-	}
-}
-
-// TestRenderVersionSummary_ContainsModelResultsSection verifies that the output
-// contains a generated:model-results block.
-func TestRenderVersionSummary_ContainsModelResultsSection(t *testing.T) {
-	vs := minimalVersionSummary("v1.0.0")
-	output := resultsummary.RenderVersionSummary(vs)
-
-	if !strings.Contains(output, "<!-- generated:model-results -->") {
-		t.Error("RenderVersionSummary output must contain <!-- generated:model-results --> marker")
-	}
-	if !strings.Contains(output, "<!-- /generated:model-results -->") {
-		t.Error("RenderVersionSummary output must contain <!-- /generated:model-results --> closing marker")
-	}
-}
-
-// TestRenderVersionSummary_ContainsModelComparisonSection verifies that the
-// output contains a generated:model-comparison block.
-func TestRenderVersionSummary_ContainsModelComparisonSection(t *testing.T) {
-	vs := minimalVersionSummary("v1.0.0")
-	output := resultsummary.RenderVersionSummary(vs)
-
-	if !strings.Contains(output, "<!-- generated:model-comparison -->") {
-		t.Error("RenderVersionSummary output must contain <!-- generated:model-comparison --> marker")
-	}
-	if !strings.Contains(output, "<!-- /generated:model-comparison -->") {
-		t.Error("RenderVersionSummary output must contain <!-- /generated:model-comparison --> closing marker")
-	}
-}
-
-// TestRenderVersionSummary_ContainsHarnessComparisonSection verifies that the
-// output contains a generated:harness-comparison block.
-func TestRenderVersionSummary_ContainsHarnessComparisonSection(t *testing.T) {
-	vs := minimalVersionSummary("v1.0.0")
-	output := resultsummary.RenderVersionSummary(vs)
-
-	if !strings.Contains(output, "<!-- generated:harness-comparison -->") {
-		t.Error("RenderVersionSummary output must contain <!-- generated:harness-comparison --> marker")
-	}
-	if !strings.Contains(output, "<!-- /generated:harness-comparison -->") {
-		t.Error("RenderVersionSummary output must contain <!-- /generated:harness-comparison --> closing marker")
-	}
-}
-
-// TestRenderVersionSummary_ContainsProblemAreasSection verifies that the output
-// contains a generated:problem-areas block.
-func TestRenderVersionSummary_ContainsProblemAreasSection(t *testing.T) {
-	vs := minimalVersionSummary("v1.0.0")
-	output := resultsummary.RenderVersionSummary(vs)
-
-	if !strings.Contains(output, "<!-- generated:problem-areas -->") {
-		t.Error("RenderVersionSummary output must contain <!-- generated:problem-areas --> marker")
-	}
-	if !strings.Contains(output, "<!-- /generated:problem-areas -->") {
-		t.Error("RenderVersionSummary output must contain <!-- /generated:problem-areas --> closing marker")
-	}
-}
-
-// TestRenderVersionSummary_ProblemAreasContent_AppearInsideBlock verifies that
-// problem test entries (test ID and spread) appear inside the
-// generated:problem-areas block, not just that the block markers are present.
-// Uses multiModelVersionSummary which contains a ProblemTest entry for "test-beta".
-func TestRenderVersionSummary_ProblemAreasContent_AppearInsideBlock(t *testing.T) {
-	vs := multiModelVersionSummary()
-	output := resultsummary.RenderVersionSummary(vs)
-
-	blockStart := strings.Index(output, "<!-- generated:problem-areas -->")
-	blockEnd := strings.Index(output, "<!-- /generated:problem-areas -->")
-	if blockStart < 0 || blockEnd < 0 || blockEnd <= blockStart {
-		t.Fatal("generated:problem-areas block not found in rendered output; implementation required")
-	}
-
-	blockContent := output[blockStart:blockEnd]
-	if !strings.Contains(blockContent, "test-beta") {
-		t.Errorf("problem-areas block must contain problem test ID 'test-beta'; block content:\n%s", blockContent)
-	}
-}
-
-// TestRenderVersionSummary_ContainsOverallAnalysisPlaceholder verifies that
-// the output contains an analysis:overall-analysis block (the placeholder where
-// an LLM or human writes qualitative observations).
-func TestRenderVersionSummary_ContainsOverallAnalysisPlaceholder(t *testing.T) {
-	vs := minimalVersionSummary("v1.0.0")
-	output := resultsummary.RenderVersionSummary(vs)
-
-	if !strings.Contains(output, "<!-- analysis:overall-analysis -->") {
-		t.Error("RenderVersionSummary output must contain <!-- analysis:overall-analysis --> marker")
-	}
-	if !strings.Contains(output, "<!-- /analysis:overall-analysis -->") {
-		t.Error("RenderVersionSummary output must contain <!-- /analysis:overall-analysis --> closing marker")
-	}
-}
-
-// TestRenderVersionSummary_VersionAppearsinOverview verifies that the version
+// TestRenderUserSummary_VersionAppearsInOverview verifies that the version
 // string appears in the overview section.
-func TestRenderVersionSummary_VersionAppearsInOverview(t *testing.T) {
+func TestRenderUserSummary_VersionAppearsInOverview(t *testing.T) {
 	vs := minimalVersionSummary("v1.0.0")
-	output := resultsummary.RenderVersionSummary(vs)
+	output := resultsummary.RenderUserSummary(vs)
 
 	if !strings.Contains(output, "v1.0.0") {
-		t.Error("RenderVersionSummary output must contain the version string v1.0.0")
+		t.Error("RenderUserSummary output must contain the version string v1.0.0")
 	}
 }
 
-// TestRenderVersionSummary_ModelAppearsInModelResults verifies that the model
+// TestRenderUserSummary_ModelAppearsInModelResults verifies that the model
 // name appears in the model-results section.
-func TestRenderVersionSummary_ModelAppearsInModelResults(t *testing.T) {
+func TestRenderUserSummary_ModelAppearsInModelResults(t *testing.T) {
 	vs := minimalVersionSummary("v1.0.0")
 	// minimalVersionSummary includes "claude-sonnet-4.6" as the model.
-	output := resultsummary.RenderVersionSummary(vs)
+	output := resultsummary.RenderUserSummary(vs)
 
 	if !strings.Contains(output, "claude-sonnet-4.6") {
-		t.Error("RenderVersionSummary output must include model name claude-sonnet-4.6")
+		t.Error("RenderUserSummary output must include model name claude-sonnet-4.6")
 	}
 }
 
-// TestRenderVersionSummary_SuiteBreakdownContent_AppearsInsideModelResultsBlock
+// TestRenderUserSummary_SuiteBreakdownContent_AppearsInsideModelResultsBlock
 // verifies that suite names from BySuite appear within the
 // generated:model-results block. This guards against an implementation that
-// renders only aggregate model stats and silently omits per-suite breakdowns,
-// which are an explicit requirement of AC2.2 ("Model Results with per-suite
-// breakdowns"). Uses the same block-extraction pattern as
-// TestRenderVersionSummary_ProblemAreasContent_AppearInsideBlock to prevent
+// renders only aggregate model stats and silently omits per-suite breakdowns.
+// Uses the same block-extraction pattern as
+// TestRenderInternalSummary_ProblemAreasContent_AppearInsideBlock to prevent
 // false positives from content outside the expected section.
-func TestRenderVersionSummary_SuiteBreakdownContent_AppearsInsideModelResultsBlock(t *testing.T) {
+func TestRenderUserSummary_SuiteBreakdownContent_AppearsInsideModelResultsBlock(t *testing.T) {
 	vs := resultsummary.VersionSummary{
 		Version:     "v1.0.0",
 		ReportCount: 2,
@@ -665,7 +557,7 @@ func TestRenderVersionSummary_SuiteBreakdownContent_AppearsInsideModelResultsBlo
 		},
 	}
 
-	output := resultsummary.RenderVersionSummary(vs)
+	output := resultsummary.RenderUserSummary(vs)
 
 	blockStart := strings.Index(output, "<!-- generated:model-results -->")
 	blockEnd := strings.Index(output, "<!-- /generated:model-results -->")
@@ -682,22 +574,22 @@ func TestRenderVersionSummary_SuiteBreakdownContent_AppearsInsideModelResultsBlo
 	}
 }
 
-// TestRenderVersionSummary_HarnessAppearsInHarnessComparison verifies that the
+// TestRenderUserSummary_HarnessAppearsInHarnessComparison verifies that the
 // harness name appears in the harness-comparison section.
-func TestRenderVersionSummary_HarnessAppearsInHarnessComparison(t *testing.T) {
+func TestRenderUserSummary_HarnessAppearsInHarnessComparison(t *testing.T) {
 	vs := minimalVersionSummary("v1.0.0")
 	// minimalVersionSummary includes "claude-code" as the harness.
-	output := resultsummary.RenderVersionSummary(vs)
+	output := resultsummary.RenderUserSummary(vs)
 
 	if !strings.Contains(output, "claude-code") {
-		t.Error("RenderVersionSummary output must include harness name claude-code")
+		t.Error("RenderUserSummary output must include harness name claude-code")
 	}
 }
 
-// TestRenderVersionSummary_CostWarning_ShowsMarkerNotZeroDollar verifies that
+// TestRenderUserSummary_CostWarning_ShowsMarkerNotZeroDollar verifies that
 // when HarnessModelStats.CostWarning is true, the rendered row shows the cost
 // warning marker instead of "$0.00".
-func TestRenderVersionSummary_CostWarning_ShowsMarkerNotZeroDollar(t *testing.T) {
+func TestRenderUserSummary_CostWarning_ShowsMarkerNotZeroDollar(t *testing.T) {
 	vs := resultsummary.VersionSummary{
 		Version:     "v1.0.0",
 		ReportCount: 1,
@@ -735,22 +627,22 @@ func TestRenderVersionSummary_CostWarning_ShowsMarkerNotZeroDollar(t *testing.T)
 		},
 	}
 
-	output := resultsummary.RenderVersionSummary(vs)
+	output := resultsummary.RenderUserSummary(vs)
 
 	if strings.Contains(output, "$0.00") {
-		t.Error("RenderVersionSummary must not show $0.00 for unresolved cost attribution")
+		t.Error("RenderUserSummary must not show $0.00 for unresolved cost attribution")
 	}
 	if !strings.Contains(output, "[cost?]") {
-		t.Error("RenderVersionSummary must show [cost?] warning marker for unresolved cost attribution")
+		t.Error("RenderUserSummary must show [cost?] warning marker for unresolved cost attribution")
 	}
 }
 
-// TestRenderVersionSummary_ZeroCostNoWarning_ShowsDollarZeroNotCostWarning
+// TestRenderUserSummary_ZeroCostNoWarning_ShowsDollarZeroNotCostWarning
 // verifies that when HarnessModelStats.CostWarning is false and TotalCost is
 // 0.0, the rendered output shows "$0.00" and does NOT show the "[cost?]"
 // warning marker. This is the complement of the CostWarning=true test above:
 // an implementation that always renders "[cost?]" would fail this test.
-func TestRenderVersionSummary_ZeroCostNoWarning_ShowsDollarZeroNotCostWarning(t *testing.T) {
+func TestRenderUserSummary_ZeroCostNoWarning_ShowsDollarZeroNotCostWarning(t *testing.T) {
 	vs := resultsummary.VersionSummary{
 		Version:     "v1.0.0",
 		ReportCount: 1,
@@ -788,20 +680,20 @@ func TestRenderVersionSummary_ZeroCostNoWarning_ShowsDollarZeroNotCostWarning(t 
 		},
 	}
 
-	output := resultsummary.RenderVersionSummary(vs)
+	output := resultsummary.RenderUserSummary(vs)
 
 	if strings.Contains(output, "[cost?]") {
-		t.Error("RenderVersionSummary must not show [cost?] when CostWarning is false")
+		t.Error("RenderUserSummary must not show [cost?] when CostWarning is false")
 	}
 	if !strings.Contains(output, "$0.00") {
-		t.Error("RenderVersionSummary must show $0.00 for zero cost when CostWarning is false")
+		t.Error("RenderUserSummary must show $0.00 for zero cost when CostWarning is false")
 	}
 }
 
-// TestRenderVersionSummary_MultipleModels_AllAppearInModelComparison verifies
+// TestRenderUserSummary_MultipleModels_AllAppearInModelComparison verifies
 // that when multiple models are present, all appear in the model-comparison
 // table.
-func TestRenderVersionSummary_MultipleModels_AllAppearInModelComparison(t *testing.T) {
+func TestRenderUserSummary_MultipleModels_AllAppearInModelComparison(t *testing.T) {
 	vs := resultsummary.VersionSummary{
 		Version:     "v1.0.0",
 		ReportCount: 2,
@@ -833,7 +725,7 @@ func TestRenderVersionSummary_MultipleModels_AllAppearInModelComparison(t *testi
 		},
 	}
 
-	output := resultsummary.RenderVersionSummary(vs)
+	output := resultsummary.RenderUserSummary(vs)
 
 	if !strings.Contains(output, "claude-sonnet-4.6") {
 		t.Error("model-comparison must include claude-sonnet-4.6")
@@ -1267,7 +1159,7 @@ func TestMergeDocument_MultipleGeneratedBlocks_AllReplaced(t *testing.T) {
 // TestGenerate_Regeneration_PreservesAnalysisBlockContent is an end-to-end
 // marker preservation test. It:
 //  1. Calls Generate on a seeded fakeFS.
-//  2. Reads the written per-version summary.md.
+//  2. Reads the written per-version user-summary.md.
 //  3. Injects user-authored text into the analysis block.
 //  4. Writes the modified content back to the fakeFS.
 //  5. Calls Generate again with the same reports.
@@ -1285,7 +1177,7 @@ func TestGenerate_Regeneration_PreservesAnalysisBlockContent(t *testing.T) {
 		t.Fatalf("first Generate returned unexpected error: %v", err)
 	}
 
-	summaryPath := "/TestResults/Orchestrator/v1.0.0/summary.md"
+	summaryPath := "/TestResults/Orchestrator/v1.0.0/user-summary.md"
 	firstContent := readWrittenFile(t, fs, summaryPath)
 
 	// Inject user commentary into the analysis block.
@@ -1322,7 +1214,7 @@ func TestGenerate_Regeneration_GeneratedBlocksAreUpdated(t *testing.T) {
 		t.Fatalf("first Generate returned unexpected error: %v", err)
 	}
 
-	summaryPath := "/TestResults/Orchestrator/v1.0.0/summary.md"
+	summaryPath := "/TestResults/Orchestrator/v1.0.0/user-summary.md"
 	firstContent := readWrittenFile(t, fs, summaryPath)
 
 	// Corrupt a generated block to confirm it gets replaced on re-generation.
@@ -1344,20 +1236,20 @@ func TestGenerate_Regeneration_GeneratedBlocksAreUpdated(t *testing.T) {
 
 // ---- T2.6: Determinism ----
 
-// TestRenderVersionSummary_Determinism_SameInputProducesIdenticalOutput
-// verifies that calling RenderVersionSummary twice with the same VersionSummary
+// TestRenderUserSummary_Determinism_SameInputProducesIdenticalOutput
+// verifies that calling RenderUserSummary twice with the same VersionSummary
 // produces byte-identical output.
-func TestRenderVersionSummary_Determinism_SameInputProducesIdenticalOutput(t *testing.T) {
+func TestRenderUserSummary_Determinism_SameInputProducesIdenticalOutput(t *testing.T) {
 	vs := multiModelVersionSummary()
 
-	first := resultsummary.RenderVersionSummary(vs)
+	first := resultsummary.RenderUserSummary(vs)
 	if first == "" {
-		t.Fatal("RenderVersionSummary returned empty output; cannot evaluate determinism")
+		t.Fatal("RenderUserSummary returned empty output; cannot evaluate determinism")
 	}
-	second := resultsummary.RenderVersionSummary(vs)
+	second := resultsummary.RenderUserSummary(vs)
 
 	if first != second {
-		t.Error("RenderVersionSummary is not deterministic: two calls with identical input produced different output")
+		t.Error("RenderUserSummary is not deterministic: two calls with identical input produced different output")
 	}
 }
 
@@ -1410,7 +1302,7 @@ func TestGenerate_Determinism_SameReportsProduceIdenticalGeneratedBlocks(t *test
 
 	// Compare per-version and cross-version summaries.
 	paths := []string{
-		"/TestResults/Orchestrator/v1.0.0/summary.md",
+		"/TestResults/Orchestrator/v1.0.0/user-summary.md",
 		"/TestResults/Orchestrator/summary.md",
 	}
 	for _, p := range paths {
@@ -1477,8 +1369,8 @@ func TestGenerate_NonReportFileInVersionDir_IsSkipped(t *testing.T) {
 		t.Fatalf("Generate returned unexpected error when version dir contains non-report files: %v", err)
 	}
 	allFiles := append(result.FilesWritten, result.FilesUpdated...)
-	if !containsPath(allFiles, "/TestResults/Orchestrator/v1.0.0/summary.md") {
-		t.Errorf("Generate should still produce v1.0.0/summary.md when non-report files are present, got: %v", allFiles)
+	if !containsPath(allFiles, "/TestResults/Orchestrator/v1.0.0/user-summary.md") {
+		t.Errorf("Generate should still produce v1.0.0/user-summary.md when non-report files are present, got: %v", allFiles)
 	}
 }
 
@@ -1505,8 +1397,8 @@ func TestGenerate_ExistingCrossVersionSummaryAtRoot_NotTreatedAsVersionDir(t *te
 	}
 	allFiles := append(result.FilesWritten, result.FilesUpdated...)
 	// The per-version summary must still be produced.
-	if !containsPath(allFiles, "/TestResults/Orchestrator/v1.0.0/summary.md") {
-		t.Errorf("Generate should produce v1.0.0/summary.md even when root summary.md exists, got: %v", allFiles)
+	if !containsPath(allFiles, "/TestResults/Orchestrator/v1.0.0/user-summary.md") {
+		t.Errorf("Generate should produce v1.0.0/user-summary.md even when root summary.md exists, got: %v", allFiles)
 	}
 }
 
@@ -1804,7 +1696,7 @@ func TestGenerate_SameNumericID_DifferentTestNames_TrackedAsSingleTest(t *testin
 		t.Fatalf("Generate returned unexpected error: %v", err)
 	}
 
-	content := readWrittenFile(t, fs, "/TestResults/Orchestrator/v1.0.0/summary.md")
+	content := readWrittenFile(t, fs, "/TestResults/Orchestrator/v1.0.0/internal-summary.md")
 
 	blockStart := strings.Index(content, "<!-- generated:problem-areas -->")
 	blockEnd := strings.Index(content, "<!-- /generated:problem-areas -->")
@@ -1814,7 +1706,7 @@ func TestGenerate_SameNumericID_DifferentTestNames_TrackedAsSingleTest(t *testin
 
 	blockContent := content[blockStart:blockEnd]
 	// The problem-areas block must contain an entry for numeric ID 42. The
-	// implementation may display the original name, the renamed name, or both —
+	// implementation may display the original name, the renamed name, or both --
 	// either is acceptable as long as an entry appears. With the old string-key
 	// implementation neither name appears because no entry is generated.
 	if !strings.Contains(blockContent, "original-name") && !strings.Contains(blockContent, "renamed-test") {
@@ -1824,11 +1716,9 @@ func TestGenerate_SameNumericID_DifferentTestNames_TrackedAsSingleTest(t *testin
 	}
 }
 
-// TestRenderVersionSummary_ProblemTest_ShowsTestName verifies that the
+// TestRenderInternalSummary_ProblemTest_ShowsTestName verifies that the
 // problem-areas section renders the human-readable TestName for readability.
-// This test FAILS TO COMPILE until contracts.go renames TestID to TestName
-// and adds NumericID.
-func TestRenderVersionSummary_ProblemTest_ShowsTestName(t *testing.T) {
+func TestRenderInternalSummary_ProblemTest_ShowsTestName(t *testing.T) {
 	vs := resultsummary.VersionSummary{
 		Version:     "v1.0.0",
 		ReportCount: 2,
@@ -1872,7 +1762,7 @@ func TestRenderVersionSummary_ProblemTest_ShowsTestName(t *testing.T) {
 		},
 	}
 
-	output := resultsummary.RenderVersionSummary(vs)
+	output := resultsummary.RenderInternalSummary(vs)
 
 	blockStart := strings.Index(output, "<!-- generated:problem-areas -->")
 	blockEnd := strings.Index(output, "<!-- /generated:problem-areas -->")
@@ -1886,12 +1776,10 @@ func TestRenderVersionSummary_ProblemTest_ShowsTestName(t *testing.T) {
 	}
 }
 
-// TestRenderVersionSummary_ProblemTest_NumericIDAppearsInOutput verifies that
+// TestRenderInternalSummary_ProblemTest_NumericIDAppearsInOutput verifies that
 // the problem-areas section includes the numeric test ID alongside the name,
 // so that cross-rename traceability is visible in the rendered Markdown.
-// This test FAILS TO COMPILE until contracts.go renames TestID to TestName
-// and adds NumericID.
-func TestRenderVersionSummary_ProblemTest_NumericIDAppearsInOutput(t *testing.T) {
+func TestRenderInternalSummary_ProblemTest_NumericIDAppearsInOutput(t *testing.T) {
 	vs := resultsummary.VersionSummary{
 		Version:     "v1.0.0",
 		ReportCount: 2,
@@ -1935,7 +1823,7 @@ func TestRenderVersionSummary_ProblemTest_NumericIDAppearsInOutput(t *testing.T)
 		},
 	}
 
-	output := resultsummary.RenderVersionSummary(vs)
+	output := resultsummary.RenderInternalSummary(vs)
 
 	blockStart := strings.Index(output, "<!-- generated:problem-areas -->")
 	blockEnd := strings.Index(output, "<!-- /generated:problem-areas -->")

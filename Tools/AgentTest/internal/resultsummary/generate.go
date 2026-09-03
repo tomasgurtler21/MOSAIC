@@ -76,16 +76,18 @@ func (a *statsAccumulator) toStats(model, harness string) HarnessModelStats {
 	}
 }
 
-// Generate scans the OrchestrationTestResults tree, groups reports, and writes or
-// updates summary.md files. It returns a result describing which files
-// were written or updated. It returns an error only for infrastructure
-// failures (cannot read OrchestrationTestResults/, cannot write a summary.md).
+// Generate scans the OrchestrationTestResults tree, groups reports, and writes
+// or updates user-summary.md and internal-summary.md files per version. It
+// also writes/updates the cross-version summary.md (unchanged behavior). It
+// returns a result describing which files were written or updated. It returns
+// an error only for infrastructure failures (cannot read
+// OrchestrationTestResults/, cannot write a summary file).
 //
 // An empty or missing OrchestrationTestResults tree is not an error; Generate
 // returns a SummaryResult with zero files written.
 //
 // When req.VersionFilter is non-empty, only that version directory
-// is scanned and only its per-version summary.md is written (plus the
+// is scanned and only its per-version summaries are written (plus the
 // cross-version summary.md, updated to reflect any changes).
 func Generate(fs FileSystem, req SummaryRequest) (SummaryResult, error) {
 	var result SummaryResult
@@ -139,15 +141,26 @@ func Generate(fs FileSystem, req SummaryRequest) (SummaryResult, error) {
 			continue
 		}
 
-		summaryPath := versionPath + "/summary.md"
-		outcome, writeErr := writeFileSummary(fs, summaryPath, vs)
-		if writeErr != nil {
-			return result, writeErr
+		userPath := versionPath + "/user-summary.md"
+		userOutcome, userErr := writeUserSummary(fs, userPath, vs)
+		if userErr != nil {
+			return result, userErr
 		}
-		if outcome.Created {
-			result.FilesWritten = append(result.FilesWritten, summaryPath)
+		if userOutcome.Created {
+			result.FilesWritten = append(result.FilesWritten, userPath)
 		} else {
-			result.FilesUpdated = append(result.FilesUpdated, summaryPath)
+			result.FilesUpdated = append(result.FilesUpdated, userPath)
+		}
+
+		internalPath := versionPath + "/internal-summary.md"
+		internalOutcome, internalErr := writeInternalSummary(fs, internalPath, vs)
+		if internalErr != nil {
+			return result, internalErr
+		}
+		if internalOutcome.Created {
+			result.FilesWritten = append(result.FilesWritten, internalPath)
+		} else {
+			result.FilesUpdated = append(result.FilesUpdated, internalPath)
 		}
 	}
 
@@ -232,6 +245,15 @@ func buildVersionSummary(version string, reports []resultstore.ParsedReport) Ver
 	harnessSet := make(map[string]bool)
 	totalTests := 0
 
+	// exclusionDetails accumulates per-exclusion detail keyed by (suite, numericID)
+	// for deterministic ordering.
+	type exclusionEntry struct {
+		suite     string
+		numericID int
+		detail    ExclusionDetail
+	}
+	var exclusionEntries []exclusionEntry
+
 	for _, parsed := range reports {
 		model := parsed.ModelShort
 		harness := parsed.HarnessID
@@ -278,7 +300,35 @@ func buildVersionSummary(version string, reports []resultstore.ParsedReport) Ver
 			} else {
 				testCombos[tk] = append(testCombos[tk], cr)
 			}
+
+			// Collect per-exclusion detail from the wire field (nil for older reports).
+			for _, ex := range t.Aggregate.Exclusions {
+				exclusionEntries = append(exclusionEntries, exclusionEntry{
+					suite:     suite,
+					numericID: t.TestID,
+					detail: ExclusionDetail{
+						Suite:             suite,
+						TestName:          t.TestName,
+						Reason:            ex.Reason,
+						TerminationReason: ex.TerminationReason,
+						Detail:            ex.Detail,
+					},
+				})
+			}
 		}
+	}
+
+	// Sort exclusion entries by suite, then numeric test ID, to produce
+	// deterministic output regardless of report scan order.
+	sort.Slice(exclusionEntries, func(i, j int) bool {
+		if exclusionEntries[i].suite != exclusionEntries[j].suite {
+			return exclusionEntries[i].suite < exclusionEntries[j].suite
+		}
+		return exclusionEntries[i].numericID < exclusionEntries[j].numericID
+	})
+	var exclusionDetails []ExclusionDetail
+	for _, e := range exclusionEntries {
+		exclusionDetails = append(exclusionDetails, e.detail)
 	}
 
 	// Build ByModel map.
@@ -412,16 +462,17 @@ func buildVersionSummary(version string, reports []resultstore.ParsedReport) Ver
 	harnesses := sortedStringKeys(harnessSet)
 
 	return VersionSummary{
-		Version:      version,
-		ReportCount:  len(reports),
-		Suites:       suites,
-		Models:       models,
-		Harnesses:    harnesses,
-		TotalTests:   totalTests,
-		ByModel:      byModel,
-		BySuite:      bySuite,
-		ProblemTests: problemTests,
-		InfraTests:   infraTests,
+		Version:          version,
+		ReportCount:      len(reports),
+		Suites:           suites,
+		Models:           models,
+		Harnesses:        harnesses,
+		TotalTests:       totalTests,
+		ByModel:          byModel,
+		BySuite:          bySuite,
+		ProblemTests:     problemTests,
+		InfraTests:       infraTests,
+		ExclusionDetails: exclusionDetails,
 	}
 }
 
@@ -498,10 +549,19 @@ func getHarnessStats(vs VersionSummary, model, harness string) (HarnessModelStat
 	return stats, ok
 }
 
-// writeFileSummary renders a per-version summary, merges it with any existing
-// content (preserving analysis blocks), and writes the result to path.
-func writeFileSummary(fs FileSystem, path string, vs VersionSummary) (SummaryFileOutcome, error) {
-	newDoc := RenderVersionSummary(vs)
+// writeUserSummary renders the user-facing per-version summary via
+// RenderUserSummary, merges it with any existing content (preserving analysis
+// blocks), and writes the result to path.
+func writeUserSummary(fs FileSystem, path string, vs VersionSummary) (SummaryFileOutcome, error) {
+	newDoc := RenderUserSummary(vs)
+	return writeMergedDoc(fs, path, newDoc)
+}
+
+// writeInternalSummary renders the internal-facing per-version summary via
+// RenderInternalSummary, merges it with any existing content (preserving
+// analysis blocks), and writes the result to path.
+func writeInternalSummary(fs FileSystem, path string, vs VersionSummary) (SummaryFileOutcome, error) {
+	newDoc := RenderInternalSummary(vs)
 	return writeMergedDoc(fs, path, newDoc)
 }
 
