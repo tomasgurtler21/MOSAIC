@@ -66,13 +66,17 @@ type Options struct {
 	Progress domain.ProgressSink
 	Clock    domain.Clock
 
-	// MaxConcurrentRuns bounds how many runs execute at once across the whole
-	// suite — one bound over the (test × repetition) matrix together, not one
-	// bound per nesting level.
+	// MaxConcurrentRuns bounds how many repetitions of a single test execute
+	// concurrently during the fan-out phase (reps 2..N after the warm-up
+	// repetition completes). Tests within a suite execute one at a time: all
+	// repetitions of one test complete before any repetition of the next test
+	// starts. Within one test's fan-out the bound caps simultaneous in-flight
+	// repetitions; it no longer spans the full (test x repetition) matrix.
 	//
-	// 1 is strictly sequential and reproduces the pre-concurrency behaviour,
-	// results and lifecycle-event ordering exactly, so a user who does not
-	// opt into concurrency is unaffected.
+	// 1 is strictly sequential: the warm-up rep runs alone and the single
+	// fan-out slot means each remaining rep also runs alone in order, giving
+	// identical behaviour, results and lifecycle-event ordering to the
+	// pre-concurrency sequential loop.
 	//
 	// It replaces MaxConcurrentTests, which was declared, never read, and
 	// carried a rationale for sequential repetitions ("overlapping samples
@@ -197,37 +201,37 @@ type workItem struct {
 // Run executes a validated plan and returns the single result model both
 // renderers and both frontends consume.
 //
-// Scheduling unit. The unit of concurrent scheduling is one repetition of one
-// test, not one attempt. A unit occupies exactly one slot of
-// Options.MaxConcurrentRuns for its whole life and runs its attempts strictly
-// in order inside that slot. Two properties follow by construction rather
-// than from two cooperating mechanisms: the total number of runs in flight
-// across all tests never exceeds the bound, and a repetition's raw attempts
-// never run concurrently at any bound.
+// Scheduling. Tests execute one at a time in plan order. For each test, the
+// first repetition (rep 1, the warm-up) runs alone and must complete before
+// any of the remaining repetitions start. After the warm-up completes, reps
+// 2..N fan out concurrently, bounded by Options.MaxConcurrentRuns. The next
+// test only starts after all repetitions of the current test have completed.
+// No provider- or model-conditional branching affects this ordering: the
+// warm-up-then-fan-out sequence applies uniformly to every test.
 //
-// Ordering. Every unit's result is written into a slot reserved for it by
-// (test index, repetition number) before scheduling begins, never appended on
-// completion. Report ordering is therefore by test order and repetition
-// number regardless of completion order, which is what the report builder
+// Ordering. Every result is written into a slot pre-allocated by (test index,
+// repetition number) before scheduling begins, never appended on completion.
+// Report ordering is therefore by test plan order and repetition number
+// regardless of fan-out completion order, which is what the report builder
 // already assumes when it consumes reports in the order the suite produced
 // them.
 //
-// Identity and isolation. Each unit's attempts receive distinct run
+// Identity and isolation. Each repetition's attempts receive distinct run
 // identities and therefore distinct sandboxes, distinct run-state files,
 // distinct locks and distinct invocation logs. No file, counter or lock is
-// shared across units, so two runs executing at the same instant can neither
-// observe nor corrupt each other's evidence.
+// shared across repetitions, so two fan-out reps executing at the same instant
+// can neither observe nor corrupt each other's evidence.
 //
-// Cancellation. Run returns only after every unit it started has returned.
-// Cancellation stops further units from being scheduled; units already in
-// flight receive the same ctx and complete their own guaranteed teardown.
-// Results completed before cancellation are returned rather than discarded,
-// and a cancelled suite is not itself a failure.
+// Cancellation. Run returns only after every repetition it started has
+// returned. Cancellation during a warm-up prevents fan-out reps from being
+// dispatched; reps already in flight receive the same ctx and complete their
+// own guaranteed teardown. Results completed before cancellation are returned
+// rather than discarded, and a cancelled suite is not itself a failure.
 //
-// A bound of 1 reproduces the sequential implementation's behaviour, results
-// and lifecycle-event ordering exactly: the work channel is FIFO and one
-// worker processes items in submission order, giving the same ordering the
-// previous sequential loop produced.
+// A bound of 1 is strictly sequential: the warm-up rep runs alone, and the
+// single fan-out slot means each remaining rep also runs alone in order,
+// producing identical behaviour, results and lifecycle-event ordering to the
+// pre-concurrency sequential loop.
 func (s *Suite) Run(ctx context.Context, p preflight.Plan) (report.Result, error) {
 	clock := s.opts.Clock
 	sink := s.opts.Progress
@@ -259,7 +263,6 @@ func (s *Suite) Run(ctx context.Context, p preflight.Plan) (report.Result, error
 	// any goroutine starts so completion order cannot affect the final
 	// report ordering.
 	slots := make([]testSlot, len(p.Tests))
-	totalWork := 0
 	for i, rt := range p.Tests {
 		reps := 1
 		if rt.Settings.Repetitions != nil {
@@ -276,97 +279,134 @@ func (s *Suite) Run(ctx context.Context, p preflight.Plan) (report.Result, error
 			allResults:  make([][]domain.TestResult, reps),
 			runReports:  make([]report.RunReport, reps),
 		}
-		totalWork += reps
 	}
 
-	// Enqueue all work items in (test, repetition) order. The channel is
-	// buffered to hold every item so producers never block. With a single
-	// worker (bound=1) items are consumed in send order, reproducing the
-	// sequential implementation's ordering exactly.
-	workCh := make(chan workItem, totalWork)
-	for i := range slots {
-		for rep := 1; rep <= slots[i].repetitions; rep++ {
-			workCh <- workItem{slotIdx: i, repIdx: rep - 1, rep: rep}
+	// recordResult writes the final result and run report for one repetition
+	// into its pre-allocated slot position, then emits a ProgressTestFinished
+	// event. Each repIdx is owned by exactly one call path, so concurrent
+	// fan-out goroutines always write to non-overlapping positions — no mutex
+	// needed. fanOutWg.Wait() provides the happens-before edge that makes
+	// fan-out writes visible to the assembler goroutine that reads them.
+	recordResult := func(slot *testSlot, item workItem, final domain.TestResult, attempts []domain.TestResult) {
+		slot.allResults[item.repIdx] = attempts
+		slot.runReports[item.repIdx] = report.RunReport{
+			Key:                 final.Key,
+			Verdict:             final.Verdict,
+			Reasons:             final.Reasons,
+			Assertions:          final.Assertions,
+			Conditions:          final.Conditions,
+			Duration:            final.Duration,
+			Cost:                final.Cost,
+			NegativeApplied:     final.NegativeApplied,
+			RetainedSandboxPath: final.RetainedSandboxPath,
+			SubjectVersion:      final.SubjectVersion,
+			SubjectModel:        final.SubjectModel,
+			StubModel:           final.StubModel,
+			HarnessID:           final.HarnessID,
+			TerminationReason:   final.TerminationReason,
+			TestVersion:         final.Version,
+			NumericID:           final.NumericID,
+			Subject: report.SubjectFailure{
+				ExitCode:  final.SubjectResult.ExitCode,
+				Stderr:    final.SubjectResult.Stderr,
+				RawOutput: final.SubjectResult.RawOutput,
+			},
 		}
+		emitSafe(sink, domain.ProgressEvent{
+			Kind:             domain.ProgressTestFinished,
+			At:               clock.Now(),
+			TestID:           slot.rt.Definition.Name,
+			Repetition:       item.rep,
+			Repetitions:      slot.repetitions,
+			Verdict:          final.Verdict,
+			Duration:         final.Duration,
+			Cost:             final.Cost,
+			FailedAssertions: failedAssertionNames(final.Assertions),
+			Run:              final.Key,
+		})
 	}
-	close(workCh)
 
-	// Launch exactly bound workers. Each worker processes items from the
-	// shared FIFO channel until it is drained, holding the semaphore
-	// implicitly by being one of at most bound active goroutines.
-	var wg sync.WaitGroup
-	for w := 0; w < bound; w++ {
-		wg.Add(1)
-		go func() {
-			defer wg.Done()
-			for item := range workCh {
-				slot := &slots[item.slotIdx]
+	// Execute tests one at a time in plan order. For each test:
+	//   - Rep 1 (warm-up) runs alone; no fan-out rep may start before it
+	//     completes.
+	//   - After the warm-up completes, reps 2..N fan out concurrently,
+	//     bounded by Options.MaxConcurrentRuns.
+	//   - The next test begins only after all repetitions of the current
+	//     test have completed.
+	for i := range slots {
+		slot := &slots[i]
 
-				// Respect cancellation: drain remaining items without
-				// executing them, so wg.Done() fires for every started
-				// goroutine and the suite does not orphan goroutines.
-				if ctx.Err() != nil {
-					continue
-				}
+		// Respect cancellation: stop scheduling further tests.
+		if ctx.Err() != nil {
+			break
+		}
 
-				// Block while paused. If ctx is cancelled during the wait,
-				// fall through to the ctx.Err() drain on the next iteration.
-				// Pause is independent of ctx: in-flight runs are unaffected.
-				if s.opts.Pause != nil {
-					if err := s.opts.Pause.WaitIfPaused(ctx); err != nil {
-						continue // context cancelled while paused; drain
-					}
-				}
-
-				final, attempts := s.executeWork(ctx, item, slot, sink, clock)
-
-				// Write into the pre-allocated position. Each repIdx is owned
-				// by exactly one work item, so concurrent workers always write
-				// to non-overlapping slice positions — no mutex needed.
-				// wg.Wait() provides the happens-before edge that makes these
-				// writes visible to the assembler goroutine below.
-				slot.allResults[item.repIdx] = attempts
-				slot.runReports[item.repIdx] = report.RunReport{
-					Key:                 final.Key,
-					Verdict:             final.Verdict,
-					Reasons:             final.Reasons,
-					Assertions:          final.Assertions,
-					Conditions:          final.Conditions,
-					Duration:            final.Duration,
-					Cost:                final.Cost,
-					NegativeApplied:     final.NegativeApplied,
-					RetainedSandboxPath: final.RetainedSandboxPath,
-					SubjectVersion:      final.SubjectVersion,
-					SubjectModel:        final.SubjectModel,
-					StubModel:           final.StubModel,
-					HarnessID:           final.HarnessID,
-					TerminationReason:   final.TerminationReason,
-					TestVersion:         final.Version,
-					NumericID:           final.NumericID,
-					Subject: report.SubjectFailure{
-						ExitCode:  final.SubjectResult.ExitCode,
-						Stderr:    final.SubjectResult.Stderr,
-						RawOutput: final.SubjectResult.RawOutput,
-					},
-				}
-
-				emitSafe(sink, domain.ProgressEvent{
-					Kind:             domain.ProgressTestFinished,
-					At:               clock.Now(),
-					TestID:           slot.rt.Definition.Name,
-					Repetition:       item.rep,
-					Repetitions:      slot.repetitions,
-					Verdict:          final.Verdict,
-					Duration:         final.Duration,
-					Cost:             final.Cost,
-					FailedAssertions: failedAssertionNames(final.Assertions),
-					Run:              final.Key,
-				})
+		// Block while paused. If ctx is cancelled during the wait, stop
+		// scheduling. Pause is independent of ctx: in-flight runs are
+		// unaffected by Pause, only new scheduling points are blocked.
+		if s.opts.Pause != nil {
+			if err := s.opts.Pause.WaitIfPaused(ctx); err != nil {
+				break // context cancelled while paused
 			}
-		}()
-	}
+		}
 
-	wg.Wait()
+		// --- Warm-up: rep 1 runs alone. ---
+		// Rep 1 must complete before any fan-out rep may be dispatched.
+		warmUpItem := workItem{slotIdx: i, repIdx: 0, rep: 1}
+		warmFinal, warmAttempts := s.executeWork(ctx, warmUpItem, slot, sink, clock)
+		recordResult(slot, warmUpItem, warmFinal, warmAttempts)
+
+		// Skip fan-out for a single-rep test, or if ctx was cancelled
+		// during the warm-up (the fan-out must never be dispatched after
+		// cancellation — the warm-up result is already recorded above).
+		if slot.repetitions <= 1 || ctx.Err() != nil {
+			continue
+		}
+
+		// --- Fan-out: reps 2..N concurrently, bounded by MaxConcurrentRuns. ---
+		// The semaphore caps simultaneously in-flight fan-out reps. Each
+		// goroutine releases its slot when its executeWork call returns.
+		sem := make(chan struct{}, bound)
+		var fanOutWg sync.WaitGroup
+
+	fanOutLoop:
+		for rep := 2; rep <= slot.repetitions; rep++ {
+			// Respect cancellation: stop dispatching fan-out reps.
+			if ctx.Err() != nil {
+				break fanOutLoop
+			}
+
+			// Pause interop before dispatching each fan-out rep.
+			if s.opts.Pause != nil {
+				if err := s.opts.Pause.WaitIfPaused(ctx); err != nil {
+					break fanOutLoop // context cancelled while paused
+				}
+			}
+
+			// Acquire a semaphore slot, blocking until one is free or
+			// ctx is cancelled.
+			select {
+			case sem <- struct{}{}:
+			case <-ctx.Done():
+				break fanOutLoop
+			}
+
+			item := workItem{slotIdx: i, repIdx: rep - 1, rep: rep}
+			fanOutWg.Add(1)
+			go func(item workItem) {
+				defer func() {
+					<-sem
+					fanOutWg.Done()
+				}()
+				f, att := s.executeWork(ctx, item, slot, sink, clock)
+				recordResult(slot, item, f, att)
+			}(item)
+		}
+
+		// Wait for every dispatched fan-out goroutine to return before
+		// moving to the next test.
+		fanOutWg.Wait()
+	}
 
 	// Assemble test reports from the pre-allocated slots, in plan order.
 	// Repetitions that were cancelled before execution have a nil allResults

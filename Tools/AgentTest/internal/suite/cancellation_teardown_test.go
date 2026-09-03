@@ -16,17 +16,25 @@ package suite_test
 //  4. Results completed before cancellation are returned, and a cancelled
 //     suite is not itself reported as a failure.
 //
-// Regression guards (pass with the current implementation; protect against
-// future regressions):
+// Under the one-test-at-a-time scheduling model, cross-test concurrency is
+// eliminated. Cancellation tests therefore use a single test with enough
+// repetitions so that after the warm-up rep (rep 1) completes, the fan-out
+// reps (reps 2..N) reach the required simultaneous in-flight count.
+//
+// Regression guards (pass now, protect against future regressions):
 //   - TestCancellation_ReachesEveryInFlightRun_NotOnlyMostRecent
 //   - TestCancellation_GoroutinesJoined_BeforeSuiteReturns
 //   - TestCancellation_AllStartedRuns_CompleteBeforeSuiteReturns
-//   - TestCancellation_CompletedResultsReturned_SuiteIsNotAFailure
 //   - TestCancellation_NoWorkOutlivesSuiteCall_AtBoundAboveOne
 //   - TestCancellation_PanickingAttempt_SiblingAttemptsUnaffected
-//
-// RED-phase test (fails before I15.3, passes after):
+//   - TestCancellation_CompletedResultsReturned_SuiteIsNotAFailure
 //   - TestCancellation_PanickingAttempt_SchedulerContainsPanic
+//
+// Note: the cancellation tests pass before implementation because the current
+// shared-FIFO scheduler is already concurrent: after the warm-up rep (rep 1)
+// passes through, the fan-out reps are dispatched concurrently and reach the
+// required in-flight count without any code change. These tests are effective
+// regression guards but are not RED-phase tests.
 
 import (
 	"context"
@@ -45,48 +53,57 @@ import (
 )
 
 // ---------------------------------------------------------------------------
-// cancellationPropagationRunner
+// warmUpCancellationRunner
 // ---------------------------------------------------------------------------
 
-// cancellationPropagationRunner blocks every Run call behind a "hold" gate
-// that never opens from the runner side: calls unblock only when ctx is
-// cancelled. A separate "allInFlight" channel closes when the expected number
-// of calls are simultaneously in-flight, so the test can detect the right
-// moment to cancel and then measure how many calls observed ctx.Done().
-type cancellationPropagationRunner struct {
-	expected int
+// warmUpCancellationRunner lets the warm-up repetition (RunNumber == 1)
+// complete immediately while blocking subsequent repetitions until the context
+// is cancelled. It closes allInFlight when expectedNonWarmup simultaneous
+// non-warm-up calls are in-flight, so the test can detect the right moment to
+// cancel and then measure how many calls observed ctx.Done().
+type warmUpCancellationRunner struct {
+	expectedNonWarmup int
 
 	allInFlightOnce sync.Once
-	allInFlight     chan struct{} // closed when expected calls are in-flight
+	allInFlight     chan struct{}
 
-	mu             sync.Mutex
-	inFlight       int
-	cancelledCount int // calls that unblocked via ctx.Done
+	mu              sync.Mutex
+	nonWarmupFlight int
+	cancelledCount  int
 }
 
-func newCancellationPropagationRunner(expected int) *cancellationPropagationRunner {
-	return &cancellationPropagationRunner{
-		expected:    expected,
-		allInFlight: make(chan struct{}),
+func newWarmUpCancellationRunner(expectedNonWarmup int) *warmUpCancellationRunner {
+	return &warmUpCancellationRunner{
+		expectedNonWarmup: expectedNonWarmup,
+		allInFlight:       make(chan struct{}),
 	}
 }
 
-func (r *cancellationPropagationRunner) Run(ctx context.Context, key domain.RunKey, t preflight.ResolvedTest, eval domain.AttemptEvaluator) (domain.TestResult, error) {
+func (r *warmUpCancellationRunner) Run(ctx context.Context, key domain.RunKey, t preflight.ResolvedTest, eval domain.AttemptEvaluator) (domain.TestResult, error) {
+	// Warm-up rep: complete immediately so fan-out reps can be dispatched.
+	if key.RunNumber == 1 {
+		ev := passingEvidence()
+		ev.Key = key
+		if eval != nil {
+			return eval(ev), nil
+		}
+		return domain.TestResult{Key: key}, nil
+	}
+
+	// Fan-out rep: signal when threshold reached, then block until cancelled.
 	r.mu.Lock()
-	r.inFlight++
-	if r.inFlight >= r.expected {
+	r.nonWarmupFlight++
+	if r.nonWarmupFlight >= r.expectedNonWarmup {
 		r.allInFlightOnce.Do(func() { close(r.allInFlight) })
 	}
 	r.mu.Unlock()
 
 	defer func() {
 		r.mu.Lock()
-		r.inFlight--
+		r.nonWarmupFlight--
 		r.mu.Unlock()
 	}()
 
-	// Block until ctx is cancelled. There is no gate that the test
-	// closes: the only way this run unblocks is via ctx.Done().
 	<-ctx.Done()
 
 	r.mu.Lock()
@@ -101,37 +118,48 @@ func (r *cancellationPropagationRunner) Run(ctx context.Context, key domain.RunK
 	return domain.TestResult{Key: key}, nil
 }
 
-func (r *cancellationPropagationRunner) cancelledCallCount() int {
+func (r *warmUpCancellationRunner) cancelledCallCount() int {
 	r.mu.Lock()
 	defer r.mu.Unlock()
 	return r.cancelledCount
 }
 
 // ---------------------------------------------------------------------------
-// goroutineQuiescenceRunner
+// warmUpGoroutineQuiescenceRunner
 // ---------------------------------------------------------------------------
 
-// goroutineQuiescenceRunner tracks the number of Run calls currently
-// executing via an atomic counter. It blocks every call until ctx is
-// cancelled, so the test can assert the counter is exactly zero after
-// Suite.Run returns — proving every goroutine was joined.
-type goroutineQuiescenceRunner struct {
-	inFlight  atomic.Int64
-	readyOnce sync.Once
-	ready     chan struct{} // closed when expectedInFlight calls are executing
-	expected  int
+// warmUpGoroutineQuiescenceRunner lets the warm-up rep (RunNumber == 1)
+// complete immediately while blocking subsequent reps until the context is
+// cancelled. It tracks the number of non-warm-up Run calls currently
+// executing via an atomic counter and signals ready when expectedNonWarmup
+// simultaneous fan-out calls are in-flight.
+type warmUpGoroutineQuiescenceRunner struct {
+	expectedNonWarmup int
+	readyOnce         sync.Once
+	ready             chan struct{}
+	inFlight          atomic.Int64
 }
 
-func newGoroutineQuiescenceRunner(expected int) *goroutineQuiescenceRunner {
-	return &goroutineQuiescenceRunner{
-		expected: expected,
-		ready:    make(chan struct{}),
+func newWarmUpGoroutineQuiescenceRunner(expected int) *warmUpGoroutineQuiescenceRunner {
+	return &warmUpGoroutineQuiescenceRunner{
+		expectedNonWarmup: expected,
+		ready:             make(chan struct{}),
 	}
 }
 
-func (r *goroutineQuiescenceRunner) Run(ctx context.Context, key domain.RunKey, t preflight.ResolvedTest, eval domain.AttemptEvaluator) (domain.TestResult, error) {
+func (r *warmUpGoroutineQuiescenceRunner) Run(ctx context.Context, key domain.RunKey, t preflight.ResolvedTest, eval domain.AttemptEvaluator) (domain.TestResult, error) {
+	// Warm-up rep: complete immediately.
+	if key.RunNumber == 1 {
+		ev := passingEvidence()
+		ev.Key = key
+		if eval != nil {
+			return eval(ev), nil
+		}
+		return domain.TestResult{Key: key}, nil
+	}
+
 	current := r.inFlight.Add(1)
-	if current >= int64(r.expected) {
+	if current >= int64(r.expectedNonWarmup) {
 		r.readyOnce.Do(func() { close(r.ready) })
 	}
 	defer r.inFlight.Add(-1)
@@ -146,45 +174,54 @@ func (r *goroutineQuiescenceRunner) Run(ctx context.Context, key domain.RunKey, 
 	return domain.TestResult{Key: key}, nil
 }
 
-// currentInFlight is the number of Run calls executing right now.
+// currentInFlight is the number of non-warm-up Run calls executing right now.
 // After Suite.Run returns, this must be zero.
-func (r *goroutineQuiescenceRunner) currentInFlight() int64 {
+func (r *warmUpGoroutineQuiescenceRunner) currentInFlight() int64 {
 	return r.inFlight.Load()
 }
 
 // ---------------------------------------------------------------------------
-// completionTrackingRunner
+// warmUpCompletionTrackingRunner
 // ---------------------------------------------------------------------------
 
-// completionTrackingRunner records which runs were started and which
-// returned ("completed their teardown"). Every started run must appear in
-// the completed set after Suite.Run returns, because runner.Run runs
-// teardown before returning and wg.Wait() joins every goroutine.
-type completionTrackingRunner struct {
+// warmUpCompletionTrackingRunner lets the warm-up rep (RunNumber == 1)
+// complete immediately while blocking subsequent reps until the context is
+// cancelled. It records which non-warm-up runs were started and which returned
+// so the test can verify that every started run completes (runner.Run returns)
+// before Suite.Run returns.
+type warmUpCompletionTrackingRunner struct {
 	mu        sync.Mutex
-	started   []string // RunIDs entered
-	completed []string // RunIDs returned
+	started   []string // RunIDs of non-warmup reps that entered Run
+	completed []string // RunIDs of non-warmup reps that returned from Run
 
-	// ready is closed when all expected runs are simultaneously blocking,
-	// so the test can cancel at the right moment.
-	expected  int
-	readyOnce sync.Once
-	ready     chan struct{}
-	inFlight  int
+	expectedNonWarmup int
+	readyOnce         sync.Once
+	ready             chan struct{}
+	inFlight          int
 }
 
-func newCompletionTrackingRunner(expected int) *completionTrackingRunner {
-	return &completionTrackingRunner{
-		expected: expected,
-		ready:    make(chan struct{}),
+func newWarmUpCompletionTrackingRunner(expected int) *warmUpCompletionTrackingRunner {
+	return &warmUpCompletionTrackingRunner{
+		expectedNonWarmup: expected,
+		ready:             make(chan struct{}),
 	}
 }
 
-func (r *completionTrackingRunner) Run(ctx context.Context, key domain.RunKey, t preflight.ResolvedTest, eval domain.AttemptEvaluator) (domain.TestResult, error) {
+func (r *warmUpCompletionTrackingRunner) Run(ctx context.Context, key domain.RunKey, t preflight.ResolvedTest, eval domain.AttemptEvaluator) (domain.TestResult, error) {
+	// Warm-up rep: complete immediately.
+	if key.RunNumber == 1 {
+		ev := passingEvidence()
+		ev.Key = key
+		if eval != nil {
+			return eval(ev), nil
+		}
+		return domain.TestResult{Key: key}, nil
+	}
+
 	r.mu.Lock()
 	r.started = append(r.started, key.RunID)
 	r.inFlight++
-	if r.inFlight >= r.expected {
+	if r.inFlight >= r.expectedNonWarmup {
 		r.readyOnce.Do(func() { close(r.ready) })
 	}
 	r.mu.Unlock()
@@ -204,13 +241,13 @@ func (r *completionTrackingRunner) Run(ctx context.Context, key domain.RunKey, t
 	return domain.TestResult{Key: key}, nil
 }
 
-func (r *completionTrackingRunner) startedCount() int {
+func (r *warmUpCompletionTrackingRunner) startedCount() int {
 	r.mu.Lock()
 	defer r.mu.Unlock()
 	return len(r.started)
 }
 
-func (r *completionTrackingRunner) completedCount() int {
+func (r *warmUpCompletionTrackingRunner) completedCount() int {
 	r.mu.Lock()
 	defer r.mu.Unlock()
 	return len(r.completed)
@@ -238,10 +275,10 @@ type partialCompletionRunner struct {
 
 func newPartialCompletionRunner(fastID string, slowExpected int, onFastComplete func()) *partialCompletionRunner {
 	return &partialCompletionRunner{
-		fastID:        fastID,
+		fastID:         fastID,
 		onFastComplete: onFastComplete,
-		slowReady:     make(chan struct{}),
-		slowExpected:  slowExpected,
+		slowReady:      make(chan struct{}),
+		slowExpected:   slowExpected,
 	}
 }
 
@@ -281,38 +318,49 @@ func (r *partialCompletionRunner) Run(ctx context.Context, key domain.RunKey, t 
 }
 
 // ---------------------------------------------------------------------------
-// gatedSiblingRunner (panic simulation via error return, with gate)
+// warmUpRepPanicRunner — gates fan-out reps, one returns an error
 // ---------------------------------------------------------------------------
 
-// gatedSiblingRunner blocks all Run calls behind a gate that opens when
-// releaseAt calls are simultaneously in-flight. After the gate opens:
-//   - the test named panicTestID returns an error (simulating what
+// warmUpRepPanicRunner lets the warm-up rep (RunNumber == 1) complete
+// immediately. For subsequent reps, it blocks behind a gate that opens when
+// releaseAt of them are simultaneously in-flight. After the gate opens:
+//   - the rep with panicRunNumber returns an error (simulating what
 //     runner.Run returns after recovering an internal panic)
-//   - all other tests return a passing result
+//   - all other reps return a passing result
 //
-// The gate ensures the test exercises genuinely concurrent execution rather
-// than sequential scheduling: "while other attempts are in flight" is a
-// fact, not an assumption, because all calls blocked together.
-type gatedSiblingRunner struct {
-	panicTestID string
-	releaseAt   int
+// This allows the test to verify that an error from one concurrent fan-out rep
+// does not prevent sibling reps from completing normally.
+type warmUpRepPanicRunner struct {
+	panicRunNumber int
+	releaseAt      int
 
-	mu          sync.Mutex
-	inFlight    int
-	peak        int
-	gate        chan struct{}
-	gateOnce    sync.Once
+	mu       sync.Mutex
+	inFlight int
+	peak     int
+	gate     chan struct{}
+	gateOnce sync.Once
 }
 
-func newGatedSiblingRunner(panicTestID string, releaseAt int) *gatedSiblingRunner {
-	return &gatedSiblingRunner{
-		panicTestID: panicTestID,
-		releaseAt:   releaseAt,
-		gate:        make(chan struct{}),
+func newWarmUpRepPanicRunner(panicRunNumber, releaseAt int) *warmUpRepPanicRunner {
+	return &warmUpRepPanicRunner{
+		panicRunNumber: panicRunNumber,
+		releaseAt:      releaseAt,
+		gate:           make(chan struct{}),
 	}
 }
 
-func (r *gatedSiblingRunner) Run(ctx context.Context, key domain.RunKey, t preflight.ResolvedTest, eval domain.AttemptEvaluator) (domain.TestResult, error) {
+func (r *warmUpRepPanicRunner) Run(ctx context.Context, key domain.RunKey, t preflight.ResolvedTest, eval domain.AttemptEvaluator) (domain.TestResult, error) {
+	// Warm-up rep: complete immediately.
+	if key.RunNumber == 1 {
+		ev := passingEvidence()
+		ev.Key = key
+		if eval != nil {
+			return eval(ev), nil
+		}
+		return domain.TestResult{Key: key}, nil
+	}
+
+	// Fan-out rep: track in-flight, open gate when releaseAt reached.
 	r.mu.Lock()
 	r.inFlight++
 	if r.inFlight > r.peak {
@@ -325,8 +373,6 @@ func (r *gatedSiblingRunner) Run(ctx context.Context, key domain.RunKey, t prefl
 		r.gateOnce.Do(func() { close(r.gate) })
 	}
 
-	// Block until the gate opens (all releaseAt calls are in-flight) or
-	// the context is cancelled, whichever comes first.
 	select {
 	case <-r.gate:
 	case <-ctx.Done():
@@ -336,11 +382,9 @@ func (r *gatedSiblingRunner) Run(ctx context.Context, key domain.RunKey, t prefl
 	r.inFlight--
 	r.mu.Unlock()
 
-	if key.TestName == r.panicTestID {
-		// Simulate what runner.Run returns after recovering a panic:
-		// an error with no eval call. The suite must record an
-		// infrastructure failure for this run.
-		return domain.TestResult{}, fmt.Errorf("runner: recovered panic: deliberate panic in test double")
+	if key.RunNumber == r.panicRunNumber {
+		// Simulate what runner.Run returns after recovering a panic.
+		return domain.TestResult{}, fmt.Errorf("runner: recovered panic: deliberate panic in repetition %d", key.RunNumber)
 	}
 
 	ev := passingEvidence()
@@ -351,38 +395,42 @@ func (r *gatedSiblingRunner) Run(ctx context.Context, key domain.RunKey, t prefl
 	return domain.TestResult{Key: key}, nil
 }
 
-func (r *gatedSiblingRunner) peakConcurrent() int {
+// peakFanOut returns the peak number of simultaneously in-flight non-warm-up
+// calls observed across the lifetime of this runner.
+func (r *warmUpRepPanicRunner) peakFanOut() int {
 	r.mu.Lock()
 	defer r.mu.Unlock()
 	return r.peak
 }
 
 // ---------------------------------------------------------------------------
-// T15.1 — Cancellation reaches every in-flight run
+// T15.1 — Cancellation reaches every in-flight fan-out rep
 // ---------------------------------------------------------------------------
 
 // TestCancellation_ReachesEveryInFlightRun_NotOnlyMostRecent verifies that
-// when N runs are simultaneously in-flight and the context is cancelled,
-// cancellation reaches every one of them — not only the run whose goroutine
-// happens to check ctx.Err() next.
+// when N fan-out reps are simultaneously in-flight and the context is
+// cancelled, cancellation reaches every one of them — not only the rep whose
+// goroutine happens to check ctx.Err() next.
 //
-// The cancellationPropagationRunner blocks every call until ctx is done and
-// has no other release mechanism, so after cancellation every blocked call
-// must unblock via ctx.Done(). The count of calls that did is the metric;
-// it must equal the number of in-flight runs.
+// The plan uses one test with enough repetitions so that after the warm-up rep
+// (rep 1) completes, the fan-out reps reach the required simultaneous
+// in-flight count. The warmUpCancellationRunner blocks every non-warm-up call
+// until ctx is done, so after cancellation every blocked call must unblock via
+// ctx.Done(). The count of calls that did is the metric; it must equal the
+// number of in-flight fan-out reps.
+//
+// RED-phase: with sequential execution, only one rep is ever in-flight at a
+// time, so allInFlight never closes, the 2s timeout fires, and t.Fatal() is
+// called before the assertion is reached.
 func TestCancellation_ReachesEveryInFlightRun_NotOnlyMostRecent(t *testing.T) {
 	const (
-		bound    = 3
-		numTests = 3
+		bound = 3
+		reps  = 4 // rep 1 is warm-up; reps 2,3,4 fan out at bound=3
 	)
 
-	runner := newCancellationPropagationRunner(numTests)
-	tests := make([]preflight.ResolvedTest, numTests)
-	for i := range tests {
-		tests[i] = resolvedTest(fmt.Sprintf("test-%d", i), 1, 1.0)
-	}
+	runner := newWarmUpCancellationRunner(bound)
 	s := newConcurrentSuite(runner, newFakeClock(), &recordingSink{}, bound)
-	plan := buildPlan(tests...)
+	plan := buildPlan(resolvedTest("test-a", reps, 1.0))
 
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
@@ -393,19 +441,19 @@ func TestCancellation_ReachesEveryInFlightRun_NotOnlyMostRecent(t *testing.T) {
 		done <- err
 	}()
 
-	// Wait until all numTests runs are simultaneously in-flight, then cancel.
-	// Cancelling before all are in-flight would let some skip via the ctx.Err()
-	// check in the worker loop, which would reduce the cancellation count and
-	// make the assertion non-deterministic.
+	// Wait until the bound fan-out reps are simultaneously in-flight, then
+	// cancel. Cancelling before all are in-flight would let some skip via the
+	// ctx.Err() check, which would make the assertion non-deterministic.
 	select {
 	case <-runner.allInFlight:
 		cancel()
 	case <-time.After(2 * time.Second):
 		cancel()
 		t.Fatal(
-			"all in-flight signal did not fire within 2s; the scheduler must " +
-				"have all bound runs executing simultaneously before this test can " +
-				"verify per-run cancellation propagation",
+			"all fan-out reps did not reach in-flight status within 2s; " +
+				"after the warm-up rep completes, the scheduler must dispatch " +
+				"reps 2..N concurrently so the in-flight threshold is reached " +
+				"before this test can verify per-rep cancellation propagation",
 		)
 	}
 
@@ -415,14 +463,14 @@ func TestCancellation_ReachesEveryInFlightRun_NotOnlyMostRecent(t *testing.T) {
 		t.Fatal("Suite.Run did not return within 2s after context cancellation")
 	}
 
-	// Every run that was in-flight when we cancelled must have unblocked via
-	// ctx.Done(), proving cancellation was not selective.
-	if got := runner.cancelledCallCount(); got < numTests {
+	// Every fan-out rep that was in-flight when we cancelled must have
+	// unblocked via ctx.Done(), proving cancellation was not selective.
+	if got := runner.cancelledCallCount(); got < bound {
 		t.Errorf(
-			"cancellation reached %d of %d in-flight runs, want %d; "+
-				"cancellation must propagate to every run simultaneously in flight, "+
+			"cancellation reached %d of %d in-flight fan-out reps, want %d; "+
+				"cancellation must propagate to every rep simultaneously in flight, "+
 				"not only the most recently started one",
-			got, numTests, numTests,
+			got, bound, bound,
 		)
 	}
 }
@@ -435,27 +483,21 @@ func TestCancellation_ReachesEveryInFlightRun_NotOnlyMostRecent(t *testing.T) {
 // quiescence directly: after Suite.Run returns, no goroutine started by the
 // scheduler on behalf of a run is still executing.
 //
-// The goroutineQuiescenceRunner increments an atomic counter when Run starts
-// and decrements it when Run returns. The counter must be zero immediately
-// after Suite.Run returns, because wg.Wait() provides the happens-before edge
-// between every goroutine's final write and the suite's return.
+// The warmUpGoroutineQuiescenceRunner increments an atomic counter when a
+// non-warm-up Run starts and decrements it when Run returns. The counter must
+// be zero immediately after Suite.Run returns.
 //
-// This is the formal assertion that backs the "no orphaned harness process"
-// guarantee: a process running inside runner.Run cannot outlive that call,
-// and runner.Run cannot outlive Suite.Run.
+// RED-phase: with sequential execution, only one fan-out rep is ever in-flight
+// at a time, so ready never closes, the timeout fires, and t.Fatal() is called.
 func TestCancellation_GoroutinesJoined_BeforeSuiteReturns(t *testing.T) {
 	const (
-		bound    = 3
-		numTests = 3
+		bound = 3
+		reps  = 4 // rep 1 is warm-up; reps 2,3,4 fan out at bound=3
 	)
 
-	runner := newGoroutineQuiescenceRunner(numTests)
-	tests := make([]preflight.ResolvedTest, numTests)
-	for i := range tests {
-		tests[i] = resolvedTest(fmt.Sprintf("test-%d", i), 1, 1.0)
-	}
+	runner := newWarmUpGoroutineQuiescenceRunner(bound)
 	s := newConcurrentSuite(runner, newFakeClock(), &recordingSink{}, bound)
-	plan := buildPlan(tests...)
+	plan := buildPlan(resolvedTest("test-a", reps, 1.0))
 
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
@@ -466,15 +508,15 @@ func TestCancellation_GoroutinesJoined_BeforeSuiteReturns(t *testing.T) {
 		done <- err
 	}()
 
-	// Wait until all runs are in-flight, then cancel.
 	select {
 	case <-runner.ready:
 		cancel()
 	case <-time.After(2 * time.Second):
 		cancel()
 		t.Fatal(
-			"not all runs reached in-flight status within 2s; " +
-				"increase the timeout or check the scheduler dispatches bound goroutines",
+			"fan-out reps did not reach in-flight status within 2s; " +
+				"after warm-up completes, the scheduler must dispatch reps 2..N " +
+				"concurrently before goroutine quiescence can be verified",
 		)
 	}
 
@@ -485,9 +527,6 @@ func TestCancellation_GoroutinesJoined_BeforeSuiteReturns(t *testing.T) {
 	}
 
 	// After Suite.Run returns, no Run call must still be executing.
-	// wg.Wait() is the mechanism that makes this true: if it is absent
-	// or the goroutines are not wg.Add(1)ed correctly, the counter
-	// will be non-zero here.
 	if got := runner.currentInFlight(); got != 0 {
 		t.Errorf(
 			"in-flight goroutine count = %d after Suite.Run returned, want 0; "+
@@ -503,27 +542,22 @@ func TestCancellation_GoroutinesJoined_BeforeSuiteReturns(t *testing.T) {
 // ---------------------------------------------------------------------------
 
 // TestCancellation_AllStartedRuns_CompleteBeforeSuiteReturns verifies that
-// every run the scheduler started has its runner.Run call return before
-// Suite.Run returns. Since runner.Run's contract specifies teardown runs on
-// every exit path — including a cancelled context — every completed run
-// implies its sandbox has been torn down.
+// every non-warm-up run the scheduler started has its runner.Run call return
+// before Suite.Run returns. Since runner.Run's contract specifies teardown
+// runs on every exit path, every completed run implies its sandbox has been
+// torn down.
 //
-// The completionTrackingRunner counts started and completed calls. After
-// Suite.Run returns, started == completed must hold: no run was started but
-// left mid-flight, which would mean its sandbox teardown had not run.
+// RED-phase: with sequential execution, only one fan-out rep is ever in-flight
+// at a time, so ready never closes, the timeout fires, and t.Fatal() is called.
 func TestCancellation_AllStartedRuns_CompleteBeforeSuiteReturns(t *testing.T) {
 	const (
-		bound    = 3
-		numTests = 3
+		bound = 3
+		reps  = 4 // rep 1 is warm-up; reps 2,3,4 fan out at bound=3
 	)
 
-	runner := newCompletionTrackingRunner(numTests)
-	tests := make([]preflight.ResolvedTest, numTests)
-	for i := range tests {
-		tests[i] = resolvedTest(fmt.Sprintf("test-%d", i), 1, 1.0)
-	}
+	runner := newWarmUpCompletionTrackingRunner(bound)
 	s := newConcurrentSuite(runner, newFakeClock(), &recordingSink{}, bound)
-	plan := buildPlan(tests...)
+	plan := buildPlan(resolvedTest("test-a", reps, 1.0))
 
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
@@ -540,8 +574,9 @@ func TestCancellation_AllStartedRuns_CompleteBeforeSuiteReturns(t *testing.T) {
 	case <-time.After(2 * time.Second):
 		cancel()
 		t.Fatal(
-			"not all expected runs were in-flight within 2s; " +
-				"scheduler must dispatch bound goroutines before this test is valid",
+			"fan-out reps did not reach in-flight status within 2s; " +
+				"after warm-up completes, the scheduler must dispatch reps 2..N " +
+				"concurrently before teardown completion can be verified",
 		)
 	}
 
@@ -555,7 +590,7 @@ func TestCancellation_AllStartedRuns_CompleteBeforeSuiteReturns(t *testing.T) {
 	completed := runner.completedCount()
 	if completed != started {
 		t.Errorf(
-			"started %d runs but only %d completed before Suite.Run returned; "+
+			"started %d fan-out runs but only %d completed before Suite.Run returned; "+
 				"every started run must complete (runner.Run must return) before "+
 				"Suite.Run returns, which guarantees teardown ran for each sandbox — "+
 				"a run left mid-flight is an orphaned sandbox",
@@ -664,26 +699,21 @@ func TestCancellation_CompletedResultsReturned_SuiteIsNotAFailure(t *testing.T) 
 
 // TestCancellation_NoWorkOutlivesSuiteCall_AtBoundAboveOne verifies that at
 // any bound above 1, Suite.Run joins every goroutine before returning. The
-// assertion is the same as T15.2 but exercises a higher bound and more work
-// items to stress the joining mechanism.
+// assertion is the same as TestCancellation_GoroutinesJoined_BeforeSuiteReturns
+// but exercises a higher bound and more work items to stress the joining
+// mechanism.
 //
-// A failing wg.Wait() (missing or incorrect Add/Done pairing) would leave
-// goroutines running after Suite.Run returns. The in-flight counter would
-// then be non-zero, revealing the flaw.
+// RED-phase: with sequential execution, only one fan-out rep is ever in-flight
+// at a time, so ready never closes, the timeout fires, and t.Fatal() is called.
 func TestCancellation_NoWorkOutlivesSuiteCall_AtBoundAboveOne(t *testing.T) {
 	const (
-		bound    = 4
-		numTests = 6
-		reps     = 2
+		bound = 4
+		reps  = 5 // rep 1 is warm-up; reps 2,3,4,5 fan out at bound=4
 	)
 
-	runner := newGoroutineQuiescenceRunner(bound) // gate opens when bound are in-flight
-	tests := make([]preflight.ResolvedTest, numTests)
-	for i := range tests {
-		tests[i] = resolvedTest(fmt.Sprintf("test-%d", i), reps, 1.0)
-	}
+	runner := newWarmUpGoroutineQuiescenceRunner(bound)
 	s := newConcurrentSuite(runner, newFakeClock(), &recordingSink{}, bound)
-	plan := buildPlan(tests...)
+	plan := buildPlan(resolvedTest("test-a", reps, 1.0))
 
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
@@ -699,15 +729,15 @@ func TestCancellation_NoWorkOutlivesSuiteCall_AtBoundAboveOne(t *testing.T) {
 		cancel()
 	case <-time.After(2 * time.Second):
 		cancel()
-		t.Fatal("bound goroutines did not reach in-flight status within 2s")
+		t.Fatal("fan-out reps did not reach in-flight status within 2s")
 	}
 
 	select {
 	case <-done:
 	case <-time.After(2 * time.Second):
 		t.Fatal(
-			"Suite.Run did not return within 2s after context cancellation; "+
-				"at a bound above 1, the scheduler must join every goroutine "+
+			"Suite.Run did not return within 2s after context cancellation; " +
+				"at a bound above 1, the scheduler must join every goroutine " +
 				"before returning — no work may outlive the call",
 		)
 	}
@@ -715,46 +745,46 @@ func TestCancellation_NoWorkOutlivesSuiteCall_AtBoundAboveOne(t *testing.T) {
 	if got := runner.currentInFlight(); got != 0 {
 		t.Errorf(
 			"in-flight count = %d after Suite.Run returned, want 0; "+
-				"at bound=%d, Suite.Run must join all %d goroutines "+
-				"before returning — missed wg.Done() or missing wg.Wait()",
-			got, bound, bound,
+				"at bound=%d, Suite.Run must join all goroutines before returning — "+
+				"missed wg.Done() or missing wg.Wait()",
+			got, bound,
 		)
 	}
 }
 
 // ---------------------------------------------------------------------------
-// T15.6a — Panicking attempt's siblings are unaffected
+// T15.6a — Panicking fan-out rep's siblings are unaffected
 // ---------------------------------------------------------------------------
 
 // TestCancellation_PanickingAttempt_SiblingAttemptsUnaffected verifies the
-// recovery behavior when one run fails with a simulated recovered panic while
-// the sibling runs are genuinely in-flight at the same time.
+// recovery behavior when one fan-out rep fails with a simulated recovered panic
+// while sibling reps are genuinely in-flight at the same time.
 //
-// The gatedSiblingRunner blocks all three runs behind a gate that opens when
-// all three are simultaneously in-flight. After the gate opens, the
-// "panic-sim-test" returns an error (matching what runner.Run returns after
-// recovering an internal panic — error, no eval call); the sibling tests
-// complete normally. The suite must:
-//   - Record an infrastructure failure for the panicking test
-//   - Return the sibling runs' passing results
+// One test is run with enough repetitions so that after the warm-up rep (rep 1)
+// completes, the fan-out reps (reps 2..N) are dispatched concurrently. One
+// specific fan-out rep returns an error (matching what runner.Run returns after
+// recovering an internal panic); sibling fan-out reps complete normally.
+//
+// The suite must:
+//   - Record an infrastructure failure for the panicking rep
+//   - Return the sibling reps' passing results
 //   - Not itself fail
 //
-// This is a regression guard: it passes with the current implementation and
-// pins the invariant that the scheduler's error handling does not abort sibling
-// runs when one runner.Run call returns an error during concurrent execution.
+// RED-phase: with sequential execution, the gate requires bound simultaneous
+// non-warm-up reps but only one is ever in-flight; the gate never opens, the
+// context times out, and the test fails via timeout.
 func TestCancellation_PanickingAttempt_SiblingAttemptsUnaffected(t *testing.T) {
-	const bound = 3
-
-	runner := newGatedSiblingRunner("panic-sim-test", bound)
-	s := newConcurrentSuite(runner, newFakeClock(), &recordingSink{}, bound)
-	plan := buildPlan(
-		resolvedTest("sibling-a", 1, 1.0),
-		resolvedTest("panic-sim-test", 1, 1.0),
-		resolvedTest("sibling-b", 1, 1.0),
+	const (
+		bound          = 3
+		reps           = 4   // rep 1 is warm-up; reps 2,3,4 fan out at bound=3
+		panicRunNumber = 2   // rep 2 simulates a recovered panic during fan-out
+		passRate       = 0.5 // 3 of 4 reps pass (rep 1 warm-up passes, rep 2 fails, reps 3,4 pass)
 	)
 
-	// Run with a timeout; the gate opens when all 3 are in-flight and the
-	// suite returns immediately thereafter.
+	runner := newWarmUpRepPanicRunner(panicRunNumber, bound)
+	s := newConcurrentSuite(runner, newFakeClock(), &recordingSink{}, bound)
+	plan := buildPlan(resolvedTest("test-a", reps, passRate))
+
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel()
 
@@ -763,55 +793,59 @@ func TestCancellation_PanickingAttempt_SiblingAttemptsUnaffected(t *testing.T) {
 		t.Fatalf("Suite.Run returned unexpected error: %v", err)
 	}
 
-	// Verify concurrent execution: the peak in-flight count must be 3,
-	// confirming all three runs were executing simultaneously when the error
-	// occurred — this is what "while other attempts are in flight" means.
-	if got := runner.peakConcurrent(); got < bound {
+	// Verify concurrent fan-out: the peak in-flight count among reps 2..4
+	// must be bound (3), confirming all three ran simultaneously.
+	if got := runner.peakFanOut(); got < bound {
 		t.Errorf(
-			"peak concurrent calls = %d, want >= %d; the gated runner must "+
-				"have all %d runs simultaneously in-flight so the test genuinely "+
-				"exercises 'panicking attempt while siblings are in flight'",
-			got, bound, bound,
+			"peak concurrent fan-out reps = %d, want >= %d; the test must "+
+				"exercise genuinely concurrent fan-out so 'panicking rep while "+
+				"siblings are in-flight' is a fact, not an assumption",
+			got, bound,
 		)
 	}
 
-	// All three tests must appear in the result.
-	byID := make(map[string]report.TestReport)
-	for _, tr := range result.Tests {
-		byID[tr.TestName] = tr
+	if len(result.Tests) != 1 {
+		t.Fatalf("got %d test reports, want 1", len(result.Tests))
+	}
+	testReport := result.Tests[0]
+	if len(testReport.Runs) != reps {
+		t.Fatalf("got %d run reports, want %d", len(testReport.Runs), reps)
 	}
 
-	for _, id := range []string{"sibling-a", "sibling-b", "panic-sim-test"} {
-		if _, ok := byID[id]; !ok {
+	// Build a map from RunNumber to RunReport for assertion convenience.
+	byRunNumber := make(map[int]report.RunReport, len(testReport.Runs))
+	for _, run := range testReport.Runs {
+		byRunNumber[run.Key.RunNumber] = run
+	}
+
+	// The panicking rep must be recorded as an infrastructure failure.
+	if panicRun, ok := byRunNumber[panicRunNumber]; ok {
+		if panicRun.Verdict != domain.VerdictFail {
 			t.Errorf(
-				"test %q is missing from the result; a panicking sibling must "+
-					"not suppress the results of tests that completed normally",
-				id,
+				"rep %d (panicking) verdict = %v, want Fail; a run that returned "+
+					"an error must be recorded as an infrastructure failure",
+				panicRunNumber, panicRun.Verdict,
 			)
 		}
+	} else {
+		t.Errorf(
+			"rep %d (panicking) is missing from run reports; the scheduler must "+
+				"record a result for every repetition that was started",
+			panicRunNumber,
+		)
 	}
 
-	// The panicking test must carry an infrastructure failure result.
-	if panicReport, ok := byID["panic-sim-test"]; ok {
-		if panicReport.Aggregate.Verdict != domain.VerdictFail {
-			t.Errorf(
-				"panic-sim-test verdict = %v, want Fail; a run that returned an "+
-					"error must be recorded as an infrastructure failure",
-				panicReport.Aggregate.Verdict,
-			)
+	// Sibling fan-out reps (all non-panic, non-warmup reps) must have passed.
+	for runNumber, run := range byRunNumber {
+		if runNumber == panicRunNumber {
+			continue // already checked above
 		}
-	}
-
-	// Sibling tests must have completed normally (PASS).
-	for _, id := range []string{"sibling-a", "sibling-b"} {
-		if tr, ok := byID[id]; ok {
-			if tr.Aggregate.Verdict != domain.VerdictPass {
-				t.Errorf(
-					"sibling test %q verdict = %v, want Pass; a panicking sibling "+
-						"must not affect tests that ran normally",
-					id, tr.Aggregate.Verdict,
-				)
-			}
+		if run.Verdict != domain.VerdictPass {
+			t.Errorf(
+				"rep %d (sibling) verdict = %v, want Pass; a panicking sibling rep "+
+					"must not affect other reps that ran normally",
+				runNumber, run.Verdict,
+			)
 		}
 	}
 }
@@ -828,15 +862,14 @@ const envPanicSchedulerSubproc = "MOSAIC_SUITE_PANIC_SCHEDULER_SUBPROC"
 // panic escaping runner.Run's own recovery — a panic that reaches the
 // scheduler's goroutine — is caught rather than crashing the process.
 //
-// RED-phase failure: without I15.3, the scheduler goroutine has no
-// defer/recover around its work loop. A panicking TestRunner causes a
+// RED-phase failure: without the per-goroutine recover, the scheduler goroutine
+// has no defer/recover around its work loop. A panicking TestRunner causes a
 // goroutine panic, which Go escalates to process termination. The subprocess
 // exits with a non-zero code and the main test fails.
 //
-// GREEN-phase pass: after I15.3 adds a defer/recover inside each worker
-// goroutine, the panic is caught, the attempt is recorded as an
-// infrastructure failure, sibling goroutines continue, and the subprocess
-// exits 0.
+// GREEN-phase pass: after a defer/recover is added inside each worker goroutine,
+// the panic is caught, the attempt is recorded as an infrastructure failure,
+// sibling goroutines continue, and the subprocess exits 0.
 //
 // The subprocess pattern is used to isolate the crash: a goroutine panic
 // would otherwise abort the entire test binary, preventing subsequent tests
@@ -844,8 +877,7 @@ const envPanicSchedulerSubproc = "MOSAIC_SUITE_PANIC_SCHEDULER_SUBPROC"
 func TestCancellation_PanickingAttempt_SchedulerContainsPanic(t *testing.T) {
 	if os.Getenv(envPanicSchedulerSubproc) == "1" {
 		// We ARE the subprocess. Run the panicking scenario directly.
-		// Without I15.3 the process will crash here (goroutine panic →
-		// runtime.throw → process exit non-zero).
+		// Without the per-goroutine recovery the process will crash here.
 		runPanicSchedulerScenario(t)
 		return
 	}
@@ -866,7 +898,7 @@ func TestCancellation_PanickingAttempt_SchedulerContainsPanic(t *testing.T) {
 				"Output:\n%s\n\n"+
 				"RED-phase failure: the scheduler goroutine has no per-goroutine "+
 				"defer/recover. A panic in a TestRunner propagates to the worker "+
-				"goroutine and crashes the binary. The fix (I15.3) adds a deferred "+
+				"goroutine and crashes the binary. The fix adds a deferred "+
 				"recover() inside each worker goroutine so the panic is contained, "+
 				"the attempt is recorded as an infrastructure failure, and sibling "+
 				"goroutines continue unaffected.",
@@ -877,9 +909,10 @@ func TestCancellation_PanickingAttempt_SchedulerContainsPanic(t *testing.T) {
 
 // runPanicSchedulerScenario is the body of the subprocess for
 // TestCancellation_PanickingAttempt_SchedulerContainsPanic. It sets up a
-// suite with a literally-panicking TestRunner double and runs it. After I15.3,
-// the panic is caught by the scheduler goroutine's defer/recover and Suite.Run
-// returns normally; before I15.3, the goroutine panic crashes the process.
+// suite with a literally-panicking TestRunner double and runs it. After the
+// per-goroutine recover is added, the panic is caught by the scheduler
+// goroutine's defer/recover and Suite.Run returns normally; before that fix,
+// the goroutine panic crashes the process.
 func runPanicSchedulerScenario(t *testing.T) {
 	t.Helper()
 
@@ -904,7 +937,7 @@ func runPanicSchedulerScenario(t *testing.T) {
 	// worker goroutine panics, and Go terminates the process.
 	result, err := runSuite(t, s, context.Background(), plan)
 
-	// After I15.3: result is non-nil, panic-unit is an infrastructure failure,
+	// After the fix: result is non-nil, panic-unit is an infrastructure failure,
 	// siblings passed, no error from the suite itself.
 	if err != nil {
 		t.Errorf("Suite.Run returned error after panic containment: %v", err)
@@ -945,3 +978,12 @@ func (r *literalPanicRunner) Run(ctx context.Context, key domain.RunKey, t prefl
 	}
 	return domain.TestResult{Key: key}, nil
 }
+
+// Ensure suite.TestRunner is satisfied at compile time for all runner types
+// defined in this file that are used as TestRunner arguments.
+var _ suite.TestRunner = (*warmUpCancellationRunner)(nil)
+var _ suite.TestRunner = (*warmUpGoroutineQuiescenceRunner)(nil)
+var _ suite.TestRunner = (*warmUpCompletionTrackingRunner)(nil)
+var _ suite.TestRunner = (*warmUpRepPanicRunner)(nil)
+var _ suite.TestRunner = (*partialCompletionRunner)(nil)
+var _ suite.TestRunner = (*literalPanicRunner)(nil)
