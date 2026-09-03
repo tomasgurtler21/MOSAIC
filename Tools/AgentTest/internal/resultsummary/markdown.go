@@ -13,6 +13,16 @@ func formatPassRate(rate float64) string {
 	return fmt.Sprintf("%.0f%%", rate*100)
 }
 
+// formatSampleSize returns the sample-size annotation string.
+// When excluded == 0: "(N)" where N = counted.
+// When excluded > 0: "(N/M)" where N = counted, M = counted + excluded.
+func formatSampleSize(counted, excluded int) string {
+	if excluded > 0 {
+		return fmt.Sprintf("(%d/%d)", counted, counted+excluded)
+	}
+	return fmt.Sprintf("(%d)", counted)
+}
+
 // formatCost formats a cost value normalized to per-100-tests. When warning is
 // true the cost is unresolved and the marker "[cost?]" is returned instead of
 // a computed value. testCount is the denominator; if zero the per-100-tests
@@ -84,6 +94,11 @@ func RenderVersionSummary(v VersionSummary) string {
 	renderProblemAreasSection(&sb, v)
 	sb.WriteString("<!-- /generated:problem-areas -->\n\n")
 
+	// generated:infrastructure-failures
+	sb.WriteString("<!-- generated:infrastructure-failures -->\n")
+	renderInfrastructureFailuresSection(&sb, v)
+	sb.WriteString("<!-- /generated:infrastructure-failures -->\n\n")
+
 	// analysis:overall-analysis (empty placeholder)
 	sb.WriteString("<!-- analysis:overall-analysis -->\n")
 	sb.WriteString("<!-- /analysis:overall-analysis -->\n")
@@ -131,10 +146,11 @@ func renderModelResultsSection(sb *strings.Builder, v VersionSummary) {
 
 			for _, harness := range harnesses {
 				stats := byHarness[harness]
-				sb.WriteString(fmt.Sprintf("| %s | %s | %d | %s | %s |\n",
+				sb.WriteString(fmt.Sprintf("| %s | %s | %d | %s %s | %s |\n",
 					suite, harness,
 					stats.TestCount,
 					formatPassRate(stats.PassRate),
+					formatSampleSize(stats.TestCount, stats.ExcludedCount),
 					formatCost(stats.TotalCost, stats.TestCount, stats.CostWarning),
 				))
 			}
@@ -158,7 +174,7 @@ func renderModelComparisonSection(sb *strings.Builder, v VersionSummary) {
 		}
 		sort.Strings(harnesses)
 
-		var testCount, passCount int
+		var testCount, passCount, excludedCount int
 		var totalCost float64
 		var costWarning bool
 
@@ -166,6 +182,7 @@ func renderModelComparisonSection(sb *strings.Builder, v VersionSummary) {
 			s := byHarness[harness]
 			testCount += s.TestCount
 			passCount += s.PassCount
+			excludedCount += s.ExcludedCount
 			totalCost += s.TotalCost
 			if s.CostWarning {
 				costWarning = true
@@ -177,9 +194,10 @@ func renderModelComparisonSection(sb *strings.Builder, v VersionSummary) {
 			passRate = float64(passCount) / float64(testCount)
 		}
 
-		sb.WriteString(fmt.Sprintf("| %s | %d | %s | %s |\n",
+		sb.WriteString(fmt.Sprintf("| %s | %d | %s %s | %s |\n",
 			model, testCount,
 			formatPassRate(passRate),
+			formatSampleSize(testCount, excludedCount),
 			formatCost(totalCost, testCount, costWarning),
 		))
 	}
@@ -193,10 +211,11 @@ func renderHarnessComparisonSection(sb *strings.Builder, v VersionSummary) {
 
 	// Aggregate per-harness across all models.
 	type hAgg struct {
-		testCount   int
-		passCount   int
-		totalCost   float64
-		costWarning bool
+		testCount     int
+		passCount     int
+		excludedCount int
+		totalCost     float64
+		costWarning   bool
 	}
 	aggMap := make(map[string]*hAgg)
 
@@ -213,6 +232,7 @@ func renderHarnessComparisonSection(sb *strings.Builder, v VersionSummary) {
 			a := aggMap[harness]
 			a.testCount += s.TestCount
 			a.passCount += s.PassCount
+			a.excludedCount += s.ExcludedCount
 			a.totalCost += s.TotalCost
 			if s.CostWarning {
 				a.costWarning = true
@@ -229,9 +249,10 @@ func renderHarnessComparisonSection(sb *strings.Builder, v VersionSummary) {
 		if a.testCount > 0 {
 			passRate = float64(a.passCount) / float64(a.testCount)
 		}
-		sb.WriteString(fmt.Sprintf("| %s | %d | %s | %s |\n",
+		sb.WriteString(fmt.Sprintf("| %s | %d | %s %s | %s |\n",
 			harness, a.testCount,
 			formatPassRate(passRate),
+			formatSampleSize(a.testCount, a.excludedCount),
 			formatCost(a.totalCost, a.testCount, a.costWarning),
 		))
 	}
@@ -249,11 +270,35 @@ func renderProblemAreasSection(sb *strings.Builder, v VersionSummary) {
 	sb.WriteString("|-------|----|------|-----------|------------|------------|-------------|--------|\n")
 
 	for _, pt := range v.ProblemTests {
-		sb.WriteString(fmt.Sprintf("| %s | %d | %s | %s | %s | %s | %s | %s |\n",
+		sb.WriteString(fmt.Sprintf("| %s | %d | %s | %s %s | %s | %s %s | %s | %s |\n",
 			pt.SuiteID, pt.NumericID, pt.TestName,
-			formatPassRate(pt.BestRate), pt.BestCombo,
-			formatPassRate(pt.WorstRate), pt.WorstCombo,
+			formatPassRate(pt.BestRate), formatSampleSize(pt.BestCounted, pt.BestExcluded), pt.BestCombo,
+			formatPassRate(pt.WorstRate), formatSampleSize(pt.WorstCounted, pt.WorstExcluded), pt.WorstCombo,
 			formatPassRate(pt.Spread),
+		))
+	}
+	sb.WriteString("\n")
+}
+
+// renderInfrastructureFailuresSection writes the infrastructure-failures
+// generated section. Same table shape as Problem Areas for rendering consistency.
+// When v.InfraTests is empty, renders "No infrastructure failures."
+func renderInfrastructureFailuresSection(sb *strings.Builder, v VersionSummary) {
+	sb.WriteString("## Infrastructure Failures\n\n")
+	if len(v.InfraTests) == 0 {
+		sb.WriteString("No infrastructure failures.\n\n")
+		return
+	}
+
+	sb.WriteString("| Suite | ID | Test | Best Rate | Best Combo | Worst Rate | Worst Combo | Spread |\n")
+	sb.WriteString("|-------|----|------|-----------|------------|------------|-------------|--------|\n")
+
+	for _, it := range v.InfraTests {
+		sb.WriteString(fmt.Sprintf("| %s | %d | %s | %s %s | %s | %s %s | %s | %s |\n",
+			it.SuiteID, it.NumericID, it.TestName,
+			formatPassRate(it.BestRate), formatSampleSize(it.BestCounted, it.BestExcluded), it.BestCombo,
+			formatPassRate(it.WorstRate), formatSampleSize(it.WorstCounted, it.WorstExcluded), it.WorstCombo,
+			formatPassRate(it.Spread),
 		))
 	}
 	sb.WriteString("\n")

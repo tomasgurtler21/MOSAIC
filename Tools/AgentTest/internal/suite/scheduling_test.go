@@ -212,8 +212,10 @@ func TestSuiteRun_RepeatedStateIntegrityEndsAsInfrastructureFailure(t *testing.T
 	if !agg.InfrastructureFailure {
 		t.Errorf("aggregate InfrastructureFailure = false, want true after a second state-integrity fault")
 	}
-	if result.InfrastructureFailures != 1 {
-		t.Errorf("Result.InfrastructureFailures = %d, want 1", result.InfrastructureFailures)
+	// InfrastructureFailures counts excluded runs (not infra-failed tests).
+	// Two state-integrity faults means 2 excluded runs, so the count is 2.
+	if result.InfrastructureFailures != 2 {
+		t.Errorf("Result.InfrastructureFailures = %d, want 2 (sum of excluded runs across infra-flagged tests: both state-integrity attempts are excluded)", result.InfrastructureFailures)
 	}
 }
 

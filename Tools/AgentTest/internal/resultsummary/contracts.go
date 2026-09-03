@@ -88,6 +88,12 @@ type HarnessModelStats struct {
 	// HasPartial is true when any contributing report has
 	// infrastructure_failure entries or other markers of incomplete data.
 	HasPartial bool
+	// ExcludedCount is the total number of excluded runs across all tests
+	// in this harness+model combination.
+	ExcludedCount int
+	// AttemptedCount is TestCount + ExcludedCount: the total number of runs
+	// attempted before exclusions. Precomputed for rendering convenience.
+	AttemptedCount int
 }
 
 // TestStats holds cross-combination stats for one test, used to
@@ -101,6 +107,14 @@ type TestStats struct {
 	WorstRate  float64
 	WorstCombo string
 	Spread     float64 // BestRate - WorstRate
+	// BestCounted is the counted sample size for the best combo.
+	BestCounted int
+	// BestExcluded is the excluded count for the best combo.
+	BestExcluded int
+	// WorstCounted is the counted sample size for the worst combo.
+	WorstCounted int
+	// WorstExcluded is the excluded count for the worst combo.
+	WorstExcluded int
 }
 
 // VersionSummary holds all aggregated data for one orchestrator version,
@@ -118,6 +132,12 @@ type VersionSummary struct {
 	BySuite map[string]map[string]map[string]HarnessModelStats
 	// ProblemTests lists tests sorted by ascending best pass rate.
 	ProblemTests []TestStats
+
+	// InfraTests lists tests whose aggregate carries InfrastructureFailure == true,
+	// sorted by suite then numeric ID for determinism. These tests are excluded
+	// from ProblemTests. Same TestStats shape as ProblemTests for rendering
+	// consistency.
+	InfraTests []TestStats
 }
 
 // RegressionFlag identifies one model+harness combination where the

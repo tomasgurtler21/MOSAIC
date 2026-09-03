@@ -13,13 +13,14 @@ import (
 // statsAccumulator gathers metrics for one harness+model combination across
 // one or more report files.
 type statsAccumulator struct {
-	testCount   int
-	passCount   int
-	durationMS  int64
-	runCount    int
-	totalCost   float64
-	costWarning bool
-	hasPartial  bool
+	testCount     int
+	passCount     int
+	excludedCount int // sum of Aggregate.Excluded across tests
+	durationMS    int64
+	runCount      int
+	totalCost     float64
+	costWarning   bool
+	hasPartial    bool
 }
 
 // add integrates the metrics from one report wire into the accumulator.
@@ -41,6 +42,7 @@ func (a *statsAccumulator) add(raw resultstore.ReportWire) {
 		}
 		a.testCount += t.Aggregate.Counted
 		a.passCount += t.Aggregate.Passed
+		a.excludedCount += t.Aggregate.Excluded
 		a.totalCost += t.Aggregate.TotalCost.TotalUSD
 		for _, r := range t.Runs {
 			a.durationMS += r.DurationMS
@@ -60,15 +62,17 @@ func (a *statsAccumulator) toStats(model, harness string) HarnessModelStats {
 		avgDuration = time.Duration(a.durationMS/int64(a.runCount)) * time.Millisecond
 	}
 	return HarnessModelStats{
-		Harness:     harness,
-		Model:       model,
-		TestCount:   a.testCount,
-		PassCount:   a.passCount,
-		PassRate:    passRate,
-		AvgDuration: avgDuration,
-		TotalCost:   a.totalCost,
-		CostWarning: a.costWarning,
-		HasPartial:  a.hasPartial,
+		Harness:        harness,
+		Model:          model,
+		TestCount:      a.testCount,
+		PassCount:      a.passCount,
+		PassRate:       passRate,
+		AvgDuration:    avgDuration,
+		TotalCost:      a.totalCost,
+		CostWarning:    a.costWarning,
+		HasPartial:     a.hasPartial,
+		ExcludedCount:  a.excludedCount,
+		AttemptedCount: a.testCount + a.excludedCount,
 	}
 }
 
@@ -197,9 +201,11 @@ func scanVersionDir(fs FileSystem, versionDir string) ([]resultstore.ParsedRepor
 // testComboRate holds a pass rate for one model+harness combination for a
 // specific test, used when computing problem areas.
 type testComboRate struct {
-	model   string
-	harness string
-	rate    float64
+	model    string
+	harness  string
+	rate     float64
+	counted  int // from Aggregate.Counted
+	excluded int // from Aggregate.Excluded
 }
 
 // buildVersionSummary aggregates a slice of parsed reports into a VersionSummary
@@ -216,6 +222,8 @@ func buildVersionSummary(version string, reports []resultstore.ParsedReport) Ver
 	byCombo := make(map[comboKey]*statsAccumulator)
 	bySuiteCombo := make(map[suiteComboKey]*statsAccumulator)
 	testCombos := make(map[testKey][]testComboRate)
+	// infraCombos parallels testCombos but holds only infra-flagged test entries.
+	infraCombos := make(map[testKey][]testComboRate)
 	// testNames tracks the first-seen display name for each numeric-ID-keyed test.
 	testNames := make(map[testKey]string)
 
@@ -258,7 +266,18 @@ func buildVersionSummary(version string, reports []resultstore.ParsedReport) Ver
 			if t.Aggregate.Counted > 0 {
 				rate = float64(t.Aggregate.Passed) / float64(t.Aggregate.Counted)
 			}
-			testCombos[tk] = append(testCombos[tk], testComboRate{model, harness, rate})
+			cr := testComboRate{
+				model:    model,
+				harness:  harness,
+				rate:     rate,
+				counted:  t.Aggregate.Counted,
+				excluded: t.Aggregate.Excluded,
+			}
+			if t.Aggregate.InfrastructureFailure {
+				infraCombos[tk] = append(infraCombos[tk], cr)
+			} else {
+				testCombos[tk] = append(testCombos[tk], cr)
+			}
 		}
 	}
 
@@ -324,14 +343,67 @@ func buildVersionSummary(version string, reports []resultstore.ParsedReport) Ver
 			continue
 		}
 		problemTests = append(problemTests, TestStats{
-			SuiteID:    tk.suite,
-			TestName:   testNames[tk],
-			NumericID:  tk.numericID,
-			BestRate:   best.rate,
-			BestCombo:  best.model + "/" + best.harness,
-			WorstRate:  worst.rate,
-			WorstCombo: worst.model + "/" + worst.harness,
-			Spread:     spread,
+			SuiteID:       tk.suite,
+			TestName:      testNames[tk],
+			NumericID:     tk.numericID,
+			BestRate:      best.rate,
+			BestCombo:     best.model + "/" + best.harness,
+			WorstRate:     worst.rate,
+			WorstCombo:    worst.model + "/" + worst.harness,
+			Spread:        spread,
+			BestCounted:   best.counted,
+			BestExcluded:  best.excluded,
+			WorstCounted:  worst.counted,
+			WorstExcluded: worst.excluded,
+		})
+	}
+
+	// Build InfraTests from infraCombos. Include all entries (no spread filter).
+	// Sort infra keys by suite then numeric ID for determinism.
+	var sortedInfraKeys []testKey
+	for tk := range infraCombos {
+		sortedInfraKeys = append(sortedInfraKeys, tk)
+	}
+	sort.Slice(sortedInfraKeys, func(i, j int) bool {
+		if sortedInfraKeys[i].suite != sortedInfraKeys[j].suite {
+			return sortedInfraKeys[i].suite < sortedInfraKeys[j].suite
+		}
+		return sortedInfraKeys[i].numericID < sortedInfraKeys[j].numericID
+	})
+
+	var infraTests []TestStats
+	for _, tk := range sortedInfraKeys {
+		combos := infraCombos[tk]
+		// Sort combos by model+harness key for deterministic best/worst selection.
+		sort.Slice(combos, func(i, j int) bool {
+			ki := combos[i].model + "/" + combos[i].harness
+			kj := combos[j].model + "/" + combos[j].harness
+			return ki < kj
+		})
+		best := combos[0]
+		worst := combos[0]
+		for _, c := range combos[1:] {
+			if c.rate > best.rate {
+				best = c
+			}
+			if c.rate < worst.rate {
+				worst = c
+			}
+		}
+		spread := best.rate - worst.rate
+		infraTests = append(infraTests, TestStats{
+			SuiteID:       tk.suite,
+			TestName:      testNames[tk],
+			NumericID:     tk.numericID,
+			BestRate:      best.rate,
+			BestCombo:     best.model + "/" + best.harness,
+			WorstRate:     worst.rate,
+			WorstCombo:    worst.model + "/" + worst.harness,
+			Spread:        spread,
+			BestCounted:   best.counted,
+			BestExcluded:  best.excluded,
+			WorstCounted:  worst.counted,
+			WorstExcluded: worst.excluded,
 		})
 	}
 
@@ -349,6 +421,7 @@ func buildVersionSummary(version string, reports []resultstore.ParsedReport) Ver
 		ByModel:      byModel,
 		BySuite:      bySuite,
 		ProblemTests: problemTests,
+		InfraTests:   infraTests,
 	}
 }
 

@@ -59,6 +59,10 @@ type Session struct {
 
 	// Outcome is the three-state classification of the session.
 	Outcome SessionOutcome
+
+	// Errors is the combined report-level errors across all executed suites.
+	// Renders as [] (never null) on the wire.
+	Errors []ReportError
 }
 
 // NewSession builds a Session from the suites that executed, the names of
@@ -80,6 +84,7 @@ func NewSession(suites []Result, unrunSuites []string, aborted bool) Session {
 	combined := make(map[domain.Verdict]int)
 	var totalCost domain.CostReport
 	var infraFailures int
+	allErrors := []ReportError{}
 
 	for _, s := range suites {
 		for verdict, count := range s.Counts {
@@ -87,6 +92,7 @@ func NewSession(suites []Result, unrunSuites []string, aborted bool) Session {
 		}
 		totalCost = totalCost.Add(s.TotalCost)
 		infraFailures += s.InfrastructureFailures
+		allErrors = append(allErrors, s.Errors...)
 	}
 
 	var outcome SessionOutcome
@@ -107,5 +113,6 @@ func NewSession(suites []Result, unrunSuites []string, aborted bool) Session {
 		TotalCost:              totalCost,
 		InfrastructureFailures: infraFailures,
 		Outcome:                outcome,
+		Errors:                 allErrors,
 	}
 }

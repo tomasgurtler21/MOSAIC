@@ -46,6 +46,12 @@ type CostReport struct {
 	// only when Attribution is AttributionPartial. Empty otherwise.
 	// Carries structured model identity so callers do not need to parse Detail.
 	UnpricedModels []string
+
+	// UnknownRunResidual is the count of unknown-run records that could not
+	// be attributed to this run after LogAnalyzer's merge. Zero means all
+	// records were attributed (or no unknown-run bucket existed). Non-zero
+	// triggers a report-level error via report.Build.
+	UnknownRunResidual int
 }
 
 // Add combines two cost reports. The combined attribution is the weaker of
@@ -61,8 +67,9 @@ func (c CostReport) Add(other CostReport) CostReport {
 	}
 
 	result := CostReport{
-		TotalUSD:    c.TotalUSD + other.TotalUSD,
-		Attribution: attribution,
+		TotalUSD:           c.TotalUSD + other.TotalUSD,
+		Attribution:        attribution,
+		UnknownRunResidual: c.UnknownRunResidual + other.UnknownRunResidual,
 	}
 	switch {
 	case c.Detail == "":

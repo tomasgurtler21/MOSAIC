@@ -181,6 +181,9 @@ type AggregateWire struct {
 	PassRate              float64  `json:"pass_rate"`
 	InfrastructureFailure bool     `json:"infrastructure_failure"`
 	TotalCost             CostWire `json:"total_cost"`
+	// Excluded is the number of runs excluded from the denominator.
+	// Absent in older report JSON; decodes to 0 (backward compatible).
+	Excluded int `json:"excluded"`
 }
 
 // RunReportWire is the minimal wire shape for one run entry.

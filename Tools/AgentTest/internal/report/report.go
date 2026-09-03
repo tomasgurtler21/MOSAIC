@@ -9,6 +9,7 @@
 package report
 
 import (
+	"fmt"
 	"io"
 	"time"
 
@@ -19,6 +20,25 @@ import (
 // additive-only: a field is never removed or retyped, so a caller parsing
 // today's output keeps working.
 const SchemaVersion = "1"
+
+// ReportErrorKind is a stable string identifying a report-level error type.
+type ReportErrorKind string
+
+const (
+	// ErrorUnknownRunResidual means usage records in the unknown-run bucket
+	// could not be attributed to any run after merging.
+	ErrorUnknownRunResidual ReportErrorKind = "unknown_run_residual"
+)
+
+// ReportError is one report-level error condition.
+type ReportError struct {
+	// Kind identifies the error type. Machine-readable, stable string.
+	Kind ReportErrorKind
+	// Detail is a human-readable description.
+	Detail string
+	// Count is the number of affected items (e.g., residual records).
+	Count int
+}
 
 // Result is the one model every rendering and every frontend derives from.
 type Result struct {
@@ -47,6 +67,12 @@ type Result struct {
 	// constant for all runs in a single invocation. Empty means no
 	// catalog folder was configured (production catalog was used).
 	CatalogFolder string
+
+	// Errors is a list of report-level error conditions that are not
+	// attributable to any single test or run. Machine-readable so downstream
+	// tooling can check for them without parsing per-run detail.
+	// Renders as [] (never null) on the wire.
+	Errors []ReportError
 }
 
 // TestReport is one test's aggregate outcome plus its per-repetition detail.
@@ -137,13 +163,27 @@ func Build(suiteID string, started, finished time.Time, tests []TestReport, cata
 	counts := map[domain.Verdict]int{}
 	total := domain.CostReport{Attribution: domain.AttributionAttributed}
 	infra := 0
+	var totalResidual int
 
 	for _, t := range tests {
 		counts[t.Aggregate.Verdict]++
 		total = total.Add(t.Aggregate.TotalCost)
 		if t.Aggregate.InfrastructureFailure {
-			infra++
+			infra += t.Aggregate.Excluded
 		}
+		totalResidual += t.Aggregate.TotalCost.UnknownRunResidual
+	}
+
+	errors := []ReportError{}
+	if totalResidual > 0 {
+		errors = append(errors, ReportError{
+			Kind: ErrorUnknownRunResidual,
+			Detail: fmt.Sprintf(
+				"%d unknown-run usage record(s) could not be attributed after merging",
+				totalResidual,
+			),
+			Count: totalResidual,
+		})
 	}
 
 	return Result{
@@ -156,6 +196,7 @@ func Build(suiteID string, started, finished time.Time, tests []TestReport, cata
 		TotalCost:              total,
 		InfrastructureFailures: infra,
 		CatalogFolder:          catalogFolder,
+		Errors:                 errors,
 	}
 }
 

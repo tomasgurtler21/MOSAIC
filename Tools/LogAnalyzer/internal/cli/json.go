@@ -82,15 +82,23 @@ func encodeMoneyValue(mv domain.MoneyValue) jsonMoneyValue {
 //	  "complete":       true
 //	}
 type jsonRunTotalWire struct {
-	SchemaVersion string          `json:"schema_version"`
-	RunID         string          `json:"run_id"`
-	Provisional   bool            `json:"provisional"`
-	Currency      string          `json:"currency"`
-	Tokens        jsonTokenUsage  `json:"tokens"`
-	Money         jsonMoneyValue  `json:"money"`
-	Complete      bool            `json:"complete"`
-	UnpricedModels []string       `json:"unpriced_models,omitempty"`
+	SchemaVersion  string          `json:"schema_version"`
+	RunID          string          `json:"run_id"`
+	Provisional    bool            `json:"provisional"`
+	Currency       string          `json:"currency"`
+	Tokens         jsonTokenUsage  `json:"tokens"`
+	Money          jsonMoneyValue  `json:"money"`
+	Complete       bool            `json:"complete"`
+	UnpricedModels []string        `json:"unpriced_models,omitempty"`
 	PartialMoney   *jsonMoneyValue `json:"partial_money,omitempty"`
+
+	// UnknownRunMerged is the count of usage records merged from the
+	// unknown-run sibling bucket. Absent (omitempty) when zero.
+	UnknownRunMerged int `json:"unknown_run_merged,omitempty"`
+
+	// UnknownRunResidual is the count of unknown-run records that could
+	// not be attributed after merging. Absent (omitempty) when zero.
+	UnknownRunResidual int `json:"unknown_run_residual,omitempty"`
 }
 
 // EncodeRunTotal writes the stable basic total-per-run contract to w.
@@ -108,15 +116,17 @@ func EncodeRunTotal(w io.Writer, t app.RunTotal) error {
 	}
 
 	wire := jsonRunTotalWire{
-		SchemaVersion:  "1",
-		RunID:          t.RunID,
-		Provisional:    t.Provisional,
-		Currency:       domain.Currency,
-		Tokens:         encodeTokenUsage(t.Tokens),
-		Money:          encodeMoneyValue(t.Money),
-		Complete:       t.Complete,
-		UnpricedModels: unpricedModels,
-		PartialMoney:   partialMoney,
+		SchemaVersion:      "1",
+		RunID:              t.RunID,
+		Provisional:        t.Provisional,
+		Currency:           domain.Currency,
+		Tokens:             encodeTokenUsage(t.Tokens),
+		Money:              encodeMoneyValue(t.Money),
+		Complete:           t.Complete,
+		UnpricedModels:     unpricedModels,
+		PartialMoney:       partialMoney,
+		UnknownRunMerged:   t.UnknownRunMerged,
+		UnknownRunResidual: t.UnknownRunResidual,
 	}
 	return json.NewEncoder(w).Encode(wire)
 }

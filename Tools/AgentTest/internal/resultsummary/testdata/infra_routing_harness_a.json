@@ -1,0 +1,87 @@
+{
+  "schema_version": "1",
+  "suite_id": "infra-suite",
+  "started_at": "2026-09-01T10:00:00Z",
+  "finished_at": "2026-09-01T10:10:00Z",
+  "tests": [
+    {
+      "test_name": "normal-test",
+      "test_id": 10,
+      "description": "A normal test that varies across harnesses (spread candidate for problem areas)",
+      "layer": "orchestrator",
+      "aggregate": {
+        "verdict": "pass",
+        "counted": 2,
+        "passed": 2,
+        "pass_rate": 1.0,
+        "infrastructure_failure": false,
+        "total_cost": { "total_usd": 0.04, "attribution": "direct" }
+      },
+      "runs": [
+        {
+          "subject_version": "v1.0.0",
+          "subject_model": "github-copilot/claude-sonnet-4.6",
+          "harness_id": "claude-code",
+          "verdict": "pass",
+          "duration_ms": 2000,
+          "cost": { "total_usd": 0.02, "attribution": "direct" },
+          "termination_reason": "completed",
+          "conditions": [],
+          "test_version": 1
+        },
+        {
+          "subject_version": "v1.0.0",
+          "subject_model": "github-copilot/claude-sonnet-4.6",
+          "harness_id": "claude-code",
+          "verdict": "pass",
+          "duration_ms": 2000,
+          "cost": { "total_usd": 0.02, "attribution": "direct" },
+          "termination_reason": "completed",
+          "conditions": [],
+          "test_version": 1
+        }
+      ]
+    },
+    {
+      "test_name": "infra-test",
+      "test_id": 20,
+      "description": "A test that fails with infrastructure failure (must not appear in problem areas)",
+      "layer": "orchestrator",
+      "aggregate": {
+        "verdict": "fail",
+        "counted": 2,
+        "passed": 2,
+        "pass_rate": 1.0,
+        "infrastructure_failure": true,
+        "total_cost": { "total_usd": 0.04, "attribution": "direct" }
+      },
+      "runs": [
+        {
+          "subject_version": "v1.0.0",
+          "subject_model": "github-copilot/claude-sonnet-4.6",
+          "harness_id": "claude-code",
+          "verdict": "pass",
+          "duration_ms": 1500,
+          "cost": { "total_usd": 0.02, "attribution": "direct" },
+          "termination_reason": "completed",
+          "conditions": [],
+          "test_version": 1
+        },
+        {
+          "subject_version": "v1.0.0",
+          "subject_model": "github-copilot/claude-sonnet-4.6",
+          "harness_id": "claude-code",
+          "verdict": "pass",
+          "duration_ms": 1500,
+          "cost": { "total_usd": 0.02, "attribution": "direct" },
+          "termination_reason": "completed",
+          "conditions": [],
+          "test_version": 1
+        }
+      ]
+    }
+  ],
+  "counts": { "pass": 1, "fail": 1 },
+  "total_cost": { "total_usd": 0.08, "attribution": "direct" },
+  "infrastructure_failures": 1
+}
