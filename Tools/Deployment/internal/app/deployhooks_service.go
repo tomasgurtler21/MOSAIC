@@ -193,7 +193,8 @@ func deployHooks(ctx context.Context, s *service, req DeployHooksRequest) (domai
 			Harness: harnessRef.DisplayName, WorkspacePath: workspace, DeploymentRoot: workspace,
 			GeneratedAt: now, Mode: domain.ModeDeployHooks,
 		},
-		DryRun: req.DryRun,
+		DryRun:      req.DryRun,
+		ToolVersion: s.deps.ToolVersion,
 	}
 
 	result, err := s.deps.Executor.Execute(ctx, execReq)

@@ -92,6 +92,10 @@ type ExecRequest struct {
 	// Atomic has no effect when DryRun is true (no writes occur) or when a fallback tier is
 	// used (the workspace was unwritable, which is not a mid-plan stop).
 	Atomic bool
+	// ToolVersion is the semver string identifying the mosaic-deploy binary (e.g. "1.0.0").
+	// The executor threads it into the manifest written by buildManifest. An empty string
+	// means "not recorded" and results in no tool_version key in the YAML.
+	ToolVersion string
 }
 
 // RevertFailure names one journal entry the reversal could not apply.
@@ -349,7 +353,7 @@ func (e *executor) Execute(ctx context.Context, req ExecRequest) (ExecResult, er
 	}
 
 	// Build the manifest from what is actually on disk (entryMap reflects reality).
-	finalManifest := buildManifest(prior, entryMap, req.Plan)
+	finalManifest := buildManifest(prior, entryMap, req.Plan, req.ToolVersion)
 
 	// Persist the manifest and the TODO file (skipped for DryRun).
 	todoFilePath := ""
@@ -792,7 +796,7 @@ func buildEntryMap(m domain.Manifest) map[entryKey]domain.ManifestEntry {
 }
 
 // buildManifest produces the final domain.Manifest from the entry map, sorted by TargetPath.
-func buildManifest(prior domain.Manifest, entryMap map[entryKey]domain.ManifestEntry, plan domain.Plan) domain.Manifest {
+func buildManifest(prior domain.Manifest, entryMap map[entryKey]domain.ManifestEntry, plan domain.Plan, toolVersion string) domain.Manifest {
 	harnessID := plan.Harness.ID
 	if harnessID == "" {
 		harnessID = prior.HarnessID
@@ -801,6 +805,7 @@ func buildManifest(prior domain.Manifest, entryMap map[entryKey]domain.ManifestE
 		SchemaVersion: manifest.SchemaVersion,
 		HarnessID:     harnessID,
 		UpdatedAt:     time.Now(),
+		ToolVersion:   toolVersion,
 	}
 
 	keys := make([]entryKey, 0, len(entryMap))

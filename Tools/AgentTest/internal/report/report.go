@@ -73,6 +73,13 @@ type Result struct {
 	// tooling can check for them without parsing per-run detail.
 	// Renders as [] (never null) on the wire.
 	Errors []ReportError
+
+	// ToolVersion is the version of the mosaic-agent-test binary that produced
+	// this report. Distinct from SchemaVersion (wire-format version) and per-run
+	// SubjectVersion (tested agent's version). Set on the Result returned by
+	// Build at the production call site in suite.go, not by Build itself.
+	// Empty means not recorded (e.g. pre-feature invocation or test double).
+	ToolVersion string
 }
 
 // TestReport is one test's aggregate outcome plus its per-repetition detail.

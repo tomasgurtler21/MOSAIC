@@ -48,6 +48,11 @@ type Options struct {
 	// Supplied by the composition root; nil disables reloading, in which case the catalogue
 	// screen still displays and validates but the confirmed value has no further effect.
 	ReloadCatalog CatalogReloadFunc
+
+	// ToolVersion is the semver string of the mosaic-deploy binary (e.g. "1.0.0").
+	// When set, it is included in the ModeScreen title so users see the tool identity
+	// immediately on launch. An empty string omits the version from the title.
+	ToolVersion string
 }
 
 // Run owns the terminal for the lifetime of the call. It presents the three entry screens to
@@ -161,8 +166,10 @@ func newRootModel(ctx context.Context, svc app.Service, opts Options) *rootModel
 
 	harnesses := svc.ListHarnesses()
 	hScreen := screens.NewHarnessScreen(harnesses, w, h, style)
+	hScreen.SetToolVersion(opts.ToolVersion)
 
 	mScreen := screens.NewModeScreen(w, h, style)
+	mScreen.SetToolVersion(opts.ToolVersion)
 
 	wsScreen := screens.NewWorkspaceScreen(w, h, style)
 	if opts.InitialRequest != nil && opts.InitialRequest.WorkspacePath != "" {

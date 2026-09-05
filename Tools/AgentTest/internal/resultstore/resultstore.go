@@ -161,6 +161,10 @@ type ReportWire struct {
 	Counts                 map[string]int   `json:"counts"`
 	TotalCost              CostWire         `json:"total_cost"`
 	InfrastructureFailures int              `json:"infrastructure_failures"`
+	// ToolVersion is the version of mosaic-agent-test that produced this report.
+	// Additive-only: omitempty ensures pre-feature report JSON (lacking the field)
+	// deserializes with empty string rather than causing an error.
+	ToolVersion            string           `json:"tool_version,omitempty"`
 }
 
 // TestReportWire is the minimal wire shape for one test entry.

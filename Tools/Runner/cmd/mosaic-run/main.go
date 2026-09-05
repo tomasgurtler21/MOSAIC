@@ -35,6 +35,8 @@ import (
 	"mosaic-run/internal/tui/screens"
 )
 
+const ToolVersion = "1.0.0"
+
 // wantsTUI reports whether mosaic-run should launch the interactive TUI.
 // The TUI is launched when:
 //   (a) --tui is given explicitly, OR
@@ -75,12 +77,14 @@ func main() {
 	// store still produces a log entry. Closed via defer so writes are flushed
 	// before the process exits along non-os.Exit paths.
 	logger := debuglog.New(workDir)
+	logger.SetToolVersion(ToolVersion)
 	defer logger.Close()
 
 	// Construct the process-level dispatch logger. One logger per process;
 	// records every subagent ProtocolRequest/ProtocolResponse pair as JSONL.
 	// File is created lazily on first use and closed via defer.
 	dispLogger := dispatchlog.New(workDir)
+	dispLogger.SetToolVersion(ToolVersion)
 	defer dispLogger.Close()
 
 	// CLI mode: pre-scan flags needed for dependency wiring before cobra parses them,
@@ -210,11 +214,13 @@ func runTUIMode(args []string) {
 	// still captured. The logger is shared across all session constructions (the
 	// factory runs more than once per process), ensuring exactly one log file per run.
 	logger := debuglog.New(workDir)
+	logger.SetToolVersion(ToolVersion)
 	defer logger.Close()
 
 	// Construct the process-level dispatch logger once here, shared across all
 	// session constructions, ensuring exactly one dispatch log file per process/run.
 	dispLogger := dispatchlog.New(workDir)
+	dispLogger.SetToolVersion(ToolVersion)
 	defer dispLogger.Close()
 
 	// Pre-scan --claude-path so it is available to the session factory.

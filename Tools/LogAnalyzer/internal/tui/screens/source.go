@@ -15,10 +15,11 @@ import (
 //   - Enter on a non-empty path -> Done() == true, Path() returns the path.
 //   - Esc -> Back() == true.
 type SourceScreen struct {
-	input  *widgets.TextInput
-	width  int
-	height int
-	styles Styles
+	input   *widgets.TextInput
+	width   int
+	height  int
+	styles  Styles
+	version string
 }
 
 // NewSourceScreen creates the log-source path entry screen.
@@ -57,6 +58,12 @@ type errString string
 
 func (e errString) Error() string { return string(e) }
 
+// SetVersion sets the tool version string displayed in the screen title.
+// Call before the first View() for the version to appear on entry.
+func (s *SourceScreen) SetVersion(v string) {
+	s.version = v
+}
+
 // ID implements Screen.
 func (s *SourceScreen) ID() ScreenID { return ScreenSource }
 
@@ -76,7 +83,11 @@ func (s *SourceScreen) View(width, height int) string {
 	s.input.Resize(width)
 
 	sep := s.styles.Border.Width(width).Render(strings.Repeat("─", width))
-	title := s.styles.Title.Width(width).Render("Log Analyzer — Select Source")
+	titleText := "Log Analyzer -- Select Source"
+	if s.version != "" {
+		titleText = "Log Analyzer v" + s.version + " -- Select Source"
+	}
+	title := s.styles.Title.Width(width).Render(titleText)
 	subtitle := s.styles.Subtitle.Width(width).Render("Enter the path to your logs root or a single run folder.")
 	guidance := s.styles.Muted.Width(width).Render("Accepts: OrchestrationLogs/ directory  or  a single run folder (e.g. 20260101T120000Z-abcd)")
 	help := s.styles.Help.Width(width).Render("enter confirm  esc skip  ctrl+c quit")

@@ -184,6 +184,11 @@ type Options struct {
 	// mirroring session.New's treatment of Deps.Debug, so the root model never
 	// nil-checks it.
 	Debug domain.DebugLogger
+
+	// ToolVersion is the semver string of the mosaic-run binary (e.g. "1.0.0").
+	// When set, it is included in the entry screen titles so users see the tool
+	// identity immediately on launch. An empty string omits the version.
+	ToolVersion string
 }
 
 // runSetupSelections holds all inputs collected during the setup phase.
@@ -361,7 +366,9 @@ func newRootModel(ctx context.Context, sess session.Session, opts Options) *root
 	ctx, cancel := context.WithCancel(ctx)
 
 	harnessScreen := screens.NewHarnessSelectScreen(w, h, style)
+	harnessScreen.SetToolVersion(opts.ToolVersion)
 	fileScreen := screens.NewOrchestratorFileScreen(w, h, style)
+	fileScreen.SetToolVersion(opts.ToolVersion)
 	taskScreen := screens.NewTaskScreen(w, h, style)
 	seedInputScreen := screens.NewSeedInputScreen(w, h, style)
 	configScreen := screens.NewConfigScreen(w, h, style)
@@ -397,6 +404,7 @@ func newRootModel(ctx context.Context, sess session.Session, opts Options) *root
 		}
 		runSelectQuestion = &q
 		runSelectScreen = screens.NewRunSelectScreen(q, w, h, style)
+		runSelectScreen.SetToolVersion(opts.ToolVersion)
 		initialScreen = screenRunSelect
 	}
 	// Zero candidates (or pre-resolved): skip run select, go straight to setup.

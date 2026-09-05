@@ -297,6 +297,7 @@ func (m Model) handlePending(p Pending) (tea.Model, tea.Cmd) {
 			// Surface the source screen for the log-source path question.
 			style := stylesFromTheme(m.theme)
 			m.sourceScreen = screens.NewSourceScreen(m.width, m.height, style)
+			m.sourceScreen.SetVersion(m.opts.Version)
 			m.screen = screenSource
 			return m, tea.Batch(
 				m.sourceScreen.Init(),
@@ -402,6 +403,7 @@ func (m Model) updateRuns(msg tea.Msg) (tea.Model, tea.Cmd) {
 	if key, ok := msg.(tea.KeyMsg); ok && key.String() == "s" {
 		style := stylesFromTheme(m.theme)
 		m.sourceScreen = screens.NewSourceScreen(m.width, m.height, style)
+		m.sourceScreen.SetVersion(m.opts.Version)
 		m.sourceFromRuns = true
 		m.screen = screenSource
 		return m, m.sourceScreen.Init()

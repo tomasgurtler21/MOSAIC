@@ -165,6 +165,7 @@ func buildInteractiveWiring(in interactiveWiringInput) interactiveWiring {
 			OnRunIDResolved: in.OnRunIDResolved,
 			StopSignal:      in.StopSignal,
 			Debug:           in.Debug,
+			ToolVersion:     ToolVersion,
 		},
 		NewDeps: newDeps,
 	}

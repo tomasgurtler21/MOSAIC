@@ -32,6 +32,11 @@ type wireResult struct {
 	// Errors is the list of report-level error conditions.
 	// Always [] (never null) when empty.
 	Errors []wireReportError `json:"errors"`
+
+	// ToolVersion is the version of mosaic-agent-test that produced this report.
+	// Additive-only: omitempty ensures pre-feature parsers ignore it and
+	// pre-feature report JSON (lacking the field) deserializes with empty string.
+	ToolVersion string `json:"tool_version,omitempty"`
 }
 
 // wireReportError is the stable wire shape for one report-level error condition.
@@ -195,6 +200,7 @@ func toWireResult(r Result) wireResult {
 		InfrastructureFailures: r.InfrastructureFailures,
 		CatalogFolder:          r.CatalogFolder,
 		Errors:                 errors,
+		ToolVersion:            r.ToolVersion,
 	}
 }
 

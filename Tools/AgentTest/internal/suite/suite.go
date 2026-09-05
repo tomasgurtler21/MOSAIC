@@ -116,6 +116,13 @@ type Options struct {
 	// checkable field-for-field rather than trusted by comment.
 	Retention domain.RetentionPolicy
 
+	// ToolVersion is the version of the mosaic-agent-test binary for this
+	// invocation. Set on the Result returned by report.Build at the production
+	// call site (Run method), not by Build itself, so Build's parameter list
+	// remains unchanged. Empty means not recorded (test doubles that do not
+	// supply a version, or pre-feature invocations).
+	ToolVersion string
+
 	// Pause, when non-nil, is checked by workers before picking up each new
 	// work item. When paused, workers block until resumed or the context is
 	// cancelled. When nil, workers never pause (backward compatible).
@@ -443,6 +450,7 @@ func (s *Suite) Run(ctx context.Context, p preflight.Plan) (report.Result, error
 
 	finished := clock.Now()
 	result := report.Build(p.Suite.ID, started, finished, testReports, p.CatalogFolder)
+	result.ToolVersion = s.opts.ToolVersion
 
 	emitSafe(sink, domain.ProgressEvent{
 		Kind:      domain.ProgressSuiteFinished,

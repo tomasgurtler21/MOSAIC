@@ -113,11 +113,38 @@ func agentFixturesDir(t *testing.T) string {
 	return abs
 }
 
+// frozenCatalogRoot returns the absolute path to the frozen Catalog fixture tree. This tree
+// is a snapshot of the protocol source document and all HarnessInjections files at the time
+// the golden files were last regenerated. Golden-file tests must use this root instead of the
+// live repo root so they remain immune to Catalog evolution (version bumps, prose edits, etc.).
+func frozenCatalogRoot(t *testing.T) string {
+	t.Helper()
+	// testdata/frozen-catalog/ is at Tools/Deployment/testdata/frozen-catalog/
+	rel := filepath.Join("..", "..", "..", "..", "testdata", "frozen-catalog")
+	abs, err := filepath.Abs(rel)
+	if err != nil {
+		t.Fatalf("resolve frozen catalog root: %v", err)
+	}
+	return abs
+}
+
 func newModule(t *testing.T) domain.HarnessModule {
 	t.Helper()
 	mod, err := ghcpcli.New(registry.BuiltinOptions{MosaicRoot: repoRoot(t)})
 	if err != nil {
 		t.Fatalf("ghcpcli.New(): %v", err)
+	}
+	return mod
+}
+
+// newModuleFromFrozen constructs the GHCP CLI module against the frozen Catalog fixture root.
+// Golden-file tests use this instead of newModule so that changes to the live HarnessInjections
+// files in Catalog/ do not affect the committed golden files.
+func newModuleFromFrozen(t *testing.T) domain.HarnessModule {
+	t.Helper()
+	mod, err := ghcpcli.New(registry.BuiltinOptions{MosaicRoot: frozenCatalogRoot(t)})
+	if err != nil {
+		t.Fatalf("ghcpcli.New() from frozen catalog: %v", err)
 	}
 	return mod
 }
@@ -205,9 +232,8 @@ func truncate(b []byte, n int) []byte {
 // whereas the canonical GHCP CLI format uses single-quoted flow style: ['skill', 'read', ...].
 // The golden file uses the correct single-quoted flow style.
 func TestGoldenFile_GHCP_ContractsReviewAgent(t *testing.T) {
-	mod := newModule(t)
-	root := repoRoot(t)
-	protocol := loadProtocol(t, root)
+	mod := newModuleFromFrozen(t)
+	protocol := loadProtocol(t, frozenCatalogRoot(t))
 
 
 	srcPath := filepath.Join(agentFixturesDir(t), "contracts-review.md")
@@ -238,9 +264,8 @@ func TestGoldenFile_GHCP_ContractsReviewAgent(t *testing.T) {
 // tools: ['read', 'edit', 'search', 'execute', 'ask_user']
 // (file_write + file_edit → edit; file_search + content_search → search; no duplication)
 func TestGoldenFile_GHCP_TestRunnerAgent(t *testing.T) {
-	mod := newModule(t)
-	root := repoRoot(t)
-	protocol := loadProtocol(t, root)
+	mod := newModuleFromFrozen(t)
+	protocol := loadProtocol(t, frozenCatalogRoot(t))
 
 
 	srcPath := filepath.Join(agentFixturesDir(t), "test-runner.md")
@@ -271,9 +296,8 @@ func TestGoldenFile_GHCP_TestRunnerAgent(t *testing.T) {
 // and 'execute' (maps from terminal):
 // tools: ['skill', 'read', 'edit', 'search', 'execute', 'ask_user']
 func TestGoldenFile_GHCP_PlannerTDDSoftAgent(t *testing.T) {
-	mod := newModule(t)
-	root := repoRoot(t)
-	protocol := loadProtocol(t, root)
+	mod := newModuleFromFrozen(t)
+	protocol := loadProtocol(t, frozenCatalogRoot(t))
 
 
 	srcPath := filepath.Join(agentFixturesDir(t), "planner-tdd-soft.md")
@@ -308,9 +332,8 @@ func TestGoldenFile_GHCP_PlannerTDDSoftAgent(t *testing.T) {
 // and 'execute'. This appears to be an error in the committed file produced by the rough
 // LLM-based process. The correct expansion should include all placeholder_expansion tools.
 func TestGoldenFile_GHCP_Orchestrator(t *testing.T) {
-	mod := newModule(t)
-	root := repoRoot(t)
-	protocol := loadProtocol(t, root)
+	mod := newModuleFromFrozen(t)
+	protocol := loadProtocol(t, frozenCatalogRoot(t))
 
 
 	srcPath := filepath.Join(agentFixturesDir(t), "orchestrator.md")

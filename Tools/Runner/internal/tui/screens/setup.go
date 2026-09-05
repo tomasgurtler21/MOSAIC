@@ -21,10 +21,11 @@ import (
 //   - Enter on a non-empty path that exists -> Done() == true, FilePath() returns the path.
 //   - Esc -> Back() == true.
 type OrchestratorFileScreen struct {
-	input  *widgets.TextInput
-	width  int
-	height int
-	styles Styles
+	input       *widgets.TextInput
+	width       int
+	height      int
+	styles      Styles
+	toolVersion string
 }
 
 // NewOrchestratorFileScreen creates the orchestrator file path entry screen.
@@ -80,6 +81,12 @@ func validateOrchestratorFile(path string) error {
 	return nil
 }
 
+// SetToolVersion sets the tool version string displayed in the screen title.
+// Call before the first View() for the version to appear on entry.
+func (s *OrchestratorFileScreen) SetToolVersion(v string) {
+	s.toolVersion = v
+}
+
 // Update processes a key message and delegates to the text input widget.
 func (s *OrchestratorFileScreen) Update(msg tea.Msg) tea.Cmd {
 	return s.input.Update(msg)
@@ -87,7 +94,11 @@ func (s *OrchestratorFileScreen) Update(msg tea.Msg) tea.Cmd {
 
 // View renders the orchestrator file entry screen.
 func (s *OrchestratorFileScreen) View() string {
-	title := s.styles.Title.Width(s.width).Render("Orchestrator File")
+	titleText := "Orchestrator File"
+	if s.toolVersion != "" {
+		titleText = "MOSAIC Runner v" + s.toolVersion + " -- Orchestrator File"
+	}
+	title := s.styles.Title.Width(s.width).Render(titleText)
 	subtitle := s.styles.Subtitle.Width(s.width).Render("Enter the path to the orchestrator agent file.")
 	border := s.styles.Border.Width(s.width).Render(strings.Repeat("─", s.width))
 	guidance := s.styles.Muted.Width(s.width).Render("The file must be an existing .md agent file.\n")
@@ -131,10 +142,11 @@ func (s *OrchestratorFileScreen) Resize(width, height int) {
 //   - Enter on a harness -> Done() == true, SelectedID() returns its ID.
 //   - Esc -> Back() == true (quit; this is the first setup screen).
 type HarnessSelectScreen struct {
-	list   *widgets.List
-	width  int
-	height int
-	styles Styles
+	list        *widgets.List
+	width       int
+	height      int
+	styles      Styles
+	toolVersion string
 }
 
 // NewHarnessSelectScreen creates the harness selection screen.
@@ -166,6 +178,12 @@ func NewHarnessSelectScreen(width, height int, styles Styles) *HarnessSelectScre
 	}
 }
 
+// SetToolVersion sets the tool version string displayed in the screen title.
+// Call before the first View() for the version to appear on entry.
+func (s *HarnessSelectScreen) SetToolVersion(v string) {
+	s.toolVersion = v
+}
+
 // Update processes a key message and delegates to the list widget.
 func (s *HarnessSelectScreen) Update(msg tea.Msg) tea.Cmd {
 	s.list.Update(msg)
@@ -174,7 +192,11 @@ func (s *HarnessSelectScreen) Update(msg tea.Msg) tea.Cmd {
 
 // View renders the harness selection screen.
 func (s *HarnessSelectScreen) View() string {
-	title := s.styles.Title.Width(s.width).Render("Select Harness")
+	titleText := "Select Harness"
+	if s.toolVersion != "" {
+		titleText = "MOSAIC Runner v" + s.toolVersion + " -- Select Harness"
+	}
+	title := s.styles.Title.Width(s.width).Render(titleText)
 	subtitle := s.styles.Subtitle.Width(s.width).Render("Choose the AI harness to use for this run.")
 	border := s.styles.Border.Width(s.width).Render(strings.Repeat("─", s.width))
 	listView := s.list.View()
@@ -306,11 +328,12 @@ const NewRunSentinelID = runselect.NewRunChoiceID
 //   - Enter on the "Start new run" item -> Done() == true, IsNewRun() == true.
 //   - Esc -> Back() == true.
 type RunSelectScreen struct {
-	list    *widgets.List
-	choices []runselect.Choice
-	width   int
-	height  int
-	styles  Styles
+	list        *widgets.List
+	choices     []runselect.Choice
+	width       int
+	height      int
+	styles      Styles
+	toolVersion string
 }
 
 // NewRunSelectScreen creates the run selection screen from a selection
@@ -400,6 +423,12 @@ func NewRunSelectScreen(question runselect.Question, width, height int, styles S
 	}
 }
 
+// SetToolVersion sets the tool version string displayed in the screen title.
+// Call before the first View() for the version to appear on entry.
+func (s *RunSelectScreen) SetToolVersion(v string) {
+	s.toolVersion = v
+}
+
 // Update processes a key message and delegates to the list widget.
 func (s *RunSelectScreen) Update(msg tea.Msg) tea.Cmd {
 	s.list.Update(msg)
@@ -408,7 +437,11 @@ func (s *RunSelectScreen) Update(msg tea.Msg) tea.Cmd {
 
 // View renders the run selection screen with title, candidate list, and help bar.
 func (s *RunSelectScreen) View() string {
-	title := s.styles.Title.Width(s.width).Render("Select Run")
+	titleText := "Select Run"
+	if s.toolVersion != "" {
+		titleText = "MOSAIC Runner v" + s.toolVersion + " -- Select Run"
+	}
+	title := s.styles.Title.Width(s.width).Render(titleText)
 	subtitle := s.styles.Subtitle.Width(s.width).Render("Choose a resumable run or start a new one.")
 	border := s.styles.Border.Width(s.width).Render(strings.Repeat("─", s.width))
 	listView := s.list.View()

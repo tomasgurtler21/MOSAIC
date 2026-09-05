@@ -27,6 +27,7 @@ type Manifest struct {
 	HarnessID     string
 	UpdatedAt     time.Time
 	Entries       []ManifestEntry // sorted by TargetPath
+	ToolVersion   string          // version of the mosaic-deploy binary that wrote this manifest; empty means not recorded
 }
 
 // ManifestEntry records one deployed artifact: its identity, the path it was written to,

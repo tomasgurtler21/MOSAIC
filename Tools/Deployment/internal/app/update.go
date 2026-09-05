@@ -456,7 +456,8 @@ func (s *service) Update(ctx context.Context, req UpdateRequest) (domain.RunSumm
 		// Update opts into all-or-nothing execution so a failed run restores every overwritten
 		// file to its pre-run bytes and deletes every file the run created. Fallback runs are
 		// excluded from reversal by the executor and keep today's non-atomic semantics.
-		Atomic: true,
+		Atomic:      true,
+		ToolVersion: s.deps.ToolVersion,
 	}
 
 	result, err := s.deps.Executor.Execute(ctx, execReq)
