@@ -4,7 +4,7 @@
 ## Overview
 
 - **Version:** 7.4.1
-- **Reports:** 28
+- **Reports:** 32
 - **Suites:** execution-groups, hitl-gate, infrastructure-triggers, route-back, status-routing, wildcard-expansion
 - **Models:** claude-opus-4-6, claude-opus-5, claude-sonnet-4-6, claude-sonnet-5, gpt-5.6-luna, gpt-5.6-sol, gpt-5.6-terra
 - **Harnesses:** claude-code, opencode
@@ -16,10 +16,11 @@
 
 | Suite | ID | Test | Best Rate | Best Combo | Worst Rate | Worst Combo | Spread |
 |-------|----|------|-----------|------------|------------|-------------|--------|
+| execution-groups | 50 | impl-first-reorder | 100% (100) | claude-sonnet-4-6/claude-code | 99% (100) | claude-sonnet-5/claude-code | 1% |
 | execution-groups | 51 | impl-only-skip-tests | 100% (100) | claude-sonnet-4-6/claude-code | 43% (100/101) | gpt-5.6-luna/opencode | 57% |
 | hitl-gate | 55 | hitl-plan-stage-all-agents | 100% (100) | claude-sonnet-4-6/claude-code | 53% (100/101) | gpt-5.6-luna/opencode | 47% |
 | hitl-gate | 56 | hitl-plan-stage-override | 100% (100) | claude-sonnet-4-6/claude-code | 33% (100/101) | gpt-5.6-luna/opencode | 67% |
-| hitl-gate | 57 | hitl-redispatch-unapproved | 99% (100) | claude-sonnet-4-6/claude-code | 96% (100/101) | gpt-5.6-sol/opencode | 3% |
+| hitl-gate | 57 | hitl-redispatch-unapproved | 100% (100) | claude-sonnet-5/claude-code | 96% (100/101) | gpt-5.6-sol/opencode | 4% |
 | infrastructure-triggers | 59 | interval-overdue | 100% (100) | gpt-5.6-sol/opencode | 42% (100/101) | gpt-5.6-terra/opencode | 58% |
 | infrastructure-triggers | 62 | phase-end-trigger | 100% (100) | claude-sonnet-4-6/claude-code | 45% (100) | gpt-5.6-luna/opencode | 55% |
 | route-back | 66 | contracts-routeback-quality-gate | 100% (100) | claude-opus-5/claude-code | 0% (100) | gpt-5.6-luna/opencode | 100% |
@@ -28,7 +29,7 @@
 | status-routing | 72 | creator-fix-rereview | 100% (100) | claude-opus-4-6/claude-code | 99% (100) | claude-sonnet-5/claude-code | 1% |
 | status-routing | 73 | findings-route-back | 94% (100) | claude-sonnet-5/claude-code | 91% (100) | claude-opus-4-6/claude-code | 3% |
 | status-routing | 74 | needs-clarification-no-advance | 100% (100) | claude-opus-4-6/claude-code | 15% (100) | gpt-5.6-luna/opencode | 85% |
-| wildcard-expansion | 76 | wildcard-after-routeback | 100% (100/101) | gpt-5.6-sol/opencode | 2% (100) | gpt-5.6-luna/opencode | 98% |
+| wildcard-expansion | 76 | wildcard-after-routeback | 100% (100) | claude-sonnet-5/claude-code | 2% (100) | gpt-5.6-luna/opencode | 98% |
 | wildcard-expansion | 77 | wildcard-dual-expansion | 100% (100) | claude-sonnet-4-6/claude-code | 7% (100/101) | gpt-5.6-luna/opencode | 93% |
 | wildcard-expansion | 78 | wildcard-input-expansion | 99% (100/101) | gpt-5.6-sol/opencode | 7% (100) | gpt-5.6-luna/opencode | 92% |
 
