@@ -4,8 +4,9 @@ package screens
 // (name an unmapped MCP server) and QCustomModel (enter a free-form model ID). The screen
 // shows the question context, a single-line text input, and optional skip/skip-all bindings.
 //
-// Pressing Esc sends Cancelled, which aborts the run. Pressing 's'/'S' (when permitted)
-// returns SkippedOne/SkippedAll without any text.
+// Pressing Esc sends Cancelled, which aborts the run. Pressing ctrl+k (when permitted)
+// returns SkippedOne and ctrl+x returns SkippedAll without any text. Modifier keys are used
+// so that ordinary characters including 's' and 'S' always pass through as literal input.
 
 import (
 	"strings"
@@ -63,15 +64,17 @@ func NewTextPromptScreen(q domain.TextQuestion, width, height int, styles Styles
 // Update processes a tea.Msg. Returns true when the screen has a final answer.
 func (s *TextPromptScreen) Update(msg tea.Msg) bool {
 	// Check skip / skip-all before delegating to the text input.
+	// Modifier keys are used so that ordinary letters (including 's'/'S') always pass
+	// through as literal text. ctrl+k skips one; ctrl+x skips all.
 	if keyMsg, ok := msg.(tea.KeyMsg); ok {
-		switch keyMsg.String() {
-		case "s":
+		switch keyMsg.Type {
+		case tea.KeyCtrlK:
 			if s.q.AllowSkip {
 				s.answer = domain.TextAnswer{Status: domain.SkippedOne}
 				s.done = true
 				return true
 			}
-		case "S":
+		case tea.KeyCtrlX:
 			if s.q.AllowSkipAll {
 				s.answer = domain.TextAnswer{Status: domain.SkippedAll}
 				s.done = true
@@ -141,10 +144,10 @@ func (s *TextPromptScreen) View() string {
 func (s *TextPromptScreen) buildHelp() string {
 	parts := []string{"enter confirm"}
 	if s.q.AllowSkip {
-		parts = append(parts, "s skip")
+		parts = append(parts, "ctrl+k skip")
 	}
 	if s.q.AllowSkipAll {
-		parts = append(parts, "S skip all")
+		parts = append(parts, "ctrl+x skip all")
 	}
 	parts = append(parts, "esc cancel run")
 	return strings.Join(parts, "  ")
