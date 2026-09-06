@@ -1,0 +1,20 @@
+Line 1: Greetings, Universe! 🚀
+Line 2: This file has "double quotes" and 'single quotes' for validation.
+Line 3:     Four-space indentation here.
+Line 4:	Tab-indented content here.
+Line 5: Special characters: <chevrons> & ampersand | pipe \ backslash
+Line 6: Unicode: resume, naive, 中文测试, Кириллица, עברית
+Line 7: Blank line follows:
+
+Line 9: Resumed after blank line.
+Line 10: Path-like content: /opt/tools/bin/run --mode=capture
+Line 11: Code-like content: const calc = (x) => { return x > 0 && x < 100; }
+Line 12: Regex-like content: ^begin.*center[a-z]+finish$
+Line 13: XML-like content: <node role="test">nested value</node>
+Line 14: JSON-like content: {"name": "probe", "count": 77, "items": [4, 5, 6]}
+--- EDIT TARGET START ---
+Line 16: Swap this line with different content.
+--- EDIT TARGET END ---
+Line 18: This line must stay intact after edit tests.
+Line 19: Grep target: DISTINCT_MATCH_TOKEN_ABC
+Line 20: Final line with trailing newline.

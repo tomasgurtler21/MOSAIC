@@ -1,0 +1,144 @@
+{
+  "_meta": {
+    "harness": "GHCP CLI (GitHub Copilot CLI)",
+    "context": "Primary agent session",
+    "captured": "2026-09-06",
+    "note": "verbatim fields contain exact captured output. commentary fields contain human interpretation."
+  },
+  "wrapperFormat": {
+    "verbatim": "N/A — no visible outer XML/result wrapper tags were observed around tool outputs in this harness's rendered turn.",
+    "commentary": "Unlike some harnesses that wrap every tool result in an explicit XML tag (e.g. <result>...</result>), GHCP CLI tool outputs appear directly as plain text/content blocks per tool call, with no visible wrapper tag in the rendered context available to this agent. Background/async shell commands append a bracketed status suffix of the form `<shellId: N completed with exit code X>` directly into the output text rather than as a separate wrapper."
+  },
+  "tools": {
+    "view": {
+      "cases": {
+        "full_file_read": {
+          "call": "view(path: TestArtifacts/varied-content-test.txt)",
+          "verbatim": "Line 1: Greetings, Universe! \ud83d\ude80\nLine 2: This file has \"double quotes\" and 'single quotes' for validation.\nLine 3:     Four-space indentation here.\nLine 4:\tTab-indented content here.\nLine 5: Special characters: <chevrons> & ampersand | pipe \\ backslash\nLine 6: Unicode: resume, naive, \u4e2d\u6587\u6d4b\u8bd5, \u041a\u0438\u0440\u0438\u043b\u043b\u0438\u0446\u0430, \u05e2\u05d1\u05e8\u05d9\u05ea\nLine 7: Blank line follows:\n\nLine 9: Resumed after blank line.\nLine 10: Path-like content: /opt/tools/bin/run --mode=capture\nLine 11: Code-like content: const calc = (x) => { return x > 0 && x < 100; }\nLine 12: Regex-like content: ^begin.*center[a-z]+finish$\nLine 13: XML-like content: <node role=\"test\">nested value</node>\nLine 14: JSON-like content: {\"name\": \"probe\", \"count\": 77, \"items\": [4, 5, 6]}\n--- EDIT TARGET START ---\nLine 16: Swap this line with different content.\n--- EDIT TARGET END ---\nLine 18: This line must stay intact after edit tests.\nLine 19: Grep target: DISTINCT_MATCH_TOKEN_ABC\nLine 20: Final line with trailing newline.",
+          "commentary": "Returns raw file content verbatim with no added line-number prefixes (the 'Line N:' text visible is part of the test file's own content, not tool-added numbering). Unicode and special characters (emoji, CJK, Cyrillic, Hebrew, angle brackets) pass through unescaped."
+        },
+        "partial_read_view_range": {
+          "call": "view(path: TestArtifacts/varied-content-test.txt, view_range: [5, 9])",
+          "verbatim": "Line 5: Special characters: <chevrons> & ampersand | pipe \\ backslash\nLine 6: Unicode: resume, naive, \u4e2d\u6587\u6d4b\u8bd5, \u041a\u0438\u0440\u0438\u043b\u043b\u0438\u0446\u0430, \u05e2\u05d1\u05e8\u05d9\u05ea\nLine 7: Blank line follows:\n\nLine 9: Resumed after blank line.",
+          "commentary": "view_range: [5, 9] returns exactly lines 5 through 9 inclusive, no added markers indicating truncation or range boundaries."
+        },
+        "directory_listing": {
+          "call": "view(path: TestArtifacts)",
+          "verbatim": "large-file-3000-lines.txt\nvaried-content-test.txt",
+          "commentary": "Directory listing is a plain newline-separated list of entry names (non-hidden, up to 2 levels deep per tool description), no file sizes/types/permissions shown at this depth of output."
+        },
+        "error_file_not_found": {
+          "call": "view(path: TestArtifacts/does-not-exist.txt)",
+          "verbatim": "Path C:\\AI\\MOSAIC\\MOSAIC\\HarnessKnowledge\\SystemPromptCapture\\TestArtifacts\\does-not-exist.txt does not exist. Please provide a valid path.",
+          "commentary": "Error message includes the fully resolved absolute path and a corrective instruction, not a raw stack trace or OS error code."
+        },
+        "large_file_default_params": {
+          "call": "view(path: TestArtifacts/large-file-3000-lines.txt)",
+          "verbatim": "File too large to read at once (108.4 KB). Consider using the grep tool to search within the file, or view with view_range to read specific sections.",
+          "commentary": "Rather than silently truncating output to a default line/byte limit, the view tool refuses outright once a size threshold (~20KB per the tool description, observed message cites 108.4 KB) is exceeded and requires the caller to supply view_range or use grep instead. No partial content is returned in this case."
+        }
+      }
+    },
+    "glob": {
+      "cases": {
+        "with_matches": {
+          "call": "glob(paths: TestArtifacts, pattern: *.txt)",
+          "verbatim": "C:\\AI\\MOSAIC\\MOSAIC\\HarnessKnowledge\\SystemPromptCapture\\TestArtifacts\\varied-content-test.txt\nC:\\AI\\MOSAIC\\MOSAIC\\HarnessKnowledge\\SystemPromptCapture\\TestArtifacts\\large-file-3000-lines.txt",
+          "commentary": "Newline-separated list of absolute matching file paths; order does not appear alphabetically sorted (varied-content-test.txt listed before large-file-3000-lines.txt)."
+        },
+        "no_matches": {
+          "call": "glob(paths: TestArtifacts, pattern: *.nonexistent-ext-zzz)",
+          "verbatim": "No files matched the pattern.",
+          "commentary": "Plain sentence, not an empty string or JSON null."
+        }
+      }
+    },
+    "grep": {
+      "cases": {
+        "with_matches_content_mode": {
+          "call": "grep(paths: TestArtifacts/varied-content-test.txt, pattern: DISTINCT_MATCH_TOKEN_ABC, output_mode: content)",
+          "verbatim": "C:\\AI\\MOSAIC\\MOSAIC\\HarnessKnowledge\\SystemPromptCapture\\TestArtifacts\\varied-content-test.txt:Line 19: Grep target: DISTINCT_MATCH_TOKEN_ABC",
+          "commentary": "Ripgrep-style `path:line_content` format (colon-joined), no line number included since -n was not set."
+        },
+        "no_matches": {
+          "call": "grep(paths: TestArtifacts, pattern: NO_SUCH_TOKEN_WILL_MATCH_XYZ, output_mode: content)",
+          "verbatim": "No matches found.",
+          "commentary": "Plain sentence for the empty-result case, mirroring glob's no-match phrasing style."
+        },
+        "with_include_filter_files_with_matches": {
+          "call": "grep(paths: TestArtifacts, pattern: Line, glob: *.txt, output_mode: files_with_matches)",
+          "verbatim": "C:\\AI\\MOSAIC\\MOSAIC\\HarnessKnowledge\\SystemPromptCapture\\TestArtifacts\\varied-content-test.txt",
+          "commentary": "Only varied-content-test.txt matched because large-file-3000-lines.txt apparently does not contain the literal token 'Line' in the same casing/content pattern; output_mode files_with_matches returns just the path with no line content."
+        },
+        "anomaly_dash_n_flag_hook_denial": {
+          "call": "grep(paths: TestArtifacts/varied-content-test.txt, pattern: DISTINCT_MATCH_TOKEN_ABC, output_mode: content, -n: true)",
+          "verbatim": "Denied by preToolUse hook from \"repo settings\" (hook errored)",
+          "commentary": "Not a harness-native output format — this is a repository-level preToolUse hook (configured in this repo's Copilot settings) intercepting and denying grep calls that set the -n parameter, reproducible on both directory and single-file paths. Documented here because it is a real message this harness can surface, but it reflects local repo policy/hook configuration rather than default GHCP CLI behavior, and would not be present in a repo without such a hook."
+        }
+      }
+    },
+    "edit": {
+      "cases": {
+        "success": {
+          "call": "edit(path: _temp-edit-test.txt, old_str: 'Line 16: Swap this line with different content.', new_str: 'Line 16: This content was swapped by the edit tool test.')",
+          "verbatim": "File C:\\AI\\MOSAIC\\MOSAIC\\HarnessKnowledge\\SystemPromptCapture\\GHCP-CLI\\PrimaryAgent\\_temp-edit-test.txt updated with changes.",
+          "commentary": "Confirms full absolute path of the file updated; no diff/before-after content is echoed back."
+        },
+        "error_old_str_not_found": {
+          "call": "edit(path: _temp-edit-test.txt, old_str: 'This string absolutely does not appear anywhere in the target file XYZZY_NONEXISTENT_STRING_12345', new_str: 'This text does not exist in the file.')",
+          "verbatim": "No match found: old_str not found in C:\\AI\\MOSAIC\\MOSAIC\\HarnessKnowledge\\SystemPromptCapture\\GHCP-CLI\\PrimaryAgent\\_temp-edit-test.txt; no changes made; you might want to try again with correct old_str",
+          "commentary": "Clearly states no changes were made and suggests retrying, semicolon-joined sentence fragments in one line."
+        }
+      }
+    },
+    "create": {
+      "cases": {
+        "success": {
+          "call": "create(path: _temp-create-test.txt, file_text: 'This is a temporary file created to capture the create/write tool output format.\\n')",
+          "verbatim": "Created file C:\\AI\\MOSAIC\\MOSAIC\\HarnessKnowledge\\SystemPromptCapture\\GHCP-CLI\\PrimaryAgent\\_temp-create-test.txt with 82 characters",
+          "commentary": "Reports full absolute path and exact character count written."
+        }
+      }
+    },
+    "powershell": {
+      "cases": {
+        "success": {
+          "call": "powershell(command: 'Write-Output \"hello-from-powershell-test\"', description: 'Simple successful powershell command for capture')",
+          "verbatim": "hello-from-powershell-test\n<shellId: 28 completed with exit code 0>",
+          "commentary": "Command stdout is followed by a bracketed status line in the exact form `<shellId: N completed with exit code X>` appended directly to the output (not a separate structured field)."
+        },
+        "error_nonzero_exit": {
+          "call": "powershell(command: 'exit 7', description: 'Nonzero exit code command for capture')",
+          "verbatim": "\n<shellId: 27 completed with exit code 7>",
+          "commentary": "No stdout produced; the same bracketed status-line format reports the nonzero exit code, with no separate 'error' label or stderr distinction shown here."
+        },
+        "long_output": {
+          "call": "powershell(command: '1..5000 | ForEach-Object { \"line-$_\" }', description: 'Long output command for capture', initial_wait: 30)",
+          "verbatim": "Output too large to read at once (47.7 KB). Saved to: C:\\Users\\tgurt\\AppData\\Local\\Temp\\1788726941240-copilot-tool-output-50748-cf0dfbcc-2f8b-48bd-8fa4-c9538bcfd255.txt\nConsider using tools like grep (for searching), head/tail (for viewing start/end), view with view_range (for specific sections), or jq (for JSON) to examine portions of the output.\n\nPreview (first 500 chars):\nline-1\nline-2\nline-3\n... (truncated in this schema file; full 500-char preview captured verbatim in ToolOutputFormats-raw.md)",
+          "commentary": "When output exceeds a size threshold (~47.7 KB observed), the full output is spilled to a temp file on disk and only a 500-character preview plus guidance on follow-up tools (grep/head/tail/view/jq) is returned inline. This mirrors the view tool's large-file behavior but for command output rather than file content, and unlike view it does provide a partial preview rather than refusing entirely."
+        }
+      }
+    },
+    "ask_user": {
+      "cases": {
+        "test_question": {
+          "call": "ask_user(message: 'This is a test question for the System Prompt Capturer's Tool Output Format Capture step ...', requestedSchema: {properties: {test_response: {type: string, title: 'Test response', description: '...'}}})",
+          "verbatim": "User responded: this is user response, hello",
+          "commentary": "Tool output is a single sentence prefixed with 'User responded:' followed by the free-text answer; no JSON structure or field name is echoed back even though the schema defined a named field (test_response) — the rendered output collapses to plain prose."
+        }
+      }
+    },
+    "task": {
+      "cases": {
+        "spawn_minimal_subagent": {
+          "call": "task(agent_type: explore, name: 'Capture test subagent', description: 'Minimal test task for capture', mode: sync, prompt: 'This is a minimal test task ... reply with the exact text: CAPTURE_TEST_ACK. Do not use any tools.')",
+          "verbatim": "CAPTURE_TEST_ACK",
+          "commentary": "In sync mode, the tool call resolves directly to the subagent's final text response with no wrapping metadata (no agent id, status, or turn count surfaced in the visible output for a synchronous call). Only available at the primary-agent tier since subagents may not spawn further subagents in this harness's configuration."
+        }
+      }
+    },
+    "not_captured": {
+      "reason": "The following built-in tools were not exercised in this capture pass: read_powershell, stop_powershell, list_powershell (no long-running/background process was left active to inspect); store_memory, vote_memory (would create persistent memory records outside the scope of a tool-output-format capture); web_fetch, web_search (network-dependent, and not part of the guide's required tool list); fetch_copilot_cli_documentation, search_code_subagent, skill (not part of the guide's required list); sql, session_store_sql (would create database side effects beyond the todos/session tables already implicitly available; not part of required list); read_agent, list_agents, write_agent, tool_search_tool, update_todo (not part of the guide's required tool list for this capture pass)."
+    }
+  }
+}

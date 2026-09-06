@@ -1,0 +1,145 @@
+{
+  "_meta": {
+    "harness": "Claude Code",
+    "context": "Subagent session",
+    "captured": "2026-09-06",
+    "note": "verbatim fields contain exact captured output. commentary fields contain human interpretation."
+  },
+  "wrapperFormat": {
+    "verbatim": "<result>\n<name>{ToolName}</name>\n<output>{content}</output>\n</result>\n\nOR for errors:\n\n<result>\n<name>{ToolName}</name>\n<error>{error message}</error>\n</result>",
+    "commentary": "Each tool result is wrapped in a <result> block with <name> identifying the tool and either <output> for success or <error> for failure. When multiple tools are called in parallel, results appear as multiple <result> blocks. A <system-reminder> block with token count may be appended after results."
+  },
+  "tools": {
+    "Read": {
+      "cases": {
+        "full_file": {
+          "call": "Read({file_path: 'varied-content-test.txt'})",
+          "verbatim": "1\tLine 1: Greetings, Universe! ...\n2\tLine 2: ...\n...\n20\tLine 20: Final line with trailing newline.\n21\t",
+          "commentary": "Output uses cat -n format: line_number TAB content. Line numbers start at 1. Blank lines show just the line number and tab. Empty trailing line (line 21) indicates file ends with newline."
+        },
+        "partial_with_offset_limit": {
+          "call": "Read({file_path: 'varied-content-test.txt', offset: 5, limit: 3})",
+          "verbatim": "5\tLine 5: ...\n6\tLine 6: ...\n7\tLine 7: ...",
+          "commentary": "Same cat -n format. offset=5 starts at line 5, limit=3 returns 3 lines (5, 6, 7)."
+        },
+        "file_not_found": {
+          "call": "Read({file_path: 'nonexistent-file.txt'})",
+          "verbatim": "File does not exist. Note: your current working directory is C:\\AI\\MOSAIC\\MOSAIC.",
+          "commentary": "Returned via <error> wrapper instead of <output>. Includes the current working directory as context."
+        },
+        "large_file_default_truncation": {
+          "call": "Read({file_path: 'large-file-3000-lines.txt'}) — no limit specified",
+          "verbatim": "1\tfoxtrot golf [ROW:0001] hotel india\n...\n1518\tfoxtrot golf [ROW:1518] hotel india\n\n<system-reminder>\n[Truncated: PARTIAL view — ...large-file-3000-lines.txt: showing lines 1-1518 of 3001 total (42006 tokens, cap 25000). Call Read with offset=1519 limit=1518 for the next page, or Grep to find a specific section. Do NOT answer from this page alone if the answer may be further in the file.]\n</system-reminder>",
+          "commentary": "Default read limit is 2000 lines per the tool description, but actual truncation is token-based (cap 25000 tokens). For this file, truncation occurred at line 1518 of 3001 total. A system-reminder is injected with truncation details including: lines shown, total lines, token count, token cap, and pagination instructions."
+        }
+      }
+    },
+    "Write": {
+      "cases": {
+        "new_file": {
+          "call": "Write({file_path: 'write-test.txt', content: 'test content'})",
+          "verbatim": "File created successfully at: C:\\Users\\tgurt\\AppData\\Local\\Temp\\...\\write-test.txt (file state is current in your context — no need to Read it back)",
+          "commentary": "Success message includes full absolute path and a reminder not to re-read the file."
+        }
+      }
+    },
+    "Edit": {
+      "cases": {
+        "success": {
+          "call": "Edit({file_path: 'edit-test-copy.txt', old_string: 'Line 16: Swap this line with different content.', new_string: 'Line 16: EDITED SUCCESSFULLY by capture agent.'})",
+          "verbatim": "The file ...\\edit-test-copy.txt has been updated successfully. (file state is current in your context — no need to Read it back)",
+          "commentary": "Success message includes full path and reminder not to re-read."
+        },
+        "old_string_not_found": {
+          "call": "Edit({file_path: 'edit-test-copy.txt', old_string: 'THIS STRING DOES NOT EXIST IN THE FILE', new_string: 'replacement text'})",
+          "verbatim": "<error><tool_use_error>String to replace not found in file.\nString: THIS STRING DOES NOT EXIST IN THE FILE</tool_use_error></error>",
+          "commentary": "Error is wrapped in <error><tool_use_error> tags (not just <error>). Includes the string that was not found."
+        }
+      }
+    },
+    "Bash": {
+      "cases": {
+        "success": {
+          "call": "Bash({command: 'echo \"Hello from bash\"'})",
+          "verbatim": "Hello from bash",
+          "commentary": "Plain stdout content returned via <output> wrapper. No exit code shown on success."
+        },
+        "error_nonzero_exit": {
+          "call": "Bash({command: 'nonexistent_command_xyz_12345'})",
+          "verbatim": "Exit code 127\n/usr/bin/bash: line 1: nonexistent_command_xyz_12345: command not found",
+          "commentary": "Returned via <error> wrapper. First line is 'Exit code {N}', followed by stderr content."
+        },
+        "long_output": {
+          "call": "Bash({command: 'seq 1 5000'})",
+          "verbatim": "1\n2\n3\n...\n5000",
+          "commentary": "All 5000 lines returned in full with no truncation. Bash does not appear to have a default output line limit — but a system-reminder with token count may be appended."
+        },
+        "no_output": {
+          "call": "Bash({command: 'cp source dest'}) — command with no stdout",
+          "verbatim": "(Bash completed with no output)",
+          "commentary": "When a command succeeds but produces no stdout, the harness returns this specific message instead of empty output."
+        }
+      }
+    },
+    "Glob": {
+      "cases": {
+        "with_matches": {
+          "call": "Glob({pattern: '**/*varied*', path: 'TestArtifacts/'})",
+          "verbatim": "HarnessKnowledge\\SystemPromptCapture\\TestArtifacts\\varied-content-test.txt",
+          "commentary": "Matching file paths listed one per line, using backslash separators on Windows. Paths are relative to the working directory."
+        },
+        "no_matches": {
+          "call": "Glob({pattern: '**/*.nonexistent_extension_xyz', path: 'TestArtifacts/'})",
+          "verbatim": "No files found",
+          "commentary": "Specific message when no files match the pattern."
+        }
+      }
+    },
+    "Grep": {
+      "cases": {
+        "content_mode_with_matches": {
+          "call": "Grep({pattern: 'DISTINCT_MATCH_TOKEN_ABC', path: 'TestArtifacts/', output_mode: 'content'})",
+          "verbatim": "HarnessKnowledge\\SystemPromptCapture\\TestArtifacts\\varied-content-test.txt:19:Line 19: Grep target: DISTINCT_MATCH_TOKEN_ABC",
+          "commentary": "Format is file_path:line_number:matching_line_content. Uses backslash path separators on Windows."
+        },
+        "no_matches": {
+          "call": "Grep({pattern: 'NONEXISTENT_PATTERN_XYZ_12345', path: 'TestArtifacts/', output_mode: 'content'})",
+          "verbatim": "No matches found",
+          "commentary": "Specific message when no content matches the pattern."
+        },
+        "with_glob_filter": {
+          "call": "Grep({pattern: 'DISTINCT_MATCH_TOKEN_ABC', path: 'TestArtifacts/', output_mode: 'content', glob: '*.txt'})",
+          "verbatim": "HarnessKnowledge\\SystemPromptCapture\\TestArtifacts\\varied-content-test.txt:19:Line 19: Grep target: DISTINCT_MATCH_TOKEN_ABC",
+          "commentary": "Same format as without glob filter. The glob parameter restricts which files are searched."
+        }
+      }
+    },
+    "Agent": {
+      "cases": {
+        "not_captured": {
+          "call": "N/A",
+          "verbatim": "N/A",
+          "commentary": "Agent tool is available in subagent context but spawning a test subagent is only done in PrimaryAgent tier per the capture guide."
+        }
+      }
+    },
+    "TaskStop": {
+      "cases": {
+        "not_captured": {
+          "call": "N/A",
+          "verbatim": "N/A",
+          "commentary": "TaskStop requires a running background task ID. No task was spawned to exercise this tool against."
+        }
+      }
+    },
+    "AskUserQuestion": {
+      "cases": {
+        "not_available": {
+          "call": "N/A",
+          "verbatim": "N/A",
+          "commentary": "AskUserQuestion is not a built-in tool in the subagent context. The MCP server 'contact-user' provides ask_user_questions via MCP, but MCP tools are excluded from this capture."
+        }
+      }
+    }
+  }
+}
