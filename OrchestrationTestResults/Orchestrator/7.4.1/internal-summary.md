@@ -4,9 +4,9 @@
 ## Overview
 
 - **Version:** 7.4.1
-- **Reports:** 32
+- **Reports:** 35
 - **Suites:** execution-groups, hitl-gate, infrastructure-triggers, route-back, status-routing, wildcard-expansion
-- **Models:** claude-opus-4-6, claude-opus-5, claude-sonnet-4-6, claude-sonnet-5, gpt-5.6-luna, gpt-5.6-sol, gpt-5.6-terra
+- **Models:** claude-fable-5, claude-opus-4-6, claude-opus-5, claude-sonnet-4-6, claude-sonnet-5, gpt-5.6-luna, gpt-5.6-sol, gpt-5.6-terra
 - **Harnesses:** claude-code, opencode
 
 <!-- /generated:internal-overview -->
@@ -25,13 +25,14 @@
 | infrastructure-triggers | 62 | phase-end-trigger | 100% (100) | claude-sonnet-4-6/claude-code | 45% (100) | gpt-5.6-luna/opencode | 55% |
 | route-back | 66 | contracts-routeback-quality-gate | 100% (100) | claude-opus-5/claude-code | 0% (100) | gpt-5.6-luna/opencode | 100% |
 | status-routing | 69 | blocked-e501-retry | 100% (100) | claude-opus-4-6/claude-code | 99% (100) | claude-sonnet-5/claude-code | 1% |
+| status-routing | 70 | blocked-e503-hitl-retry | 100% (100) | claude-opus-5/claude-code | 0% (100) | claude-sonnet-4-6/claude-code | 100% |
 | status-routing | 71 | capability-exceeded-escalate | 100% (100) | claude-opus-4-6/claude-code | 82% (100) | claude-sonnet-4-6/claude-code | 18% |
 | status-routing | 72 | creator-fix-rereview | 100% (100) | claude-opus-4-6/claude-code | 99% (100) | claude-sonnet-5/claude-code | 1% |
-| status-routing | 73 | findings-route-back | 94% (100) | claude-sonnet-5/claude-code | 91% (100) | claude-opus-4-6/claude-code | 3% |
+| status-routing | 73 | findings-route-back | 100% (100) | claude-opus-5/claude-code | 91% (100) | claude-opus-4-6/claude-code | 9% |
 | status-routing | 74 | needs-clarification-no-advance | 100% (100) | claude-opus-4-6/claude-code | 15% (100) | gpt-5.6-luna/opencode | 85% |
-| wildcard-expansion | 76 | wildcard-after-routeback | 100% (100) | claude-sonnet-5/claude-code | 2% (100) | gpt-5.6-luna/opencode | 98% |
-| wildcard-expansion | 77 | wildcard-dual-expansion | 100% (100) | claude-sonnet-4-6/claude-code | 7% (100/101) | gpt-5.6-luna/opencode | 93% |
-| wildcard-expansion | 78 | wildcard-input-expansion | 99% (100/101) | gpt-5.6-sol/opencode | 7% (100) | gpt-5.6-luna/opencode | 92% |
+| wildcard-expansion | 76 | wildcard-after-routeback | 100% (100) | claude-opus-5/claude-code | 2% (100) | gpt-5.6-luna/opencode | 98% |
+| wildcard-expansion | 77 | wildcard-dual-expansion | 100% (100) | claude-opus-5/claude-code | 7% (100/101) | gpt-5.6-luna/opencode | 93% |
+| wildcard-expansion | 78 | wildcard-input-expansion | 100% (100) | claude-opus-5/claude-code | 7% (100) | gpt-5.6-luna/opencode | 93% |
 
 <!-- /generated:problem-areas -->
 
@@ -51,7 +52,7 @@
 | infrastructure-triggers | 62 | phase-end-trigger | 100% (100/102) | gpt-5.6-sol/opencode | 100% (100/102) | gpt-5.6-sol/opencode | 0% |
 | infrastructure-triggers | 63 | restore-class-exclusion | 100% (100/105) | gpt-5.6-sol/opencode | 38% (99/105) | gpt-5.6-luna/opencode | 62% |
 | infrastructure-triggers | 64 | stage-end-checkpoint | 100% (100/102) | gpt-5.6-sol/opencode | 42% (100/102) | gpt-5.6-luna/opencode | 58% |
-| route-back | 67 | planner-routeback-quality-gate | 0% (99/106) | gpt-5.6-sol/opencode | 0% (99/106) | gpt-5.6-sol/opencode | 0% |
+| route-back | 67 | planner-routeback-quality-gate | 0% (74/126) | claude-fable-5/claude-code | 0% (74/126) | claude-fable-5/claude-code | 0% |
 | status-routing | 68 | blocked-e101-retry | 100% (100/108) | gpt-5.6-sol/opencode | 58% (100/102) | gpt-5.6-luna/opencode | 42% |
 | status-routing | 69 | blocked-e501-retry | 100% (100/104) | gpt-5.6-sol/opencode | 49% (99/107) | gpt-5.6-luna/opencode | 51% |
 | status-routing | 70 | blocked-e503-hitl-retry | 80% (75/125) | claude-opus-4-6/claude-code | 1% (100/102) | gpt-5.6-sol/opencode | 79% |
@@ -224,11 +225,11 @@
 | infrastructure-triggers | multiple-triggers-same-boundary | spawn_failed | spawn_failed | harness process exited non-zero (exit status 1) |
 | infrastructure-triggers | multiple-triggers-same-boundary | spawn_failed | spawn_failed | harness process exited non-zero (exit status 1) |
 | infrastructure-triggers | multiple-triggers-same-boundary | spawn_failed | spawn_failed | harness process exited non-zero (exit status 1) |
-| infrastructure-triggers | multiple-triggers-same-boundary | spawn_failed | spawn_failed | harness process exited non-zero (exit status 1) |
-| infrastructure-triggers | multiple-triggers-same-boundary | spawn_failed | spawn_failed | harness process exited non-zero (exit status 1) |
 | infrastructure-triggers | multiple-triggers-same-boundary | echo_mismatch | early_exit | invocation 1: echo mismatch |
 | infrastructure-triggers | multiple-triggers-same-boundary | echo_mismatch | early_exit | invocation 1: echo mismatch |
 | infrastructure-triggers | multiple-triggers-same-boundary | echo_mismatch | early_exit | invocation 2: echo mismatch |
+| infrastructure-triggers | multiple-triggers-same-boundary | echo_mismatch | early_exit | invocation 1: echo mismatch |
+| infrastructure-triggers | multiple-triggers-same-boundary | echo_mismatch | early_exit | invocation 1: echo mismatch |
 | infrastructure-triggers | multiple-triggers-same-boundary | echo_mismatch | early_exit | invocation 1: echo mismatch |
 | infrastructure-triggers | multiple-triggers-same-boundary | spawn_failed | spawn_failed | harness process exited non-zero (exit status 1) |
 | infrastructure-triggers | multiple-triggers-same-boundary | spawn_failed | spawn_failed | harness process exited non-zero (exit status 1) |
@@ -242,84 +243,136 @@
 | infrastructure-triggers | multiple-triggers-same-boundary | spawn_failed | spawn_failed | harness process exited non-zero (exit status 1) |
 | infrastructure-triggers | multiple-triggers-same-boundary | spawn_failed | spawn_failed | harness process exited non-zero (exit status 1) |
 | infrastructure-triggers | multiple-triggers-same-boundary | spawn_failed | spawn_failed | harness process exited non-zero (exit status 1) |
-| infrastructure-triggers | multiple-triggers-same-boundary | spawn_failed | spawn_failed | harness process exited non-zero (exit status 1) |
-| infrastructure-triggers | multiple-triggers-same-boundary | spawn_failed | spawn_failed | harness process exited non-zero (exit status 1) |
-| infrastructure-triggers | multiple-triggers-same-boundary | echo_mismatch | early_exit | invocation 1: echo mismatch |
-| infrastructure-triggers | multiple-triggers-same-boundary | echo_mismatch | early_exit | invocation 1: echo mismatch |
 | infrastructure-triggers | multiple-triggers-same-boundary | echo_mismatch | early_exit | invocation 1: echo mismatch; invocation 3: echo mismatch; assertion failures also present |
 | infrastructure-triggers | multiple-triggers-same-boundary | spawn_failed | spawn_failed | harness process exited non-zero (exit status 1) |
 | infrastructure-triggers | multiple-triggers-same-boundary | spawn_failed | spawn_failed | harness process exited non-zero (exit status 1) |
 | infrastructure-triggers | multiple-triggers-same-boundary | spawn_failed | spawn_failed | harness process exited non-zero (exit status 1) |
 | infrastructure-triggers | multiple-triggers-same-boundary | spawn_failed | spawn_failed | harness process exited non-zero (exit status 1) |
+| infrastructure-triggers | multiple-triggers-same-boundary | spawn_failed | spawn_failed | harness process exited non-zero (exit status 1) |
+| infrastructure-triggers | multiple-triggers-same-boundary | spawn_failed | spawn_failed | harness process exited non-zero (exit status 1) |
+| infrastructure-triggers | multiple-triggers-same-boundary | spawn_failed | spawn_failed | harness process exited non-zero (exit status 1) |
+| infrastructure-triggers | multiple-triggers-same-boundary | spawn_failed | spawn_failed | harness process exited non-zero (exit status 1) |
+| infrastructure-triggers | phase-end-trigger | echo_mismatch | early_exit | invocation 1: echo mismatch |
 | infrastructure-triggers | phase-end-trigger | echo_mismatch | early_exit | invocation 1: echo mismatch |
 | infrastructure-triggers | phase-end-trigger | echo_mismatch | early_exit | invocation 2: echo mismatch |
-| infrastructure-triggers | phase-end-trigger | echo_mismatch | early_exit | invocation 1: echo mismatch |
-| infrastructure-triggers | restore-class-exclusion | echo_mismatch | early_exit | invocation 1: echo mismatch |
-| infrastructure-triggers | restore-class-exclusion | echo_mismatch | early_exit | invocation 2: echo mismatch; assertion failures also present |
-| infrastructure-triggers | restore-class-exclusion | echo_mismatch | early_exit | invocation 1: echo mismatch; assertion failures also present |
-| infrastructure-triggers | restore-class-exclusion | echo_mismatch | early_exit | invocation 2: echo mismatch |
-| infrastructure-triggers | restore-class-exclusion | echo_mismatch | early_exit | invocation 2: echo mismatch |
-| infrastructure-triggers | restore-class-exclusion | echo_mismatch | early_exit | invocation 1: echo mismatch |
-| infrastructure-triggers | restore-class-exclusion | echo_mismatch | early_exit | invocation 1: echo mismatch |
-| infrastructure-triggers | restore-class-exclusion | echo_mismatch | early_exit | invocation 1: echo mismatch |
-| infrastructure-triggers | restore-class-exclusion | echo_mismatch | early_exit | invocation 1: echo mismatch |
-| infrastructure-triggers | restore-class-exclusion | echo_mismatch | early_exit | invocation 1: echo mismatch; assertion failures also present |
-| infrastructure-triggers | restore-class-exclusion | echo_mismatch | early_exit | invocation 1: echo mismatch |
-| infrastructure-triggers | restore-class-exclusion | echo_mismatch | early_exit | invocation 1: echo mismatch; assertion failures also present |
-| infrastructure-triggers | restore-class-exclusion | echo_mismatch | early_exit | invocation 1: echo mismatch |
 | infrastructure-triggers | restore-class-exclusion | echo_mismatch | early_exit | invocation 1: echo mismatch; invocation 2: echo mismatch |
+| infrastructure-triggers | restore-class-exclusion | echo_mismatch | early_exit | invocation 1: echo mismatch; assertion failures also present |
+| infrastructure-triggers | restore-class-exclusion | echo_mismatch | early_exit | invocation 1: echo mismatch |
+| infrastructure-triggers | restore-class-exclusion | echo_mismatch | early_exit | invocation 1: echo mismatch |
+| infrastructure-triggers | restore-class-exclusion | echo_mismatch | early_exit | invocation 2: echo mismatch |
+| infrastructure-triggers | restore-class-exclusion | echo_mismatch | early_exit | invocation 2: echo mismatch |
+| infrastructure-triggers | restore-class-exclusion | echo_mismatch | early_exit | invocation 1: echo mismatch; assertion failures also present |
+| infrastructure-triggers | restore-class-exclusion | echo_mismatch | early_exit | invocation 1: echo mismatch |
+| infrastructure-triggers | restore-class-exclusion | echo_mismatch | early_exit | invocation 1: echo mismatch |
+| infrastructure-triggers | restore-class-exclusion | echo_mismatch | early_exit | invocation 2: echo mismatch; assertion failures also present |
+| infrastructure-triggers | restore-class-exclusion | echo_mismatch | early_exit | invocation 1: echo mismatch |
+| infrastructure-triggers | restore-class-exclusion | echo_mismatch | early_exit | invocation 1: echo mismatch; assertion failures also present |
 | infrastructure-triggers | restore-class-exclusion | echo_mismatch | early_exit | invocation 2: echo mismatch; assertion failures also present |
 | infrastructure-triggers | restore-class-exclusion | echo_mismatch | early_exit | invocation 1: echo mismatch; assertion failures also present |
+| infrastructure-triggers | restore-class-exclusion | echo_mismatch | early_exit | invocation 1: echo mismatch |
+| infrastructure-triggers | restore-class-exclusion | echo_mismatch | early_exit | invocation 1: echo mismatch |
 | infrastructure-triggers | restore-class-exclusion | echo_mismatch | early_exit | invocation 1: echo mismatch; assertion failures also present |
 | infrastructure-triggers | restore-class-exclusion | echo_mismatch | early_exit | invocation 1: echo mismatch; assertion failures also present |
-| infrastructure-triggers | stage-end-checkpoint | echo_mismatch | early_exit | invocation 1: echo mismatch |
-| infrastructure-triggers | stage-end-checkpoint | echo_mismatch | early_exit | invocation 1: echo mismatch |
+| infrastructure-triggers | stage-end-checkpoint | echo_mismatch | early_exit | invocation 2: echo mismatch |
 | infrastructure-triggers | stage-end-checkpoint | echo_mismatch | early_exit | invocation 2: echo mismatch; assertion failures also present |
 | infrastructure-triggers | stage-end-checkpoint | echo_mismatch | early_exit | invocation 1: echo mismatch |
 | infrastructure-triggers | stage-end-checkpoint | echo_mismatch | early_exit | invocation 1: echo mismatch |
-| infrastructure-triggers | stage-end-checkpoint | echo_mismatch | early_exit | invocation 2: echo mismatch |
+| infrastructure-triggers | stage-end-checkpoint | echo_mismatch | early_exit | invocation 1: echo mismatch |
+| infrastructure-triggers | stage-end-checkpoint | echo_mismatch | early_exit | invocation 1: echo mismatch |
 | route-back | contracts-routeback-quality-gate | echo_mismatch | early_exit | invocation 1: echo mismatch |
 | route-back | contracts-routeback-quality-gate | echo_mismatch | early_exit | invocation 1: echo mismatch; assertion failures also present |
-| route-back | planner-routeback-quality-gate | echo_mismatch | early_exit | invocation 1: echo mismatch; assertion failures also present |
-| route-back | planner-routeback-quality-gate | echo_mismatch | early_exit | invocation 1: echo mismatch; assertion failures also present |
+| route-back | planner-routeback-quality-gate | spawn_failed | spawn_failed | harness process exited non-zero (exit status 1) |
+| route-back | planner-routeback-quality-gate | spawn_failed | spawn_failed | harness process exited non-zero (exit status 1) |
+| route-back | planner-routeback-quality-gate | spawn_failed | spawn_failed | harness process exited non-zero (exit status 1) |
+| route-back | planner-routeback-quality-gate | spawn_failed | spawn_failed | harness process exited non-zero (exit status 1) |
+| route-back | planner-routeback-quality-gate | spawn_failed | spawn_failed | harness process exited non-zero (exit status 1) |
+| route-back | planner-routeback-quality-gate | spawn_failed | spawn_failed | harness process exited non-zero (exit status 1) |
+| route-back | planner-routeback-quality-gate | spawn_failed | spawn_failed | harness process exited non-zero (exit status 1) |
+| route-back | planner-routeback-quality-gate | spawn_failed | spawn_failed | harness process exited non-zero (exit status 1) |
+| route-back | planner-routeback-quality-gate | spawn_failed | spawn_failed | harness process exited non-zero (exit status 1) |
+| route-back | planner-routeback-quality-gate | spawn_failed | spawn_failed | harness process exited non-zero (exit status 1) |
+| route-back | planner-routeback-quality-gate | spawn_failed | spawn_failed | harness process exited non-zero (exit status 1) |
+| route-back | planner-routeback-quality-gate | spawn_failed | spawn_failed | harness process exited non-zero (exit status 1) |
+| route-back | planner-routeback-quality-gate | spawn_failed | spawn_failed | harness process exited non-zero (exit status 1) |
+| route-back | planner-routeback-quality-gate | spawn_failed | spawn_failed | harness process exited non-zero (exit status 1) |
+| route-back | planner-routeback-quality-gate | spawn_failed | spawn_failed | harness process exited non-zero (exit status 1) |
+| route-back | planner-routeback-quality-gate | spawn_failed | spawn_failed | harness process exited non-zero (exit status 1) |
+| route-back | planner-routeback-quality-gate | spawn_failed | spawn_failed | harness process exited non-zero (exit status 1) |
+| route-back | planner-routeback-quality-gate | spawn_failed | spawn_failed | harness process exited non-zero (exit status 1) |
+| route-back | planner-routeback-quality-gate | spawn_failed | spawn_failed | harness process exited non-zero (exit status 1) |
+| route-back | planner-routeback-quality-gate | spawn_failed | spawn_failed | harness process exited non-zero (exit status 1) |
+| route-back | planner-routeback-quality-gate | spawn_failed | spawn_failed | harness process exited non-zero (exit status 1) |
+| route-back | planner-routeback-quality-gate | spawn_failed | spawn_failed | harness process exited non-zero (exit status 1) |
+| route-back | planner-routeback-quality-gate | spawn_failed | spawn_failed | harness process exited non-zero (exit status 1) |
+| route-back | planner-routeback-quality-gate | spawn_failed | spawn_failed | harness process exited non-zero (exit status 1) |
+| route-back | planner-routeback-quality-gate | spawn_failed | spawn_failed | harness process exited non-zero (exit status 1) |
+| route-back | planner-routeback-quality-gate | spawn_failed | spawn_failed | harness process exited non-zero (exit status 1) |
+| route-back | planner-routeback-quality-gate | spawn_failed | spawn_failed | harness process exited non-zero (exit status 1) |
+| route-back | planner-routeback-quality-gate | spawn_failed | spawn_failed | harness process exited non-zero (exit status 1) |
+| route-back | planner-routeback-quality-gate | spawn_failed | spawn_failed | harness process exited non-zero (exit status 1) |
+| route-back | planner-routeback-quality-gate | spawn_failed | spawn_failed | harness process exited non-zero (exit status 1) |
+| route-back | planner-routeback-quality-gate | spawn_failed | spawn_failed | harness process exited non-zero (exit status 1) |
+| route-back | planner-routeback-quality-gate | spawn_failed | spawn_failed | harness process exited non-zero (exit status 1) |
+| route-back | planner-routeback-quality-gate | spawn_failed | spawn_failed | harness process exited non-zero (exit status 1) |
+| route-back | planner-routeback-quality-gate | spawn_failed | spawn_failed | harness process exited non-zero (exit status 1) |
+| route-back | planner-routeback-quality-gate | spawn_failed | spawn_failed | harness process exited non-zero (exit status 1) |
+| route-back | planner-routeback-quality-gate | spawn_failed | spawn_failed | harness process exited non-zero (exit status 1) |
+| route-back | planner-routeback-quality-gate | spawn_failed | spawn_failed | harness process exited non-zero (exit status 1) |
+| route-back | planner-routeback-quality-gate | spawn_failed | spawn_failed | harness process exited non-zero (exit status 1) |
+| route-back | planner-routeback-quality-gate | spawn_failed | spawn_failed | harness process exited non-zero (exit status 1) |
+| route-back | planner-routeback-quality-gate | spawn_failed | spawn_failed | harness process exited non-zero (exit status 1) |
+| route-back | planner-routeback-quality-gate | spawn_failed | spawn_failed | harness process exited non-zero (exit status 1) |
+| route-back | planner-routeback-quality-gate | spawn_failed | spawn_failed | harness process exited non-zero (exit status 1) |
+| route-back | planner-routeback-quality-gate | spawn_failed | spawn_failed | harness process exited non-zero (exit status 1) |
+| route-back | planner-routeback-quality-gate | spawn_failed | spawn_failed | harness process exited non-zero (exit status 1) |
+| route-back | planner-routeback-quality-gate | spawn_failed | spawn_failed | harness process exited non-zero (exit status 1) |
+| route-back | planner-routeback-quality-gate | spawn_failed | spawn_failed | harness process exited non-zero (exit status 1) |
+| route-back | planner-routeback-quality-gate | spawn_failed | spawn_failed | harness process exited non-zero (exit status 1) |
+| route-back | planner-routeback-quality-gate | spawn_failed | spawn_failed | harness process exited non-zero (exit status 1) |
+| route-back | planner-routeback-quality-gate | spawn_failed | spawn_failed | harness process exited non-zero (exit status 1) |
+| route-back | planner-routeback-quality-gate | spawn_failed | spawn_failed | harness process exited non-zero (exit status 1) |
 | route-back | planner-routeback-quality-gate | echo_mismatch | early_exit | invocation 2: echo mismatch; assertion failures also present |
-| route-back | planner-routeback-quality-gate | echo_mismatch | early_exit | invocation 1: echo mismatch; assertion failures also present |
-| route-back | planner-routeback-quality-gate | echo_mismatch | early_exit | invocation 1: echo mismatch; assertion failures also present |
 | route-back | planner-routeback-quality-gate | echo_mismatch | early_exit | invocation 1: echo mismatch; assertion failures also present |
 | route-back | planner-routeback-quality-gate | spawn_failed | spawn_failed | harness process exited non-zero |
+| route-back | planner-routeback-quality-gate | echo_mismatch | early_exit | invocation 1: echo mismatch; assertion failures also present |
 | route-back | planner-routeback-quality-gate | echo_mismatch | early_exit | invocation 2: echo mismatch; assertion failures also present |
-| status-routing | blocked-e101-retry | echo_mismatch | early_exit | invocation 2: echo mismatch |
-| status-routing | blocked-e101-retry | echo_mismatch | early_exit | invocation 2: echo mismatch |
-| status-routing | blocked-e101-retry | echo_mismatch | early_exit | invocation 2: echo mismatch |
-| status-routing | blocked-e101-retry | echo_mismatch | early_exit | invocation 2: echo mismatch |
-| status-routing | blocked-e101-retry | echo_mismatch | early_exit | invocation 2: echo mismatch |
-| status-routing | blocked-e101-retry | echo_mismatch | early_exit | invocation 2: echo mismatch |
+| route-back | planner-routeback-quality-gate | echo_mismatch | early_exit | invocation 1: echo mismatch; assertion failures also present |
+| route-back | planner-routeback-quality-gate | echo_mismatch | early_exit | invocation 1: echo mismatch; assertion failures also present |
+| route-back | planner-routeback-quality-gate | echo_mismatch | early_exit | invocation 1: echo mismatch; assertion failures also present |
+| route-back | planner-routeback-quality-gate | spawn_failed | spawn_failed | harness process exited non-zero (exit status 1) |
+| route-back | planner-routeback-quality-gate | spawn_failed | spawn_failed | harness process exited non-zero (exit status 1) |
 | status-routing | blocked-e101-retry | echo_mismatch | early_exit | invocation 2: echo mismatch |
 | status-routing | blocked-e101-retry | echo_mismatch | early_exit | invocation 2: echo mismatch |
 | status-routing | blocked-e101-retry | echo_mismatch | early_exit | invocation 2: echo mismatch |
 | status-routing | blocked-e101-retry | echo_mismatch | early_exit | invocation 1: echo mismatch |
 | status-routing | blocked-e101-retry | echo_mismatch | early_exit | invocation 2: echo mismatch |
 | status-routing | blocked-e101-retry | echo_mismatch | early_exit | invocation 2: echo mismatch |
-| status-routing | blocked-e501-retry | echo_mismatch | early_exit | invocation 1: echo mismatch |
-| status-routing | blocked-e501-retry | echo_mismatch | early_exit | invocation 2: echo mismatch |
-| status-routing | blocked-e501-retry | echo_mismatch | early_exit | invocation 1: echo mismatch |
-| status-routing | blocked-e501-retry | echo_mismatch | early_exit | invocation 1: echo mismatch |
-| status-routing | blocked-e501-retry | echo_mismatch | early_exit | invocation 1: echo mismatch |
-| status-routing | blocked-e501-retry | echo_mismatch | early_exit | invocation 1: echo mismatch |
-| status-routing | blocked-e501-retry | echo_mismatch | early_exit | invocation 1: echo mismatch |
-| status-routing | blocked-e501-retry | echo_mismatch | early_exit | invocation 2: echo mismatch |
+| status-routing | blocked-e101-retry | echo_mismatch | early_exit | invocation 2: echo mismatch |
+| status-routing | blocked-e101-retry | echo_mismatch | early_exit | invocation 2: echo mismatch |
+| status-routing | blocked-e101-retry | echo_mismatch | early_exit | invocation 2: echo mismatch |
+| status-routing | blocked-e101-retry | echo_mismatch | early_exit | invocation 2: echo mismatch |
+| status-routing | blocked-e101-retry | echo_mismatch | early_exit | invocation 2: echo mismatch |
+| status-routing | blocked-e101-retry | echo_mismatch | early_exit | invocation 2: echo mismatch |
 | status-routing | blocked-e501-retry | echo_mismatch | early_exit | invocation 1: echo mismatch |
 | status-routing | blocked-e501-retry | echo_mismatch | early_exit | invocation 1: echo mismatch |
-| status-routing | blocked-e501-retry | echo_mismatch | early_exit | invocation 2: echo mismatch |
 | status-routing | blocked-e501-retry | echo_mismatch | early_exit | invocation 1: echo mismatch |
 | status-routing | blocked-e501-retry | echo_mismatch | early_exit | invocation 1: echo mismatch |
 | status-routing | blocked-e501-retry | echo_mismatch | early_exit | invocation 2: echo mismatch |
 | status-routing | blocked-e501-retry | echo_mismatch | early_exit | invocation 1: echo mismatch |
 | status-routing | blocked-e501-retry | echo_mismatch | early_exit | invocation 2: echo mismatch |
+| status-routing | blocked-e501-retry | echo_mismatch | early_exit | invocation 2: echo mismatch |
+| status-routing | blocked-e501-retry | echo_mismatch | early_exit | invocation 1: echo mismatch |
+| status-routing | blocked-e501-retry | echo_mismatch | early_exit | invocation 1: echo mismatch |
+| status-routing | blocked-e501-retry | echo_mismatch | early_exit | invocation 1: echo mismatch |
 | status-routing | blocked-e501-retry | echo_mismatch | early_exit | invocation 1: echo mismatch |
 | status-routing | blocked-e501-retry | echo_mismatch | early_exit | invocation 2: echo mismatch |
 | status-routing | blocked-e501-retry | echo_mismatch | early_exit | invocation 1: echo mismatch |
 | status-routing | blocked-e501-retry | echo_mismatch | early_exit | invocation 1: echo mismatch |
+| status-routing | blocked-e501-retry | echo_mismatch | early_exit | invocation 2: echo mismatch |
+| status-routing | blocked-e501-retry | echo_mismatch | early_exit | invocation 1: echo mismatch |
+| status-routing | blocked-e501-retry | echo_mismatch | early_exit | invocation 1: echo mismatch |
+| status-routing | blocked-e501-retry | echo_mismatch | early_exit | invocation 2: echo mismatch |
+| status-routing | blocked-e501-retry | echo_mismatch | early_exit | invocation 1: echo mismatch |
 | status-routing | blocked-e503-hitl-retry | spawn_failed | spawn_failed | harness process exited non-zero (exit status 1) |
 | status-routing | blocked-e503-hitl-retry | spawn_failed | spawn_failed | harness process exited non-zero (exit status 1) |
 | status-routing | blocked-e503-hitl-retry | spawn_failed | spawn_failed | harness process exited non-zero (exit status 1) |
@@ -329,32 +382,6 @@
 | status-routing | blocked-e503-hitl-retry | spawn_failed | spawn_failed | harness process exited non-zero (exit status 1) |
 | status-routing | blocked-e503-hitl-retry | spawn_failed | spawn_failed | harness process exited non-zero (exit status 1) |
 | status-routing | blocked-e503-hitl-retry | spawn_failed | spawn_failed | harness process exited non-zero (exit status 1) |
-| status-routing | blocked-e503-hitl-retry | spawn_failed | spawn_failed | harness process exited non-zero (exit status 1) |
-| status-routing | blocked-e503-hitl-retry | spawn_failed | spawn_failed | harness process exited non-zero (exit status 1) |
-| status-routing | blocked-e503-hitl-retry | spawn_failed | spawn_failed | harness process exited non-zero (exit status 1) |
-| status-routing | blocked-e503-hitl-retry | spawn_failed | spawn_failed | harness process exited non-zero (exit status 1) |
-| status-routing | blocked-e503-hitl-retry | spawn_failed | spawn_failed | harness process exited non-zero (exit status 1) |
-| status-routing | blocked-e503-hitl-retry | spawn_failed | spawn_failed | harness process exited non-zero (exit status 1) |
-| status-routing | blocked-e503-hitl-retry | spawn_failed | spawn_failed | harness process exited non-zero (exit status 1) |
-| status-routing | blocked-e503-hitl-retry | spawn_failed | spawn_failed | harness process exited non-zero (exit status 1) |
-| status-routing | blocked-e503-hitl-retry | spawn_failed | spawn_failed | harness process exited non-zero (exit status 1) |
-| status-routing | blocked-e503-hitl-retry | spawn_failed | spawn_failed | harness process exited non-zero (exit status 1) |
-| status-routing | blocked-e503-hitl-retry | spawn_failed | spawn_failed | harness process exited non-zero (exit status 1) |
-| status-routing | blocked-e503-hitl-retry | spawn_failed | spawn_failed | harness process exited non-zero (exit status 1) |
-| status-routing | blocked-e503-hitl-retry | spawn_failed | spawn_failed | harness process exited non-zero (exit status 1) |
-| status-routing | blocked-e503-hitl-retry | spawn_failed | spawn_failed | harness process exited non-zero (exit status 1) |
-| status-routing | blocked-e503-hitl-retry | spawn_failed | spawn_failed | harness process exited non-zero (exit status 1) |
-| status-routing | blocked-e503-hitl-retry | spawn_failed | spawn_failed | harness process exited non-zero (exit status 1) |
-| status-routing | blocked-e503-hitl-retry | spawn_failed | spawn_failed | harness process exited non-zero (exit status 1) |
-| status-routing | blocked-e503-hitl-retry | spawn_failed | spawn_failed | harness process exited non-zero (exit status 1) |
-| status-routing | blocked-e503-hitl-retry | spawn_failed | spawn_failed | harness process exited non-zero (exit status 1) |
-| status-routing | blocked-e503-hitl-retry | spawn_failed | spawn_failed | harness process exited non-zero (exit status 1) |
-| status-routing | blocked-e503-hitl-retry | spawn_failed | spawn_failed | harness process exited non-zero (exit status 1) |
-| status-routing | blocked-e503-hitl-retry | spawn_failed | spawn_failed | harness process exited non-zero (exit status 1) |
-| status-routing | blocked-e503-hitl-retry | spawn_failed | spawn_failed | harness process exited non-zero (exit status 1) |
-| status-routing | blocked-e503-hitl-retry | spawn_failed | spawn_failed | harness process exited non-zero (exit status 1) |
-| status-routing | blocked-e503-hitl-retry | echo_mismatch | early_exit | invocation 1: echo mismatch; assertion failures also present |
-| status-routing | blocked-e503-hitl-retry | echo_mismatch | early_exit | invocation 2: echo mismatch; assertion failures also present |
 | status-routing | blocked-e503-hitl-retry | spawn_failed | spawn_failed | harness process exited non-zero (exit status 1) |
 | status-routing | blocked-e503-hitl-retry | spawn_failed | spawn_failed | harness process exited non-zero (exit status 1) |
 | status-routing | blocked-e503-hitl-retry | spawn_failed | spawn_failed | harness process exited non-zero (exit status 1) |
@@ -380,13 +407,39 @@
 | status-routing | blocked-e503-hitl-retry | spawn_failed | spawn_failed | harness process exited non-zero (exit status 1) |
 | status-routing | blocked-e503-hitl-retry | spawn_failed | spawn_failed | harness process exited non-zero (exit status 1) |
 | status-routing | blocked-e503-hitl-retry | spawn_failed | spawn_failed | harness process exited non-zero (exit status 1) |
+| status-routing | blocked-e503-hitl-retry | spawn_failed | spawn_failed | harness process exited non-zero (exit status 1) |
+| status-routing | blocked-e503-hitl-retry | spawn_failed | spawn_failed | harness process exited non-zero (exit status 1) |
+| status-routing | blocked-e503-hitl-retry | spawn_failed | spawn_failed | harness process exited non-zero (exit status 1) |
 | status-routing | blocked-e503-hitl-retry | echo_mismatch | early_exit | invocation 2: echo mismatch; assertion failures also present |
+| status-routing | blocked-e503-hitl-retry | echo_mismatch | early_exit | invocation 1: echo mismatch; assertion failures also present |
+| status-routing | blocked-e503-hitl-retry | spawn_failed | spawn_failed | harness process exited non-zero (exit status 1) |
+| status-routing | blocked-e503-hitl-retry | spawn_failed | spawn_failed | harness process exited non-zero (exit status 1) |
+| status-routing | blocked-e503-hitl-retry | spawn_failed | spawn_failed | harness process exited non-zero (exit status 1) |
 | status-routing | blocked-e503-hitl-retry | echo_mismatch | early_exit | invocation 2: echo mismatch; assertion failures also present |
+| status-routing | blocked-e503-hitl-retry | spawn_failed | spawn_failed | harness process exited non-zero (exit status 1) |
+| status-routing | blocked-e503-hitl-retry | spawn_failed | spawn_failed | harness process exited non-zero (exit status 1) |
+| status-routing | blocked-e503-hitl-retry | spawn_failed | spawn_failed | harness process exited non-zero (exit status 1) |
+| status-routing | blocked-e503-hitl-retry | spawn_failed | spawn_failed | harness process exited non-zero (exit status 1) |
+| status-routing | blocked-e503-hitl-retry | spawn_failed | spawn_failed | harness process exited non-zero (exit status 1) |
+| status-routing | blocked-e503-hitl-retry | spawn_failed | spawn_failed | harness process exited non-zero (exit status 1) |
+| status-routing | blocked-e503-hitl-retry | spawn_failed | spawn_failed | harness process exited non-zero (exit status 1) |
+| status-routing | blocked-e503-hitl-retry | spawn_failed | spawn_failed | harness process exited non-zero (exit status 1) |
+| status-routing | blocked-e503-hitl-retry | spawn_failed | spawn_failed | harness process exited non-zero (exit status 1) |
+| status-routing | blocked-e503-hitl-retry | echo_mismatch | early_exit | invocation 2: echo mismatch |
 | status-routing | blocked-e503-hitl-retry | echo_mismatch | early_exit | invocation 2: echo mismatch; assertion failures also present |
 | status-routing | blocked-e503-hitl-retry | echo_mismatch | early_exit | invocation 1: echo mismatch |
-| status-routing | blocked-e503-hitl-retry | echo_mismatch | early_exit | invocation 2: echo mismatch; assertion failures also present |
-| status-routing | blocked-e503-hitl-retry | echo_mismatch | early_exit | invocation 2: echo mismatch |
 | status-routing | blocked-e503-hitl-retry | spawn_failed | spawn_failed | harness process exited non-zero (exit status 1) |
+| status-routing | blocked-e503-hitl-retry | spawn_failed | spawn_failed | harness process exited non-zero (exit status 1) |
+| status-routing | blocked-e503-hitl-retry | spawn_failed | spawn_failed | harness process exited non-zero (exit status 1) |
+| status-routing | blocked-e503-hitl-retry | spawn_failed | spawn_failed | harness process exited non-zero (exit status 1) |
+| status-routing | blocked-e503-hitl-retry | spawn_failed | spawn_failed | harness process exited non-zero (exit status 1) |
+| status-routing | blocked-e503-hitl-retry | spawn_failed | spawn_failed | harness process exited non-zero (exit status 1) |
+| status-routing | blocked-e503-hitl-retry | spawn_failed | spawn_failed | harness process exited non-zero (exit status 1) |
+| status-routing | blocked-e503-hitl-retry | spawn_failed | spawn_failed | harness process exited non-zero (exit status 1) |
+| status-routing | blocked-e503-hitl-retry | spawn_failed | spawn_failed | harness process exited non-zero (exit status 1) |
+| status-routing | blocked-e503-hitl-retry | spawn_failed | spawn_failed | harness process exited non-zero (exit status 1) |
+| status-routing | blocked-e503-hitl-retry | echo_mismatch | early_exit | invocation 2: echo mismatch; assertion failures also present |
+| status-routing | blocked-e503-hitl-retry | echo_mismatch | early_exit | invocation 2: echo mismatch; assertion failures also present |
 | status-routing | creator-fix-rereview | echo_mismatch | early_exit | invocation 1: echo mismatch |
 | status-routing | creator-fix-rereview | echo_mismatch | early_exit | invocation 1: echo mismatch |
 | status-routing | creator-fix-rereview | echo_mismatch | early_exit | invocation 1: echo mismatch |
@@ -395,37 +448,21 @@
 | status-routing | creator-fix-rereview | echo_mismatch | early_exit | invocation 1: echo mismatch |
 | status-routing | creator-fix-rereview | echo_mismatch | early_exit | invocation 1: echo mismatch |
 | status-routing | creator-fix-rereview | echo_mismatch | early_exit | invocation 1: echo mismatch |
+| status-routing | findings-route-back | echo_mismatch | early_exit | invocation 1: echo mismatch; assertion failures also present |
+| status-routing | findings-route-back | spawn_failed | spawn_failed | harness process exited non-zero (exit status 3221226505) |
+| status-routing | findings-route-back | spawn_failed | spawn_failed | harness process exited non-zero (exit status 3221226505) |
+| status-routing | findings-route-back | spawn_failed | spawn_failed | harness process exited non-zero (exit status 3221226505) |
 | status-routing | findings-route-back | spawn_failed | spawn_failed | harness process exited non-zero: Warning: no stdin data received in 3s, proceeding without it. If piping from a slow command, redirect stdin explicitly: < /dev/null to skip, or wait longer.
 Error: Input must be provided either through stdin or as a prompt argument when using --print
  |
-| status-routing | findings-route-back | echo_mismatch | early_exit | invocation 2: echo mismatch; assertion failures also present |
-| status-routing | findings-route-back | infrastructure |  | runner/deploy error before subject started: runner: deploying catalogue path: deploy failed (exit 2): fatal error: bcryptprimitives.dll not found
-runtime: panic before malloc heap initialized
-
-runtime stack:
-runtime.throw({0x7ff6433267fe?, 0x4e4cbff868?})
-	C:/Program Files/Go/src/runtime/panic.go:1229 +0x4d fp=0x4e4cbff7b8 sp=0x4e4cbff788 pc=0x7ff642fbec0d
-runtime.loadOptionalSyscalls()
-	C:/Program Files/Go/src/runtime/os_windows.go:267 +0x349 fp=0x4e4cbff8a0 sp=0x4e4cbff7b8 pc=0x7ff642f85829
-runtime.osinit()
-	C:/Program Files/Go/src/runtime/os_windows.go:464 +0x3d fp=0x4e4cbff920 sp=0x4e4cbff8a0 pc=0x7ff642f85f3d
-runtime.rt0_go()
-	C:/Program Files/Go/src/runtime/asm_amd64.s:372 +0x13e fp=0x4e4cbff928 sp=0x4e4cbff920 pc=0x7ff642fc3f3e
+| status-routing | findings-route-back | spawn_failed | spawn_failed | harness process exited non-zero: Warning: no stdin data received in 3s, proceeding without it. If piping from a slow command, redirect stdin explicitly: < /dev/null to skip, or wait longer.
+Error: Input must be provided either through stdin or as a prompt argument when using --print
  |
-| status-routing | findings-route-back | spawn_failed | spawn_failed | harness process exited non-zero: Systém nemůže nalézt uvedenou cestu.
+| status-routing | findings-route-back | spawn_failed | spawn_failed | harness process exited non-zero: Warning: no stdin data received in 3s, proceeding without it. If piping from a slow command, redirect stdin explicitly: < /dev/null to skip, or wait longer.
+Error: Input must be provided either through stdin or as a prompt argument when using --print
  |
-| status-routing | findings-route-back | infrastructure |  | runner/deploy error before subject started: runner: deploying catalogue path: agentdeploy: deployment tool unavailable: deployment tool "C:\\AI\\MOSAIC\\MOSAIC\\Tools\\AgentTest\\dist\\mosaic-deploy.exe" could not be invoked: fork/exec C:\AI\MOSAIC\MOSAIC\Tools\AgentTest\dist\mosaic-deploy.exe: K dokončení požadované služby je stránkovací soubor příliš malý. |
-| status-routing | findings-route-back | echo_mismatch | early_exit | invocation 2: echo mismatch; assertion failures also present |
-| status-routing | findings-route-back | echo_mismatch | early_exit | invocation 1: echo mismatch; assertion failures also present |
-| status-routing | findings-route-back | echo_mismatch | early_exit | invocation 1: echo mismatch |
-| status-routing | findings-route-back | echo_mismatch | early_exit | invocation 1: echo mismatch |
-| status-routing | findings-route-back | spawn_failed | spawn_failed | harness process exited non-zero (exit status 3221226505) |
-| status-routing | findings-route-back | infrastructure |  | runner/deploy error before subject started: runner: deploying catalogue path: agentdeploy: deployment tool unavailable: deployment tool "C:\\AI\\MOSAIC\\MOSAIC\\Tools\\AgentTest\\dist\\mosaic-deploy.exe" could not be invoked: fork/exec C:\AI\MOSAIC\MOSAIC\Tools\AgentTest\dist\mosaic-deploy.exe: K dokončení požadované služby je stránkovací soubor příliš malý. |
-| status-routing | findings-route-back | echo_mismatch | early_exit | invocation 1: echo mismatch; assertion failures also present |
-| status-routing | findings-route-back | echo_mismatch | early_exit | invocation 2: echo mismatch; assertion failures also present |
-| status-routing | findings-route-back | echo_mismatch | early_exit | invocation 1: echo mismatch |
-| status-routing | findings-route-back | echo_mismatch | early_exit | invocation 2: echo mismatch; assertion failures also present |
-| status-routing | findings-route-back | spawn_failed | spawn_failed | harness process exited non-zero: The system cannot execute the specified program.
+| status-routing | findings-route-back | spawn_failed | spawn_failed | harness process exited non-zero: Warning: no stdin data received in 3s, proceeding without it. If piping from a slow command, redirect stdin explicitly: < /dev/null to skip, or wait longer.
+Error: Input must be provided either through stdin or as a prompt argument when using --print
  |
 | status-routing | findings-route-back | spawn_failed | spawn_failed | harness process exited non-zero (exit status 3221226505) |
 | status-routing | findings-route-back | infrastructure |  | runner/deploy error before subject started: runner: deploying catalogue path: deploy failed (exit 2): fatal error: runtime: cannot allocate memory
@@ -453,62 +490,78 @@ runtime.rt0_go()
 	C:/Program Files/Go/src/runtime/asm_amd64.s:373 +0x143 fp=0x4db9ff898 sp=0x4db9ff890 pc=0x7ff642fc3f43
  |
 | status-routing | findings-route-back | spawn_failed | spawn_failed | harness process exited non-zero (exit status 3221226505) |
+| status-routing | findings-route-back | spawn_failed | spawn_failed | harness process exited non-zero: The system cannot execute the specified program.
+ |
+| status-routing | findings-route-back | infrastructure |  | runner/deploy error before subject started: runner: deploying catalogue path: agentdeploy: deployment tool unavailable: deployment tool "C:\\AI\\MOSAIC\\MOSAIC\\Tools\\AgentTest\\dist\\mosaic-deploy.exe" could not be invoked: fork/exec C:\AI\MOSAIC\MOSAIC\Tools\AgentTest\dist\mosaic-deploy.exe: K dokončení požadované služby je stránkovací soubor příliš malý. |
+| status-routing | findings-route-back | echo_mismatch | early_exit | invocation 2: echo mismatch; assertion failures also present |
+| status-routing | findings-route-back | spawn_failed | spawn_failed | harness process exited non-zero: Systém nemůže nalézt uvedenou cestu.
+ |
+| status-routing | findings-route-back | infrastructure |  | runner/deploy error before subject started: runner: deploying catalogue path: deploy failed (exit 2): fatal error: bcryptprimitives.dll not found
+runtime: panic before malloc heap initialized
+
+runtime stack:
+runtime.throw({0x7ff6433267fe?, 0x4e4cbff868?})
+	C:/Program Files/Go/src/runtime/panic.go:1229 +0x4d fp=0x4e4cbff7b8 sp=0x4e4cbff788 pc=0x7ff642fbec0d
+runtime.loadOptionalSyscalls()
+	C:/Program Files/Go/src/runtime/os_windows.go:267 +0x349 fp=0x4e4cbff8a0 sp=0x4e4cbff7b8 pc=0x7ff642f85829
+runtime.osinit()
+	C:/Program Files/Go/src/runtime/os_windows.go:464 +0x3d fp=0x4e4cbff920 sp=0x4e4cbff8a0 pc=0x7ff642f85f3d
+runtime.rt0_go()
+	C:/Program Files/Go/src/runtime/asm_amd64.s:372 +0x13e fp=0x4e4cbff928 sp=0x4e4cbff920 pc=0x7ff642fc3f3e
+ |
+| status-routing | findings-route-back | infrastructure |  | runner/deploy error before subject started: runner: deploying catalogue path: agentdeploy: deployment tool unavailable: deployment tool "C:\\AI\\MOSAIC\\MOSAIC\\Tools\\AgentTest\\dist\\mosaic-deploy.exe" could not be invoked: fork/exec C:\AI\MOSAIC\MOSAIC\Tools\AgentTest\dist\mosaic-deploy.exe: K dokončení požadované služby je stránkovací soubor příliš malý. |
+| status-routing | findings-route-back | echo_mismatch | early_exit | invocation 2: echo mismatch; assertion failures also present |
+| status-routing | findings-route-back | echo_mismatch | early_exit | invocation 1: echo mismatch; assertion failures also present |
+| status-routing | findings-route-back | echo_mismatch | early_exit | invocation 2: echo mismatch; assertion failures also present |
+| status-routing | findings-route-back | echo_mismatch | early_exit | invocation 2: echo mismatch; assertion failures also present |
+| status-routing | findings-route-back | echo_mismatch | early_exit | invocation 1: echo mismatch |
 | status-routing | findings-route-back | echo_mismatch | early_exit | invocation 2: echo mismatch |
-| status-routing | findings-route-back | spawn_failed | spawn_failed | harness process exited non-zero: Warning: no stdin data received in 3s, proceeding without it. If piping from a slow command, redirect stdin explicitly: < /dev/null to skip, or wait longer.
-Error: Input must be provided either through stdin or as a prompt argument when using --print
- |
-| status-routing | findings-route-back | spawn_failed | spawn_failed | harness process exited non-zero: Warning: no stdin data received in 3s, proceeding without it. If piping from a slow command, redirect stdin explicitly: < /dev/null to skip, or wait longer.
-Error: Input must be provided either through stdin or as a prompt argument when using --print
- |
-| status-routing | findings-route-back | spawn_failed | spawn_failed | harness process exited non-zero: Warning: no stdin data received in 3s, proceeding without it. If piping from a slow command, redirect stdin explicitly: < /dev/null to skip, or wait longer.
-Error: Input must be provided either through stdin or as a prompt argument when using --print
- |
-| status-routing | findings-route-back | spawn_failed | spawn_failed | harness process exited non-zero (exit status 3221226505) |
-| status-routing | findings-route-back | spawn_failed | spawn_failed | harness process exited non-zero (exit status 3221226505) |
+| status-routing | findings-route-back | echo_mismatch | early_exit | invocation 1: echo mismatch |
+| status-routing | findings-route-back | echo_mismatch | early_exit | invocation 1: echo mismatch |
 | status-routing | findings-route-back | echo_mismatch | early_exit | invocation 2: echo mismatch; assertion failures also present |
 | status-routing | needs-clarification-no-advance | echo_mismatch | early_exit | invocation 1: echo mismatch |
 | status-routing | needs-clarification-no-advance | echo_mismatch | early_exit | invocation 1: echo mismatch |
 | status-routing | partially-done-redispatch | echo_mismatch | early_exit | invocation 1: echo mismatch |
 | status-routing | partially-done-redispatch | echo_mismatch | early_exit | invocation 2: echo mismatch |
-| status-routing | partially-done-redispatch | echo_mismatch | early_exit | invocation 1: echo mismatch |
-| status-routing | partially-done-redispatch | echo_mismatch | early_exit | invocation 1: echo mismatch |
-| status-routing | partially-done-redispatch | echo_mismatch | early_exit | invocation 2: echo mismatch |
-| status-routing | partially-done-redispatch | echo_mismatch | early_exit | invocation 1: echo mismatch |
-| status-routing | partially-done-redispatch | echo_mismatch | early_exit | invocation 1: echo mismatch |
-| status-routing | partially-done-redispatch | echo_mismatch | early_exit | invocation 1: echo mismatch |
-| status-routing | partially-done-redispatch | echo_mismatch | early_exit | invocation 2: echo mismatch |
-| status-routing | partially-done-redispatch | echo_mismatch | early_exit | invocation 1: echo mismatch |
-| status-routing | partially-done-redispatch | echo_mismatch | early_exit | invocation 1: echo mismatch |
-| status-routing | partially-done-redispatch | echo_mismatch | early_exit | invocation 2: echo mismatch |
-| status-routing | partially-done-redispatch | echo_mismatch | early_exit | invocation 2: echo mismatch |
-| status-routing | partially-done-redispatch | echo_mismatch | early_exit | invocation 1: echo mismatch |
-| status-routing | partially-done-redispatch | echo_mismatch | early_exit | invocation 1: echo mismatch |
-| status-routing | partially-done-redispatch | echo_mismatch | early_exit | invocation 2: echo mismatch |
-| status-routing | partially-done-redispatch | echo_mismatch | early_exit | invocation 2: echo mismatch |
-| status-routing | partially-done-redispatch | echo_mismatch | early_exit | invocation 1: echo mismatch |
-| status-routing | partially-done-redispatch | echo_mismatch | early_exit | invocation 1: echo mismatch |
-| status-routing | partially-done-redispatch | echo_mismatch | early_exit | invocation 1: echo mismatch |
-| status-routing | partially-done-redispatch | echo_mismatch | early_exit | invocation 1: echo mismatch |
-| status-routing | partially-done-redispatch | echo_mismatch | early_exit | invocation 2: echo mismatch |
-| status-routing | partially-done-redispatch | echo_mismatch | early_exit | invocation 1: echo mismatch |
-| status-routing | partially-done-redispatch | echo_mismatch | early_exit | invocation 2: echo mismatch |
-| status-routing | partially-done-redispatch | echo_mismatch | early_exit | invocation 2: echo mismatch |
-| status-routing | partially-done-redispatch | echo_mismatch | early_exit | invocation 1: echo mismatch |
-| status-routing | partially-done-redispatch | echo_mismatch | early_exit | invocation 1: echo mismatch |
-| status-routing | partially-done-redispatch | echo_mismatch | early_exit | invocation 2: echo mismatch; assertion failures also present |
-| status-routing | partially-done-redispatch | echo_mismatch | early_exit | invocation 1: echo mismatch |
-| status-routing | partially-done-redispatch | echo_mismatch | early_exit | invocation 1: echo mismatch |
-| status-routing | partially-done-redispatch | echo_mismatch | early_exit | invocation 1: echo mismatch |
-| status-routing | partially-done-redispatch | echo_mismatch | early_exit | invocation 2: echo mismatch; assertion failures also present |
-| status-routing | partially-done-redispatch | echo_mismatch | early_exit | invocation 1: echo mismatch |
-| status-routing | partially-done-redispatch | echo_mismatch | early_exit | invocation 1: echo mismatch |
 | status-routing | partially-done-redispatch | echo_mismatch | early_exit | invocation 2: echo mismatch; assertion failures also present |
 | status-routing | partially-done-redispatch | echo_mismatch | early_exit | invocation 2: echo mismatch |
+| status-routing | partially-done-redispatch | echo_mismatch | early_exit | invocation 1: echo mismatch |
 | status-routing | partially-done-redispatch | echo_mismatch | early_exit | invocation 1: echo mismatch; invocation 2: echo mismatch |
 | status-routing | partially-done-redispatch | echo_mismatch | early_exit | invocation 1: echo mismatch |
+| status-routing | partially-done-redispatch | echo_mismatch | early_exit | invocation 1: echo mismatch |
+| status-routing | partially-done-redispatch | echo_mismatch | early_exit | invocation 2: echo mismatch |
+| status-routing | partially-done-redispatch | echo_mismatch | early_exit | invocation 1: echo mismatch |
+| status-routing | partially-done-redispatch | echo_mismatch | early_exit | invocation 1: echo mismatch |
+| status-routing | partially-done-redispatch | echo_mismatch | early_exit | invocation 2: echo mismatch |
+| status-routing | partially-done-redispatch | echo_mismatch | early_exit | invocation 2: echo mismatch |
+| status-routing | partially-done-redispatch | echo_mismatch | early_exit | invocation 1: echo mismatch |
+| status-routing | partially-done-redispatch | echo_mismatch | early_exit | invocation 1: echo mismatch |
+| status-routing | partially-done-redispatch | echo_mismatch | early_exit | invocation 2: echo mismatch |
+| status-routing | partially-done-redispatch | echo_mismatch | early_exit | invocation 2: echo mismatch |
+| status-routing | partially-done-redispatch | echo_mismatch | early_exit | invocation 1: echo mismatch |
+| status-routing | partially-done-redispatch | echo_mismatch | early_exit | invocation 1: echo mismatch |
+| status-routing | partially-done-redispatch | echo_mismatch | early_exit | invocation 1: echo mismatch |
 | status-routing | partially-done-redispatch | echo_mismatch | early_exit | invocation 2: echo mismatch |
 | status-routing | partially-done-redispatch | echo_mismatch | early_exit | invocation 2: echo mismatch; assertion failures also present |
+| status-routing | partially-done-redispatch | echo_mismatch | early_exit | invocation 2: echo mismatch; assertion failures also present |
 | status-routing | partially-done-redispatch | echo_mismatch | early_exit | invocation 1: echo mismatch |
+| status-routing | partially-done-redispatch | echo_mismatch | early_exit | invocation 1: echo mismatch |
+| status-routing | partially-done-redispatch | echo_mismatch | early_exit | invocation 2: echo mismatch; assertion failures also present |
+| status-routing | partially-done-redispatch | echo_mismatch | early_exit | invocation 1: echo mismatch |
+| status-routing | partially-done-redispatch | echo_mismatch | early_exit | invocation 1: echo mismatch |
+| status-routing | partially-done-redispatch | echo_mismatch | early_exit | invocation 1: echo mismatch |
+| status-routing | partially-done-redispatch | echo_mismatch | early_exit | invocation 1: echo mismatch |
+| status-routing | partially-done-redispatch | echo_mismatch | early_exit | invocation 1: echo mismatch |
+| status-routing | partially-done-redispatch | echo_mismatch | early_exit | invocation 1: echo mismatch |
+| status-routing | partially-done-redispatch | echo_mismatch | early_exit | invocation 2: echo mismatch |
+| status-routing | partially-done-redispatch | echo_mismatch | early_exit | invocation 1: echo mismatch |
+| status-routing | partially-done-redispatch | echo_mismatch | early_exit | invocation 1: echo mismatch |
+| status-routing | partially-done-redispatch | echo_mismatch | early_exit | invocation 2: echo mismatch |
+| status-routing | partially-done-redispatch | echo_mismatch | early_exit | invocation 1: echo mismatch |
+| status-routing | partially-done-redispatch | echo_mismatch | early_exit | invocation 1: echo mismatch |
+| status-routing | partially-done-redispatch | echo_mismatch | early_exit | invocation 2: echo mismatch |
+| status-routing | partially-done-redispatch | echo_mismatch | early_exit | invocation 1: echo mismatch |
+| status-routing | partially-done-redispatch | echo_mismatch | early_exit | invocation 2: echo mismatch |
 | wildcard-expansion | wildcard-after-routeback | echo_mismatch | early_exit | invocation 1: echo mismatch |
 | wildcard-expansion | wildcard-dual-expansion | echo_mismatch | early_exit | invocation 1: echo mismatch |
 | wildcard-expansion | wildcard-dual-expansion | echo_mismatch | early_exit | invocation 1: echo mismatch |
