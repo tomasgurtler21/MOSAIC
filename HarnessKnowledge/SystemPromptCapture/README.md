@@ -2,6 +2,8 @@
 
 Captures and documents the **harness-injected system prompt** — the instructions each AI coding harness injects into the LLM context before any agent-specific content.
 
+For the canonical harness list and folder naming convention, see `HarnessKnowledge/README.md`.
+
 ## Why This Matters
 
 - Tool descriptions contain behavioral instructions (e.g., "NEVER write new files unless explicitly required") that can override or conflict with agent instructions.
