@@ -8,7 +8,7 @@ This directory contains utility agents for creating and maintaining the multi-ag
 | `anthropic-subagent-creator` | Creates subagent instructions compliant with the orchestration system architecture |
 | `workflow-creator` | Creates and modifies orchestration workflow definitions |
 | `injections-helper` | Fills and adds injection regions (`type="project"`) in a deployed workspace's agent files, from project context the user supplies |
-| `harness-bug-hunter` | Discovers, validates, and maintains a knowledge base of harness bugs and workarounds |
+| `harness-issue-hunter` | Discovers, validates, and maintains a knowledge base of harness issues (bugs, limitations, quirks) and workarounds |
 | `system-prompt-capturer` | Captures and maintains harness-injected system prompts, built-in tool definitions, and tool output formats |
 
 ---
