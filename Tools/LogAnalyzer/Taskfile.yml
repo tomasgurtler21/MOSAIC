@@ -35,16 +35,16 @@ tasks:
       - "{{.DIST_DIR}}/{{.BINARY_NAME}}.exe"
 
   build:linux:
-    desc: "Cross-compile for Linux (amd64). Output: dist/mosaic-log-analyzer-linux-amd64"
+    desc: "Cross-compile for Linux (amd64). Output: dist/mosaic-log-analyzer"
     env:
       GOOS: linux
       GOARCH: amd64
       CGO_ENABLED: "0"
     cmds:
       - mkdir -p {{.DIST_DIR}}
-      - go build -ldflags="{{.LDFLAGS}}" -o {{.DIST_DIR}}/{{.BINARY_NAME}}-linux-amd64 {{.CMD_PKG}}
+      - go build -ldflags="{{.LDFLAGS}}" -o {{.DIST_DIR}}/{{.BINARY_NAME}} {{.CMD_PKG}}
     generates:
-      - "{{.DIST_DIR}}/{{.BINARY_NAME}}-linux-amd64"
+      - "{{.DIST_DIR}}/{{.BINARY_NAME}}"
 
   build:all:
     desc: Cross-compile for all supported platforms (Windows and Linux amd64)

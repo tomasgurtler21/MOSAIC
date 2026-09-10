@@ -8,6 +8,18 @@ The current harnesses are AI coding tools, but the orchestration model is not li
 
 ---
 
+## Quick Start
+
+> **Prerequisite:** You need a working AI coding tool — Claude Code, OpenCode, VS Code GitHub Copilot, or GitHub Copilot CLI — already installed and configured with model access.
+
+1. **Clone & get tools** — `git clone https://github.com/tomasgurtler21/MOSAIC.git` + download the [latest release](https://github.com/tomasgurtler21/MOSAIC/releases) for your platform (Linux x64, Windows x64) and unpack into the repo root
+2. **Deploy** — run `mosaic-deploy` from the MOSAIC repo root — pick your harness, select `kb-generation` workflow, assign models, and point it at your project workspace
+3. **Run** — open the orchestrator agent in your AI tool within the project workspace and tell it: `Use kb-generation workflow. Task: Generate knowledge base for this codebase. Checkpoints disabled.`
+
+Full walkthrough: **[Getting Started Guide](docs/GettingStarted.md)**
+
+---
+
 ## What Makes MOSAIC Different
 
 ### Three-Layer Agent Composition
@@ -58,7 +70,7 @@ MOSAIC is not tied to any single AI agent platform. It targets four **harnesses*
 
 | Mode | Mechanism | When It Happens |
 |------|-----------|-----------------|
-| **Interactive / harness-native** | The harness (e.g., Claude Code) runs the orchestrator agent, which dispatches subagents using the harness's native agent/task tool. Everything happens within one harness session. | User starts a conversation with the orchestrator agent in their AI agent platform |
+| **Interactive / harness-native** | The harness (e.g., Claude Code) runs the orchestrator agent, which dispatches subagents using the harness's native agent/task tool. Everything happens within one harness session. | User starts a conversation with the orchestrator agent in their AI agent harness |
 | **Runner pipeline** | `Tools/Runner` (`mosaic-run`) drives headless CLI invocations per workflow stage, treating each harness as a subprocess backend. The runner manages the session lifecycle externally. | Automated or semi-automated runs via the CLI |
 
 ---
@@ -88,6 +100,7 @@ MOSAIC is not tied to any single AI agent platform. It targets four **harnesses*
 ```
 MOSAIC/
 ├── docs/                             # User-facing guides for the deployed system
+│   ├── GettingStarted.md
 │   ├── AgentCustomizationGuide.md
 │   ├── DeploymentGuide.md
 │   ├── OrchestrationGuide.md
