@@ -5,7 +5,7 @@
 
 | Version | Reports |
 |---------|----------|
-| 7.4.1 | 35 |
+| 7.4.1 | 38 |
 
 <!-- /generated:version-overview -->
 
@@ -18,7 +18,7 @@
 |-------|--------|--------|
 | claude-fable-5 | claude-code | 39% |
 | claude-opus-4-6 | claude-code | 78% |
-| claude-opus-5 | claude-code | 92% |
+| claude-opus-5 | claude-code | 96% |
 | claude-sonnet-4-6 | claude-code | 86% |
 | claude-sonnet-5 | claude-code | 83% |
 | gpt-5.6-luna | opencode | 32% |
