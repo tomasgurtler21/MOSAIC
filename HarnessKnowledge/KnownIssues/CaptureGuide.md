@@ -22,6 +22,19 @@ Classification affects expectations, not importance. A Limitation can be HIGH im
 
 ---
 
+## Don't Trust Duplicate/Closure Labels — Verify Yourself
+
+GitHub's "possible duplicate" bot suggestions, a maintainer's "duplicate of #X" closure, and stale-bot auto-closures are **hints, not facts**. Repos with high issue volume (OpenCode is a clear example — hundreds of open issues at any time) lean hard on automation to keep the tracker manageable, and that automation over-clusters. Two issues can share symptoms (same error string, same crash pattern) while having genuinely different root causes, different reproduction conditions, or one containing evidence — a maintainer response, a working repro, a more severe variant — that the "canonical" issue lacks.
+
+**Rule:** Whenever an issue is marked as a duplicate of, or the same root cause as, another issue you're tracking (or considering not tracking), open it and read it yourself — body and comments — before deciding. Ask:
+- Does the reproduction actually match, or just the surface symptom?
+- Does this issue contain a maintainer acknowledgment, reproduction, or severity detail the "original" doesn't have?
+- Is the closure itself real (a fix landed, confirmed by the reporter) or just a stale-bot/needs-info auto-close with no actual resolution?
+
+If it's genuinely the same behavior, don't create a second KB entry — cross-reference it in the existing entry's Notes (citing the additional issue number and what new evidence, if any, it adds). If it's actually distinct — different trigger, different scope, or a more severe variant (e.g., a "cosmetic mismatch" issue and a "someone confirmed an actual bypass" issue on a related topic are NOT the same finding) — give it its own entry even though a bot or maintainer called it a duplicate. When a batch of adjacent/duplicate-flagged issue numbers comes up during a scan (own findings or a prior pass's "suggested follow-up" list), treat verifying them as first-class investigation work, not a formality — this has repeatedly turned up wrongly-bucketed issues that were more severe than the entry they were filed against.
+
+---
+
 ## Directory Structure
 
 ```

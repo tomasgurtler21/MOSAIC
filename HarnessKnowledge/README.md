@@ -22,10 +22,12 @@ HarnessKnowledge/
 ├── README.md                          # This file — canonical harness list
 ├── SystemPromptCapture/               # Harness system prompt documentation
 │   ├── CaptureGuide.md                # Agent-facing specs and prompts
+│   ├── CrossHarnessComparison.md      # Side-by-side comparison across all harnesses
 │   ├── TestArtifacts/                 # Shared test files for captures
 │   └── {Harness}/                     # Per-harness captures (Subagent + PrimaryAgent)
 └── KnownIssues/                       # Harness issue knowledge base (bugs, limitations, quirks)
     ├── CaptureGuide.md                # Agent-facing format specs
+    ├── CrossHarnessComparison.md      # Side-by-side comparison across all harnesses (mode-split rankings)
     └── {Harness}/                     # Per-harness issue tracking
         ├── index.md                   # Quick-reference index
         ├── active-issues.md           # Currently active issues
