@@ -471,6 +471,15 @@ func processRegions(doc *docformat.Document, req Request) (outcomes []RegionOutc
 // Harness content is refreshed on every transform; the deployed file's content is never
 // consulted for tool-managed regions.
 func applyHarnessRegion(node *docformat.Node, name string, class domain.InjectionClass, req Request) RegionOutcome {
+	// Resolve the injection version once, shared by both the RegionFilled and RegionEmptied
+	// paths. For orchestrator agents the orchestrator-specific version is selected; for all
+	// other agents the regular injections version is used. This follows the same
+	// role-conditional pattern as build.go's stamp construction.
+	injVersion := req.InjectionsVersion
+	if req.Key == "orchestrator" {
+		injVersion = req.OrchestratorInjectionsVersion
+	}
+
 	content, ok := req.Module.Injection(domain.InjectionRequest{Name: name, AgentKey: req.Key})
 	if ok && content != "" {
 		// Ensure the content ends with a newline so the closing tag appears on its own line
@@ -491,15 +500,9 @@ func applyHarnessRegion(node *docformat.Node, name string, class domain.Injectio
 			contentBytes = append(contentBytes, []byte(lineEnding)...)
 		}
 		node.SetContent(contentBytes) //nolint:errcheck // Node.SetContent always returns nil; forward-compatible error return.
-		// Stamp the injection version on the region tag. For orchestrator agents, the
-		// orchestrator-specific version is selected; for all other agents, the regular
-		// injections version is used. This follows the same role-conditional pattern as
-		// build.go's stamp construction. The guard skips SetVersion when the version is
-		// empty so that agents without a configured injection version produce no attribute.
-		injVersion := req.InjectionsVersion
-		if req.Key == "orchestrator" {
-			injVersion = req.OrchestratorInjectionsVersion
-		}
+		// Stamp the injection version on the region tag. The guard skips SetVersion when the
+		// version is empty so that agents without a configured injection version produce no
+		// attribute.
 		if injVersion != "" {
 			node.SetVersion(injVersion) //nolint:errcheck // Node.SetVersion always returns nil; forward-compatible error return.
 		}
@@ -514,7 +517,12 @@ func applyHarnessRegion(node *docformat.Node, name string, class domain.Injectio
 	// No harness content for this region: clear it so any nested source markers are removed
 	// and the capture-regenerate-reemit sequence can re-add them cleanly. This mirrors the
 	// explicit Clear() call on the RegionEmptied path of every other deployed-region generator.
+	// Clear() unconditionally strips any existing version attribute, so SetVersion must be
+	// called after it to stamp the version on the emptied region tag.
 	node.Clear() //nolint:errcheck // Node.Clear always returns nil; forward-compatible error return.
+	if injVersion != "" {
+		node.SetVersion(injVersion) //nolint:errcheck // Node.SetVersion always returns nil; forward-compatible error return.
+	}
 	return RegionOutcome{
 		Name:   name,
 		Marker: node.Kind(),

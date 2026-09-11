@@ -436,3 +436,146 @@ func TestHarnessRegionVersion_EmptyInjectionsVersion_NoVersionAttribute(t *testi
 			got)
 	}
 }
+
+// ---------------------------------------------------------------------------
+// emptyContentModule — wraps fixtureModule, forcing HarnessConstraints to be empty
+// ---------------------------------------------------------------------------
+
+// emptyContentModule wraps a domain.HarnessModule and forces Injection to return
+// ("", true) for "HarnessConstraints", exercising the empty-content (RegionEmptied) path
+// in applyHarnessRegion. All other methods are delegated to the inner module unchanged.
+//
+// This stub is needed because the fixture descriptor provides non-empty content for
+// HarnessConstraints; there is no fixture.yaml entry that returns ("", true) — a module
+// wrapper is the only way to drive the RegionEmptied branch without modifying shared fixtures.
+type emptyContentModule struct {
+	inner domain.HarnessModule
+}
+
+func newEmptyContentModule(t *testing.T) domain.HarnessModule {
+	t.Helper()
+	return &emptyContentModule{inner: newFixtureModule(t)}
+}
+
+func (m *emptyContentModule) Ref() domain.HarnessRef                { return m.inner.Ref() }
+func (m *emptyContentModule) Descriptor() *domain.HarnessDescriptor { return m.inner.Descriptor() }
+func (m *emptyContentModule) Close() error                          { return m.inner.Close() }
+
+func (m *emptyContentModule) Tools(req domain.ToolRequest) (domain.ToolResult, error) {
+	return m.inner.Tools(req)
+}
+
+func (m *emptyContentModule) Frontmatter(req domain.FrontmatterRequest) (domain.FrontmatterPlan, error) {
+	return m.inner.Frontmatter(req)
+}
+
+func (m *emptyContentModule) TargetPath(req domain.TargetPathRequest) (string, error) {
+	return m.inner.TargetPath(req)
+}
+
+func (m *emptyContentModule) HookPlan(req domain.HookPlanRequest) (domain.HookPlan, error) {
+	return m.inner.HookPlan(req)
+}
+
+// Injection returns ("", true) for "HarnessConstraints" to force the RegionEmptied path
+// in applyHarnessRegion. All other injection names are delegated to the inner module.
+func (m *emptyContentModule) Injection(req domain.InjectionRequest) (string, bool) {
+	if req.Name == "HarnessConstraints" {
+		return "", true
+	}
+	return m.inner.Injection(req)
+}
+
+// applyWithEmptyContentRegion calls transform.Apply using an emptyContentModule so that
+// the HarnessConstraints Injection returns ("", true), driving the RegionEmptied path in
+// applyHarnessRegion. Returns the parsed output document and transform result.
+// Fails the test on any Apply or Parse error.
+func applyWithEmptyContentRegion(t *testing.T, key, injectionsVersion, orchestratorInjectionsVersion string) (*docformat.Document, transform.Result) {
+	t.Helper()
+	req := transform.Request{
+		Source:                        []byte(sourceWithHarnessInjectionRegion),
+		Kind:                          domain.ArtifactAgent,
+		Key:                           key,
+		Module:                        newEmptyContentModule(t),
+		Model:                         fixtureModel(),
+		Scope:                         domain.ScopeProject,
+		InjectionsVersion:             injectionsVersion,
+		OrchestratorInjectionsVersion: orchestratorInjectionsVersion,
+	}
+	result, err := transform.Apply(req)
+	if err != nil {
+		t.Fatalf("transform.Apply: %v", err)
+	}
+	doc, err := docformat.Parse(result.Output)
+	if err != nil {
+		t.Fatalf("docformat.Parse output: %v", err)
+	}
+	return doc, result
+}
+
+// ---------------------------------------------------------------------------
+// Regression: empty-content region must carry version attribute after fix
+// ---------------------------------------------------------------------------
+
+// TestEmptyContentRegion_NonOrchestrator_CarriesVersionAttribute verifies that when a
+// harness injection returns ("", true) — the injection name is recognised but content is
+// absent — and InjectionsVersion is non-empty, the HarnessConstraints region's opening tag
+// carries a version attribute matching req.InjectionsVersion.
+//
+// This is the primary regression test for the RegionEmptied bug: applyHarnessRegion calls
+// node.Clear() on this path but never follows it with node.SetVersion(injVersion), so the
+// version attribute is silently lost for empty-content regions.
+//
+// This test FAILS against the pre-fix code because no SetVersion call exists on the
+// RegionEmptied path.
+func TestEmptyContentRegion_NonOrchestrator_CarriesVersionAttribute(t *testing.T) {
+	const wantVersion = "1.2.0"
+	doc, _ := applyWithEmptyContentRegion(t, "some-worker-agent", wantVersion, "99.0.0")
+
+	node := findHarnessConstraintsNode(t, doc)
+	if got := node.Version(); got != wantVersion {
+		t.Errorf("HarnessConstraints version attribute on emptied region: want %q, got %q; "+
+			"applyHarnessRegion must call node.SetVersion(injVersion) after node.Clear() on the RegionEmptied path",
+			wantVersion, got)
+	}
+}
+
+// TestEmptyContentRegion_Orchestrator_CarriesOrchestratorVersionAttribute verifies that when
+// a harness injection returns ("", true) and req.Key == "orchestrator", the HarnessConstraints
+// region's opening tag carries a version attribute matching req.OrchestratorInjectionsVersion.
+// The role-conditional injVersion selection (InjectionsVersion vs OrchestratorInjectionsVersion)
+// must apply on the RegionEmptied path in the same way it applies on the RegionFilled path.
+//
+// This test FAILS against the pre-fix code because no SetVersion call exists on the
+// RegionEmptied path for either role.
+func TestEmptyContentRegion_Orchestrator_CarriesOrchestratorVersionAttribute(t *testing.T) {
+	const injectionsVersion = "1.2.0"
+	const wantVersion = "2.7.0"
+	doc, _ := applyWithEmptyContentRegion(t, "orchestrator", injectionsVersion, wantVersion)
+
+	node := findHarnessConstraintsNode(t, doc)
+	if got := node.Version(); got != wantVersion {
+		t.Errorf("HarnessConstraints version attribute on emptied region for orchestrator: want %q (OrchestratorInjectionsVersion), got %q; "+
+			"applyHarnessRegion must use OrchestratorInjectionsVersion when req.Key == \"orchestrator\" on the RegionEmptied path",
+			wantVersion, got)
+	}
+}
+
+// TestEmptyContentRegion_EmptyInjVersion_NoVersionAttribute verifies that when the harness
+// injection returns ("", true) but injVersion is "" (empty), the HarnessConstraints region's
+// tag carries no version attribute. The fix must guard the SetVersion call with
+// `if injVersion != ""` on the RegionEmptied path, matching the guard on the RegionFilled path.
+//
+// This test passes against the pre-fix code (no SetVersion is called at all on this path)
+// and must continue to pass after the fix. It pins the empty-version guard condition and
+// ensures the fix does not introduce an unconditional SetVersion call.
+func TestEmptyContentRegion_EmptyInjVersion_NoVersionAttribute(t *testing.T) {
+	doc, _ := applyWithEmptyContentRegion(t, "some-worker-agent", "", "")
+
+	node := findHarnessConstraintsNode(t, doc)
+	if got := node.Version(); got != "" {
+		t.Errorf("HarnessConstraints version attribute on emptied region with empty injVersion: want \"\" (no attribute), got %q; "+
+			"applyHarnessRegion must not call node.SetVersion when injVersion is empty",
+			got)
+	}
+}

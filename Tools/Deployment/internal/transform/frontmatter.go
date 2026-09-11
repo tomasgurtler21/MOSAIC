@@ -196,6 +196,24 @@ func applyFrontmatter(
 	if c := applyVersionStamp(fm, tmvField.Deployed, req.ToolMappingsVersion); c != nil {
 		touchedKeys[tmvField.Deployed] = true
 		changes = append(changes, *c)
+	} else if req.Deployed != nil {
+		// ToolMappingsVersion is empty (no new stamp to write). Check whether the deployed
+		// file carries a zombie stamp left over from a previous run when mappings were
+		// active. Actively remove it and mark it touched so the Step 5c preservation pass
+		// does not re-inject it, allowing the staleness loop to converge.
+		if deployedDoc, deployedParseErr := docformat.Parse(req.Deployed); deployedParseErr == nil {
+			deployedFM := deployedDoc.Frontmatter()
+			if deployedStamp, ok := deployedFM.Get(tmvField.Deployed); ok && renderValue(deployedStamp) != "" {
+				touchedKeys[tmvField.Deployed] = true
+				fm.Remove(tmvField.Deployed)
+				changes = append(changes, FieldChange{
+					Key:    tmvField.Deployed,
+					Before: renderValue(deployedStamp),
+					After:  "",
+					Reason: "zombie stamp removal",
+				})
+			}
+		}
 	}
 
 	// Step 4b: Stamp bundle_version for roles that receive bundle blocks. The stamp enables
