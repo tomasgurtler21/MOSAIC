@@ -251,7 +251,7 @@ tools:
   # ... shape, universe, mappings ...
   custom_tool_destination:
     - to: field
-      field: mcpServers
+      field: extra_servers        # hypothetical field -- use whatever your harness reads
       format: list-block
 ```
 
@@ -272,9 +272,10 @@ Key rules for harness authors:
   read generically by `descriptor.MapTools`, which serves all provision tiers (built-in,
   descriptor-only, external) without any harness-specific branching.
 
-Only **Claude Code** among the current built-in harnesses declares this field. All other
-built-in descriptors omit it, and their custom tools continue to go to the main tools field.
-New descriptor-only and external harnesses may declare it freely if routing custom tools to a
+No current built-in harness declares this field. Claude Code, which previously declared it
+to route custom tools to `mcpServers`, now uses `custom_tool_template: "mcp__%s__*"` instead
+to format custom tools as wildcards routed to the main tools field. New descriptor-only and
+external harnesses may declare `custom_tool_destination` freely if routing custom tools to a
 separate frontmatter key is appropriate for their platform.
 
 See [descriptor-schema.md](descriptor-schema.md) for the full field reference, including

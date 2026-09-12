@@ -11,6 +11,7 @@ import (
 var categoryOrder = []domain.TodoCategory{
 	domain.TodoModels,
 	domain.TodoToolMappings,
+	domain.TodoToolConflicts,
 	domain.TodoInjections,
 	domain.TodoSkippedFiles,
 	domain.TodoRegistration,
@@ -30,8 +31,9 @@ var categoryIndex = func() map[domain.TodoCategory]int {
 // gapToCategory is the single canonical mapping from GapKind to TodoCategory. Every gap kind
 // in domain.gaps.go appears here exactly once; the mapping is not duplicated anywhere.
 var gapToCategory = map[domain.GapKind]domain.TodoCategory{
-	domain.GapNoModel:                  domain.TodoModels,
-	domain.GapUnmappedTool:             domain.TodoToolMappings,
+	domain.GapNoModel:               domain.TodoModels,
+	domain.GapUnmappedTool:          domain.TodoToolMappings,
+	domain.GapConflictingToolField:  domain.TodoToolConflicts,
 	domain.GapEmptyInjection:           domain.TodoInjections,
 	domain.GapRemovedInjection:         domain.TodoInjections,
 	domain.GapParkedCustomRegion:       domain.TodoInjections,

@@ -4,7 +4,7 @@ name: planner-tdd-soft
 description: Skill-using fixture for golden file tests — exercises skill plus terminal alongside the full file-access tool set
 model: claude-sonnet-4-6
 tools: Read, Write, Edit, Bash, Glob, Grep, AskUserQuestion
-mosaic_harness_version: 3.0.0
+mosaic_harness_version: 3.0.1
 mosaic_role: subagent
 mosaic_version: 1.0.0
 ---

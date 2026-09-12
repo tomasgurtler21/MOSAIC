@@ -160,13 +160,13 @@ log_retention_runs: 0
 #             names: ["mcp__mosaic-kb__search"]
 #
 #       # 2. Override a built-in mapping and fan it out to two destinations:
-#       #    the normal tools key plus a separate `mcp_servers:` key.
+#       #    the normal tools key plus a separate field (generic to:field example).
 #       - generic: user_interaction
 #         destinations:
 #           - to: main
 #             names: ["AskUserQuestion"]
 #           - to: field
-#             field: mcpServers
+#             field: extra_servers
 #             format: list-block
 #             names: ["human-in-the-loop"]
 #

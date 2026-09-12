@@ -55,6 +55,12 @@ const (
 	// names in sorted order. Distinct from GapDeployedRegionContentChanged, which
 	// covers the managed-region parent case.
 	GapEnclosingSectionChanged GapKind = "enclosing-section-changed"
+
+	// GapConflictingToolField is raised when a deployed agent's pre-rebuild
+	// frontmatter contains both a main tools field and a diverted tool field
+	// (e.g. mcpServers) that the target harness is known to ignore when both
+	// are present. The gap is advisory -- it does not block processing.
+	GapConflictingToolField GapKind = "conflicting-tool-field"
 )
 
 // Gap is produced by transform, plan, and deploy when a decision could not be made automatically.
@@ -75,13 +81,14 @@ type Gap struct {
 type TodoCategory string
 
 const (
-	TodoModels       TodoCategory = "Models"
-	TodoToolMappings TodoCategory = "Tool mappings"
-	TodoInjections   TodoCategory = "Project-specific injections"
-	TodoSkippedFiles TodoCategory = "Skipped files"
-	TodoRegistration TodoCategory = "Hook registration"
-	TodoManual       TodoCategory = "Manual steps"
-	TodoEnvironment  TodoCategory = "Deployment location"
+	TodoModels        TodoCategory = "Models"
+	TodoToolMappings  TodoCategory = "Tool mappings"
+	TodoToolConflicts TodoCategory = "Tool conflicts"
+	TodoInjections    TodoCategory = "Project-specific injections"
+	TodoSkippedFiles  TodoCategory = "Skipped files"
+	TodoRegistration  TodoCategory = "Hook registration"
+	TodoManual        TodoCategory = "Manual steps"
+	TodoEnvironment   TodoCategory = "Deployment location"
 )
 
 // TodoItem is one action the user must take after the deployment run completes.

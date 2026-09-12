@@ -1,6 +1,6 @@
 # Claude Code — Active Issues
 
-> Last updated: 2026-09-10 (run 15)
+> Last updated: 2026-09-12 (run 18)
 
 ---
 
@@ -2397,5 +2397,157 @@ New-file creation is one of the most common operations MOSAIC subagents perform 
 
 **Notes:**
 Filed as an `enhancement` rather than `bug` label, but the underlying behavior — a silent, undocumented gap in a documented memory-loading feature with no warning to the user — has real operational impact matching this KB's inclusion criteria regardless of how the reporter framed the fix request. Directly part of the same cluster as CC-034 (`--add-dir` rules skipped), CC-036 (`CLAUDE.md` above repo root skipped in worktrees), CC-059 (symlinked `.claude/rules/` never loading), and CC-060 (Auto Mode's Bash-first steering defeats the same `Read`-gated trigger) — all five entries share the same underlying architectural fragility: nested/path-scoped memory loading depends entirely on a `Read` tool call happening to occur on the exact right file, and any tool-call pattern that doesn't produce that exact `Read` (new-file creation, Bash-routed access, `--add-dir` boundaries, symlink resolution, parent-of-worktree path resolution) silently drops the rules with zero diagnostic. Needs re-verification on a current version — reported mid-2026 with no recent confirmation, and closed by bot rather than resolved. If #64708's `allowed-tools` frontmatter proposal is ever implemented, re-check whether it closes this gap.
+
+---
+
+### CC-079: `mcpServers:` frontmatter silently ignored when `tools:` field is also present — MCP tools from the declared server never surface
+
+| Field | Value |
+|-------|-------|
+| **Classification** | Bug |
+| **Source** | Direct MOSAIC reproduction on v2.1.269 (2026-09-12), narrowing and partially superseding three earlier GitHub reports: [#31287](https://github.com/anthropics/claude-code/issues/31287), [#65142](https://github.com/anthropics/claude-code/issues/65142), [#66581](https://github.com/anthropics/claude-code/issues/66581) |
+| **Reported** | Direct observation reported to this KB 2026-09-12; earliest corroborating GitHub report dated 2026-03-06 (#31287) |
+| **Last Activity** | 2026-09-12 (MOSAIC systematic reproduction — see Evidence) |
+| **Confidence** | Confirmed (reproduced at MOSAIC with a systematic 7-test matrix on v2.1.269) |
+| **Orchestration Impact** | HIGH |
+| **Reproduced at MOSAIC** | Yes |
+| **MOSAIC Response** | Unevaluated |
+| **Version(s) Affected** | Confirmed present on v2.1.269 (2026-09-12). The broader `tools:`-also-broken variant reported in #31287/#65142/#66581 (v2.1.69–v2.1.169) appears to have been fixed — `tools:` scoping for built-in tools now works correctly |
+| **Latest Platform Version** | v2.1.269 (2026-09-12) |
+| **Labels** | N/A for the direct reproduction; underlying GitHub issues carry `bug`, `has repro`, `area:mcp`, `area:agents`, `stale` |
+
+**Summary:**
+MOSAIC systematic reproduction (v2.1.269, 2026-09-12) with a 7-test matrix has **narrowed the original claim significantly**. The original CC-079 entry (and the three corroborating GitHub reports from v2.1.69–v2.1.169) claimed that `claude --agent <name>` silently dropped **both** `tools:` and `mcpServers:` frontmatter. Our testing disproves the broad claim and isolates the **actual remaining bug** to a specific interaction between the two fields:
+
+- **`tools:` scoping works correctly** on its own. An agent with `tools: [Read, Bash]` gets exactly Read and Bash — Glob, Grep, WebSearch are completely absent from the schema (not blocked at call time, never offered). This contradicts the v2.1.169-era reports (#66581) where enumerated `tools:` were fully ignored. That aspect was apparently fixed silently between v2.1.169 and v2.1.237 (consistent with #78777's counter-evidence).
+- **`mcpServers:` works correctly** on its own (no `tools:` field). An agent with only `mcpServers: [github]` gets the full default tool set plus all github MCP tools.
+- **The bug: when both `tools:` and `mcpServers:` are present, `mcpServers:` is silently ignored.** The `tools:` allowlist becomes the sole authority for tool resolution. Since it contains only built-in tool names and no `mcp__*` entries, zero MCP tools are granted — despite the `mcpServers:` field explicitly declaring which server(s) should be available. No error, no warning. This is the pattern used by `mosaic-architect.md` and the pattern users naturally write.
+- **Explicit MCP tool names in `tools:` work** — e.g., `tools: Read, Bash, mcp__github__get_me` correctly grants exactly those three tools, and the github MCP server connects automatically without needing a separate `mcpServers:` field.
+- **Server wildcard in `tools:` works** — `tools: Read, Bash, mcp__github__*` correctly grants Read, Bash, and all ~50 github MCP tools.
+
+The root cause appears to be that `tools:` and `mcpServers:` are not merged — the presence of a `tools:` field switches tool resolution to "only what's listed here" mode, and `mcpServers:` is not consulted as a supplementary source.
+
+**Impact on Orchestration:**
+Still HIGH but narrower than originally assessed. MOSAIC agents that use the natural pattern of `tools: <built-in list>` + `mcpServers: [<server>]` (the `mosaic-architect.md` pattern) will silently get zero MCP tools. This directly affected the `harness-issue-hunter` agent, which had its `tools:` and `mcpServers:` fields stripped entirely as a workaround — the user couldn't get github MCP access and assumed the entire `--agent` launch path was broken. For Runner, the impact is limited to stages that need MCP tools — the `tools:` scoping for built-in tools works correctly, so least-privilege built-in-tool scoping is not threatened.
+
+**Evidence:**
+MOSAIC reproduction matrix on Claude Code v2.1.269 (Windows 11, 2026-09-12), all tests run via `claude --agent <name> --allow-dangerously-skip-permissions --dangerously-skip-permissions -p <prompt>` in headless mode:
+
+| Test | `tools:` field | `mcpServers:` field | Built-in scoping | MCP tools available | MCP invocation |
+|------|---------------|---------------------|-----------------|---------------------|----------------|
+| T1 | `Read, Bash` (one-line) | *(none)* | ✅ Glob/Grep/WebSearch absent | N/A | N/A |
+| T2 | `Read, Bash, mcp__github__get_me, mcp__github__search_issues` (one-line, explicit MCP names) | *(none)* | ✅ Glob absent | ✅ 2 MCP tools present | ✅ `get_me` returned data |
+| T3 | *(none)* | `[github]` | N/A (full default set) | ✅ All ~50 github MCP tools | ✅ `get_me` returned data |
+| **T4** | **`Read, Bash, Glob, Grep` (one-line)** | **`[github]`** | **✅ WebSearch absent** | **❌ Zero MCP tools — `mcpServers:` silently ignored** | **N/A — tools absent from schema** |
+| T5 | `Read, Bash, mcp__github__*` (one-line, server wildcard) | *(none)* | ✅ Glob absent | ✅ All ~50 github MCP tools | ✅ `get_me` + `search_issues` returned data |
+| T6 | `[Read, Bash]` (YAML list) | *(none)* | ✅ Glob/Grep absent | N/A | N/A |
+| T7 | `[Read, Bash, mcp__github__get_me, mcp__github__search_issues]` (YAML list) + `[github]` | `[github]` | ✅ Glob absent | ✅ 2 MCP tools present | ✅ `get_me` returned data |
+
+T4 is the failing case — it is the **only** configuration where MCP tools are absent, and it is precisely the pattern MOSAIC agents use. T7 shows the same configuration works when MCP tools are also listed explicitly in `tools:` alongside `mcpServers:` — confirming `mcpServers:` is ignored, not that MCP is fundamentally broken.
+
+Additional note on permission layer: MCP tools that appear in the schema still require permission grants to invoke. In headless `-p` mode, use `--allowedTools "mcp__github__get_me"` or `--dangerously-skip-permissions` or add to `settings.local.json`'s `permissions.allow`. This is a separate, correct behavior — not part of the bug.
+
+**Historical context:** The three GitHub reports (#31287/#65142/#66581, v2.1.69–v2.1.169) described a **broader** failure where `tools:` scoping itself was also broken (enumerated lists fully ignored, fixed 7-tool hardcoded set). That broader bug appears to have been fixed silently between v2.1.169 and v2.1.237 (consistent with #78777 counter-evidence). What remains is the narrower `mcpServers:`-ignored-when-`tools:`-present interaction bug, which may have been present all along but was masked by the broader `tools:` failure.
+
+**Workaround(s):**
+1. ⭐ **MOSAIC-verified on v2.1.269:** Put MCP tools directly in the `tools:` field using the server wildcard syntax `mcp__<serverName>__*` instead of using a separate `mcpServers:` field. Example — instead of the broken pattern:
+   ```yaml
+   tools: Read, Write, Edit, Glob, Grep, Bash, WebSearch, WebFetch
+   mcpServers:
+     - github
+     - contact-user
+   ```
+   Use this working pattern:
+   ```yaml
+   tools: Read, Write, Edit, Glob, Grep, Bash, WebSearch, WebFetch, mcp__github__*, mcp__contact-user__*
+   ```
+   This grants all tools from the named MCP servers alongside the built-in tools. No `mcpServers:` field needed — the `mcp__<server>__*` entries in `tools:` are sufficient to connect the server and grant all its tools.
+2. If you only need specific MCP tools (not all from a server), list them explicitly: `tools: Read, Bash, mcp__github__get_me, mcp__github__search_issues`. This also works without `mcpServers:`.
+3. Omitting the `tools:` field entirely (the current `harness-issue-hunter.md` workaround) gives the full default tool set including all MCP tools — but sacrifices least-privilege scoping.
+
+**Notes:**
+**2026-09-12 MOSAIC verification (this pass):** The original CC-079 entry was written based on a MOSAIC user's hands-on report plus three corroborating GitHub issues, all pre-dating v2.1.237. A systematic 7-test matrix on v2.1.269 has now **partially disproved and partially confirmed** the original claim. The `tools:` scoping aspect is fixed — enumerated built-in tool lists work correctly (contradicting #66581's v2.1.169-era findings). The `mcpServers:` aspect remains broken in a specific interaction: `mcpServers:` is silently ignored whenever `tools:` is also present. The workaround is simple and verified: use `mcp__<serverName>__*` wildcard entries directly in `tools:` instead of `mcpServers:`.
+
+**RECONCILIATION with CC-031:** The tension noted in the original entry is now resolved. CC-031's reporter observed `--agent` working correctly for prompt/role identity and general tool inheritance — our testing confirms `tools:` scoping works correctly for built-in tools. CC-031's test did not involve MCP tools, so it never would have hit the `mcpServers:` interaction bug.
+
+**Remaining question:** Whether `mcpServers:` is intentionally subordinate to `tools:` (a design choice where `tools:` is the authoritative allowlist and `mcpServers:` is merely a connection hint that doesn't expand the allowlist) or whether this is an unintentional parsing/merge failure. If it's by-design, the classification should be changed to Limitation. No maintainer has commented on this interaction specifically.
+
+---
+
+### CC-080: MCP server instruction blocks injected into agents/subagents that have no access to that server's tools
+
+| Field | Value |
+|-------|-------|
+| **Classification** | Bug |
+| **Source** | MOSAIC observation (2026-09-12), corroborated by 5 GitHub reports: [#85307](https://github.com/anthropics/claude-code/issues/85307) (open), [#75283](https://github.com/anthropics/claude-code/issues/75283), [#58138](https://github.com/anthropics/claude-code/issues/58138), [#47118](https://github.com/anthropics/claude-code/issues/47118), [#29655](https://github.com/anthropics/claude-code/issues/29655) (all closed by stale-bot) |
+| **Reported** | Earliest GitHub report ~2026-02; MOSAIC observation 2026-09-12 |
+| **Last Activity** | 2026-09-12 (MOSAIC observation); #85307 still open |
+| **Confidence** | Confirmed (reproduced at MOSAIC on v2.1.269, corroborated by 5 independent GitHub reports) |
+| **Orchestration Impact** | HIGH |
+| **Reproduced at MOSAIC** | Yes |
+| **MOSAIC Response** | Awareness — primary agents receive instructions for all connected MCP servers regardless of tool scoping |
+| **Version(s) Affected** | Reported across v2.1.x from Feb–Sep 2026; confirmed on v2.1.269 |
+| **Latest Platform Version** | v2.1.269 (2026-09-12) |
+| **Labels** | `bug`, `area:security`, `area:mcp`, `area:agents` (from #47118) |
+
+**Summary:**
+When a session has multiple MCP servers connected (via `enabledMcpjsonServers` or `.mcp.json`), ALL servers' `# MCP Server Instructions` blocks are injected into the **primary agent's** system prompt — regardless of whether the agent's `tools:` frontmatter grants access to that server's tools. A primary agent restricted to `tools: Read, Write, Edit, Glob, Grep, Bash, WebSearch, WebFetch` (no MCP tools) still receives the full github and contact-user MCP instruction blocks in its system prompt. This wastes context tokens, confuses the model (it reads "Use `get_me` first..." but can't call it), and misleads users who see the agent discussing capabilities it doesn't have.
+
+Note: For **subagents** dispatched via the Agent tool, the behavior is different — subagents receive NO `# MCP Server Instructions` blocks at all, regardless of their tool list. See CC-081. The "inverted routing" from #85307 is between the primary agent (gets all instructions, may lack tools) and subagents (have tools, get no instructions).
+
+Per #75283, the injected content can also appear appended to Bash tool results, causing agents to flag it as prompt injection.
+
+**Impact on Orchestration:**
+The primary MOSAIC orchestrator agent pays the context-token cost for instruction blocks from MCP servers it can't use. It may waste turns attempting to use tools it sees instructions for but doesn't have access to. However, the more severe impact is the CC-081 inverse: subagents that need the guidance don't get it.
+
+**Workaround(s):**
+None known for preventing the injection into the primary agent. The only mitigation is to minimize the number of MCP servers enabled in `enabledMcpjsonServers` / `.mcp.json` to reduce the irrelevant instruction surface.
+
+**Evidence (MOSAIC reproduction, 2026-09-12, v2.1.269):**
+- Primary agent (`mosaic-architect`, tools: Read,Write,Edit,Glob,Grep,Bash,WebSearch,WebFetch — no MCP tools): **receives** full `# MCP Server Instructions` block for github and contact-user.
+- Subagent (`claude` type, Tools: * including mcp__github__*): **does not** receive any MCP instructions block.
+- Subagent (`anthropic-subagent-creator`, tools: Read,Write,Edit,Glob,Grep — no MCP tools): **does not** receive any MCP instructions block.
+- Conclusion: MCP instruction injection is primary-agent-only, scope-unaware. Subagents never receive it.
+
+**Notes:**
+See also CC-081 (the inverse problem). #85307 frames these as two halves of one inverted routing bug. Additional leads: #85230 (background subagents lose MCP resource tools), #79728 (subagent tools: allowlist collapses when MCP server unavailable at spawn).
+
+---
+
+### CC-081: Subagents with MCP tools in their `tools:` allowlist do NOT receive that server's instruction block
+
+| Field | Value |
+|-------|-------|
+| **Classification** | Bug |
+| **Source** | GitHub reports: [#85307](https://github.com/anthropics/claude-code/issues/85307) (open), [#29655](https://github.com/anthropics/claude-code/issues/29655) (closed stale-bot) |
+| **Reported** | ~2026-02 (#29655); consolidated in #85307 (2026-08-09) |
+| **Last Activity** | 2026-08-09 (#85307, still open) |
+| **Confidence** | Confirmed (reproduced at MOSAIC on v2.1.269) |
+| **Orchestration Impact** | HIGH |
+| **Reproduced at MOSAIC** | Yes |
+| **MOSAIC Response** | Awareness + workaround: agents that need MCP guidance should include it in their own body text |
+| **Version(s) Affected** | Reported on v2.1.226 (#85307); earlier reports span v2.1.x; confirmed on v2.1.269 |
+| **Latest Platform Version** | v2.1.269 (2026-09-12) |
+| **Labels** | `area:mcp`, `area:agents` |
+
+**Summary:**
+The inverse of CC-080: subagents dispatched via the Agent tool do NOT receive ANY `# MCP Server Instructions` blocks in their system prompt — regardless of whether they have MCP tools in their allowlist. A subagent with `mcp__github__*` tools fully available gets zero guidance on how to use them — no server-specific instructions, no usage hints, no tool selection guidance. Combined with CC-080 (primary agent gets ALL instructions regardless of tool scope), the routing is completely inverted: the primary agent that may lack MCP tools gets the instructions, while subagents that have the tools get nothing.
+
+**Impact on Orchestration:**
+MOSAIC subagents dispatched with MCP tools (e.g., `harness-issue-hunter` using `mcp__github__*`) lack the server's usage guidance (tool selection hints, authentication context, pagination advice), leading to suboptimal or incorrect tool usage. Specifically, guidance like "Always call `get_me` first", "Use `search_*` tools for targeted queries", and "Use `minimal_output` parameter" — which the primary agent sees — never reaches the subagent that actually needs it.
+
+**Workaround(s):**
+1. **⭐ Include relevant MCP server usage instructions directly in the subagent's agent definition body.** Since the harness won't inject them, the agent file itself must carry the guidance. For MOSAIC agents using `mcp__github__*`, copy the essential github MCP guidance into the agent's body text.
+2. For primary agents launched via `--agent`, this does NOT apply — primary agents DO receive MCP instructions (see CC-080).
+
+**Evidence (MOSAIC reproduction, 2026-09-12, v2.1.269):**
+Three subagents dispatched via the Agent tool from a primary session with github and contact-user MCP servers connected:
+- `claude` type (Tools: *, including all mcp__github__* tools): **zero** MCP instruction blocks in context. GitHub tools listed as deferred tools but no usage guidance.
+- Second `claude` type (same config): identical result — **zero** MCP instruction blocks.
+- `anthropic-subagent-creator` type (tools: Read,Write,Edit,Glob,Grep, no github MCP tools): **zero** MCP instruction blocks. (Also no github tools, as expected.)
+- All three probes confirmed: the `# MCP Server Instructions` section that appears in the primary agent's context is simply absent from subagent contexts entirely.
+
+**Notes:**
+This is the other half of #85307's "inverted routing" finding. The workaround for MOSAIC is straightforward: agents that use MCP tools should include the relevant server's usage instructions in their own body text (agent definition). This is already partially done for `harness-issue-hunter` (which has github usage patterns in its body) but should be reviewed and formalized. Additional leads: #85230 (background subagents lose MCP resource tools), #79728 (subagent tools: allowlist collapses when MCP server unavailable at spawn).
 
 ---

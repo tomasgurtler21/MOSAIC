@@ -349,9 +349,9 @@ Rules and constraints:
 - **Validation rules** mirror those for `tool_destinations` destinations (rules 3–9
   from the configuration reference), except that rule 10 (non-empty names) does not
   apply — names are always empty as declared and are filled in at resolution time.
-- **Claude Code** is the only built-in harness that currently declares this field,
-  routing every custom tool to the `mcpServers` frontmatter key as a block list.
-  No other built-in descriptor declares the field.
+- No current built-in harness declares this field. Claude Code, the harness that
+  previously declared it, now uses `custom_tool_template: "mcp__%s__*"` to format
+  custom tools as wildcards routed to the main tools field instead.
 
 #### Tool mapping outcomes
 

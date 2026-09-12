@@ -280,19 +280,18 @@ for which the user supplies a name but the harness has no built-in mapping — t
 specific frontmatter field rather than the main tools value. A `tool_destinations`
 entry in either config file for a specific generic tool always wins over this default.
 
-**Claude Code's new default:** As of this release the Claude Code harness declares
-`custom_tool_destination` routing every custom tool to the `mcpServers` frontmatter
-key as a block list. This is why a custom MCP server now appears under `mcpServers`
-in Claude Code agent frontmatter with no `tool_destinations` entry required:
+**Claude Code's default:** The Claude Code harness uses
+`custom_tool_template: "mcp__%s__*"` to format custom tool names as wildcards and
+routes them to the main `tools` field. This is why a custom MCP server now appears
+in the `tools` value as `mcp__<name>__*` with no `tool_destinations` entry required:
 
 ```yaml
 # Without any tool_destinations entry, a custom tool resolves like this for Claude Code:
-mcpServers:
-  - human-in-the-loop
+tools: Read, Write, mcp__human-in-the-loop__*
 ```
 
-If you want a specific custom tool to go somewhere else — or back to the main tools
-value — declare a `tool_destinations` entry for it. That entry outranks the harness
+If you want a specific custom tool to go somewhere else — or to use a different name
+format — declare a `tool_destinations` entry for it. That entry outranks the harness
 default regardless of which config file declares it:
 
 ```yaml
@@ -309,16 +308,16 @@ To *extend* a built-in mapping rather than replace it, restate the built-in
 destinations alongside your new ones:
 
 ```yaml
-# claude-code's descriptor maps file_read -> Read.
-# This keeps Read AND adds an MCP server, because the whole set is restated.
+# my-harness's descriptor maps file_read -> Read.
+# This keeps Read AND adds an extra server, because the whole set is restated.
 tool_destinations:
-  claude-code:
+  my-harness:
     - generic: file_read
       destinations:
         - to: main
           names: ["Read"]
         - to: field
-          field: mcp_servers
+          field: extra_servers
           names: ["mosaic-kb"]
 ```
 
@@ -342,17 +341,20 @@ tool_destinations:
 ```
 
 **2 — Fan one generic tool out to two destinations.**
-The harness's own `tools` key *and* a separate `mcp_servers` key.
+The harness's own `tools` key *and* a separate field. This illustrates the generic
+`to: field` mechanism using a hypothetical `extra_servers` key — not a Claude Code
+specific pattern. For Claude Code, custom tools go to the main `tools` field by default
+(see above); override with `tool_destinations` only when you need different behavior.
 
 ```yaml
 tool_destinations:
-  claude-code:
+  my-harness:
     - generic: user_interaction
       destinations:
         - to: main
           names: ["AskUserQuestion"]
         - to: field
-          field: mcp_servers
+          field: extra_servers
           format: list-block
           names: ["user-feedback"]
 ```
@@ -361,7 +363,7 @@ Produces:
 
 ```yaml
 tools: Read, Write, AskUserQuestion
-mcp_servers:
+extra_servers:
   - user-feedback
 ```
 
