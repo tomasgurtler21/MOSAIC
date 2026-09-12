@@ -5,7 +5,7 @@
 
 | Version | Reports |
 |---------|----------|
-| 7.4.1 | 38 |
+| 7.4.1 | 44 |
 
 <!-- /generated:version-overview -->
 
@@ -17,6 +17,7 @@
 | Model | Harness | 7.4.1 |
 |-------|--------|--------|
 | claude-fable-5 | claude-code | 39% |
+| claude-haiku-4-5 | claude-code | 52% |
 | claude-opus-4-6 | claude-code | 78% |
 | claude-opus-5 | claude-code | 96% |
 | claude-sonnet-4-6 | claude-code | 86% |
