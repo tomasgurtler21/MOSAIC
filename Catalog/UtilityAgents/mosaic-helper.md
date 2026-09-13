@@ -1,5 +1,5 @@
 ---
-version: 1.1.0
+version: 1.1.1
 name: mosaic-helper
 description: Onboarding assistant that helps users understand the MOSAIC system, answers questions using documentation, and directs them to the right utility agent for hands-on tasks
 role: utility

@@ -680,13 +680,13 @@ version: "1.0.0"
 	root := makeDescriptorRootWithOrchestratorContent(t, id, yamlContent, injectionsMd, orchMd)
 	m := resolveDescriptorOnly(t, root, id)
 
-	got, ok := m.Injection(domain.InjectionRequest{Name: "HarnessConstraints", AgentKey: "orchestrator"})
+	got, ok := m.Injection(domain.InjectionRequest{Name: "HarnessConstraints", AgentKey: "orchestrator", Role: domain.RoleOrchestrator})
 	if !ok {
-		t.Errorf("Injection(HarnessConstraints, orchestrator) returned ok=false; " +
+		t.Errorf("Injection(HarnessConstraints, orchestrator, RoleOrchestrator) returned ok=false; " +
 			"managed content from HarnessInjectionsOrchestrator.md must be served to the orchestrator agent")
 	}
 	if ok && got != wantContent {
-		t.Errorf("Injection(HarnessConstraints, orchestrator) = %q, want %q", got, wantContent)
+		t.Errorf("Injection(HarnessConstraints, orchestrator, RoleOrchestrator) = %q, want %q", got, wantContent)
 	}
 }
 
@@ -720,6 +720,51 @@ version: "1.0.0"
 		if got != wantContent {
 			t.Errorf("Injection(LanguagePatterns, %q) = %q, want %q", agentKey, got, wantContent)
 		}
+	}
+}
+
+// TestDescriptorOnly_OrchestratorRole_NonOrchestratorKey_ReturnsMergedContent verifies
+// that the descriptor-only module's Injection method respects req.Role for orchestrator
+// content selection, not the literal AgentKey value.
+//
+// When an agent has AgentKey != "orchestrator" but Role == domain.RoleOrchestrator, the
+// module must return orchestrator-merged content (shared + orchestrator-only), not
+// shared content only.
+//
+// RED: FAILS until I1.1 (add Role field to InjectionRequest) and I1.3 (switch
+// descriptor-only Injection gate from AgentKey to Role) are both complete.
+func TestDescriptorOnly_OrchestratorRole_NonOrchestratorKey_ReturnsMergedContent(t *testing.T) {
+	id := "descriptor-orchrole-nonkey-test"
+	wantContent := "orchestrator-tier-constraint-for-role-test"
+	yamlContent := fmt.Sprintf("schema_version: \"1\"\nid: %q\ndisplay_name: \"Orch Role Non-Key Test\"\n", id)
+	injectionsMd := "# Shared -- no regions\n"
+	orchMd := fmt.Sprintf(`---
+version: "1.0.0"
+---
+
+# Orchestrator Injections
+
+<HarnessConstraints type="managed">
+%s
+</HarnessConstraints>
+`, wantContent)
+	root := makeDescriptorRootWithOrchestratorContent(t, id, yamlContent, injectionsMd, orchMd)
+	m := resolveDescriptorOnly(t, root, id)
+
+	// Orchestrator-role agent with non-"orchestrator" key must receive orchestrator content.
+	got, ok := m.Injection(domain.InjectionRequest{
+		Name:     "HarnessConstraints",
+		AgentKey: "orchestrator-script", // not "orchestrator"
+		Role:     domain.RoleOrchestrator,
+	})
+	if !ok {
+		t.Errorf("Injection(HarnessConstraints, orchestrator-script, RoleOrchestrator) returned ok=false; "+
+			"managed content from HarnessInjectionsOrchestrator.md must be served when Role == domain.RoleOrchestrator, "+
+			"regardless of AgentKey value")
+	}
+	if ok && got != wantContent {
+		t.Errorf("Injection(HarnessConstraints, orchestrator-script, RoleOrchestrator) = %q, want %q; "+
+			"orchestrator-role gating must use req.Role, not req.AgentKey", got, wantContent)
 	}
 }
 

@@ -476,11 +476,11 @@ func applyHarnessRegion(node *docformat.Node, name string, class domain.Injectio
 	// other agents the regular injections version is used. This follows the same
 	// role-conditional pattern as build.go's stamp construction.
 	injVersion := req.InjectionsVersion
-	if req.Key == "orchestrator" {
+	if req.Role == domain.RoleOrchestrator {
 		injVersion = req.OrchestratorInjectionsVersion
 	}
 
-	content, ok := req.Module.Injection(domain.InjectionRequest{Name: name, AgentKey: req.Key})
+	content, ok := req.Module.Injection(domain.InjectionRequest{Name: name, AgentKey: req.Key, Role: req.Role})
 	if ok && content != "" {
 		// Ensure the content ends with a newline so the closing tag appears on its own line
 		// when the document is serialised. Descriptor YAML strings do not always carry a

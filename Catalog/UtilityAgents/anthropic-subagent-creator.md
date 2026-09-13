@@ -1,5 +1,5 @@
 ---
-version: 2.0.0
+version: 2.0.1
 base-version: 1.5.0
 name: anthropic-subagent-creator
 description: Creates high-quality orchestration subagent instructions through iterative collaboration, ensuring compliance with the multi-agent orchestration system architecture and protocols

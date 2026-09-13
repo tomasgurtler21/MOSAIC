@@ -1520,20 +1520,55 @@ func TestContract_VSCodeGHCP(t *testing.T) {
 			},
 		},
 
-		InjectionCases: map[string]string{
-			"HarnessConstraints": vscodeGHCPHarnessConstraints,
-		},
-
-		NotFilled: []string{
-			"IdentityExtension",
-			"ProtocolExtension",
-			"CodebaseContext",
-			"LanguagePatterns",
-			"OutputArtifactTemplate",
-			"CustomConstraints",
-			"ErrorHandlingExtension",
-			"ContextLimits",
-			"AvailableWorkflows",
+		AgentInjectionCases: []contracttest.InjectionCase{
+			{
+				// subagent_shared_content: a non-orchestrator agent receives only shared content.
+				// For VS Code GHCP, HarnessConstraints shared content is the file-reading
+				// constraint plus the parallel tool calls instruction.
+				Name:    "subagent_shared_content",
+				AgentKey: "some-subagent",
+				// Role is zero value (non-orchestrator)
+				Filled: map[string]string{
+					"HarnessConstraints": vscodeGHCPHarnessConstraints,
+				},
+				NotFilled: []string{
+					"IdentityExtension",
+					"ProtocolExtension",
+					"CodebaseContext",
+					"LanguagePatterns",
+					"OutputArtifactTemplate",
+					"CustomConstraints",
+					"ErrorHandlingExtension",
+					"ContextLimits",
+					"AvailableWorkflows",
+				},
+			},
+			{
+				// orchestrator_role_non_orchestrator_key: an orchestrator-role agent with a
+				// non-"orchestrator" AgentKey must receive orchestrator-merged content.
+				// For VS Code GHCP, HarnessInjectionsOrchestrator.md has no HarnessConstraints
+				// content, so the merged result equals the shared content.
+				// RED: compile-fails until domain.InjectionRequest gains a Role field (I1.1).
+				Name:    "orchestrator_role_non_orchestrator_key",
+				AgentKey: "orchestrator-script",
+				Role:    domain.RoleOrchestrator,
+				Filled: map[string]string{
+					// No orchestrator-specific HarnessConstraints content for VS Code GHCP;
+					// merged content equals shared content.
+					"HarnessConstraints": vscodeGHCPHarnessConstraints,
+				},
+				NotFilled: []string{
+					"IdentityExtension",
+					"ProtocolExtension",
+					"CodebaseContext",
+					"LanguagePatterns",
+					"OutputArtifactTemplate",
+					"CustomConstraints",
+					"ErrorHandlingExtension",
+					"ContextLimits",
+					"AvailableWorkflows",
+				},
+			},
 		},
 
 		TargetPathCases: []contracttest.TargetPathCase{

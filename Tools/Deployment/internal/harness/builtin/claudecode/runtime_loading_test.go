@@ -354,14 +354,14 @@ func TestNoRebuild_ChangingOrchestratorFileChangesInjectedContent(t *testing.T) 
 		"---\nversion: \"1.0.0\"\n---\n<HarnessConstraints type=\"managed\">\n"+firstOrchContent+"\n</HarnessConstraints>\n")
 
 	mod1 := newModuleFromOpts(t, root)
-	c1, _ := mod1.Injection(domain.InjectionRequest{Name: "HarnessConstraints", AgentKey: "orchestrator"})
+	c1, _ := mod1.Injection(domain.InjectionRequest{Name: "HarnessConstraints", AgentKey: "orchestrator", Role: domain.RoleOrchestrator})
 
 	const secondOrchContent = "SECOND_ORCH_CONSTRAINT_SENTINEL"
 	writeHarnessContentFile(t, contentDir, "HarnessInjectionsOrchestrator.md",
 		"---\nversion: \"2.0.0\"\n---\n<HarnessConstraints type=\"managed\">\n"+secondOrchContent+"\n</HarnessConstraints>\n")
 
 	mod2 := newModuleFromOpts(t, root)
-	c2, _ := mod2.Injection(domain.InjectionRequest{Name: "HarnessConstraints", AgentKey: "orchestrator"})
+	c2, _ := mod2.Injection(domain.InjectionRequest{Name: "HarnessConstraints", AgentKey: "orchestrator", Role: domain.RoleOrchestrator})
 
 	if c1 == c2 {
 		t.Errorf("orchestrator HarnessConstraints unchanged after editing orchestrator file: both = %q", c1)
@@ -407,7 +407,7 @@ func TestMerging_SharedOnly_OrchestratorReceivesSharedContent(t *testing.T) {
 
 	mod := newModuleFromOpts(t, root)
 
-	c, ok := mod.Injection(domain.InjectionRequest{Name: "LanguagePatterns", AgentKey: "orchestrator"})
+	c, ok := mod.Injection(domain.InjectionRequest{Name: "LanguagePatterns", AgentKey: "orchestrator", Role: domain.RoleOrchestrator})
 	if !ok {
 		t.Fatal("orchestrator: Injection(LanguagePatterns) returned ok=false; shared content must propagate to orchestrator")
 	}
@@ -446,7 +446,7 @@ func TestMerging_OrchestratorOnly_OrchestratorReceivesContent(t *testing.T) {
 
 	mod := newModuleFromOpts(t, root)
 
-	c, ok := mod.Injection(domain.InjectionRequest{Name: "HarnessConstraints", AgentKey: "orchestrator"})
+	c, ok := mod.Injection(domain.InjectionRequest{Name: "HarnessConstraints", AgentKey: "orchestrator", Role: domain.RoleOrchestrator})
 	if !ok {
 		t.Fatal("orchestrator: Injection(HarnessConstraints) returned ok=false; orchestrator-only content must reach orchestrator")
 	}
@@ -469,7 +469,7 @@ func TestMerging_BothNonEmpty_OrchestratorReceivesMergedWithSeparator(t *testing
 
 	mod := newModuleFromOpts(t, root)
 
-	c, ok := mod.Injection(domain.InjectionRequest{Name: "HarnessConstraints", AgentKey: "orchestrator"})
+	c, ok := mod.Injection(domain.InjectionRequest{Name: "HarnessConstraints", AgentKey: "orchestrator", Role: domain.RoleOrchestrator})
 	if !ok {
 		t.Fatal("orchestrator: Injection(HarnessConstraints) returned ok=false")
 	}
@@ -510,7 +510,7 @@ func TestMerging_BothDeclaredEmpty_OrchestratorOkTrueEmptyString(t *testing.T) {
 
 	mod := newModuleFromOpts(t, root)
 
-	c, ok := mod.Injection(domain.InjectionRequest{Name: "HarnessConstraints", AgentKey: "orchestrator"})
+	c, ok := mod.Injection(domain.InjectionRequest{Name: "HarnessConstraints", AgentKey: "orchestrator", Role: domain.RoleOrchestrator})
 	if !ok {
 		t.Fatal("orchestrator: Injection(HarnessConstraints) returned ok=false; declared-but-empty (both sources) must return ok=true")
 	}
@@ -548,7 +548,7 @@ func TestMerging_UndeclaredInBoth_OrchestratorOkFalse(t *testing.T) {
 
 	mod := newModuleFromOpts(t, root)
 
-	_, ok := mod.Injection(domain.InjectionRequest{Name: "LanguagePatterns", AgentKey: "orchestrator"})
+	_, ok := mod.Injection(domain.InjectionRequest{Name: "LanguagePatterns", AgentKey: "orchestrator", Role: domain.RoleOrchestrator})
 	if ok {
 		t.Error("orchestrator: Injection(LanguagePatterns) returned ok=true; name is undeclared in both files, must return ok=false")
 	}
@@ -566,7 +566,7 @@ func TestMerging_SharedEmptyOrchNonEmpty_OrchestratorReceivesOrchContent(t *test
 
 	mod := newModuleFromOpts(t, root)
 
-	c, ok := mod.Injection(domain.InjectionRequest{Name: "HarnessConstraints", AgentKey: "orchestrator"})
+	c, ok := mod.Injection(domain.InjectionRequest{Name: "HarnessConstraints", AgentKey: "orchestrator", Role: domain.RoleOrchestrator})
 	if !ok {
 		t.Fatal("orchestrator: Injection(HarnessConstraints) returned ok=false")
 	}

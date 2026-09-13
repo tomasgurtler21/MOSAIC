@@ -91,6 +91,7 @@ type TargetPathCase struct {
 type InjectionCase struct {
 	Name      string            // test sub-name, e.g. "subagent_HarnessConstraints"
 	AgentKey  string            // agent key to pass in InjectionRequest
+	Role      domain.AgentRole  // role to pass in InjectionRequest; zero = non-orchestrator
 	Filled    map[string]string // canonical name -> expected content (ok=true)
 	NotFilled []string          // canonical names expected to return ok=false
 }
@@ -518,24 +519,24 @@ func runAgentInjectionCases(t *testing.T, m domain.HarnessModule, cases []Inject
 			for name, want := range tc.Filled {
 				name, want := name, want
 				t.Run("filled_"+name, func(t *testing.T) {
-					req := domain.InjectionRequest{Name: name, AgentKey: tc.AgentKey}
+					req := domain.InjectionRequest{Name: name, AgentKey: tc.AgentKey, Role: tc.Role}
 					got, ok := m.Injection(req)
 					if !ok {
-						t.Errorf("Injection(%q, agentKey=%q) returned ok=false; want ok=true with content %q", name, tc.AgentKey, want)
+						t.Errorf("Injection(%q, agentKey=%q, role=%q) returned ok=false; want ok=true with content %q", name, tc.AgentKey, tc.Role, want)
 						return
 					}
 					if got != want {
-						t.Errorf("Injection(%q, agentKey=%q): got %q, want %q", name, tc.AgentKey, got, want)
+						t.Errorf("Injection(%q, agentKey=%q, role=%q): got %q, want %q", name, tc.AgentKey, tc.Role, got, want)
 					}
 				})
 			}
 			for _, name := range tc.NotFilled {
 				name := name
 				t.Run("not_filled_"+name, func(t *testing.T) {
-					req := domain.InjectionRequest{Name: name, AgentKey: tc.AgentKey}
+					req := domain.InjectionRequest{Name: name, AgentKey: tc.AgentKey, Role: tc.Role}
 					_, ok := m.Injection(req)
 					if ok {
-						t.Errorf("Injection(%q, agentKey=%q) returned ok=true; this injection should not be filled", name, tc.AgentKey)
+						t.Errorf("Injection(%q, agentKey=%q, role=%q) returned ok=true; this injection should not be filled", name, tc.AgentKey, tc.Role)
 					}
 				})
 			}

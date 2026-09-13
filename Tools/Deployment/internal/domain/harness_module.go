@@ -28,12 +28,12 @@ type HarnessModule interface {
 	TargetPath(req TargetPathRequest) (string, error)
 
 	// Injection returns the harness-level content for a canonical injection name.
-	// When req.AgentKey is "orchestrator", the returned content is the shared
+	// When req.Role == RoleOrchestrator, the returned content is the shared
 	// (subagent-level) content merged with any orchestrator-only content for the
-	// same injection name — shared content first, then a blank-line separator,
+	// same injection name -- shared content first, then a blank-line separator,
 	// then orchestrator-only content. When only one source has content, no
 	// separator is added. When neither source has content for the name, ok is false.
-	// For all other agent keys, only shared content is returned.
+	// For all other roles (including zero value), only shared content is returned.
 	// ok is false for injections this harness does not fill (which are left empty).
 	Injection(req InjectionRequest) (content string, ok bool)
 
@@ -50,8 +50,9 @@ type HarnessModule interface {
 // agent alongside the query parameter, enabling future extension without
 // signature changes.
 type InjectionRequest struct {
-	Name     string // canonical injection name, e.g. "HarnessConstraints"
-	AgentKey string // artifact slug of the requesting agent, e.g. "orchestrator"
+	Name     string    // canonical injection name, e.g. "HarnessConstraints"
+	AgentKey string    // artifact slug of the requesting agent, e.g. "orchestrator"
+	Role     AgentRole // deploying agent's role; zero value means non-orchestrator (shared content only)
 }
 
 // FrontmatterRequest is the input to HarnessModule.Frontmatter.

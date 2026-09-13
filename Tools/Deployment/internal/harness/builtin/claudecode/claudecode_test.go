@@ -584,20 +584,56 @@ func TestContract_ClaudeCode(t *testing.T) {
 			},
 		},
 
-		InjectionCases: map[string]string{
-			"HarnessConstraints": "",
-		},
-
-		NotFilled: []string{
-			"IdentityExtension",
-			"ProtocolExtension",
-			"CodebaseContext",
-			"LanguagePatterns",
-			"OutputArtifactTemplate",
-			"CustomConstraints",
-			"ErrorHandlingExtension",
-			"ContextLimits",
-			"AvailableWorkflows",
+		AgentInjectionCases: []contracttest.InjectionCase{
+			{
+				// subagent_shared_content: a non-orchestrator agent receives only shared content.
+				// For Claude Code, HarnessConstraints shared content is empty (declared-but-empty).
+				Name:    "subagent_shared_content",
+				AgentKey: "some-subagent",
+				// Role is zero value (non-orchestrator)
+				Filled: map[string]string{
+					"HarnessConstraints": "",
+				},
+				NotFilled: []string{
+					"IdentityExtension",
+					"ProtocolExtension",
+					"CodebaseContext",
+					"LanguagePatterns",
+					"OutputArtifactTemplate",
+					"CustomConstraints",
+					"ErrorHandlingExtension",
+					"ContextLimits",
+					"AvailableWorkflows",
+				},
+			},
+			{
+				// orchestrator_role_shared_only: an orchestrator-role agent with the literal
+				// "orchestrator" key still receives correct behavior. After the role-based fix,
+				// this case requires Role: domain.RoleOrchestrator to trigger orchestrator
+				// content. The exact orchestrator content is verified in the standalone
+				// TestInjection_OrchestratorRole_NonOrchestratorKey_ReturnsMergedContent test.
+				// RED: this case does not assert orchestrator-specific content here; the
+				// companion standalone test provides the RED-phase signal for role-based gating.
+				Name:    "orchestrator_key_receives_shared_content_when_no_role",
+				AgentKey: "orchestrator",
+				// Role is zero value: without Role set, an orchestrator agent must receive
+				// shared content only (backward compatibility with existing callers that
+				// construct InjectionRequest without Role).
+				Filled: map[string]string{
+					"HarnessConstraints": "",
+				},
+				NotFilled: []string{
+					"IdentityExtension",
+					"ProtocolExtension",
+					"CodebaseContext",
+					"LanguagePatterns",
+					"OutputArtifactTemplate",
+					"CustomConstraints",
+					"ErrorHandlingExtension",
+					"ContextLimits",
+					"AvailableWorkflows",
+				},
+			},
 		},
 
 		TargetPathCases: []contracttest.TargetPathCase{

@@ -1032,20 +1032,57 @@ func TestContract_GHCP(t *testing.T) {
 			},
 		},
 
-		InjectionCases: map[string]string{
-			"HarnessConstraints": ghcpHarnessConstraints,
-		},
-
-		NotFilled: []string{
-			"IdentityExtension",
-			"ProtocolExtension",
-			"CodebaseContext",
-			"LanguagePatterns",
-			"OutputArtifactTemplate",
-			"CustomConstraints",
-			"ErrorHandlingExtension",
-			"ContextLimits",
-			"AvailableWorkflows",
+		AgentInjectionCases: []contracttest.InjectionCase{
+			{
+				// subagent_shared_content: a non-orchestrator agent receives only shared content.
+				// For GHCP CLI, HarnessConstraints shared content is the parallel tool calls instruction.
+				Name:    "subagent_shared_content",
+				AgentKey: "some-subagent",
+				// Role is zero value (non-orchestrator)
+				Filled: map[string]string{
+					"HarnessConstraints": ghcpHarnessConstraints,
+				},
+				NotFilled: []string{
+					"IdentityExtension",
+					"ProtocolExtension",
+					"CodebaseContext",
+					"LanguagePatterns",
+					"OutputArtifactTemplate",
+					"CustomConstraints",
+					"ErrorHandlingExtension",
+					"ContextLimits",
+					"AvailableWorkflows",
+				},
+			},
+			{
+				// orchestrator_role_non_orchestrator_key: an orchestrator-role agent with a
+				// non-"orchestrator" AgentKey must receive orchestrator-merged content.
+				// For GHCP CLI, HarnessInjectionsOrchestrator.md has no HarnessConstraints
+				// content, so the merged result equals the shared content.
+				// RED: compile-fails until domain.InjectionRequest gains a Role field (I1.1).
+				// RUNTIME: passes in both RED and GREEN phases for GHCP CLI (no orch-specific
+				// content means merged == shared), but the compile error ensures this test
+				// still blocks until Role is implemented.
+				Name:    "orchestrator_role_non_orchestrator_key",
+				AgentKey: "orchestrator-script",
+				Role:    domain.RoleOrchestrator,
+				Filled: map[string]string{
+					// No orchestrator-specific HarnessConstraints content for GHCP CLI;
+					// merged content equals shared content.
+					"HarnessConstraints": ghcpHarnessConstraints,
+				},
+				NotFilled: []string{
+					"IdentityExtension",
+					"ProtocolExtension",
+					"CodebaseContext",
+					"LanguagePatterns",
+					"OutputArtifactTemplate",
+					"CustomConstraints",
+					"ErrorHandlingExtension",
+					"ContextLimits",
+					"AvailableWorkflows",
+				},
+			},
 		},
 
 		TargetPathCases: []contracttest.TargetPathCase{

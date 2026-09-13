@@ -127,7 +127,7 @@ func buildSummaryLines(s domain.RunSummary) []summaryLine {
 		for _, a := range updated {
 			add(fmt.Sprintf("  ✓ %s:%s", a.Ref.Kind, a.Ref.Key), "success")
 			for _, delta := range a.Stale {
-				add(fmt.Sprintf("      %s: %s → %s", delta.Field, delta.Deployed, delta.Source), "muted")
+				add("      "+formatVersionDelta(delta), "muted")
 			}
 		}
 		add("", "body")

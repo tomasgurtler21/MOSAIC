@@ -98,7 +98,9 @@ func (p *planner) Build(ctx context.Context, in Input) (domain.Plan, error) {
 		}
 
 		// Surface a gap for each generic tool the harness cannot map.
-		if len(agent.Tools) > 0 {
+		// Suppressed for ActionUnchanged: the file will not be rewritten, so the current
+		// tool destination in the deployed file stands and no resolution action is needed.
+		if len(agent.Tools) > 0 && item.Action != domain.ActionUnchanged {
 			toolResult, toolErr := in.Module.Tools(domain.ToolRequest{
 				AgentKey:    agent.Key,
 				Generic:     agent.Tools,
@@ -110,7 +112,7 @@ func (p *planner) Build(ctx context.Context, in Input) (domain.Plan, error) {
 						gaps = append(gaps, domain.Gap{
 							Kind:    domain.GapUnmappedTool,
 							Subject: res.Generic,
-							Detail:  fmt.Sprintf("generic tool %q has no harness mapping for agent %q", res.Generic, agent.Key),
+							Detail: fmt.Sprintf("generic tool %q has no harness mapping for agent %q; add a tool_destinations entry in tool-config.yaml (project scope) or user-config.yaml (user scope) for a durable fix — manually editing the deployed agent file does not persist", res.Generic, agent.Key),
 						})
 					}
 				}

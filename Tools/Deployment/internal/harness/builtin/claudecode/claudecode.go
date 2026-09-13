@@ -224,7 +224,7 @@ func (m *module) skillTargetPath(req domain.TargetPathRequest) (string, error) {
 // For all other agent keys, only shared content is returned (existing behavior).
 func (m *module) Injection(req domain.InjectionRequest) (string, bool) {
 	sharedContent, sharedOk := m.injections[req.Name]
-	if req.AgentKey != "orchestrator" {
+	if req.Role != domain.RoleOrchestrator {
 		return sharedContent, sharedOk
 	}
 	orchContent, orchOk := m.orchInjections[req.Name]

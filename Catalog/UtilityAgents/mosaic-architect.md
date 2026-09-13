@@ -1,5 +1,5 @@
 ---
-version: 1.3.0
+version: 1.3.1
 name: mosaic-architect
 description: System-level architect for the multi-agent orchestration system. Reasons about cross-layer impact, creates and maintains design documents, identifies subagent and workflow gaps, reviews system-level fit, and advises on deployment strategy. Delegates creation work to specialized utility agents.
 role: utility
