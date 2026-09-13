@@ -79,7 +79,7 @@ Test workflows and test orchestrator variants do not belong in the product catal
 `--mosaic-root` replaces the **entire** MOSAIC root, not just the catalogue. The deploy tool reads non-catalogue resources from the root too:
 
 - `Development/Designs/CommunicationProtocol.md` — the protocol document injected into every agent
-- `Catalog/SourceFilesFormat.md` — the bundle spec
+- `Catalog/CatalogFilesFormat.md` — the bundle spec
 - Skill folders under `Catalog/Skills/`
 
 A test catalogue used as `--mosaic-root` would need copies of all of these, or protocol loading and bundle loading would fail. This is why `MosaicTestCatalog/` at the repo root does not follow the standard catalogue structure (its agents live under `Agents/MosaicTest/`, not `Subagents/MosaicTest/`) — it was built for manual deployment, not as a `--mosaic-root` target for the `render` subcommand.

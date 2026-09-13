@@ -176,7 +176,7 @@ Supporting documents, read when relevant to the agent at hand:
 | `Development/Designs/DeploymentBlocks/*.md` | Why a given canonical block says what it says |
 | `Development/Designs/DeployedSectionsBundle.md` | Bundle membership, versioning, staleness, the deploy algorithm |
 | `Development/Designs/InfrastructureAgentConcept.md` | Only when the agent is trigger-fired rather than workflow-routed |
-| `Catalog/SourceFilesFormat.md` | The tool-side restatement of the schema, plus skill and hook conventions. Where it disagrees with the design document, the design document is right |
+| `Catalog/CatalogFilesFormat.md` | The tool-side restatement of the schema, plus skill and hook conventions. Where it disagrees with the design document, the design document is right |
 
 ### Where Subagents Live
 

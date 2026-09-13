@@ -189,7 +189,7 @@ type Catalog interface {
 //
 // A directory is the MOSAIC root when it contains:
 //
-//	Catalog/SourceFilesFormat.md
+//	Catalog/CatalogFilesFormat.md
 //
 // Catalog/Workflows/Index.md is no longer a required marker; a root is recognised
 // identically whether or not that file exists. A directory carrying the marker only at

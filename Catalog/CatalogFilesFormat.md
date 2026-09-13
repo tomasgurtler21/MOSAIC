@@ -1,4 +1,4 @@
-# MOSAIC Generic Source Format Reference
+# MOSAIC Catalog Files Format Reference
 
 This document describes the conventions for MOSAIC generic source files:
 agent instruction files, skill files, and hook bundle manifests.
@@ -38,6 +38,40 @@ does not apply to them.
 | `role` | enum | `subagent` or `orchestrator`. Declares what the agent is; selects which canonical text it receives. Not `utility` — utility agents are outside the schema. |
 | `model` | string | Model placeholder (`{model-identifier}`) or a concrete model id in a deployed file. |
 | `tools` | flow-list or placeholder | Generic tool vocabulary (`{tool-permissions}` for the orchestrator). |
+
+### Generic tool vocabulary
+
+The `tools` field lists capabilities from a **closed vocabulary** of generic
+tool names. During deployment, the tool maps each generic name to one or more
+harness-specific tool names via the harness descriptor's `tools.mappings`
+block. The mapping is defined per harness; agent authors use only the generic
+names.
+
+| Generic name | Grants | Notes |
+|---|---|---|
+| `file_read` | Read files from the filesystem | |
+| `file_write` | Create or overwrite files | |
+| `file_edit` | Make targeted edits to existing files | |
+| `file_search` | Find files by name or glob pattern | |
+| `content_search` | Search file contents (grep / ripgrep) | |
+| `terminal` | Execute shell commands | Grant only when the agent runs something |
+| `subagent` | Launch or delegate to other agents | |
+| `user_interaction` | Ask the user questions mid-execution | |
+| `skill` | Load skill modules at runtime | |
+
+**This vocabulary is closed.** If an agent needs a tool not listed here (e.g.
+an MCP server), it becomes a custom tool mapping question at deploy time. The
+mapping can be answered permanently in `tool-config.yaml` under
+`tool_destinations` — see `Tools/Deployment/docs/configuration.md` for the
+full reference.
+
+The orchestrator uses the placeholder `{tool-permissions}` instead of listing
+individual tools; the deployment tool expands it to the harness's full tool
+set.
+
+The authoritative copy of this vocabulary is `Tools/Deployment/docs/descriptor-schema.md`
+§`tools.mappings`. This section restates it for agent authors; where the two
+disagree, `descriptor-schema.md` is right.
 
 A deployed agent file additionally carries MOSAIC bookkeeping fields written by
 the deployment tool. These are not source fields and are not present in generic

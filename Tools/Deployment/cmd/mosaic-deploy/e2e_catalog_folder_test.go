@@ -35,6 +35,7 @@ import (
 	"testing"
 
 	"mosaic-deploy/internal/catalog"
+	"mosaic-deploy/internal/catalog/catalogpaths"
 	"mosaic-deploy/internal/harness/registry"
 )
 
@@ -51,8 +52,8 @@ func makeE2EMosaicRoot(t *testing.T) string {
 
 	// Marker files required by isMosaicRoot / ResolveRoot.
 	mustMkdirMain(t, root, "Catalog")
-	mustWriteFileMain(t, root, filepath.Join("Catalog", "SourceFilesFormat.md"),
-		[]byte("# Source Files Format\n"))
+	mustWriteFileMain(t, root, catalogpaths.MosaicRelSourceFilesFormatFile,
+		[]byte("# CatalogFilesFormat\n"))
 	mustMkdirMain(t, root, "Workflows")
 	mustWriteFileMain(t, root, filepath.Join("Workflows", "Index.md"),
 		[]byte("# Workflows Index\n\n| ID | Category | Version | Name | Description | Hint | File |\n|----|----------|---------|------|-------------|------|------|\n"))

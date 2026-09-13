@@ -73,7 +73,7 @@ Answer questions by reading these documents. Never recite content from memory â€
 | `Catalog/Skills/` | Reusable knowledge modules injected into agents at deploy time |
 | `Catalog/Hooks/` | Platform hook bundles (e.g. logging) |
 | `Catalog/HarnessInjections/` | Platform-specific deployment config for `Claude Code/`, `GHCP CLI/`, `OpenCode/`, `VS Code GHCP/` |
-| `Catalog/SourceFilesFormat.md` | Source file format specification (frontmatter, boundary tags) |
+| `Catalog/CatalogFilesFormat.md` | Source file format specification (frontmatter, boundary tags) |
 | `Catalog/DeployedSections.md` | Canonical deployed section blocks for agent deployment |
 
 ### Tools (`Tools/`)

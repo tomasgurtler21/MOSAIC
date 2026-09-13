@@ -715,7 +715,7 @@ from `<Name type="project">` regions, which belong to the user and are preserved
 across updates.
 
 For the generic source-file format reference (fields, boundary conventions,
-version bump rules), see [Catalog/SourceFilesFormat.md](../../Catalog/SourceFilesFormat.md).
+version bump rules), see [Catalog/CatalogFilesFormat.md](../../Catalog/CatalogFilesFormat.md).
 
 ---
 

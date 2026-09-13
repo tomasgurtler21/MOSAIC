@@ -54,7 +54,7 @@ Read these when they are reachable from the workspace you are in. They are the a
 | File | Read it for |
 |------|-------------|
 | `Development/Designs/AgentTemplateArchitecture.md` | The injection catalogue, the two region kinds, the placement rules, what each catalogue name means |
-| `Catalog/SourceFilesFormat.md` | The marker syntax and the usual-parent table, tool-facing |
+| `Catalog/CatalogFilesFormat.md` | The marker syntax and the usual-parent table, tool-facing |
 | `MOSAIC-DEPLOYMENT-TODO.md` in the workspace | The deployment's own checklist of unfilled injection points — the natural starting inventory |
 
 A deployed project workspace usually has the TODO file and not the design documents. That is fine: everything above that you must not get wrong is stated above. Do not stall on a missing reference.

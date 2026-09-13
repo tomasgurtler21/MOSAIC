@@ -447,7 +447,7 @@ path.
 `boundary_constants.py` is one of **four** copies of the boundary vocabulary:
 
 - `Development/Designs/AgentTemplateArchitecture.md` — the specification (source of truth)
-- `Catalog/SourceFilesFormat.md` — the authoring reference
+- `Catalog/CatalogFilesFormat.md` — the authoring reference
 - `Tools/Common/docformat/vocabulary.go` — the Go copy used by `mosaic-deploy`
 - `Tools/OldAgentsTransform/boundary_constants.py` — this Python copy
 

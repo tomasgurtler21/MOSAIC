@@ -13,7 +13,7 @@ package catalogpaths_test
 //   - CatalogDirName equals "Catalog".
 //   - Each MosaicRel* and HarnessContentDir* constant equals the value the
 //     corresponding consumer resolves today.
-//   - MosaicRelSourceFilesFormatFile and MosaicRelBundleFile are exactly
+//   - MosaicRelSourceFilesFormatFile (Catalog/CatalogFilesFormat.md) and MosaicRelBundleFile are exactly
 //     CatalogDirName + "/" + their catalog-root-relative counterparts.
 //   - MosaicRelHarnessInjectionsDir equals "Catalog/HarnessInjections" (target layout).
 //
@@ -65,9 +65,9 @@ func TestRelConstants_MatchCurrentConsumerLiterals(t *testing.T) {
 		{"RelHooksDir", catalogpaths.RelHooksDir, "Hooks"},
 		// Workflows: workflows directory (unchanged across restructure)
 		{"RelWorkflowsDir", catalogpaths.RelWorkflowsDir, "Workflows"},
-		// root.go marker: target layout Catalog/SourceFilesFormat.md
+		// root.go marker: target layout Catalog/CatalogFilesFormat.md
 		// (catalog-root-relative portion without the leading "Catalog/")
-		{"RelSourceFilesFormatFile", catalogpaths.RelSourceFilesFormatFile, "SourceFilesFormat.md"},
+		{"RelSourceFilesFormatFile", catalogpaths.RelSourceFilesFormatFile, "CatalogFilesFormat.md"},
 		// bundle.go: target layout Catalog/DeployedSections.md
 		// (catalog-root-relative portion without the leading "Catalog/")
 		{"RelBundleFile", catalogpaths.RelBundleFile, "DeployedSections.md"},
@@ -111,8 +111,8 @@ func TestMosaicRelConstants_MatchCurrentConsumerLiterals(t *testing.T) {
 	}{
 		// bundle.go BundleSourceRelPath: target layout "Catalog/DeployedSections.md"
 		{"MosaicRelBundleFile", catalogpaths.MosaicRelBundleFile, "Catalog/DeployedSections.md"},
-		// root.go isMosaicRoot: target layout "Catalog/SourceFilesFormat.md"
-		{"MosaicRelSourceFilesFormatFile", catalogpaths.MosaicRelSourceFilesFormatFile, "Catalog/SourceFilesFormat.md"},
+		// root.go isMosaicRoot: target layout "Catalog/CatalogFilesFormat.md"
+		{"MosaicRelSourceFilesFormatFile", catalogpaths.MosaicRelSourceFilesFormatFile, "Catalog/CatalogFilesFormat.md"},
 		// The parent directory that holds per-harness injection content: target layout
 		{"MosaicRelHarnessInjectionsDir", catalogpaths.MosaicRelHarnessInjectionsDir, "Catalog/HarnessInjections"},
 	}
@@ -327,10 +327,10 @@ func TestBuilders_ProducePathsMatchingCurrentConsumers(t *testing.T) {
 		{"WorkflowsDir",
 			catalogpaths.WorkflowsDir(root),
 			filepath.Join(root, "Workflows")},
-		// root.go isMosaicRoot: target layout filepath.Join(root, "SourceFilesFormat.md")
+		// root.go isMosaicRoot: target layout filepath.Join(root, "CatalogFilesFormat.md")
 		{"SourceFilesFormatFile",
 			catalogpaths.SourceFilesFormatFile(root),
-			filepath.Join(root, "SourceFilesFormat.md")},
+			filepath.Join(root, "CatalogFilesFormat.md")},
 		// bundle.go: target layout filepath.Join(root, "DeployedSections.md")
 		{"BundleFile",
 			catalogpaths.BundleFile(root),

@@ -139,7 +139,7 @@ MOSAIC/
 │   │   ├── GHCP CLI/
 │   │   ├── OpenCode/
 │   │   └── VS Code GHCP/
-│   ├── SourceFilesFormat.md         # Source file format specification (frontmatter, boundary tags)
+│   ├── CatalogFilesFormat.md        # Catalog file format specification (frontmatter, boundary tags, tools)
 │   └── DeployedSections.md          # Canonical deployed section blocks for agent deployment
 │
 ├── Tools/                           # Go-based CLI tooling

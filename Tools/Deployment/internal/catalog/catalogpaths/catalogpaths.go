@@ -36,7 +36,7 @@ const (
 	RelSkillsDir             = "Skills"
 	RelHooksDir              = "Hooks"
 	RelWorkflowsDir          = "Workflows"
-	RelSourceFilesFormatFile = "SourceFilesFormat.md"
+	RelSourceFilesFormatFile = "CatalogFilesFormat.md"
 	RelBundleFile            = "DeployedSections.md"
 )
 
@@ -159,7 +159,7 @@ func WorkflowsDir(catalogRoot string) string {
 	return filepath.Join(catalogRoot, RelWorkflowsDir)
 }
 
-// SourceFilesFormatFile returns the path to the SourceFilesFormat.md marker document.
+// SourceFilesFormatFile returns the path to the CatalogFilesFormat.md marker document.
 func SourceFilesFormatFile(catalogRoot string) string {
 	return filepath.Join(catalogRoot, RelSourceFilesFormatFile)
 }

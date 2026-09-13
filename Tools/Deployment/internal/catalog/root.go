@@ -38,12 +38,12 @@ func resolveRoot(dir string) (string, error) {
 // isMosaicRoot returns true when dir contains the required MOSAIC repository marker file
 // at its Catalog/-prefixed location:
 //
-//	Catalog/SourceFilesFormat.md
+//	Catalog/CatalogFilesFormat.md
 //
 // Catalog/Workflows/Index.md is no longer a required marker; a root is recognised
 // identically whether or not that file exists.
 //
-// The legacy marker location (Catalog/Agents/Generic/SourceFilesFormat.md) is not
+// The legacy marker location (Catalog/Agents/Generic/CatalogFilesFormat.md) is not
 // accepted — only the target layout path satisfies the check.
 func isMosaicRoot(dir string) bool {
 	_, err := os.Stat(filepath.Join(dir, catalogpaths.MosaicRelSourceFilesFormatFile))

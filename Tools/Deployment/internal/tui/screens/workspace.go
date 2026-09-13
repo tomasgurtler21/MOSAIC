@@ -39,7 +39,7 @@ const (
 	// placeholder "/path/to/catalog". Guidance states that the folder supplies the agents
 	// and workflows offered in this session and may override individual skills and hooks by
 	// supplying same-keyed ones, and that the protocol document, the deployed-sections
-	// bundle, and SourceFilesFormat.md always come from the MOSAIC root regardless.
+	// bundle, and CatalogFilesFormat.md always come from the MOSAIC root regardless.
 	PathKindCatalogFolder
 )
 
@@ -315,7 +315,7 @@ func (s *WorkspaceScreen) View() string {
 		subtitle = "Enter the catalogue directory supplying agents and workflows for this session."
 		guidanceText = "The folder supplies the agents and workflows offered in this session.\n" +
 			"It may also override individual skills and hooks by supplying same-keyed ones.\n" +
-			"The protocol document, the deployed-sections bundle, and SourceFilesFormat.md\n" +
+			"The protocol document, the deployed-sections bundle, and CatalogFilesFormat.md\n" +
 			"always come from the MOSAIC root regardless of the catalogue folder.\n"
 	default: // PathKindDirectory
 		title = "Workspace Path"
