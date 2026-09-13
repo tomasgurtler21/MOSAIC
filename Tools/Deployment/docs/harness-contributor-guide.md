@@ -15,7 +15,7 @@ If your harness can be fully described by:
 
 …then a descriptor-only harness requires no code at all. Create a single YAML file and register it with MOSAIC. See [Descriptor-only harness](#descriptor-only-harness).
 
-### External module
+### When descriptor-only isn't enough
 
 If your harness needs:
 - Logic that varies by agent key (e.g. orchestrators get a different configuration)
@@ -23,11 +23,15 @@ If your harness needs:
 - Complex path generation
 - Integration with an external system
 
-…then build an external module: a standalone executable that MOSAIC launches as a subprocess. See [External module](#external-module).
+…then a descriptor can't express it. For MOSAIC repository contributions, this means a built-in module. For use outside the repository, see [External module](#external-module) below.
 
-### Built-in (internal only)
+### Built-in
 
-Built-in harnesses are compiled into MOSAIC's binary. This is only for harnesses maintained in the MOSAIC repository itself (OpenCode, Claude Code, etc.). Third-party contributors should use the external module tier instead.
+Built-in harnesses are compiled into MOSAIC's binary. The existing harnesses (OpenCode, Claude Code, etc.) use this tier, and contributors adding new harness support to the MOSAIC repository should use it too when a descriptor-only approach isn't sufficient.
+
+### External module (for your own projects)
+
+If you're building harness support **outside the MOSAIC repository** — for a private harness, a custom integration, or your own catalog — the external module tier lets you do that without modifying MOSAIC's source. An external module is a standalone executable that MOSAIC launches as a subprocess. See [External module](#external-module) for the full implementation guide.
 
 ---
 
@@ -35,7 +39,7 @@ Built-in harnesses are compiled into MOSAIC's binary. This is only for harnesses
 
 ### Create the descriptor file
 
-Create a YAML file anywhere MOSAIC can load it. The file must follow the [descriptor schema](descriptor-schema.md). A minimal example:
+Create a YAML file named `harness.yaml` inside a subfolder of `MosaicDeploy/harnesses/` in your target project (e.g. `MosaicDeploy/harnesses/my-harness/harness.yaml`). MOSAIC discovers it automatically at startup. The file must follow the [descriptor schema](descriptor-schema.md). A minimal example:
 
 ```yaml
 schema_version: "1"
