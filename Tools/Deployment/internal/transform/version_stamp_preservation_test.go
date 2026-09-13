@@ -1,17 +1,23 @@
 package transform_test
 
-// version_stamp_preservation_test.go covers version-stamp frontmatter field preservation
+// version_stamp_preservation_test.go covers version-stamp frontmatter field behavior
 // when the incoming version value is empty (no new stamp to write).
 //
-// The bug: touchedKeys entries for mosaic_harness_version, mosaic_tool_mappings_version,
-// and mosaic_bundle_version are set unconditionally BEFORE applyVersionStamp is called.
-// When applyVersionStamp is a no-op (empty incoming value), the key remains in touchedKeys
-// and the Step 5c preservation pass skips it, silently dropping the previously-deployed
-// value instead of carrying it forward.
+// Zombie-stamp cleanup (Stage 1): when ToolMappingsVersion is empty and the deployed file
+// carries a non-empty mosaic_tool_mappings_version (a "zombie stamp" from a previous run),
+// the field must be actively removed from the output and the removal must be recorded in
+// the Report.Fields audit trail. This makes the staleness loop converge after one cleanup
+// run rather than indefinitely preserving a stale hash.
+//
+// Preservation tests for harness_version and bundle_version are unrelated to the zombie
+// cleanup and must continue to pass unchanged.
 //
 // Tests:
-//   - Empty ToolMappingsVersion: deployed mosaic_tool_mappings_version is preserved in
-//     the output (RED -- fails until I2.1 moves the touchedKeys assignment)
+//   - Empty ToolMappingsVersion + deployed has non-empty stamp: zombie stamp removed from
+//     output (RED -- fails until zombie-removal block added to applyFrontmatter)
+//   - Empty ToolMappingsVersion + deployed has no stamp: no field written (no-op / idempotent)
+//   - Empty ToolMappingsVersion + deployed has non-empty stamp: Report.Fields records a
+//     removal FieldChange with empty After (RED -- fails until audit trail entry added)
 //   - Empty TransformVersion: deployed mosaic_harness_version is preserved in the output
 //     (RED -- fails until I2.1 moves the touchedKeys assignment)
 //   - Non-applicable bundle: deployed mosaic_bundle_version is preserved in the output
@@ -59,7 +65,7 @@ Body.
 
 // deployedWithToolMappingsVersion is a deployed file carrying a mosaic_tool_mappings_version
 // stamp written by a previous run. On the next run with an empty ToolMappingsVersion, this
-// value must be preserved unchanged (not silently dropped).
+// zombie stamp must be actively removed from the output (zombie-stamp cleanup).
 const deployedWithToolMappingsVersion = `---
 mosaic_id: 300
 version: 1.0.0
@@ -101,20 +107,30 @@ mosaic_tool_mappings_version: hash-v1
 Body.
 `
 
+// deployedWithoutToolMappingsVersion is a deployed file with no mosaic_tool_mappings_version
+// field. Used to verify the no-op / idempotent case: when both the incoming ToolMappingsVersion
+// and the deployed stamp are absent, no field is written and no audit entry is produced.
+const deployedWithoutToolMappingsVersion = `---
+mosaic_id: 300
+version: 1.0.0
+---
+Body.
+`
+
 // ---------------------------------------------------------------------------
-// AC2.1: Empty ToolMappingsVersion preserves deployed mosaic_tool_mappings_version
+// Zombie stamp removal: empty ToolMappingsVersion + deployed stamp present = field removed
 // ---------------------------------------------------------------------------
 
-// TestVersionStampPreservation_EmptyToolMappingsVersion_PreservesDeployedValue asserts
-// that when ToolMappingsVersion is empty in the transform request (no new hash to write),
-// the previously-deployed mosaic_tool_mappings_version value is preserved in the output.
+// TestVersionStampPreservation_EmptyToolMappingsVersion_RemovesZombieStamp asserts that
+// when ToolMappingsVersion is empty in the transform request AND the deployed file carries
+// a non-empty mosaic_tool_mappings_version stamp (a zombie from a previous run), the field
+// is actively removed from the output so the staleness loop converges.
 //
-// This test is RED: the current applyFrontmatter sets touchedKeys["mosaic_tool_mappings_version"]
-// unconditionally before calling applyVersionStamp, so when applyVersionStamp returns nil
-// (empty value), the key is still in touchedKeys and Step 5c's preservation pass skips it,
-// dropping the deployed value. Until I2.1 moves the assignment to after the call (conditional
-// on non-nil return), the deployed value is silently lost.
-func TestVersionStampPreservation_EmptyToolMappingsVersion_PreservesDeployedValue(t *testing.T) {
+// This test is RED: the current implementation preserves deployed stamps when the incoming
+// value is empty (correct for harness_version and bundle_version, but wrong for
+// tool_mappings_version when no tool mappings are active). Until the zombie-removal block
+// is added to applyFrontmatter, the deployed stamp survives into the output unchanged.
+func TestVersionStampPreservation_EmptyToolMappingsVersion_RemovesZombieStamp(t *testing.T) {
 	mod := newDescriptorModule(t, versionStampDescriptorYAML, "inline:version-stamp")
 	req := transform.Request{
 		Source:              []byte(versionStampSource),
@@ -124,7 +140,7 @@ func TestVersionStampPreservation_EmptyToolMappingsVersion_PreservesDeployedValu
 		Module:              mod,
 		Model:               domain.ModelSelection{Origin: domain.OriginUnresolved},
 		Scope:               domain.ScopeProject,
-		ToolMappingsVersion: "", // empty -> applyVersionStamp is a no-op; deployed value must survive
+		ToolMappingsVersion: "", // empty + deployed has stamp -> zombie cleanup must remove it
 	}
 
 	result, err := transform.Apply(req)
@@ -136,17 +152,107 @@ func TestVersionStampPreservation_EmptyToolMappingsVersion_PreservesDeployedValu
 		t.Fatalf("Parse output: %v", err)
 	}
 
-	v, ok := doc.Frontmatter().Get("mosaic_tool_mappings_version")
-	if !ok {
-		t.Errorf("mosaic_tool_mappings_version absent from output after Update with empty ToolMappingsVersion; "+
-			"when no new version is stamped, the deployed value must be preserved by the Step 5c "+
-			"preservation pass (AC2.1); frontmatter keys: %v", doc.Frontmatter().Keys())
+	_, ok := doc.Frontmatter().Get("mosaic_tool_mappings_version")
+	if ok {
+		t.Errorf("mosaic_tool_mappings_version present in output after Update with empty ToolMappingsVersion; "+
+			"when no tool mappings are active, a previously-deployed stamp is a zombie and must be "+
+			"removed so the staleness loop converges; frontmatter keys: %v", doc.Frontmatter().Keys())
+	}
+}
+
+// ---------------------------------------------------------------------------
+// No-op / idempotent: empty ToolMappingsVersion + no deployed stamp = no field written
+// ---------------------------------------------------------------------------
+
+// TestVersionStampPreservation_EmptyToolMappingsVersion_NoopWhenDeployedHasNoStamp asserts
+// that when ToolMappingsVersion is empty AND the deployed file carries no
+// mosaic_tool_mappings_version field, the output also has no such field. This is the
+// idempotent case: nothing to remove, nothing to write.
+//
+// This test guards against accidentally adding a blank or default field to the output.
+func TestVersionStampPreservation_EmptyToolMappingsVersion_NoopWhenDeployedHasNoStamp(t *testing.T) {
+	mod := newDescriptorModule(t, versionStampDescriptorYAML, "inline:version-stamp")
+	req := transform.Request{
+		Source:              []byte(versionStampSource),
+		Deployed:            []byte(deployedWithoutToolMappingsVersion),
+		Kind:                domain.ArtifactAgent,
+		Key:                 "version-stamp-tool-mappings-noop-test",
+		Module:              mod,
+		Model:               domain.ModelSelection{Origin: domain.OriginUnresolved},
+		Scope:               domain.ScopeProject,
+		ToolMappingsVersion: "", // empty + deployed also has no stamp -> no-op, field must stay absent
+	}
+
+	result, err := transform.Apply(req)
+	if err != nil {
+		t.Fatalf("Apply: %v", err)
+	}
+	doc, err := docformat.Parse(result.Output)
+	if err != nil {
+		t.Fatalf("Parse output: %v", err)
+	}
+
+	_, ok := doc.Frontmatter().Get("mosaic_tool_mappings_version")
+	if ok {
+		t.Errorf("mosaic_tool_mappings_version written to output when both incoming ToolMappingsVersion "+
+			"and deployed stamp are absent; the no-op path must leave the field absent (idempotent); "+
+			"frontmatter keys: %v", doc.Frontmatter().Keys())
+	}
+}
+
+// ---------------------------------------------------------------------------
+// Audit trail: zombie stamp removal must produce a FieldChange in Report.Fields
+// ---------------------------------------------------------------------------
+
+// TestVersionStampPreservation_EmptyToolMappingsVersion_AuditTrailRecordsRemoval asserts
+// that when a zombie mosaic_tool_mappings_version stamp is removed, the removal is recorded
+// in Report.Fields as a FieldChange with a non-empty Before and an empty After.
+//
+// This test is RED: the current implementation does not perform zombie removal and therefore
+// produces no FieldChange for mosaic_tool_mappings_version under this input shape. Until the
+// zombie-removal block appends a FieldChange entry, Report.Fields will not contain the
+// expected removal record.
+func TestVersionStampPreservation_EmptyToolMappingsVersion_AuditTrailRecordsRemoval(t *testing.T) {
+	mod := newDescriptorModule(t, versionStampDescriptorYAML, "inline:version-stamp")
+	req := transform.Request{
+		Source:              []byte(versionStampSource),
+		Deployed:            []byte(deployedWithToolMappingsVersion),
+		Kind:                domain.ArtifactAgent,
+		Key:                 "version-stamp-tool-mappings-audit-test",
+		Module:              mod,
+		Model:               domain.ModelSelection{Origin: domain.OriginUnresolved},
+		Scope:               domain.ScopeProject,
+		ToolMappingsVersion: "", // empty + deployed has stamp -> removal must be audited
+	}
+
+	result, err := transform.Apply(req)
+	if err != nil {
+		t.Fatalf("Apply: %v", err)
+	}
+
+	var removalEntry *transform.FieldChange
+	for i := range result.Report.Fields {
+		if result.Report.Fields[i].Key == "mosaic_tool_mappings_version" {
+			removalEntry = &result.Report.Fields[i]
+			break
+		}
+	}
+
+	if removalEntry == nil {
+		t.Errorf("Report.Fields contains no FieldChange for \"mosaic_tool_mappings_version\"; "+
+			"zombie stamp removal must be audited with a FieldChange entry; "+
+			"Report.Fields: %+v", result.Report.Fields)
 		return
 	}
-	if v.Kind != domain.KindScalar || v.Scalar != "hash-v1" {
-		t.Errorf("mosaic_tool_mappings_version: want KindScalar %q, got kind=%v scalar=%q; "+
-			"the deployed field value must be preserved verbatim when ToolMappingsVersion is empty (AC2.1)",
-			"hash-v1", v.Kind, v.Scalar)
+	if removalEntry.Before == "" {
+		t.Errorf("Report.Fields[mosaic_tool_mappings_version].Before is empty; "+
+			"want the previously-deployed stamp value (non-empty Before signals removal, not add); "+
+			"entry: %+v", *removalEntry)
+	}
+	if removalEntry.After != "" {
+		t.Errorf("Report.Fields[mosaic_tool_mappings_version].After = %q; "+
+			"want empty string (empty After signals removal); entry: %+v",
+			removalEntry.After, *removalEntry)
 	}
 }
 

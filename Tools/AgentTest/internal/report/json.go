@@ -28,6 +28,22 @@ type wireResult struct {
 	// CatalogFolder is the agent catalog directory used for this run.
 	// Additive-only: new field, never removed or retyped.
 	CatalogFolder string `json:"catalog_folder"`
+
+	// Errors is the list of report-level error conditions.
+	// Always [] (never null) when empty.
+	Errors []wireReportError `json:"errors"`
+
+	// ToolVersion is the version of mosaic-agent-test that produced this report.
+	// Additive-only: omitempty ensures pre-feature parsers ignore it and
+	// pre-feature report JSON (lacking the field) deserializes with empty string.
+	ToolVersion string `json:"tool_version,omitempty"`
+}
+
+// wireReportError is the stable wire shape for one report-level error condition.
+type wireReportError struct {
+	Kind   string `json:"kind"`
+	Detail string `json:"detail"`
+	Count  int    `json:"count"`
 }
 
 type wireTestReport struct {
@@ -164,6 +180,15 @@ func toWireResult(r Result) wireResult {
 		counts[string(v)] = n
 	}
 
+	errors := make([]wireReportError, 0, len(r.Errors))
+	for _, e := range r.Errors {
+		errors = append(errors, wireReportError{
+			Kind:   string(e.Kind),
+			Detail: e.Detail,
+			Count:  e.Count,
+		})
+	}
+
 	return wireResult{
 		SchemaVersion:          r.SchemaVersion,
 		SuiteID:                r.SuiteID,
@@ -174,6 +199,8 @@ func toWireResult(r Result) wireResult {
 		TotalCost:              toWireCost(r.TotalCost),
 		InfrastructureFailures: r.InfrastructureFailures,
 		CatalogFolder:          r.CatalogFolder,
+		Errors:                 errors,
+		ToolVersion:            r.ToolVersion,
 	}
 }
 

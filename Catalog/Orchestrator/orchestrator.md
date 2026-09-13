@@ -1,5 +1,5 @@
 ---
-version: 7.4.1
+version: 7.5.0
 name: orchestrator
 description: Central coordinator that manages multi-agent workflow execution, routing tasks to subagents and maintaining execution state
 role: orchestrator
@@ -672,6 +672,8 @@ TIER 3: Human Escalation
 • Generate detailed error report with context (phase, subagent, error, attempts made)
 • Await human guidance and apply their decision
 ```
+
+**E503 escalates, never bypasses.** When E503 retries exhaust, escalate to the user -- never resolve it by re-dispatching with `human_in_the_loop: false`. Dropping HITL silently overrides a workflow author's decision about where a human must review. The user may waive the gate explicitly after you escalate; you may not waive it for them.
 
 ## State Recovery (After Restart)
 

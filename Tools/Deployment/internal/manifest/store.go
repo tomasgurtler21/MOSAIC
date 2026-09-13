@@ -83,6 +83,7 @@ type yamlManifest struct {
 	HarnessID     string              `yaml:"harness_id"`
 	UpdatedAt     string              `yaml:"updated_at"`
 	Entries       []yamlManifestEntry `yaml:"entries"`
+	ToolVersion   string              `yaml:"tool_version,omitempty"`
 }
 
 type yamlManifestEntry struct {
@@ -163,6 +164,7 @@ func (s *store) Load(workspaceRoot string) (Snapshot, error) {
 		SchemaVersion: raw.SchemaVersion,
 		HarnessID:     raw.HarnessID,
 		UpdatedAt:     updatedAt,
+		ToolVersion:   raw.ToolVersion,
 	}
 
 	for _, e := range raw.Entries {
@@ -207,6 +209,7 @@ func (s *store) Save(workspaceRoot string, m domain.Manifest) error {
 		SchemaVersion: m.SchemaVersion,
 		HarnessID:     m.HarnessID,
 		UpdatedAt:     m.UpdatedAt.UTC().Format(time.RFC3339),
+		ToolVersion:   m.ToolVersion,
 	}
 
 	for _, e := range m.Entries {

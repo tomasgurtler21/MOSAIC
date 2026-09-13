@@ -1,6 +1,6 @@
 package resultsummary_test
 
-// Tests for Stage 1 Report Content changes to RenderVersionSummary.
+// Tests for Stage 1 Report Content changes to RenderUserSummary.
 //
 // These tests specify the desired rendering behavior after the bug-fix batch:
 //   - No [partial] suffix appears in any table output.
@@ -57,26 +57,26 @@ func stage1VersionSummary() resultsummary.VersionSummary {
 	}
 }
 
-// TestRenderVersionSummary_NoPartialSuffix asserts that the rendered output
+// TestRenderUserSummary_NoPartialSuffix asserts that the rendered output
 // contains no "[partial]" substring anywhere, even when HasPartial is true.
 // This fails against the current implementation which calls partialSuffix and
 // appends " [partial]" to pass-rate cells in all three section renderers.
-func TestRenderVersionSummary_NoPartialSuffix(t *testing.T) {
+func TestRenderUserSummary_NoPartialSuffix(t *testing.T) {
 	v := stage1VersionSummary()
-	out := resultsummary.RenderVersionSummary(v)
+	out := resultsummary.RenderUserSummary(v)
 
 	if strings.Contains(out, "[partial]") {
 		t.Errorf("output contains [partial] suffix; it must not appear in any table.\ngot:\n%s", out)
 	}
 }
 
-// TestRenderVersionSummary_NoAvgDurationColumn asserts that the Model Results
+// TestRenderUserSummary_NoAvgDurationColumn asserts that the Model Results
 // table has no "Avg Duration" column header and no duration cell value. The
 // fixture's AvgDuration is 2s; both the column header and any "2s" cell must
 // be absent after the fix.
-func TestRenderVersionSummary_NoAvgDurationColumn(t *testing.T) {
+func TestRenderUserSummary_NoAvgDurationColumn(t *testing.T) {
 	v := stage1VersionSummary()
-	out := resultsummary.RenderVersionSummary(v)
+	out := resultsummary.RenderUserSummary(v)
 
 	if strings.Contains(out, "Avg Duration") {
 		t.Errorf("output contains \"Avg Duration\" column header; it must be removed from Model Results.\ngot:\n%s", out)
@@ -88,13 +88,13 @@ func TestRenderVersionSummary_NoAvgDurationColumn(t *testing.T) {
 	}
 }
 
-// TestRenderVersionSummary_SectionOrder asserts that the three comparison
-// sections appear in the required order: Model Comparison before Harness
+// TestRenderUserSummary_SectionHeaderOrder asserts that the three comparison
+// section headers appear in the required order: Model Comparison before Harness
 // Comparison, and Harness Comparison before Model Results. The current
 // implementation emits Model Results first; this test fails against it.
-func TestRenderVersionSummary_SectionOrder(t *testing.T) {
+func TestRenderUserSummary_SectionHeaderOrder(t *testing.T) {
 	v := stage1VersionSummary()
-	out := resultsummary.RenderVersionSummary(v)
+	out := resultsummary.RenderUserSummary(v)
 
 	mcIdx := strings.Index(out, "## Model Comparison")
 	hcIdx := strings.Index(out, "## Harness Comparison")
@@ -118,14 +118,14 @@ func TestRenderVersionSummary_SectionOrder(t *testing.T) {
 	}
 }
 
-// TestRenderVersionSummary_MarkerOrder asserts that the generated marker
+// TestRenderUserSummary_MarkerOrder asserts that the generated marker
 // pairs appear in the required order matching the corrected section order.
 // Both opening markers and closing markers must be present and correctly
 // sequenced. This fails against the current implementation because the
 // generated:model-results marker currently precedes generated:model-comparison.
-func TestRenderVersionSummary_MarkerOrder(t *testing.T) {
+func TestRenderUserSummary_MarkerOrder(t *testing.T) {
 	v := stage1VersionSummary()
-	out := resultsummary.RenderVersionSummary(v)
+	out := resultsummary.RenderUserSummary(v)
 
 	mcMarker := strings.Index(out, "<!-- generated:model-comparison -->")
 	hcMarker := strings.Index(out, "<!-- generated:harness-comparison -->")
@@ -160,14 +160,14 @@ func TestRenderVersionSummary_MarkerOrder(t *testing.T) {
 	}
 }
 
-// TestRenderVersionSummary_CostPerHundredTests asserts that cost cells in
+// TestRenderUserSummary_CostPerHundredTests asserts that cost cells in
 // all tables show the per-100-tests format (suffix "/100t"). The fixture has
 // TotalCost=1.50 and TestCount=10, so the normalized value is $15.00/100t.
 // This fails against the current implementation which shows "$1.50" without
 // normalization.
-func TestRenderVersionSummary_CostPerHundredTests(t *testing.T) {
+func TestRenderUserSummary_CostPerHundredTests(t *testing.T) {
 	v := stage1VersionSummary()
-	out := resultsummary.RenderVersionSummary(v)
+	out := resultsummary.RenderUserSummary(v)
 
 	if !strings.Contains(out, "/100t") {
 		t.Errorf("output has no \"/100t\" suffix in cost cells; all cost cells must use per-100-tests format.\ngot:\n%s", out)
@@ -178,22 +178,22 @@ func TestRenderVersionSummary_CostPerHundredTests(t *testing.T) {
 	}
 }
 
-// TestRenderVersionSummary_CostPerHundredTests_CorrectValue asserts that the
+// TestRenderUserSummary_CostPerHundredTests_CorrectValue asserts that the
 // normalized cost value is computed correctly. TotalCost=1.50, TestCount=10 ->
 // 1.50/10*100 = $15.00/100t.
-func TestRenderVersionSummary_CostPerHundredTests_CorrectValue(t *testing.T) {
+func TestRenderUserSummary_CostPerHundredTests_CorrectValue(t *testing.T) {
 	v := stage1VersionSummary()
-	out := resultsummary.RenderVersionSummary(v)
+	out := resultsummary.RenderUserSummary(v)
 
 	if !strings.Contains(out, "$15.00/100t") {
 		t.Errorf("expected normalized cost \"$15.00/100t\" (1.50 / 10 tests * 100) in output.\ngot:\n%s", out)
 	}
 }
 
-// TestRenderVersionSummary_CostWarningPreserved_StillShowsMarker asserts
+// TestRenderUserSummary_CostWarningPreserved_StillShowsMarker asserts
 // that when CostWarning is true, the "[cost?]" warning marker is still used
 // instead of any computed per-100-tests value. The warning takes priority.
-func TestRenderVersionSummary_CostWarningPreserved_StillShowsMarker(t *testing.T) {
+func TestRenderUserSummary_CostWarningPreserved_StillShowsMarker(t *testing.T) {
 	v := stage1VersionSummary()
 
 	// Set CostWarning on both ByModel and BySuite entries.
@@ -211,7 +211,7 @@ func TestRenderVersionSummary_CostWarningPreserved_StillShowsMarker(t *testing.T
 	v.ByModel["claude-sonnet-4-6"]["claude-code"] = warningStats
 	v.BySuite["suite-a"]["claude-sonnet-4-6"]["claude-code"] = warningStats
 
-	out := resultsummary.RenderVersionSummary(v)
+	out := resultsummary.RenderUserSummary(v)
 
 	if !strings.Contains(out, "[cost?]") {
 		t.Errorf("output missing [cost?] warning marker when CostWarning=true; warning must take priority over per-100-tests computation.\ngot:\n%s", out)
@@ -221,12 +221,12 @@ func TestRenderVersionSummary_CostWarningPreserved_StillShowsMarker(t *testing.T
 	}
 }
 
-// TestRenderVersionSummary_NoDurationInOutput_Regression asserts that the
+// TestRenderUserSummary_NoDurationInOutput_Regression asserts that the
 // text "Avg Duration" does not appear in the rendered Markdown, guarding
 // against re-introduction of the removed column. Companion to
-// TestRenderVersionSummary_NoAvgDurationColumn but checks all harness/model
+// TestRenderUserSummary_NoAvgDurationColumn but checks all harness/model
 // stat combinations, including multi-model summaries.
-func TestRenderVersionSummary_NoDurationInOutput_MultiModel(t *testing.T) {
+func TestRenderUserSummary_NoDurationInOutput_MultiModel(t *testing.T) {
 	v := resultsummary.VersionSummary{
 		Version:     "v1.0.0",
 		ReportCount: 2,
@@ -286,7 +286,7 @@ func TestRenderVersionSummary_NoDurationInOutput_MultiModel(t *testing.T) {
 		},
 	}
 
-	out := resultsummary.RenderVersionSummary(v)
+	out := resultsummary.RenderUserSummary(v)
 
 	if strings.Contains(out, "Avg Duration") {
 		t.Errorf("output contains \"Avg Duration\" column header in multi-model summary; it must be removed from all Model Results tables.\ngot:\n%s", out)

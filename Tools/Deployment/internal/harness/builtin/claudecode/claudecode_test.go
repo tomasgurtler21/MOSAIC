@@ -96,6 +96,21 @@ func agentFixturesDir(t *testing.T) string {
 	return abs
 }
 
+// frozenCatalogRoot returns the absolute path to the frozen Catalog fixture tree. This tree
+// is a snapshot of the protocol source document and all HarnessInjections files at the time
+// the golden files were last regenerated. Golden-file tests must use this root instead of the
+// live repo root so they remain immune to Catalog evolution (version bumps, prose edits, etc.).
+func frozenCatalogRoot(t *testing.T) string {
+	t.Helper()
+	// testdata/frozen-catalog/ is at Tools/Deployment/testdata/frozen-catalog/
+	rel := filepath.Join("..", "..", "..", "..", "testdata", "frozen-catalog")
+	abs, err := filepath.Abs(rel)
+	if err != nil {
+		t.Fatalf("resolve frozen catalog root: %v", err)
+	}
+	return abs
+}
+
 // newModule constructs the Claude Code module against the real repository root, failing the
 // test immediately if construction fails.
 func newModule(t *testing.T) domain.HarnessModule {
@@ -103,6 +118,18 @@ func newModule(t *testing.T) domain.HarnessModule {
 	mod, err := claudecode.New(registry.BuiltinOptions{MosaicRoot: repoRoot(t)})
 	if err != nil {
 		t.Fatalf("claudecode.New(): %v", err)
+	}
+	return mod
+}
+
+// newModuleFromFrozen constructs the Claude Code module against the frozen Catalog fixture root.
+// Golden-file tests use this instead of newModule so that changes to the live HarnessInjections
+// files in Catalog/ do not affect the committed golden files.
+func newModuleFromFrozen(t *testing.T) domain.HarnessModule {
+	t.Helper()
+	mod, err := claudecode.New(registry.BuiltinOptions{MosaicRoot: frozenCatalogRoot(t)})
+	if err != nil {
+		t.Fatalf("claudecode.New() from frozen catalog: %v", err)
 	}
 	return mod
 }
@@ -192,9 +219,8 @@ func truncate(b []byte, n int) []byte {
 // the committed file was produced by an LLM process and may contain project injection content;
 // the golden file uses create-mode with all project injections cleared.
 func TestGoldenFile_ClaudeCode_ContractsReviewAgent(t *testing.T) {
-	mod := newModule(t)
-	root := repoRoot(t)
-	protocol := loadProtocol(t, root)
+	mod := newModuleFromFrozen(t)
+	protocol := loadProtocol(t, frozenCatalogRoot(t))
 
 
 	srcPath := filepath.Join(agentFixturesDir(t), "contracts-review.md")
@@ -228,9 +254,8 @@ func TestGoldenFile_ClaudeCode_ContractsReviewAgent(t *testing.T) {
 // the committed file uses "opus 4.6" as model; this golden uses the fixed test model
 // "claude-sonnet-4-6". Project injections are cleared (create mode).
 func TestGoldenFile_ClaudeCode_TestRunnerAgent(t *testing.T) {
-	mod := newModule(t)
-	root := repoRoot(t)
-	protocol := loadProtocol(t, root)
+	mod := newModuleFromFrozen(t)
+	protocol := loadProtocol(t, frozenCatalogRoot(t))
 
 
 	srcPath := filepath.Join(agentFixturesDir(t), "test-runner.md")
@@ -265,9 +290,8 @@ func TestGoldenFile_ClaudeCode_TestRunnerAgent(t *testing.T) {
 // the committed file is missing Bash (the terminal tool mapping is absent), which is an error in
 // the committed file. This golden file corrects the deviation and records it here.
 func TestGoldenFile_ClaudeCode_PlannerTDDSoftAgent(t *testing.T) {
-	mod := newModule(t)
-	root := repoRoot(t)
-	protocol := loadProtocol(t, root)
+	mod := newModuleFromFrozen(t)
+	protocol := loadProtocol(t, frozenCatalogRoot(t))
 
 
 	srcPath := filepath.Join(agentFixturesDir(t), "planner-tdd-soft.md")
@@ -300,9 +324,8 @@ func TestGoldenFile_ClaudeCode_PlannerTDDSoftAgent(t *testing.T) {
 // the committed file uses "opus 4.6" as model. This golden uses "claude-sonnet-4-6". Project
 // injections are cleared (create mode).
 func TestGoldenFile_ClaudeCode_Orchestrator(t *testing.T) {
-	mod := newModule(t)
-	root := repoRoot(t)
-	protocol := loadProtocol(t, root)
+	mod := newModuleFromFrozen(t)
+	protocol := loadProtocol(t, frozenCatalogRoot(t))
 
 
 	srcPath := filepath.Join(agentFixturesDir(t), "orchestrator.md")
@@ -561,20 +584,56 @@ func TestContract_ClaudeCode(t *testing.T) {
 			},
 		},
 
-		InjectionCases: map[string]string{
-			"HarnessConstraints": "",
-		},
-
-		NotFilled: []string{
-			"IdentityExtension",
-			"ProtocolExtension",
-			"CodebaseContext",
-			"LanguagePatterns",
-			"OutputArtifactTemplate",
-			"CustomConstraints",
-			"ErrorHandlingExtension",
-			"ContextLimits",
-			"AvailableWorkflows",
+		AgentInjectionCases: []contracttest.InjectionCase{
+			{
+				// subagent_shared_content: a non-orchestrator agent receives only shared content.
+				// For Claude Code, HarnessConstraints shared content is empty (declared-but-empty).
+				Name:    "subagent_shared_content",
+				AgentKey: "some-subagent",
+				// Role is zero value (non-orchestrator)
+				Filled: map[string]string{
+					"HarnessConstraints": "",
+				},
+				NotFilled: []string{
+					"IdentityExtension",
+					"ProtocolExtension",
+					"CodebaseContext",
+					"LanguagePatterns",
+					"OutputArtifactTemplate",
+					"CustomConstraints",
+					"ErrorHandlingExtension",
+					"ContextLimits",
+					"AvailableWorkflows",
+				},
+			},
+			{
+				// orchestrator_role_shared_only: an orchestrator-role agent with the literal
+				// "orchestrator" key still receives correct behavior. After the role-based fix,
+				// this case requires Role: domain.RoleOrchestrator to trigger orchestrator
+				// content. The exact orchestrator content is verified in the standalone
+				// TestInjection_OrchestratorRole_NonOrchestratorKey_ReturnsMergedContent test.
+				// RED: this case does not assert orchestrator-specific content here; the
+				// companion standalone test provides the RED-phase signal for role-based gating.
+				Name:    "orchestrator_key_receives_shared_content_when_no_role",
+				AgentKey: "orchestrator",
+				// Role is zero value: without Role set, an orchestrator agent must receive
+				// shared content only (backward compatibility with existing callers that
+				// construct InjectionRequest without Role).
+				Filled: map[string]string{
+					"HarnessConstraints": "",
+				},
+				NotFilled: []string{
+					"IdentityExtension",
+					"ProtocolExtension",
+					"CodebaseContext",
+					"LanguagePatterns",
+					"OutputArtifactTemplate",
+					"CustomConstraints",
+					"ErrorHandlingExtension",
+					"ContextLimits",
+					"AvailableWorkflows",
+				},
+			},
 		},
 
 		TargetPathCases: []contracttest.TargetPathCase{

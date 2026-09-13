@@ -100,6 +100,21 @@ func findRepoRoot(t *testing.T) string {
 	return abs
 }
 
+// frozenCatalogRoot returns the absolute path to the frozen Catalog fixture tree. This tree
+// is a snapshot of the protocol source document and all HarnessInjections files at the time
+// the golden files were last regenerated. Golden-file tests must use this root instead of the
+// live repo root so they remain immune to Catalog evolution (version bumps, prose edits, etc.).
+func frozenCatalogRoot(t *testing.T) string {
+	t.Helper()
+	// Package is at Tools/Deployment/conformance/; testdata is at Tools/Deployment/testdata/
+	rel := filepath.Join("..", "testdata", "frozen-catalog")
+	abs, err := filepath.Abs(rel)
+	if err != nil {
+		t.Fatalf("resolve frozen catalog root: %v", err)
+	}
+	return abs
+}
+
 // buildReferenceExternalModule builds the cmd/harness-opencode-module binary into a temp
 // directory and returns its path. The test is fatally failed if the build fails, since the
 // reference external module is a load-bearing part of the conformance suite.
@@ -342,17 +357,16 @@ func TestConformance_BuiltinVsExternal_OpenCode(t *testing.T) {
 // files. This cross-check ensures the conformance suite's test model and fixtures are
 // consistent with the per-harness golden file tests in harness/builtin/opencode/.
 func TestConformance_BuiltinVsExternal_OutputsMatchOpenCodeGoldenFiles(t *testing.T) {
-	repoRoot := findRepoRoot(t)
 	goModRoot := findGoModuleRoot(t)
 	goldenDir := filepath.Join(goModRoot, "testdata", "golden", "opencode")
 
-	builtinMod, err := opencode.New(registry.BuiltinOptions{MosaicRoot: findRepoRoot(t)})
+	builtinMod, err := opencode.New(registry.BuiltinOptions{MosaicRoot: frozenCatalogRoot(t)})
 	if err != nil {
 		t.Fatalf("opencode.New: %v", err)
 	}
 	defer builtinMod.Close() //nolint:errcheck
 
-	protocol := loadTestProtocol(t, repoRoot)
+	protocol := loadTestProtocol(t, frozenCatalogRoot(t))
 	cases := goldenCases(t)
 	for _, tc := range cases {
 		tc := tc
@@ -653,13 +667,12 @@ func TestDescriptorOnly_ConformanceHarness_PassesContractTest(t *testing.T) {
 // -update to generate them once the descriptor-only adapter produces correct output. The
 // test structure guarantees that all three tiers are driven by the same suite.
 func TestDescriptorOnly_ConformanceHarness_TransformOutputMatchesGolden(t *testing.T) {
-	repoRoot := findRepoRoot(t)
 	goldenDir := descriptorOnlyGoldenDir(t)
 
 	m := resolveDescriptorOnly(t)
 	defer m.Close() //nolint:errcheck
 
-	protocol := loadTestProtocol(t, repoRoot)
+	protocol := loadTestProtocol(t, frozenCatalogRoot(t))
 	cases := goldenCases(t)
 	for _, tc := range cases {
 		tc := tc

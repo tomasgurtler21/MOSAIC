@@ -77,5 +77,6 @@
   "counts": { "FAIL": 1 },
   "total_cost": { "total_usd": 0, "attribution": "attributed", "detail": "" },
   "infrastructure_failures": 1,
-  "catalog_folder": ""
+  "catalog_folder": "",
+  "errors": []
 }

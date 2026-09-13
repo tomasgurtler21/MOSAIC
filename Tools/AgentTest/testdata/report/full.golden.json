@@ -221,5 +221,6 @@
   "counts": { "FAIL": 2, "PASS": 2, "TIMEOUT": 1 },
   "total_cost": { "total_usd": 0.17, "attribution": "unavailable", "detail": "log root missing" },
   "infrastructure_failures": 1,
-  "catalog_folder": ""
+  "catalog_folder": "",
+  "errors": []
 }

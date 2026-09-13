@@ -40,12 +40,14 @@ const LogsFolderName = "RunnerLogs"
 type Logger struct {
 	workingDir string
 
-	mu       sync.Mutex
-	runID    string // effective run ID (valid, non-empty); empty if not yet set
-	runIDSet bool   // true once a valid run ID has been accepted
-	path     string // absolute path of the log file; empty until first write succeeds
-	opened   bool   // true once file initialisation has been attempted
-	disabled bool   // true after any I/O failure or after Close
+	mu             sync.Mutex
+	runID          string // effective run ID (valid, non-empty); empty if not yet set
+	runIDSet       bool   // true once a valid run ID has been accepted
+	path           string // absolute path of the log file; empty until first write succeeds
+	opened         bool   // true once file initialisation has been attempted
+	disabled       bool   // true after any I/O failure or after Close
+	toolVersion    string // tool version string set by SetToolVersion; empty means no entry
+	versionWritten bool   // true once the version entry has been written
 }
 
 // requestEntry is the JSONL envelope for a dispatch request.
@@ -76,6 +78,15 @@ type correlationEntry struct {
 	Type      string `json:"type"`      // always "correlation"
 	Timestamp string `json:"timestamp"` // RFC 3339 UTC
 	RunID     string `json:"run_id"`
+}
+
+// versionEntry is the JSONL envelope for the tool version header, written
+// exactly once as the first entry in the log file when a tool version is
+// configured via SetToolVersion.
+type versionEntry struct {
+	Type        string `json:"type"`         // always "version"
+	Timestamp   string `json:"timestamp"`    // RFC 3339 UTC
+	ToolVersion string `json:"tool_version"` // semver string, e.g. "1.0.0"
 }
 
 // New creates a Logger rooted at workingDir. No filesystem access occurs here.
@@ -248,10 +259,54 @@ func (l *Logger) initFileLocked() {
 	l.path = filepath.Join(logDir, filename)
 }
 
+// writeVersionEntryLocked writes the version JSONL entry as the very first
+// line in the log file, then marks it as written so it is never repeated.
+// Must be called with l.mu held and only when l.toolVersion != "".
+func (l *Logger) writeVersionEntryLocked() {
+	ve := versionEntry{
+		Type:        "version",
+		Timestamp:   time.Now().UTC().Format(time.RFC3339),
+		ToolVersion: l.toolVersion,
+	}
+	data, err := json.Marshal(ve)
+	if err != nil {
+		l.path = ""
+		l.disabled = true
+		return
+	}
+	line := append(data, '\n')
+
+	f, err := os.OpenFile(l.path, os.O_CREATE|os.O_APPEND|os.O_WRONLY, 0644)
+	if err != nil {
+		l.path = ""
+		l.disabled = true
+		return
+	}
+	_, writeErr := f.Write(line)
+	_ = f.Sync()
+	_ = f.Close()
+	if writeErr != nil {
+		l.path = ""
+		l.disabled = true
+	}
+}
+
 // appendJSONLocked marshals v as compact JSON, appends it as a single line to
 // the log file, and closes the file handle immediately. Must be called with
 // l.mu held. On any failure, permanently disables the logger.
+//
+// On the very first call, if a tool version has been configured, the version
+// entry is written before the supplied entry so it always appears first.
 func (l *Logger) appendJSONLocked(v interface{}) {
+	// Write the version entry before the first real entry, if configured.
+	if !l.versionWritten && l.toolVersion != "" {
+		l.versionWritten = true
+		l.writeVersionEntryLocked()
+		if l.disabled {
+			return
+		}
+	}
+
 	data, err := json.Marshal(v)
 	if err != nil {
 		// json.Marshal should never fail for these struct types, but handle it

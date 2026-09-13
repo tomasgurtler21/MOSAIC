@@ -140,48 +140,82 @@ func TestTextPromptScreen_Validation_AcceptsValidInput(t *testing.T) {
 // Skip and skip-all key bindings
 // ---------------------------------------------------------------------------
 
-// TestTextPromptScreen_SkipKey_ReturnsSkippedOne verifies that pressing 's' when AllowSkip
-// is true returns SkippedOne without requiring text input.
+// TestTextPromptScreen_SkipKey_ReturnsSkippedOne verifies that pressing the skip modifier key
+// (ctrl+k) when AllowSkip is true returns SkippedOne without requiring text input.
 func TestTextPromptScreen_SkipKey_ReturnsSkippedOne(t *testing.T) {
 	q := customToolQuestion("my-tool", true, false)
 	s := screens.NewTextPromptScreen(q, 80, 24, plainStyles())
 
-	s.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'s'}})
+	s.Update(tea.KeyMsg{Type: tea.KeyCtrlK})
 
 	if !s.Done() {
-		t.Error("Done() = false after 's' with AllowSkip; want true")
+		t.Error("Done() = false after ctrl+k with AllowSkip; want true")
 	}
 	if s.Answer().Status != domain.SkippedOne {
 		t.Errorf("Answer().Status = %q, want SkippedOne", s.Answer().Status)
 	}
 }
 
-// TestTextPromptScreen_SkipAllKey_ReturnsSkippedAll verifies that pressing 'S' when
-// AllowSkipAll is true returns SkippedAll.
+// TestTextPromptScreen_SkipAllKey_ReturnsSkippedAll verifies that pressing the skip-all
+// modifier key (ctrl+x) when AllowSkipAll is true returns SkippedAll.
 func TestTextPromptScreen_SkipAllKey_ReturnsSkippedAll(t *testing.T) {
 	q := customToolQuestion("my-tool", true, true)
 	s := screens.NewTextPromptScreen(q, 80, 24, plainStyles())
 
-	s.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'S'}})
+	s.Update(tea.KeyMsg{Type: tea.KeyCtrlX})
 
 	if !s.Done() {
-		t.Error("Done() = false after 'S' with AllowSkipAll; want true")
+		t.Error("Done() = false after ctrl+x with AllowSkipAll; want true")
 	}
 	if s.Answer().Status != domain.SkippedAll {
 		t.Errorf("Answer().Status = %q, want SkippedAll", s.Answer().Status)
 	}
 }
 
-// TestTextPromptScreen_SkipKey_WhenNotAllowed_DoesNotComplete verifies that 's' has no
-// effect when AllowSkip is false.
+// TestTextPromptScreen_SkipKey_WhenNotAllowed_DoesNotComplete verifies that the skip
+// modifier key (ctrl+k) has no effect when AllowSkip is false.
 func TestTextPromptScreen_SkipKey_WhenNotAllowed_DoesNotComplete(t *testing.T) {
 	q := customToolQuestion("my-tool", false, false)
 	s := screens.NewTextPromptScreen(q, 80, 24, plainStyles())
 
-	s.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'s'}})
+	s.Update(tea.KeyMsg{Type: tea.KeyCtrlK})
 
 	if s.Done() {
-		t.Error("Done() = true after 's' when AllowSkip is false; want false")
+		t.Error("Done() = true after ctrl+k when AllowSkip is false; want false")
+	}
+}
+
+// TestTextPromptScreen_TextContainingSOrS_DoesNotTriggerSkip is a regression test verifying
+// that typing characters 's' and 'S' as part of ordinary text input does not trigger the skip
+// action. Before the modifier-key fix, bare 's'/'S' was intercepted as a skip shortcut, so
+// any tool name containing those letters would be cut short with an unintended skip.
+func TestTextPromptScreen_TextContainingSOrS_DoesNotTriggerSkip(t *testing.T) {
+	q := customToolQuestion("search-server", true, true)
+	s := screens.NewTextPromptScreen(q, 80, 24, plainStyles())
+
+	typeTextIntoPrompt(s, "search-server")
+
+	if s.Done() {
+		t.Error("Done() = true while typing 'search-server' with AllowSkip enabled; want false (skip should require modifier key)")
+	}
+	if s.Answer().Status == domain.SkippedOne {
+		t.Error("Answer().Status = SkippedOne after typing 's' characters; want no skip triggered")
+	}
+	if s.Answer().Status == domain.SkippedAll {
+		t.Error("Answer().Status = SkippedAll after typing 'S' characters; want no skip triggered")
+	}
+
+	// Confirm that the full text can still be submitted normally.
+	s.Update(tea.KeyMsg{Type: tea.KeyEnter})
+
+	if !s.Done() {
+		t.Error("Done() = false after Enter following text input; want true")
+	}
+	if s.Answer().Status != domain.Answered {
+		t.Errorf("Answer().Status = %q after Enter; want Answered", s.Answer().Status)
+	}
+	if s.Answer().Text != "search-server" {
+		t.Errorf("Answer().Text = %q, want %q", s.Answer().Text, "search-server")
 	}
 }
 
@@ -242,18 +276,18 @@ func TestTextPromptScreen_View_ShowsTitleAndDetail(t *testing.T) {
 }
 
 // TestTextPromptScreen_View_HelpText_ShowsSkipWhenAllowed verifies that the help bar shows
-// the 's skip' option only when AllowSkip is true.
+// the modifier-key skip labels when AllowSkip/AllowSkipAll are true.
 func TestTextPromptScreen_View_HelpText_ShowsSkipWhenAllowed(t *testing.T) {
 	q := customToolQuestion("some-tool", true, true)
 	s := screens.NewTextPromptScreen(q, 80, 24, plainStyles())
 
 	view := collapseWhitespace(s.View())
 
-	if !strings.Contains(view, "s skip") {
-		t.Errorf("help text does not mention 's skip' when AllowSkip is true:\n%s", s.View())
+	if !strings.Contains(view, "ctrl+k skip") {
+		t.Errorf("help text does not mention 'ctrl+k skip' when AllowSkip is true:\n%s", s.View())
 	}
-	if !strings.Contains(view, "S skip all") {
-		t.Errorf("help text does not mention 'S skip all' when AllowSkipAll is true:\n%s", s.View())
+	if !strings.Contains(view, "ctrl+x skip all") {
+		t.Errorf("help text does not mention 'ctrl+x skip all' when AllowSkipAll is true:\n%s", s.View())
 	}
 }
 

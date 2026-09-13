@@ -201,6 +201,11 @@ type Options struct {
 	// TestResultsRoot is the absolute path to OrchestrationTestResults/, shown read-only
 	// in the store/summary input screens for user confirmation.
 	TestResultsRoot string
+
+	// ToolVersion is the semver string of the mosaic-agent-test binary (e.g. "1.0.0").
+	// When set, it is included in the mode-select screen title so users see the tool
+	// identity immediately on launch. An empty string omits the version from the title.
+	ToolVersion string
 }
 
 // Screen names one of the screens this frontend presents.

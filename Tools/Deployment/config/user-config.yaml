@@ -129,7 +129,7 @@ custom_model_ids: {}
 #           - to: main
 #             names: ["Read"]
 #           - to: field
-#             field: mcpServers
+#             field: extra_servers
 #             format: list-block
 #             names: ["mosaic-kb"]
 #

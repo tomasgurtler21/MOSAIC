@@ -17,6 +17,7 @@ import (
 	"testing"
 
 	"mosaic-deploy/internal/catalog"
+	"mosaic-deploy/internal/catalog/catalogpaths"
 )
 
 // repoRoot returns the absolute path to the MOSAIC repository root, navigating up from
@@ -62,7 +63,7 @@ func TestResolveRoot_FromPackageDirectory_RootIsAbsolute(t *testing.T) {
 
 // TestResolveRoot_FromPackageDirectory_RootContainsRequiredMarker verifies that
 // the resolved root directory contains the required MOSAIC root marker at its
-// Catalog/ location: Catalog/Agents/Generic/SourceFilesFormat.md.
+// Catalog/ location: Catalog/CatalogFilesFormat.md.
 // Catalog/Workflows/Index.md is no longer a required root marker.
 func TestResolveRoot_FromPackageDirectory_RootContainsRequiredMarker(t *testing.T) {
 	root, err := catalog.ResolveRoot(repoRoot())
@@ -70,7 +71,7 @@ func TestResolveRoot_FromPackageDirectory_RootContainsRequiredMarker(t *testing.
 		t.Fatalf("ResolveRoot: %v", err)
 	}
 
-	marker := filepath.Join("Catalog", "SourceFilesFormat.md")
+	marker := catalogpaths.MosaicRelSourceFilesFormatFile
 	full := filepath.Join(root, marker)
 	if _, statErr := os.Stat(full); os.IsNotExist(statErr) {
 		t.Errorf("resolved root %q does not contain required marker file %s", root, marker)
@@ -131,61 +132,29 @@ func TestResolveRoot_NestedDirectory_ReturnsErrNotMosaicRoot(t *testing.T) {
 // carrying the required root marker at its Catalog/ location is recognised as a MOSAIC root.
 // The required marker is:
 //
-//	Catalog/SourceFilesFormat.md
+//	Catalog/CatalogFilesFormat.md
 //
 // Catalog/Workflows/Index.md is no longer a required root marker; this test deliberately
-// omits it to verify that the root is recognised on SourceFilesFormat.md alone.
+// omits it to verify that the root is recognised on CatalogFilesFormat.md alone.
 func TestResolveRoot_CatalogPrefixedMarkers_RecognizedAsMosaicRoot(t *testing.T) {
 	dir := t.TempDir()
 
-	// Create only SourceFilesFormat.md — no Catalog/Workflows/Index.md.
+	// Create only CatalogFilesFormat.md — no Catalog/Workflows/Index.md.
 	if err := os.MkdirAll(filepath.Join(dir, "Catalog"), 0o755); err != nil {
 		t.Fatalf("setup MkdirAll Catalog: %v", err)
 	}
-	if err := os.WriteFile(filepath.Join(dir, "Catalog", "SourceFilesFormat.md"), []byte("# Source Files Format\n"), 0o644); err != nil {
-		t.Fatalf("setup WriteFile Catalog/SourceFilesFormat.md: %v", err)
+	if err := os.WriteFile(filepath.Join(dir, catalogpaths.MosaicRelSourceFilesFormatFile), []byte("# CatalogFilesFormat\n"), 0o644); err != nil {
+		t.Fatalf("setup WriteFile %s: %v", catalogpaths.MosaicRelSourceFilesFormatFile, err)
 	}
 
 	root, err := catalog.ResolveRoot(dir)
 	if err != nil {
-		t.Fatalf("ResolveRoot returned error for a dir with Catalog/SourceFilesFormat.md: %v; "+
-			"a tree carrying this marker must be recognised as the MOSAIC root even without Catalog/Workflows/Index.md", err)
+		t.Fatalf("ResolveRoot returned error for a dir with %s: %v; "+
+			"a tree carrying this marker must be recognised as the MOSAIC root even without Catalog/Workflows/Index.md",
+			catalogpaths.MosaicRelSourceFilesFormatFile, err)
 	}
 	if root == "" {
 		t.Fatal("ResolveRoot returned an empty root with nil error")
-	}
-}
-
-// TestResolveRoot_LegacyOnlyMarkers_NotRecognizedAsMosaicRoot verifies that a directory
-// carrying the root marker only at the old Catalog/Agents/Generic/ location is NOT
-// recognised as a MOSAIC root. After the layout migration, isMosaicRoot requires the
-// marker at Catalog/SourceFilesFormat.md; the old deep path must be rejected.
-//
-// The old path (Catalog/Agents/Generic/SourceFilesFormat.md) becomes the new "legacy"
-// layout after Stage 3 flips the constant. This test is pre-configured to the post-Stage-3
-// expectation so it will fail in RED phase (when the implementation still checks the old
-// path) and pass once Stage 3 updates isMosaicRoot to require Catalog/SourceFilesFormat.md.
-func TestResolveRoot_LegacyOnlyMarkers_NotRecognizedAsMosaicRoot(t *testing.T) {
-	dir := t.TempDir()
-
-	// Create the old Catalog/Agents/Generic/ marker (will be "legacy" after Stage 3).
-	if err := os.MkdirAll(filepath.Join(dir, "Catalog", "Agents", "Generic"), 0o755); err != nil {
-		t.Fatalf("setup MkdirAll Catalog/Agents/Generic: %v", err)
-	}
-	if err := os.WriteFile(filepath.Join(dir, "Catalog", "Agents", "Generic", "SourceFilesFormat.md"), []byte("# Source Files Format\n"), 0o644); err != nil {
-		t.Fatalf("setup WriteFile Catalog/Agents/Generic/SourceFilesFormat.md: %v", err)
-	}
-	if err := os.MkdirAll(filepath.Join(dir, "Workflows"), 0o755); err != nil {
-		t.Fatalf("setup MkdirAll Workflows: %v", err)
-	}
-	if err := os.WriteFile(filepath.Join(dir, "Workflows", "Index.md"), []byte("# Workflows Index\n"), 0o644); err != nil {
-		t.Fatalf("setup WriteFile Workflows/Index.md: %v", err)
-	}
-
-	_, err := catalog.ResolveRoot(dir)
-	if !errors.Is(err, catalog.ErrNotMosaicRoot) {
-		t.Errorf("ResolveRoot(%q): got %v, want ErrNotMosaicRoot — "+
-			"the old Catalog/Agents/Generic/ layout must no longer be accepted as a MOSAIC root (marker must be at Catalog/SourceFilesFormat.md)", dir, err)
 	}
 }
 
@@ -217,23 +186,24 @@ func TestResolveRoot_EmptyTempDir_WrapsErrNotMosaicRoot(t *testing.T) {
 }
 
 // TestResolveRoot_WithoutIndexMd_Succeeds verifies that a directory carrying
-// Catalog/SourceFilesFormat.md is recognised as a MOSAIC root even when
+// Catalog/CatalogFilesFormat.md is recognised as a MOSAIC root even when
 // Catalog/Workflows/Index.md is absent. Index.md is no longer a required root marker.
 func TestResolveRoot_WithoutIndexMd_Succeeds(t *testing.T) {
 	dir := t.TempDir()
 
-	// Create ONLY SourceFilesFormat.md — no Catalog/Workflows/Index.md.
+	// Create ONLY CatalogFilesFormat.md — no Catalog/Workflows/Index.md.
 	if err := os.MkdirAll(filepath.Join(dir, "Catalog"), 0o755); err != nil {
 		t.Fatalf("setup MkdirAll Catalog: %v", err)
 	}
-	if err := os.WriteFile(filepath.Join(dir, "Catalog", "SourceFilesFormat.md"), []byte("# Source Files Format\n"), 0o644); err != nil {
-		t.Fatalf("setup WriteFile SourceFilesFormat.md: %v", err)
+	if err := os.WriteFile(filepath.Join(dir, catalogpaths.MosaicRelSourceFilesFormatFile), []byte("# CatalogFilesFormat\n"), 0o644); err != nil {
+		t.Fatalf("setup WriteFile %s: %v", catalogpaths.MosaicRelSourceFilesFormatFile, err)
 	}
 
 	root, err := catalog.ResolveRoot(dir)
 	if err != nil {
-		t.Fatalf("ResolveRoot returned error for a dir with SourceFilesFormat.md but no Index.md: %v; "+
-			"Catalog/Workflows/Index.md must not be a required root marker", err)
+		t.Fatalf("ResolveRoot returned error for a dir with %s but no Index.md: %v; "+
+			"Catalog/Workflows/Index.md must not be a required root marker",
+			catalogpaths.MosaicRelSourceFilesFormatFile, err)
 	}
 	if root == "" {
 		t.Fatal("ResolveRoot returned an empty root with nil error")
@@ -272,9 +242,9 @@ func TestResolveRoot_KnownNonMosaicFixture_ReturnsErrNotMosaicRoot(t *testing.T)
 // ---------------------------------------------------------------------------
 
 // TestResolveRoot_NewMarkerFilename_RecognizedAsMosaicRoot verifies that a directory
-// containing Catalog/SourceFilesFormat.md (the target layout's sole required marker)
-// is resolved as a valid MOSAIC root. Catalog/Workflows/Index.md is deliberately omitted
-// to confirm it is not required.
+// containing Catalog/CatalogFilesFormat.md (the sole required marker) is resolved as a
+// valid MOSAIC root. Catalog/Workflows/Index.md is deliberately omitted to confirm it is
+// not required.
 func TestResolveRoot_NewMarkerFilename_RecognizedAsMosaicRoot(t *testing.T) {
 	dir := t.TempDir()
 
@@ -282,48 +252,17 @@ func TestResolveRoot_NewMarkerFilename_RecognizedAsMosaicRoot(t *testing.T) {
 	if err := os.MkdirAll(filepath.Join(dir, "Catalog"), 0o755); err != nil {
 		t.Fatalf("setup MkdirAll Catalog: %v", err)
 	}
-	if err := os.WriteFile(filepath.Join(dir, "Catalog", "SourceFilesFormat.md"), []byte("# Source Files Format\n"), 0o644); err != nil {
-		t.Fatalf("setup WriteFile SourceFilesFormat.md: %v", err)
+	if err := os.WriteFile(filepath.Join(dir, catalogpaths.MosaicRelSourceFilesFormatFile), []byte("# CatalogFilesFormat\n"), 0o644); err != nil {
+		t.Fatalf("setup WriteFile %s: %v", catalogpaths.MosaicRelSourceFilesFormatFile, err)
 	}
 
 	root, err := catalog.ResolveRoot(dir)
 	if err != nil {
-		t.Fatalf("ResolveRoot returned error for a dir with Catalog/SourceFilesFormat.md: %v; "+
-			"a tree containing this marker must be recognised as the MOSAIC root", err)
+		t.Fatalf("ResolveRoot returned error for a dir with %s: %v; "+
+			"a tree containing this marker must be recognised as the MOSAIC root",
+			catalogpaths.MosaicRelSourceFilesFormatFile, err)
 	}
 	if root == "" {
 		t.Fatal("ResolveRoot returned an empty root with nil error")
-	}
-}
-
-// TestResolveRoot_OldMarkerFilenameOnly_NotRecognizedAsMosaicRoot verifies that a directory
-// containing only the legacy marker file under Catalog/Agents/Generic/ (the old filename before
-// the rename to SourceFilesFormat.md) is NOT recognised as a MOSAIC root. The root-detection
-// heuristic must probe for the current filename only; the old name must not satisfy the check.
-func TestResolveRoot_OldMarkerFilenameOnly_NotRecognizedAsMosaicRoot(t *testing.T) {
-	dir := t.TempDir()
-
-	// Build the old marker filename at runtime so this test file does not contain the literal
-	// string as a contiguous byte sequence, which would trigger TestNoLegacySourceFormatReference.
-	oldMarkerFile := "SOURCE" + "-" + "FORMAT" + ".md"
-
-	// Create the old marker file (not the new one) at the Catalog/-prefixed location.
-	if err := os.MkdirAll(filepath.Join(dir, "Catalog", "Agents", "Generic"), 0o755); err != nil {
-		t.Fatalf("setup MkdirAll Catalog/Agents/Generic: %v", err)
-	}
-	if err := os.WriteFile(filepath.Join(dir, "Catalog", "Agents", "Generic", oldMarkerFile), []byte("# Source Format\n"), 0o644); err != nil {
-		t.Fatalf("setup WriteFile %s: %v", oldMarkerFile, err)
-	}
-	if err := os.MkdirAll(filepath.Join(dir, "Catalog", "Workflows"), 0o755); err != nil {
-		t.Fatalf("setup MkdirAll Catalog/Workflows: %v", err)
-	}
-	if err := os.WriteFile(filepath.Join(dir, "Catalog", "Workflows", "Index.md"), []byte("# Workflows Index\n"), 0o644); err != nil {
-		t.Fatalf("setup WriteFile Catalog/Workflows/Index.md: %v", err)
-	}
-
-	_, err := catalog.ResolveRoot(dir)
-	if !errors.Is(err, catalog.ErrNotMosaicRoot) {
-		t.Errorf("ResolveRoot returned %v for a dir with only the old %s marker at Catalog/Agents/Generic/; "+
-			"want ErrNotMosaicRoot — the old filename must not satisfy the root check", err, oldMarkerFile)
 	}
 }

@@ -1,0 +1,76 @@
+{
+  "schema_version": "1",
+  "suite_id": "infra-suite",
+  "started_at": "2026-09-01T11:00:00Z",
+  "finished_at": "2026-09-01T11:10:00Z",
+  "tests": [
+    {
+      "test_name": "normal-test",
+      "test_id": 10,
+      "description": "A normal test that varies across harnesses (spread candidate for problem areas)",
+      "layer": "orchestrator",
+      "aggregate": {
+        "verdict": "fail",
+        "counted": 2,
+        "passed": 1,
+        "pass_rate": 0.5,
+        "infrastructure_failure": false,
+        "total_cost": { "total_usd": 0.03, "attribution": "direct" }
+      },
+      "runs": [
+        {
+          "subject_version": "v1.0.0",
+          "subject_model": "github-copilot/gpt-4o",
+          "harness_id": "open-code",
+          "verdict": "pass",
+          "duration_ms": 2500,
+          "cost": { "total_usd": 0.015, "attribution": "direct" },
+          "termination_reason": "completed",
+          "conditions": [],
+          "test_version": 1
+        },
+        {
+          "subject_version": "v1.0.0",
+          "subject_model": "github-copilot/gpt-4o",
+          "harness_id": "open-code",
+          "verdict": "fail",
+          "duration_ms": 2500,
+          "cost": { "total_usd": 0.015, "attribution": "direct" },
+          "termination_reason": "completed",
+          "conditions": [],
+          "test_version": 1
+        }
+      ]
+    },
+    {
+      "test_name": "infra-test",
+      "test_id": 20,
+      "description": "A test that fails with infrastructure failure (must not appear in problem areas)",
+      "layer": "orchestrator",
+      "aggregate": {
+        "verdict": "fail",
+        "counted": 1,
+        "passed": 0,
+        "pass_rate": 0.0,
+        "infrastructure_failure": true,
+        "total_cost": { "total_usd": 0.02, "attribution": "direct" }
+      },
+      "runs": [
+        {
+          "subject_version": "v1.0.0",
+          "subject_model": "github-copilot/gpt-4o",
+          "harness_id": "open-code",
+          "verdict": "fail",
+          "duration_ms": 1000,
+          "cost": { "total_usd": 0.02, "attribution": "direct" },
+          "termination_reason": "completed",
+          "conditions": [],
+          "test_version": 1
+        }
+      ]
+    }
+  ],
+  "counts": { "fail": 2 },
+  "total_cost": { "total_usd": 0.05, "attribution": "direct" },
+  "infrastructure_failures": 1
+}

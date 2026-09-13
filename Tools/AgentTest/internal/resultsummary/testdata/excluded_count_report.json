@@ -1,0 +1,66 @@
+{
+  "schema_version": "1",
+  "suite_id": "happy-path",
+  "started_at": "2026-09-01T10:00:00Z",
+  "finished_at": "2026-09-01T10:10:00Z",
+  "tests": [
+    {
+      "test_name": "test-alpha",
+      "test_id": 1,
+      "description": "Test alpha with 3 excluded runs alongside 5 counted",
+      "layer": "orchestrator",
+      "aggregate": {
+        "verdict": "pass",
+        "counted": 5,
+        "passed": 4,
+        "pass_rate": 0.8,
+        "infrastructure_failure": false,
+        "total_cost": { "total_usd": 0.10, "attribution": "direct" },
+        "excluded": 3
+      },
+      "runs": [
+        {
+          "subject_version": "v1.0.0",
+          "subject_model": "github-copilot/claude-sonnet-4.6",
+          "harness_id": "claude-code",
+          "verdict": "pass",
+          "duration_ms": 2000,
+          "cost": { "total_usd": 0.02, "attribution": "direct" },
+          "termination_reason": "completed",
+          "conditions": [],
+          "test_version": 1
+        }
+      ]
+    },
+    {
+      "test_name": "test-beta",
+      "test_id": 2,
+      "description": "Test beta with no excluded runs (excluded defaults to 0)",
+      "layer": "orchestrator",
+      "aggregate": {
+        "verdict": "pass",
+        "counted": 5,
+        "passed": 5,
+        "pass_rate": 1.0,
+        "infrastructure_failure": false,
+        "total_cost": { "total_usd": 0.10, "attribution": "direct" }
+      },
+      "runs": [
+        {
+          "subject_version": "v1.0.0",
+          "subject_model": "github-copilot/claude-sonnet-4.6",
+          "harness_id": "claude-code",
+          "verdict": "pass",
+          "duration_ms": 2000,
+          "cost": { "total_usd": 0.02, "attribution": "direct" },
+          "termination_reason": "completed",
+          "conditions": [],
+          "test_version": 1
+        }
+      ]
+    }
+  ],
+  "counts": { "pass": 2 },
+  "total_cost": { "total_usd": 0.20, "attribution": "direct" },
+  "infrastructure_failures": 0
+}

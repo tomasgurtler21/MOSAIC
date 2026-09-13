@@ -10,21 +10,13 @@ import (
 	"errors"
 	"fmt"
 	"io"
-	"os"
 	"os/exec"
-	"path/filepath"
 	"strconv"
 	"strings"
 	"time"
 
 	"mosaic-agent-test/internal/domain"
 )
-
-// UnknownRunBucket is the run folder the MOSAIC logger writes into when it
-// cannot resolve a run's identity. Its presence alongside an empty result
-// for the queried run is what distinguishes "this run cost nothing" from
-// "this run's events could not be attributed".
-const UnknownRunBucket = "unknown-run"
 
 // The log-analysis tool's stable exit codes (mirrored here as plain ints:
 // this package must not import mosaic-log-analyzer to learn its own outcome
@@ -65,10 +57,6 @@ type Options struct {
 	// Invoke is the seam that makes the outcome mapping testable without the
 	// real tool present. nil selects real process execution.
 	Invoke CommandRunner
-
-	// StatDir reports whether a directory exists. nil selects the real
-	// filesystem. Used only to detect the fallback attribution bucket.
-	StatDir func(path string) bool
 }
 
 // New constructs a domain.CostProvider that delegates to the log-analysis
@@ -88,10 +76,6 @@ func (p *provider) Cost(ctx context.Context, q domain.CostQuery) (domain.CostRep
 	if invoke == nil {
 		invoke = execCommandRunner
 	}
-	statDir := p.opts.StatDir
-	if statDir == nil {
-		statDir = defaultStatDir
-	}
 
 	runCtx := ctx
 	if p.opts.Timeout > 0 {
@@ -101,18 +85,11 @@ func (p *provider) Cost(ctx context.Context, q domain.CostQuery) (domain.CostRep
 	}
 
 	// When LogsRoot is available, pass it as --path so the analyser scans the
-	// entire OrchestrationLogs tree and can see the unknown-run sibling bucket.
+	// entire OrchestrationLogs tree. LogAnalyzer's TotalForRun handles the
+	// unknown-run merge internally.
 	scanPath := q.LogRoot
 	if q.LogsRoot != "" {
 		scanPath = q.LogsRoot
-	}
-
-	// The fallback bucket is a sibling of the run folder when LogsRoot is known,
-	// or a child of the run folder as a legacy fallback for callers that pre-date
-	// the LogsRoot field.
-	unknownBucketPath := filepath.Join(q.LogRoot, UnknownRunBucket)
-	if q.LogsRoot != "" {
-		unknownBucketPath = filepath.Join(q.LogsRoot, UnknownRunBucket)
 	}
 
 	args := []string{"total", "--run", q.RunID, "--path", scanPath, "--format", "json"}
@@ -128,36 +105,26 @@ func (p *provider) Cost(ctx context.Context, q domain.CostQuery) (domain.CostRep
 		}), nil
 	}
 
-	// Detect the unknown-run bucket for exit codes that signal missing run data.
-	// For exitUsage, detection requires LogsRoot so we know where to look for the
-	// sibling bucket.
-	unknownBucketPresent := false
-	if exitCode == exitNoData || (exitCode == exitUsage && q.LogsRoot != "") {
-		unknownBucketPresent = statDir(unknownBucketPath)
-	}
-
 	var total RunTotal
 	if parseErr := json.Unmarshal(stdout, &total); parseErr != nil {
 		return Map(MapInput{
-			ExecutablePath:       p.opts.ExecutablePath,
-			RunID:                q.RunID,
-			LogRoot:              q.LogRoot,
-			LogsRoot:             q.LogsRoot,
-			ExitCode:             exitCode,
-			StdoutLen:            len(stdout),
-			ParseErr:             parseErr,
-			UnknownBucketPresent: unknownBucketPresent,
+			ExecutablePath: p.opts.ExecutablePath,
+			RunID:          q.RunID,
+			LogRoot:        q.LogRoot,
+			LogsRoot:       q.LogsRoot,
+			ExitCode:       exitCode,
+			StdoutLen:      len(stdout),
+			ParseErr:       parseErr,
 		}), nil
 	}
 
 	return Map(MapInput{
-		ExecutablePath:       p.opts.ExecutablePath,
-		RunID:                q.RunID,
-		LogRoot:              q.LogRoot,
-		LogsRoot:             q.LogsRoot,
-		ExitCode:             exitCode,
-		Total:                total,
-		UnknownBucketPresent: unknownBucketPresent,
+		ExecutablePath: p.opts.ExecutablePath,
+		RunID:          q.RunID,
+		LogRoot:        q.LogRoot,
+		LogsRoot:       q.LogsRoot,
+		ExitCode:       exitCode,
+		Total:          total,
 	}), nil
 }
 
@@ -181,6 +148,16 @@ type RunTotal struct {
 	// PartialMoney is the attributable amount when some models are priced and
 	// others are not. Absent from older builds; decodes to nil.
 	PartialMoney *MoneyValue `json:"partial_money,omitempty"`
+
+	// UnknownRunMerged is the count of usage records merged from the
+	// unknown-run bucket by LogAnalyzer. Zero or absent means no merge
+	// occurred.
+	UnknownRunMerged int `json:"unknown_run_merged,omitempty"`
+
+	// UnknownRunResidual is the count of unknown-run records that remained
+	// unattributed after merging. Zero or absent means all records were
+	// attributed. Non-zero triggers a report-level error in AgentTest.
+	UnknownRunResidual int `json:"unknown_run_residual,omitempty"`
 }
 
 // TokenUsage categories are pointers because absent and zero are different
@@ -209,7 +186,7 @@ type MapInput struct {
 	// RunID, LogRoot and LogsRoot are what was queried.
 	RunID    string
 	LogRoot  string
-	LogsRoot string // the OrchestrationLogs parent; used for unknown-bucket detection on exitUsage
+	LogsRoot string // the OrchestrationLogs parent; passed as --path to LogAnalyzer so it can enumerate the full OrchestrationLogs tree
 
 	// ExitCode is the delegate's exit code; meaningful only when InvokeErr is nil.
 	ExitCode int
@@ -218,8 +195,7 @@ type MapInput struct {
 	// without carrying the payload itself into the mapping.
 	StdoutLen int
 
-	Total                RunTotal
-	UnknownBucketPresent bool
+	Total RunTotal
 
 	// InvokeErr is non-nil only when the delegate could not be invoked or run
 	// to completion at all — never for a delegate that ran and exited non-zero.
@@ -240,14 +216,6 @@ func Map(in MapInput) domain.CostReport {
 	}
 
 	if in.ParseErr != nil {
-		// An unknown-bucket condition takes precedence over a parse error when
-		// the exit code is one that signals missing run data.
-		if in.UnknownBucketPresent && (in.ExitCode == exitNoData || in.ExitCode == exitUsage) {
-			return domain.CostReport{
-				Attribution: domain.AttributionUnknownBucket,
-				Detail:      "cost: no data for this run, but the fallback bucket is present — a cost exists but could not be attributed",
-			}
-		}
 		if in.ExitCode == exitSuccess {
 			return domain.CostReport{
 				Attribution: domain.AttributionUnavailable,
@@ -270,12 +238,6 @@ func Map(in MapInput) domain.CostReport {
 	case exitSuccess:
 		return mapSuccess(in.Total)
 	case exitNoData:
-		if in.UnknownBucketPresent {
-			return domain.CostReport{
-				Attribution: domain.AttributionUnknownBucket,
-				Detail:      "cost: no data for this run, but the fallback bucket is present — a cost exists but could not be attributed",
-			}
-		}
 		return domain.CostReport{Attribution: domain.AttributionAttributed, TotalUSD: 0}
 	case exitFailure:
 		return domain.CostReport{
@@ -283,15 +245,9 @@ func Map(in MapInput) domain.CostReport {
 			Detail:      "cost: the log-analysis tool reported an infrastructure failure",
 		}
 	case exitUsage:
-		if in.UnknownBucketPresent {
-			return domain.CostReport{
-				Attribution: domain.AttributionUnknownBucket,
-				Detail:      "cost: no data for this run, but the fallback bucket is present — a cost exists but could not be attributed",
-			}
-		}
 		return domain.CostReport{
 			Attribution: domain.AttributionUnavailable,
-			Detail:      fmt.Sprintf("cost: no usage data found — queried %q which does not exist", in.LogRoot),
+			Detail:      fmt.Sprintf("cost: no usage data found -- queried %q which does not exist", in.LogRoot),
 		}
 	case exitUnusable:
 		return domain.CostReport{
@@ -307,16 +263,16 @@ func Map(in MapInput) domain.CostReport {
 }
 
 func mapSuccess(total RunTotal) domain.CostReport {
+	var report domain.CostReport
 	switch total.Money.State {
 	case "known":
-		report := domain.CostReport{
+		report = domain.CostReport{
 			Attribution: domain.AttributionAttributed,
 			TotalUSD:    parseAmount(total.Money.Amount),
 		}
 		if total.Provisional || !total.Complete {
 			report.Detail = "cost: total is partial (provisional or incomplete)"
 		}
-		return report
 	case "unpriced":
 		// When the analyser names the unpriced models and provides a partial
 		// amount, report the attributable cost as partial rather than zeroing
@@ -326,28 +282,34 @@ func mapSuccess(total RunTotal) domain.CostReport {
 				"cost: usage captured but the following model(s) had no price entry: %s",
 				strings.Join(total.UnpricedModels, ", "),
 			)
-			return domain.CostReport{
+			report = domain.CostReport{
 				Attribution:    domain.AttributionPartial,
 				TotalUSD:       parseAmount(total.PartialMoney.Amount),
 				Detail:         detail,
 				UnpricedModels: total.UnpricedModels,
 			}
-		}
-		// Without model identity we cannot name what we do not know, but we
-		// must acknowledge that usage was captured — not redirect the user to
-		// pricing configuration.
-		return domain.CostReport{
-			Attribution: domain.AttributionUnavailable,
-			Detail:      "cost: usage was captured but the model(s) responsible could not be identified for attribution",
+		} else {
+			// Without model identity we cannot name what we do not know, but we
+			// must acknowledge that usage was captured — not redirect the user to
+			// pricing configuration.
+			report = domain.CostReport{
+				Attribution: domain.AttributionUnavailable,
+				Detail:      "cost: usage was captured but the model(s) responsible could not be identified for attribution",
+			}
 		}
 	case "no_data":
-		return domain.CostReport{Attribution: domain.AttributionAttributed, TotalUSD: 0}
+		report = domain.CostReport{Attribution: domain.AttributionAttributed, TotalUSD: 0}
 	default:
-		return domain.CostReport{
+		report = domain.CostReport{
 			Attribution: domain.AttributionUnavailable,
 			Detail:      fmt.Sprintf("cost: unrecognised money state %q", total.Money.State),
 		}
 	}
+
+	// Carry merge residual signal into the cost report for downstream
+	// report-level error emission.
+	report.UnknownRunResidual = total.UnknownRunResidual
+	return report
 }
 
 func parseAmount(amount *string) float64 {
@@ -359,12 +321,6 @@ func parseAmount(amount *string) float64 {
 		return 0
 	}
 	return v
-}
-
-// defaultStatDir is the real filesystem implementation of Options.StatDir.
-func defaultStatDir(path string) bool {
-	info, err := os.Stat(path)
-	return err == nil && info.IsDir()
 }
 
 // execCommandRunner is the real process-execution implementation of

@@ -376,6 +376,10 @@ type Deps struct {
 	BundleLoader catalog.BundleLoader
 	// Now is injected so run records and backup filenames are deterministic in tests.
 	Now func() time.Time
+	// ToolVersion is the semver string identifying the mosaic-deploy binary (e.g. "1.0.0").
+	// It is recorded in every manifest written during this process lifetime. An empty string
+	// means "not recorded" and results in no tool_version key in the YAML.
+	ToolVersion string
 }
 
 // DeployRequest carries the caller's pre-answers for the deploy-new flow. A set field is

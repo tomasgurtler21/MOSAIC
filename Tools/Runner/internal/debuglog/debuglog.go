@@ -59,14 +59,16 @@ const LogsFolderName = "RunnerLogs"
 type Logger struct {
 	workingDir string
 
-	mu              sync.Mutex
-	runID           string   // effective run ID (valid, non-empty); empty if not yet set
-	runIDSet        bool     // true once a valid run ID has been accepted
-	path            string   // absolute path of the log file; empty until first write succeeds
-	opened          bool     // true once file initialisation has been attempted
-	disabled        bool     // true after any I/O failure or after Close
-	buffered        []string // fully-formatted pre-identity entries, for replay; discarded once a replay is attempted
-	replayAttempted bool     // true once a replay has been attempted (successful or not); prevents a repeat attempt
+	mu                   sync.Mutex
+	runID                string   // effective run ID (valid, non-empty); empty if not yet set
+	runIDSet             bool     // true once a valid run ID has been accepted
+	path                 string   // absolute path of the log file; empty until first write succeeds
+	opened               bool     // true once file initialisation has been attempted
+	disabled             bool     // true after any I/O failure or after Close
+	buffered             []string // fully-formatted pre-identity entries, for replay; discarded once a replay is attempted
+	replayAttempted      bool     // true once a replay has been attempted (successful or not); prevents a repeat attempt
+	toolVersion          string   // tool version string set by SetToolVersion; empty means no header
+	versionHeaderWritten bool     // true once the version header entry has been written
 }
 
 // New creates a Logger rooted at workingDir. workingDir must be supplied by
@@ -246,10 +248,47 @@ func (l *Logger) replayLocked() {
 	_ = os.Remove(oldPath)
 }
 
+// writeVersionHeaderLocked writes the tool-version header line as the very
+// first entry in the log file, then marks it as written so it is never
+// repeated. Must be called with l.mu held and only when l.toolVersion != "".
+// The header is also retained in the replay buffer when identity is not yet
+// known, so that it appears at the top of the replayed run-folder file.
+func (l *Logger) writeVersionHeaderLocked() {
+	ts := time.Now().UTC().Format(time.RFC3339)
+	entry := "[" + ts + "] tool-version | mosaic-run v" + l.toolVersion + "\n"
+
+	if !l.runIDSet {
+		l.buffered = append(l.buffered, entry)
+	}
+
+	f, err := os.OpenFile(l.path, os.O_CREATE|os.O_APPEND|os.O_WRONLY, 0644)
+	if err != nil {
+		l.path = ""
+		l.disabled = true
+		return
+	}
+	_, writeErr := f.WriteString(entry)
+	_ = f.Sync()
+	_ = f.Close()
+	if writeErr != nil {
+		l.path = ""
+		l.disabled = true
+	}
+}
+
 // appendEntryLocked formats one log entry, opens the file in O_APPEND mode,
 // writes the entry, then closes the file. Must be called with l.mu held.
 // On write failure, permanently disables the logger.
 func (l *Logger) appendEntryLocked(event string, message string, fields ...domain.DebugField) {
+	// Write the version header before the first real entry, if configured.
+	if !l.versionHeaderWritten && l.toolVersion != "" {
+		l.versionHeaderWritten = true
+		l.writeVersionHeaderLocked()
+		if l.disabled {
+			return
+		}
+	}
+
 	ts := time.Now().UTC().Format(time.RFC3339)
 
 	// Build field fragment: key=value pairs where values containing spaces or

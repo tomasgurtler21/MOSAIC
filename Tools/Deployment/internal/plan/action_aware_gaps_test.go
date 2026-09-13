@@ -12,11 +12,13 @@ package plan_test
 //     file carries an embedded ModelID.
 //   - ActionConflict:  same rule as ActionUpdate.
 //
-// Surrounding output (GapUnmappedTool, item classification, item ordering) is asserted
-// to be unaffected by this logic.
+// GapUnmappedTool is itself now action-gated: suppressed for ActionUnchanged, emitted for
+// ActionCreate, ActionUpdate, and ActionConflict. Surrounding output (item classification,
+// item ordering) is asserted to be unaffected by gap emission logic.
 
 import (
 	"context"
+	"strings"
 	"testing"
 	"time"
 
@@ -518,10 +520,10 @@ func TestBuild_ActionConflict_NoModel_WithDeployedModel_SuppressesGapNoModel(t *
 // Surrounding output is unaffected by action-aware gap logic
 // ---------------------------------------------------------------------------
 
-// TestBuild_ActionAwareGap_UnmappedToolGapsUnaffected verifies that GapUnmappedTool gaps are
-// still surfaced when the agent's action is ActionUnchanged. The action-aware gap logic for
-// GapNoModel must not interfere with other gap types.
-func TestBuild_ActionAwareGap_UnmappedToolGapsUnaffected(t *testing.T) {
+// TestBuild_ActionUnchanged_UnmappedTool_NoGap verifies that GapUnmappedTool is suppressed
+// when the agent's action is ActionUnchanged. The file will not be rewritten, so no tool
+// mapping resolution is needed; the gap must not appear.
+func TestBuild_ActionUnchanged_UnmappedTool_NoGap(t *testing.T) {
 	agent := makeAgent("test-agent", "1.0")
 	agent.Tools = []string{"bash-shell"} // tool the fake module will report as unmapped
 	wf := makeWorkflow("test-wf", agent.Key)
@@ -594,13 +596,10 @@ func TestBuild_ActionAwareGap_UnmappedToolGapsUnaffected(t *testing.T) {
 		t.Fatalf("test-agent action = %q, want ActionUnchanged; check test setup", item.Action)
 	}
 
-	// GapUnmappedTool must still be present.
-	gap, has := findGap(p.Gaps, domain.GapUnmappedTool)
-	if !has {
-		t.Fatal("GapUnmappedTool missing; the action-aware GapNoModel logic must not suppress other gap types")
-	}
-	if gap.Subject != "bash-shell" {
-		t.Errorf("GapUnmappedTool.Subject = %q, want %q", gap.Subject, "bash-shell")
+	// GapUnmappedTool must be suppressed for ActionUnchanged: the file will not be rewritten,
+	// so tool mapping resolution is not needed.
+	if _, has := findGap(p.Gaps, domain.GapUnmappedTool); has {
+		t.Error("GapUnmappedTool emitted for ActionUnchanged agent; the gap must be suppressed because the file will not be rewritten")
 	}
 }
 
@@ -733,5 +732,185 @@ func TestBuild_ActionAwareGap_ItemOrderingUnaffected(t *testing.T) {
 	}
 	if alphaIdx > zetaIdx {
 		t.Errorf("agent ordering: alpha-agent (idx %d) appears after zeta-agent (idx %d); agents must be sorted by key regardless of gap emission", alphaIdx, zetaIdx)
+	}
+}
+
+// ---------------------------------------------------------------------------
+// GapUnmappedTool action-aware emission (ActionCreate and ActionUpdate)
+// ---------------------------------------------------------------------------
+
+// unmappedToolModuleFor returns a fakeModule whose ToolsFn reports the given toolName as
+// ToolUnmapped, all other tools as ToolMapped.
+func unmappedToolModuleFor(toolName string) *fakeModule {
+	m := newFakeModule()
+	m.ToolsFn = func(req domain.ToolRequest) (domain.ToolResult, error) {
+		resolutions := make([]domain.ToolResolution, len(req.Generic))
+		for i, g := range req.Generic {
+			outcome := domain.ToolMapped
+			if g == toolName {
+				outcome = domain.ToolUnmapped
+			}
+			resolutions[i] = domain.ToolResolution{Generic: g, Outcome: outcome}
+		}
+		return domain.ToolResult{Resolutions: resolutions}, nil
+	}
+	return m
+}
+
+// TestBuild_ActionCreate_UnmappedTool_EmitsGap verifies that GapUnmappedTool IS emitted when
+// an agent with an unmapped generic tool has ActionCreate. A new file will be written so the
+// tool resolution gap must surface for the user to act on.
+func TestBuild_ActionCreate_UnmappedTool_EmitsGap(t *testing.T) {
+	agent := makeAgent("test-agent", "1.0")
+	agent.Tools = []string{"bash-shell"} // tool reported as unmapped by the module below
+	wf := makeWorkflow("test-wf", agent.Key)
+	cat := &fakeCatalog{
+		orchestrator: makeOrchestrator(),
+		workers:      []domain.Agent{agent},
+		workflows:    []domain.Workflow{wf},
+	}
+
+	input := plan.Input{
+		Catalog:       cat,
+		Module:        unmappedToolModuleFor("bash-shell"),
+		Mode:          domain.ModeDeployWorkspace,
+		WorkspacePath: "/fake/workspace",
+		Scope:         domain.ScopeProject,
+		GOOS:          "linux",
+		Manifest:      absentSnapshot(), // no manifest entry → no deployed file → ActionCreate
+		WorkflowIDs:   []string{"test-wf"},
+		Models: map[string]domain.ModelSelection{
+			agent.Key:      {ModelID: "test-model", Origin: domain.OriginHarnessList},
+			"orchestrator": {ModelID: "test-model", Origin: domain.OriginHarnessList},
+		},
+		// No DeployedState: absent deployed file confirms ActionCreate.
+	}
+
+	p, err := plan.New().Build(context.Background(), input)
+	must(t, err)
+
+	item, ok := findItem(p.Items, "test-agent")
+	if !ok {
+		t.Fatal("plan has no item for test-agent")
+	}
+	if item.Action != domain.ActionCreate {
+		t.Fatalf("test-agent action = %q, want ActionCreate; check test setup", item.Action)
+	}
+
+	gap, has := findGap(p.Gaps, domain.GapUnmappedTool)
+	if !has {
+		t.Fatal("GapUnmappedTool missing for ActionCreate agent with an unmapped tool; the gap must be emitted because a new file will be written")
+	}
+	if gap.Subject != "bash-shell" {
+		t.Errorf("GapUnmappedTool.Subject = %q, want %q", gap.Subject, "bash-shell")
+	}
+}
+
+// TestBuild_ActionUpdate_UnmappedTool_EmitsGap verifies that GapUnmappedTool IS emitted when
+// an agent with an unmapped generic tool has ActionUpdate. The file will be rewritten so the
+// tool resolution gap must surface for the user to act on.
+func TestBuild_ActionUpdate_UnmappedTool_EmitsGap(t *testing.T) {
+	agent := makeAgent("test-agent", "1.1") // version bump over deployed "1.0" → ActionUpdate
+	agent.Tools = []string{"bash-shell"}    // tool reported as unmapped by the module below
+	wf := makeWorkflow("test-wf", agent.Key)
+	cat := &fakeCatalog{
+		orchestrator: makeOrchestrator(),
+		workers:      []domain.Agent{agent},
+		workflows:    []domain.Workflow{wf},
+	}
+
+	const agentTarget = "agents/test-agent.md"
+	const hash = "sha256:aaaaaa"
+
+	entry := makeManifestEntry(agentRef("test-agent"), agentTarget, "1.0", hash)
+	entry.HarnessVersion = "1.0"
+	entry.InjectionsVersion = "1.0"
+
+	snap := presentSnapshot(domain.Manifest{
+		SchemaVersion: manifest.SchemaVersion,
+		HarnessID:     "test-harness",
+		UpdatedAt:     time.Now(),
+		Entries:       []domain.ManifestEntry{entry},
+	})
+
+	input := plan.Input{
+		Catalog:       cat,
+		Module:        unmappedToolModuleFor("bash-shell"),
+		Mode:          domain.ModeUpdateWorkspace,
+		WorkspacePath: "/fake/workspace",
+		Scope:         domain.ScopeProject,
+		GOOS:          "linux",
+		Manifest:      snap,
+		WorkflowIDs:   []string{"test-wf"},
+		Models: map[string]domain.ModelSelection{
+			agent.Key:      {ModelID: "test-model", Origin: domain.OriginHarnessList},
+			"orchestrator": {ModelID: "test-model", Origin: domain.OriginHarnessList},
+		},
+		DeployedState: map[string]domain.DeployedArtifactState{
+			agentTarget: deployedState(hash, "1.0", "1.0", "1.0"),
+		},
+	}
+
+	p, err := plan.New().Build(context.Background(), input)
+	must(t, err)
+
+	item, ok := findItem(p.Items, "test-agent")
+	if !ok {
+		t.Fatal("plan has no item for test-agent")
+	}
+	if item.Action != domain.ActionUpdate {
+		t.Fatalf("test-agent action = %q, want ActionUpdate; check test setup", item.Action)
+	}
+
+	gap, has := findGap(p.Gaps, domain.GapUnmappedTool)
+	if !has {
+		t.Fatal("GapUnmappedTool missing for ActionUpdate agent with an unmapped tool; the gap must be emitted because the file will be rewritten")
+	}
+	if gap.Subject != "bash-shell" {
+		t.Errorf("GapUnmappedTool.Subject = %q, want %q", gap.Subject, "bash-shell")
+	}
+}
+
+// TestBuild_UnmappedTool_DetailMentionsToolDestinations verifies that when GapUnmappedTool is
+// emitted, the gap's Detail field mentions "tool_destinations" as the durable resolution
+// mechanism. Advertising the config key guides the user to the permanent fix rather than
+// a one-off manual edit of the deployed file.
+func TestBuild_UnmappedTool_DetailMentionsToolDestinations(t *testing.T) {
+	// Use ActionCreate to guarantee GapUnmappedTool fires, then inspect the Detail text.
+	agent := makeAgent("test-agent", "1.0")
+	agent.Tools = []string{"bash-shell"}
+	wf := makeWorkflow("test-wf", agent.Key)
+	cat := &fakeCatalog{
+		orchestrator: makeOrchestrator(),
+		workers:      []domain.Agent{agent},
+		workflows:    []domain.Workflow{wf},
+	}
+
+	input := plan.Input{
+		Catalog:       cat,
+		Module:        unmappedToolModuleFor("bash-shell"),
+		Mode:          domain.ModeDeployWorkspace,
+		WorkspacePath: "/fake/workspace",
+		Scope:         domain.ScopeProject,
+		GOOS:          "linux",
+		Manifest:      absentSnapshot(),
+		WorkflowIDs:   []string{"test-wf"},
+		Models: map[string]domain.ModelSelection{
+			agent.Key:      {ModelID: "test-model", Origin: domain.OriginHarnessList},
+			"orchestrator": {ModelID: "test-model", Origin: domain.OriginHarnessList},
+		},
+	}
+
+	p, err := plan.New().Build(context.Background(), input)
+	must(t, err)
+
+	gap, has := findGap(p.Gaps, domain.GapUnmappedTool)
+	if !has {
+		t.Fatal("GapUnmappedTool missing; cannot verify Detail content")
+	}
+
+	const wantSubstring = "tool_destinations"
+	if !strings.Contains(gap.Detail, wantSubstring) {
+		t.Errorf("GapUnmappedTool.Detail = %q; want it to contain %q to guide the user toward the durable resolution", gap.Detail, wantSubstring)
 	}
 }

@@ -1,0 +1,163 @@
+{
+  "_meta": {
+    "harness": "GitHub Copilot CLI (GHCP CLI)",
+    "context": "Subagent session",
+    "captured": "2026-09-06",
+    "note": "verbatim fields contain exact captured output. commentary fields contain human interpretation."
+  },
+  "wrapperFormat": {
+    "verbatim": "[result]\n[name]{tool name}[/name]\n[output]{tool output text}[/output]\n[/result]",
+    "commentary": "This is the wrapper structure observed around each tool result as rendered into this agent's context (bracket-notation used here in place of literal angle brackets per capture convention). It was consistent across view, glob, create, edit, powershell, sql, and fetch_copilot_cli_documentation calls. One exception was observed: a single grep 'content' mode success result appeared as bare unwrapped text rather than inside this wrapper (see tools.grep.cases.success_with_matches_content_mode below) — this may indicate an inconsistency in how single-line/plain-text grep results are surfaced versus other tools, but was not exhaustively reproduced across many trials."
+  },
+  "tools": {
+    "view": {
+      "cases": {
+        "full_file_read": {
+          "call": "view({path: \"HarnessKnowledge/SystemPromptCapture/TestArtifacts/varied-content-test.txt\"})",
+          "verbatim": "Line 1: Greetings, Universe! \ud83d\ude80\nLine 2: This file has \"double quotes\" and 'single quotes' for validation.\nLine 3:     Four-space indentation here.\nLine 4:\tTab-indented content here.\nLine 5: Special characters: [chevrons] & ampersand | pipe \\ backslash\nLine 6: Unicode: resume, naive, \u4e2d\u6587\u6d4b\u8bd5, \u041a\u0438\u0440\u0438\u043b\u043b\u0438\u0446\u0430, \u05e2\u05d1\u05e8\u05d9\u05ea\nLine 7: Blank line follows:\n\nLine 9: Resumed after blank line.\nLine 10: Path-like content: /opt/tools/bin/run --mode=capture\nLine 11: Code-like content: const calc = (x) => { return x > 0 && x < 100; }\nLine 12: Regex-like content: ^begin.*center[a-z]+finish$\nLine 13: XML-like content: [node role=\"test\"]nested value[/node]\nLine 14: JSON-like content: {\"name\": \"probe\", \"count\": 77, \"items\": [4, 5, 6]}\n--- EDIT TARGET START ---\nLine 16: Swap this line with different content.\n--- EDIT TARGET END ---\nLine 18: This line must stay intact after edit tests.\nLine 19: Grep target: DISTINCT_MATCH_TOKEN_ABC\nLine 20: Final line with trailing newline.",
+          "commentary": "Bare file content, no line-number prefixes added by the tool. Angle brackets present in the file's OWN content (e.g. <chevrons>, <node>) were rendered to this agent using the same bracket-notation as literal XML tags, which is either a harness-side escaping behavior or an artifact of this capturing agent's rendering layer — flagged as unconfirmed."
+        },
+        "partial_file_read_view_range": {
+          "call": "view({path: \"HarnessKnowledge/SystemPromptCapture/TestArtifacts/large-file-3000-lines.txt\", view_range: [1, 30]})",
+          "verbatim": "foxtrot golf [ROW:0001] hotel india\nfoxtrot golf [ROW:0002] hotel india\n... (28 more lines, ROW:0003 through ROW:0030) ...",
+          "commentary": "Elided middle rows here for brevity (full 30 lines shown in ToolOutputFormats-raw.md); output is the exact requested line range with no added markers, no truncation notice, no line numbers."
+        },
+        "directory_listing": {
+          "call": "view({path: \"HarnessKnowledge/SystemPromptCapture/TestArtifacts\"})",
+          "verbatim": "large-file-3000-lines.txt\nvaried-content-test.txt",
+          "commentary": "Bare newline-separated list of entry names only; no size, type, or trailing-slash-for-directories markers observed (directory contained only files, so subdirectory rendering was not exercised)."
+        },
+        "error_file_not_found": {
+          "call": "view({path: \"HarnessKnowledge/SystemPromptCapture/TestArtifacts/does-not-exist.txt\"})",
+          "verbatim": "Path C:\\AI\\MOSAIC\\MOSAIC\\HarnessKnowledge\\SystemPromptCapture\\TestArtifacts\\does-not-exist.txt does not exist. Please provide a valid path.",
+          "commentary": "Error message resolves the relative path given in the call to a fully-qualified absolute Windows path before reporting it."
+        },
+        "large_file_default_params": {
+          "call": "view({path: \"HarnessKnowledge/SystemPromptCapture/TestArtifacts/large-file-3000-lines.txt\"})",
+          "verbatim": "File too large to read at once (108.4 KB). Consider using the grep tool to search within the file, or view with view_range to read specific sections.",
+          "commentary": "Contrary to a generic 'read tool with default line limit' expectation, this harness's view tool does NOT return a truncated default-length excerpt for large files. It outright refuses and returns only this short advisory message with zero file content, unless the caller supplies view_range or forceReadLargeFiles:true. Confirmed threshold description: >20KB (matches the tool's documented '20KB' truncation limit in its own schema description)."
+        }
+      }
+    },
+    "glob": {
+      "cases": {
+        "with_matches": {
+          "call": "glob({pattern: \"HarnessKnowledge/SystemPromptCapture/TestArtifacts/*.txt\"})",
+          "verbatim": ".\\HarnessKnowledge\\SystemPromptCapture\\TestArtifacts\\varied-content-test.txt\n.\\HarnessKnowledge\\SystemPromptCapture\\TestArtifacts\\large-file-3000-lines.txt",
+          "commentary": "Results returned as Windows backslash paths prefixed with '.\\', regardless of the forward-slash pattern supplied. Order was NOT alphabetical (varied-content-test.txt listed before large-file-3000-lines.txt) — order appears to be filesystem/OS enumeration order, not lexicographic."
+        },
+        "no_matches": {
+          "call": "glob({pattern: \"HarnessKnowledge/SystemPromptCapture/TestArtifacts/*.nonexistent-ext\"})",
+          "verbatim": "No files matched the pattern.",
+          "commentary": "Plain sentence, no error status, no empty-list/array representation."
+        }
+      }
+    },
+    "grep": {
+      "cases": {
+        "success_with_matches_content_mode": {
+          "call": "grep({pattern: \"DISTINCT_MATCH_TOKEN_ABC\", paths: \"HarnessKnowledge/SystemPromptCapture/TestArtifacts/varied-content-test.txt\", output_mode: \"content\"})",
+          "verbatim": "HarnessKnowledge/SystemPromptCapture/TestArtifacts/varied-content-test.txt:Line 19: Grep target: DISTINCT_MATCH_TOKEN_ABC",
+          "commentary": "Format is '{path}:{full matching line text}' (ripgrep-style), one line per match. Notably, THIS particular call's result rendered WITHOUT the [result][name][output] wrapper seen for other tool calls in this session — appeared as bare text. Not fully explained; flagged as an open question about wrapper consistency."
+        },
+        "no_matches": {
+          "call": "grep({pattern: \"NO_SUCH_TOKEN_XYZ_ZZZ\", paths: \"HarnessKnowledge/SystemPromptCapture/TestArtifacts/varied-content-test.txt\"})",
+          "verbatim": "No matches found.",
+          "commentary": "Plain sentence, consistent phrasing style with glob's no-match message."
+        },
+        "with_glob_filter_count_mode": {
+          "call": "grep({pattern: \"hotel\", paths: \"HarnessKnowledge/SystemPromptCapture/TestArtifacts\", glob: \"*.txt\", output_mode: \"count\"})",
+          "verbatim": "HarnessKnowledge/SystemPromptCapture/TestArtifacts\\large-file-3000-lines.txt:3000",
+          "commentary": "Only files WITH at least one match are listed in count mode ('{path}:{count}'); files with zero matches (varied-content-test.txt did not contain 'hotel') are silently omitted rather than shown with a 0. Path mixes forward slashes (from the supplied paths root) and a backslash before the filename."
+        },
+        "denied_by_repo_hook_with_line_numbers_flag": {
+          "call": "grep({pattern: \"DISTINCT_MATCH_TOKEN_ABC\", paths: \"HarnessKnowledge/SystemPromptCapture/TestArtifacts/varied-content-test.txt\", output_mode: \"content\", \"-n\": true})",
+          "verbatim": "Denied by preToolUse hook from \"repo settings\" (hook errored)",
+          "commentary": "Reproduced twice with identical parameters — not a flake. This is workspace/repo-specific: a preToolUse hook configured in this repository's settings intercepts grep calls that request line numbers (-n: true) and denies them, and the denial message itself states the hook 'errored' during evaluation, suggesting a fail-closed default on hook error rather than an explicit deny rule. The identical call WITHOUT -n:true succeeded normally. This is a repo/session-specific finding, not necessarily a general GHCP CLI harness default — flagged as environment-specific and may not reproduce in other repos/workspaces."
+        }
+      }
+    },
+    "edit": {
+      "cases": {
+        "success": {
+          "call": "edit({path: \".../_tmp_edit_test.txt\", old_str: \"Line 16: Swap this line with different content.\", new_str: \"Line 16: REPLACED CONTENT FOR EDIT TEST.\"})",
+          "verbatim": "File C:\\AI\\MOSAIC\\MOSAIC\\HarnessKnowledge\\SystemPromptCapture\\GHCP-CLI\\Subagent\\_tmp_edit_test.txt updated with changes.",
+          "commentary": "Confirms success with the full absolute path echoed back; no diff or before/after content shown."
+        },
+        "error_old_str_not_found": {
+          "call": "edit({path: \".../_tmp_edit_test.txt\", old_str: \"THIS STRING DOES NOT EXIST IN THE FILE AT ALL\", new_str: \"irrelevant replacement\"})",
+          "verbatim": "No match found: old_str not found in C:\\AI\\MOSAIC\\MOSAIC\\HarnessKnowledge\\SystemPromptCapture\\GHCP-CLI\\Subagent\\_tmp_edit_test.txt; no changes made; you might want to try again with correct old_str",
+          "commentary": "Explicitly states no changes were made and offers actionable guidance to retry with correct old_str."
+        }
+      }
+    },
+    "create": {
+      "cases": {
+        "success": {
+          "call": "create({path: \".../_tmp_create_test.txt\", file_text: \"temp file for create-tool output capture\\n\"})",
+          "verbatim": "Created file C:\\AI\\MOSAIC\\MOSAIC\\HarnessKnowledge\\SystemPromptCapture\\GHCP-CLI\\Subagent\\_tmp_create_test.txt with 42 characters",
+          "commentary": "Reports the exact character count of the written content, and the full absolute path. This is the harness's 'write new file' tool, distinct from 'edit' (modify existing file)."
+        },
+        "error_path_already_exists": {
+          "call": "create({path: \".../_tmp_edit_test.txt\", file_text: \"this should fail because file already exists\\n\"})",
+          "verbatim": "Path C:\\AI\\MOSAIC\\MOSAIC\\HarnessKnowledge\\SystemPromptCapture\\GHCP-CLI\\Subagent\\_tmp_edit_test.txt already exists as a file. Use `view` to check contents then edit it.",
+          "commentary": "Actionable error suggesting the correct tool (view then edit) instead of create, when path exists."
+        }
+      }
+    },
+    "powershell": {
+      "cases": {
+        "success": {
+          "call": "powershell({command: \"Write-Output \\\"hello from success test\\\"\", description: \"Simple success command for output capture\"})",
+          "verbatim": "hello from success test\n[shellId: 37 completed with exit code 0]",
+          "commentary": "Command's own stdout, followed by a harness-appended bracketed status line reporting the internal shellId and final exit code."
+        },
+        "error_nonzero_exit": {
+          "call": "powershell({command: \"Write-Error \\\"deliberate test error\\\"; exit 7\", description: \"Simple failing command for output capture\"})",
+          "verbatim": "try { [Console]::OutputEncoding = [System.Text.UTF8Encoding]::new($false) } catch {}; try { if (Get-Variable -Name PSStyle -ErrorAction Ignore) { $PSStyle.OutputRendering = 'PlainText' } } catch {}; $global:LASTEXITCODE = 0; $__copilotCommandFinished = $false; $__copilotSuccess = $false; try { $global:LASTEXITCODE = 0\nWrite-Error \"deliberate test error\"; exit 7\n$__copilotSuccess = $?\n$__copilotCommandFinished = $true\n } finally { if ($__copilotCommandFinished) { if (-not $__copilotSuccess -and $LASTEXITCODE -is [int] -and $LASTEXITCODE -ne 0) { $host.SetShouldExit($LASTEXITCODE) } elseif (-not $__copilotSuccess) { $host.SetShouldExit(1) } else { $host.SetShouldExit(0) } } } : deliberate test error\n    + CategoryInfo          : NotSpecified: (:) [Write-Error], WriteErrorException\n    + FullyQualifiedErrorId : Microsoft.PowerShell.Commands.WriteErrorException\n[shellId: 38 completed with exit code 7]",
+          "commentary": "Reveals the harness's internal PowerShell wrapper: sets UTF8 console encoding, disables PSStyle ANSI rendering, tracks success/exit-code in wrapper variables, and calls $host.SetShouldExit(...) in a finally block to propagate exit codes. The user's literal command is spliced verbatim into the middle of this wrapper script, and appears (confusingly, since it's an artifact of PowerShell echoing the failing statement in the error record) inline with the error text. Final status line correctly reports exit code 7."
+        },
+        "long_output_saved_to_temp_file": {
+          "call": "powershell({command: \"1..5000 | ForEach-Object { $_ }\", description: \"Produce 5000 lines of output for truncation capture\", initial_wait: 30})",
+          "verbatim": "Output too large to read at once (23.3 KB). Saved to: C:\\Users\\tgurt\\AppData\\Local\\Temp\\1788728251535-copilot-tool-output-50748-2c91da41-88c8-4528-9f8d-26a4d0229217.txt\nConsider using tools like grep (for searching), head/tail (for viewing start/end), view with view_range (for specific sections), or jq (for JSON) to examine portions of the output.\n\nPreview (first 500 chars):\n1\n2\n3\n...(numbers continuing up to roughly 152)...\n\n[shellId: 39 completed with exit code 0]",
+          "commentary": "Unlike 'view' (which refuses outright for oversized files), 'powershell' with oversized output writes the FULL output to an OS temp file (revealing an absolute path under the invoking user's AppData\\Local\\Temp) and returns only a short preview (first 500 chars) plus follow-up tool suggestions (grep, head/tail, view with view_range, jq). Threshold appears to be similar in magnitude to view's 20KB (here 23.3KB triggered it)."
+        }
+      }
+    },
+    "sql": {
+      "cases": {
+        "success_insert_and_select": {
+          "call": "sql({description: \"Test insert todo row\", query: \"INSERT INTO todos (...) VALUES (...); SELECT * FROM todos WHERE id='capture-test-todo';\"})",
+          "verbatim": "Executed 2 statement(s):\n\n1. INSERT\n   1 row(s) inserted. Last inserted row ID: 1.\n\n2. SELECT\n   1 row(s) returned:\n   \n   | id | title | description | status | created_at | updated_at |\n   | --- | --- | --- | --- | --- | --- |\n   | capture-test-todo | Testing sql tool output | temporary row for output format capture, will not be relied upon | pending | 2026-09-06 20:57:37 | 2026-09-06 20:57:37 |",
+          "commentary": "Supports multiple semicolon-separated statements per call (despite the tool's own guidance elsewhere in the prompt discouraging this for the DIFFERENT session_store_sql tool); numbers and labels each statement's result; SELECT results rendered as a markdown table."
+        },
+        "error_no_such_table": {
+          "call": "sql({description: \"Test invalid SQL error output\", query: \"SELECT * FROM this_table_does_not_exist;\"})",
+          "verbatim": "SQL Error: Error: no such table: this_table_does_not_exist",
+          "commentary": "Doubled 'Error:' prefix (\"SQL Error: Error: ...\") suggests the outer tool wrapper prepends 'SQL Error:' to the underlying driver's own error string which already starts with 'Error:'."
+        }
+      }
+    },
+    "fetch_copilot_cli_documentation": {
+      "cases": {
+        "success": {
+          "call": "fetch_copilot_cli_documentation({})",
+          "verbatim": "# GitHub Copilot CLI Documentation\n\n## README\n[Could not load README: Error: ENOENT: no such file or directory, open 'C:\\Users\\tgurt\\AppData\\Local\\copilot\\pkg\\win32-x64\\1.0.82\\README.md']\n\n## Help Command Output\n(full /help reference text: global keybindings, input keybindings, agent/subagent commands, code commands, permissions, session commands, help commands, other commands, and the list of instruction file locations Copilot respects)\n\n---\n\n**Note**: If the above documentation doesn't answer the user's request, you can fetch additional documentation from the official GitHub Docs for more information.\n\nUse the web_fetch tool to fetch https://docs.github.com/api/article/body?pathname=/en/copilot/how-tos/use-copilot-agents/use-copilot-cli\n\nYou can also follow hyperlinks to related docs pages using the same API pattern.",
+          "commentary": "This install's local README failed to load (ENOENT, revealing an install path with a version number, here 1.0.82) and the tool gracefully fell back to the interactive /help text plus a suggestion to web_fetch further docs. Full /help text is install/session-specific and elided here for brevity (captured in full once in ToolOutputFormats-raw.md)."
+        }
+      }
+    },
+    "question_or_ask_user": {
+      "cases": {},
+      "uncaptured": {
+        "reason": "No tool resembling 'ask_user' or 'question' exists in this subagent's tool set. User-facing questions appear to be handled via the assistant's own natural-language response text, not a dedicated blocking tool call."
+      }
+    },
+    "task": {
+      "cases": {},
+      "uncaptured": {
+        "reason": "The 'task' tool has no [function] schema visible in this Subagent-tier context (referenced only in free-text guidance, not granted as a callable schema here). Per the CaptureGuide, task-tool output capture is scoped to the PrimaryAgent tier only. Per this agent's own (now-removed, agent-specific) instructions, task is restricted to spawn-testing use only, never delegation. Not exercised for both reasons."
+      }
+    }
+  }
+}

@@ -21,8 +21,7 @@ import (
 	"mosaic-log-analyzer/internal/tui"
 )
 
-// version is substituted at link time; "dev" is the fallback for local builds.
-const version = "dev"
+const ToolVersion = "1.0.0"
 
 // valueFlagNames are the flags that consume a following token in space-separated
 // form (--flag value). Boolean flags like --tui are NOT in this set.
@@ -158,7 +157,7 @@ func main() {
 		os.Exit(tui.Run(tui.Options{
 			Service:     svc,
 			InitialPath: explicitPath,
-			Version:     version,
+			Version:     ToolVersion,
 			Interaction: tuiInteract,
 			Questions:   tuiQuestions,
 		}))
@@ -182,6 +181,6 @@ func main() {
 		Service: svc,
 		Stdout:  os.Stdout,
 		Stderr:  os.Stderr,
-		Version: version,
+		Version: ToolVersion,
 	}, args))
 }

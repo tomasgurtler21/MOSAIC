@@ -463,6 +463,11 @@ type Deps struct {
 	// flows can resolve the storage tree without re-deriving it.
 	TestResultsRoot string
 
+	// ToolVersion is the semver string of this binary. Threaded through
+	// composedSuiteRunner into suite.Options so the Result produced by
+	// report.Build can be stamped with it at the production call site.
+	ToolVersion string
+
 	// SandboxDiagnostics is true when the composition root resolved the
 	// diagnostic destination to DestRunSandbox. The runner reads this to
 	// decide whether to stamp SpawnPlan.DiagnosticLog before launch.
@@ -643,6 +648,12 @@ func buildDeps(cfg WiringConfig) (Deps, error) {
 		TestResultsRoot: filepath.Join(cfg.MosaicRoot, "OrchestrationTestResults"),
 
 		SandboxDiagnostics: diagDest == DestRunSandbox,
+		// ToolVersion is the package-level constant for this binary. Deps is
+		// the established data bag for process-wide values that flow from the
+		// composition root into the suite runner; ToolVersion follows the same
+		// pattern. The constant lives in main.go (same package), so buildDeps
+		// can reference it directly without adding a field to WiringConfig.
+		ToolVersion: ToolVersion,
 	}, nil
 }
 
@@ -725,6 +736,11 @@ type composedSuiteRunner struct {
 	// (CLI path and any caller that does not supply a control).
 	pause *suite.PauseControl
 
+	// toolVersion is the semver string of this binary, threaded into
+	// suite.Options.ToolVersion so the suite can stamp it on the Result
+	// after report.Build returns.
+	toolVersion string
+
 	// newSuite is an injectable constructor that replaces suite.New in tests,
 	// allowing the caller to capture suite.Options before the suite is created
 	// for field-for-field wiring assertions. nil uses suite.New.
@@ -753,6 +769,7 @@ func (r composedSuiteRunner) Run(ctx context.Context, p preflight.Plan, sink dom
 		Retention:         r.retention,
 		MaxConcurrentRuns: r.maxConcurrentRuns,
 		Pause:             r.pause,
+		ToolVersion:       r.toolVersion,
 	})
 	return s.Run(ctx, p)
 }
@@ -801,6 +818,11 @@ type tuiSuiteRunner struct {
 	// same signal the TUI keybinding handler drives. nil means no pausing.
 	pause *suite.PauseControl
 
+	// toolVersion is the semver string of this binary, threaded into
+	// suite.Options.ToolVersion so the suite can stamp it on the Result
+	// after report.Build returns.
+	toolVersion string
+
 	// newSuite is an injectable constructor that replaces suite.New in tests,
 	// allowing the caller to capture suite.Options before the suite is created
 	// for field-for-field wiring assertions. nil uses suite.New.
@@ -815,6 +837,7 @@ func (r tuiSuiteRunner) Run(ctx context.Context, p preflight.Plan, sink domain.P
 		retention:         retention,
 		maxConcurrentRuns: r.maxConcurrentRuns,
 		pause:             r.pause,
+		toolVersion:       r.toolVersion,
 		newSuite:          r.newSuite,
 	}.Run(ctx, p, sink)
 }
@@ -839,7 +862,7 @@ func newSuiteRunner(d Deps, rc cli.RunConfig) (cli.SuiteRunner, error) {
 		return nil, fmt.Errorf("newSuiteRunner: harness %q: %w", rc.HarnessID, err)
 	}
 	ws := workspace.NewManager(rc.WorkspaceRoot, d.Clock)
-	return composedSuiteRunner{deps: d, bundle: bundle, ws: ws, retention: rc.Retention, maxConcurrentRuns: rc.MaxConcurrentRuns}, nil
+	return composedSuiteRunner{deps: d, bundle: bundle, ws: ws, retention: rc.Retention, maxConcurrentRuns: rc.MaxConcurrentRuns, toolVersion: d.ToolVersion}, nil
 }
 
 // RunnerDeps is the per-attempt collaborator set a Deps yields once the
@@ -1005,7 +1028,7 @@ func tuiOptions(d Deps, suites []string) (tui.Options, error) {
 
 	return tui.Options{
 		Preflight: d.Preflight,
-		Suite:     tuiSuiteRunner{deps: d, bundle: defaultBundle, ws: ws},
+		Suite:     tuiSuiteRunner{deps: d, bundle: defaultBundle, ws: ws, toolVersion: d.ToolVersion},
 		NewSuiteRunner: func(maxConcurrentRuns int, harnessID string, pause *suite.PauseControl) (tui.SuiteRunner, tui.PreflightFunc, error) {
 			bundle, err := d.HarnessFactory.Bundle(context.Background(), harnessID)
 			if err != nil {
@@ -1022,6 +1045,7 @@ func tuiOptions(d Deps, suites []string) (tui.Options, error) {
 				ws:                ws,
 				maxConcurrentRuns: maxConcurrentRuns,
 				pause:             pause,
+				toolVersion:       d.ToolVersion,
 			}
 			return r, pf, nil
 		},
@@ -1081,5 +1105,6 @@ func tuiOptions(d Deps, suites []string) (tui.Options, error) {
 			return resultsummary.Generate(osFileSystem{}, req)
 		},
 		TestResultsRoot: d.TestResultsRoot,
+		ToolVersion:     ToolVersion,
 	}, nil
 }

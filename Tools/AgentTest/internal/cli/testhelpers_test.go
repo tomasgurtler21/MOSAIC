@@ -289,10 +289,11 @@ func infrastructureFaultResultFromRunnerError(suiteID string) report.Result {
 			TestName: "unspawnable-subject",
 			Layer:  domain.LayerOrchestrator,
 			Aggregate: domain.AggregateResult{
-				TestName:                "unspawnable-subject",
+				TestName:              "unspawnable-subject",
 				Verdict:               domain.VerdictFail,
 				Reasons:               []domain.FailureReason{domain.ReasonInfrastructure},
-				Counted:               1,
+				Counted:               0,
+				Excluded:              1,
 				Passed:                0,
 				InfrastructureFailure: true,
 			},

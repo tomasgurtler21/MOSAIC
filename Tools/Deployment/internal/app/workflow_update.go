@@ -335,7 +335,8 @@ func (s *service) UpdateWorkflows(ctx context.Context, req WorkflowUpdateRequest
 		// written file to its pre-run bytes and leaves the workspace, orchestrator, manifest,
 		// and checklist exactly as they were before the run. Fallback runs are excluded from
 		// reversal by the executor and keep non-atomic semantics.
-		Atomic: true,
+		Atomic:      true,
+		ToolVersion: s.deps.ToolVersion,
 	}
 
 	result, err := s.deps.Executor.Execute(ctx, execReq)

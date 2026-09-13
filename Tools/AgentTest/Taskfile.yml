@@ -47,7 +47,7 @@ tasks:
       - "{{.DIST_DIR}}/{{.BINARY_NAME}}.exe"
 
   build:linux:
-    desc: "Cross-compile for Linux (amd64). Output: dist/mosaic-agent-test-linux-amd64"
+    desc: "Cross-compile for Linux (amd64). Output: dist/mosaic-agent-test"
     deps: [stage:bundle]
     env:
       GOOS: linux
@@ -55,9 +55,9 @@ tasks:
       CGO_ENABLED: "0"
     cmds:
       - mkdir -p {{.DIST_DIR}}
-      - go build -ldflags="{{.LDFLAGS}}" -o {{.DIST_DIR}}/{{.BINARY_NAME}}-linux-amd64 {{.CMD_PKG}}
+      - go build -ldflags="{{.LDFLAGS}}" -o {{.DIST_DIR}}/{{.BINARY_NAME}} {{.CMD_PKG}}
     generates:
-      - "{{.DIST_DIR}}/{{.BINARY_NAME}}-linux-amd64"
+      - "{{.DIST_DIR}}/{{.BINARY_NAME}}"
 
   build:all:
     desc: Cross-compile for all supported platforms (Windows and Linux amd64)
@@ -105,7 +105,7 @@ tasks:
   stage:cost-tool:linux:
     desc: "Stage the Linux cost-analysis tool into dist/mosaic-log-analyzer"
     cmds:
-      - cp {{.LOGANALYZER_DIST_DIR}}/mosaic-log-analyzer-linux-amd64 {{.DIST_DIR}}/mosaic-log-analyzer
+      - cp {{.LOGANALYZER_DIST_DIR}}/mosaic-log-analyzer {{.DIST_DIR}}/mosaic-log-analyzer
     generates:
       - "{{.DIST_DIR}}/mosaic-log-analyzer"
 
@@ -119,7 +119,7 @@ tasks:
   stage:deploy-tool:linux:
     desc: "Stage the Linux deployment tool into dist/mosaic-deploy"
     cmds:
-      - cp {{.DEPLOYMENT_DIST_DIR}}/mosaic-deploy-linux-amd64 {{.DIST_DIR}}/mosaic-deploy
+      - cp {{.DEPLOYMENT_DIST_DIR}}/mosaic-deploy {{.DIST_DIR}}/mosaic-deploy
     generates:
       - "{{.DIST_DIR}}/mosaic-deploy"
 

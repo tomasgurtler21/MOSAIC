@@ -546,3 +546,122 @@ func TestSummaryScreen_NonFollowUpSections_UnaffectedByOwnerAttribution(t *testi
 		t.Errorf("clean-run summary view contains \"(agent:\" attribution where none is expected:\n%s", s.View())
 	}
 }
+
+// ---------------------------------------------------------------------------
+// Version delta friendly labels (summary screen)
+// ---------------------------------------------------------------------------
+
+// summaryWithKnownFieldDeltas returns a RunSummary whose updated action contains two version
+// deltas with well-known internal field names: "injections_version" and
+// "orchestrator_injections_version". These field names have friendly human-readable labels
+// defined in versionDeltaLabel.
+func summaryWithKnownFieldDeltas() domain.RunSummary {
+	return domain.RunSummary{
+		Mode:           domain.ModeUpdateWorkspace,
+		Harness:        domain.HarnessRef{ID: "claude-code", DisplayName: "Claude Code"},
+		WorkspacePath:  "/workspace",
+		DeploymentRoot: "/workspace/.ai",
+		Fallback:       domain.FallbackNone,
+		Actions: []domain.ActionRecord{
+			{
+				Ref:   agentRef("my-agent"),
+				Taken: domain.TakenUpdated,
+				Stale: []domain.VersionDelta{
+					{Field: "injections_version", Deployed: "1.0", Source: "1.1"},
+					{Field: "orchestrator_injections_version", Deployed: "2.0", Source: "2.1"},
+				},
+			},
+		},
+		Outcome: domain.OutcomeSuccess,
+	}
+}
+
+// TestSummaryScreen_VersionDelta_ShowsFriendlyLabel verifies that the summary screen renders
+// version delta labels using the human-readable form produced by formatVersionDelta rather
+// than printing the raw internal field name.
+//
+// The injections_version field must appear as "harness injection version (body tag)" and
+// orchestrator_injections_version must appear as "orchestrator injection version". Neither
+// raw field name may appear in the rendered output.
+func TestSummaryScreen_VersionDelta_ShowsFriendlyLabel(t *testing.T) {
+	// Arrange
+	s := screens.NewSummaryScreen(summaryWithKnownFieldDeltas(), 120, 80, plainStyles())
+
+	// Act
+	view := s.View()
+
+	// Assert: friendly labels are present.
+	if !strings.Contains(view, "harness injection version (body tag)") {
+		t.Errorf("summary view does not show the friendly label for injections_version;\n"+
+			"want \"harness injection version (body tag)\" in:\n%s", view)
+	}
+	if !strings.Contains(view, "orchestrator injection version") {
+		t.Errorf("summary view does not show the friendly label for orchestrator_injections_version;\n"+
+			"want \"orchestrator injection version\" in:\n%s", view)
+	}
+
+	// Assert: raw internal field names are absent.
+	if strings.Contains(view, "injections_version") {
+		t.Errorf("summary view contains the raw internal field name \"injections_version\";\n"+
+			"want only the human-readable label, not the raw field:\n%s", view)
+	}
+	if strings.Contains(view, "orchestrator_injections_version") {
+		t.Errorf("summary view contains the raw internal field name \"orchestrator_injections_version\";\n"+
+			"want only the human-readable label, not the raw field:\n%s", view)
+	}
+}
+
+// TestSummaryScreen_VersionDelta_ShowsVersionValues verifies that the before and after
+// version values are still rendered alongside the friendly label so the user can see
+// what changed.
+func TestSummaryScreen_VersionDelta_ShowsVersionValues(t *testing.T) {
+	// Arrange
+	s := screens.NewSummaryScreen(summaryWithKnownFieldDeltas(), 120, 80, plainStyles())
+
+	// Act
+	view := s.View()
+
+	// Assert: both the deployed and source version values are present.
+	if !strings.Contains(view, "1.0") || !strings.Contains(view, "1.1") {
+		t.Errorf("summary view does not show the version values for injections_version delta;\n"+
+			"want \"1.0\" and \"1.1\" in:\n%s", view)
+	}
+	if !strings.Contains(view, "2.0") || !strings.Contains(view, "2.1") {
+		t.Errorf("summary view does not show the version values for orchestrator_injections_version delta;\n"+
+			"want \"2.0\" and \"2.1\" in:\n%s", view)
+	}
+}
+
+// TestSummaryScreen_VersionDelta_UnknownField_RendersRawName verifies that a version delta
+// with an unrecognized field name falls back gracefully to the raw field name rather than
+// hiding the information or panicking.
+func TestSummaryScreen_VersionDelta_UnknownField_RendersRawName(t *testing.T) {
+	// Arrange: a delta with a field name that has no friendly label.
+	summary := domain.RunSummary{
+		Mode:           domain.ModeUpdateWorkspace,
+		Harness:        domain.HarnessRef{ID: "claude-code", DisplayName: "Claude Code"},
+		WorkspacePath:  "/workspace",
+		DeploymentRoot: "/workspace/.ai",
+		Fallback:       domain.FallbackNone,
+		Actions: []domain.ActionRecord{
+			{
+				Ref:   agentRef("my-agent"),
+				Taken: domain.TakenUpdated,
+				Stale: []domain.VersionDelta{
+					{Field: "some_future_field", Deployed: "a", Source: "b"},
+				},
+			},
+		},
+		Outcome: domain.OutcomeSuccess,
+	}
+	s := screens.NewSummaryScreen(summary, 120, 80, plainStyles())
+
+	// Act
+	view := s.View()
+
+	// Assert: the unrecognized field name is shown verbatim (graceful fallback).
+	if !strings.Contains(view, "some_future_field") {
+		t.Errorf("summary view does not show the raw field name for an unrecognized version delta field;\n"+
+			"want \"some_future_field\" in:\n%s", view)
+	}
+}

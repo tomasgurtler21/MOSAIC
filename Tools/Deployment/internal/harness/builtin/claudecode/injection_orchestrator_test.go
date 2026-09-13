@@ -83,7 +83,7 @@ func TestInjection_SubagentKey_EmptyAgentKey_ReturnsSharedContentOnly(t *testing
 func TestInjection_OrchestratorKey_ReceivesMergedContent(t *testing.T) {
 	mod := newModule(t)
 
-	content, ok := mod.Injection(domain.InjectionRequest{Name: "HarnessConstraints", AgentKey: "orchestrator"})
+	content, ok := mod.Injection(domain.InjectionRequest{Name: "HarnessConstraints", AgentKey: "orchestrator", Role: domain.RoleOrchestrator})
 	if !ok {
 		t.Fatal("Injection(HarnessConstraints, orchestrator) returned ok=false; orchestrator must receive content for HarnessConstraints")
 	}
@@ -113,7 +113,7 @@ func TestInjection_OrchestratorKey_DeclaredButBothEmpty_ReturnsOkTrueEmptyString
 		nil, // no orchestrator-only content declared
 	)
 
-	content, ok := mod.Injection(domain.InjectionRequest{Name: "HarnessConstraints", AgentKey: "orchestrator"})
+	content, ok := mod.Injection(domain.InjectionRequest{Name: "HarnessConstraints", AgentKey: "orchestrator", Role: domain.RoleOrchestrator})
 	if !ok {
 		t.Fatal("Injection(HarnessConstraints, orchestrator) returned ok=false; declared-but-empty injection must return ok=true")
 	}
@@ -200,7 +200,7 @@ func TestInjection_OrchestratorKey_BothContentSources_ReturnsMergedWithSeparator
 		map[string]string{"HarnessConstraints": orchContent},
 	)
 
-	content, ok := mod.Injection(domain.InjectionRequest{Name: "HarnessConstraints", AgentKey: "orchestrator"})
+	content, ok := mod.Injection(domain.InjectionRequest{Name: "HarnessConstraints", AgentKey: "orchestrator", Role: domain.RoleOrchestrator})
 	if !ok {
 		t.Fatal("Injection(HarnessConstraints, orchestrator) returned ok=false; must return ok=true when content exists in either source")
 	}
@@ -231,7 +231,7 @@ func TestInjection_OrchestratorKey_SharedContentOnly_NoOrchContent_ReturnsShared
 		nil, // no orchestrator-only content for HarnessConstraints
 	)
 
-	content, ok := mod.Injection(domain.InjectionRequest{Name: "HarnessConstraints", AgentKey: "orchestrator"})
+	content, ok := mod.Injection(domain.InjectionRequest{Name: "HarnessConstraints", AgentKey: "orchestrator", Role: domain.RoleOrchestrator})
 	if !ok {
 		t.Fatal("Injection(HarnessConstraints, orchestrator) returned ok=false; must return ok=true when shared content exists")
 	}

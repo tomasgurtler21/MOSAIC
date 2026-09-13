@@ -28,6 +28,7 @@ import (
 	"testing"
 
 	"mosaic-deploy/internal/catalog"
+	"mosaic-deploy/internal/catalog/catalogpaths"
 )
 
 // ---------------------------------------------------------------------------
@@ -35,14 +36,14 @@ import (
 // ---------------------------------------------------------------------------
 
 // makeTempMosaicRoot creates a minimal MOSAIC repository root in a temp directory.
-// It writes both marker files that ResolveRoot / isMosaicRoot require. The caller
+// It writes the marker file that ResolveRoot / isMosaicRoot require. The caller
 // is responsible for cleaning up via t.Cleanup (provided automatically by t.TempDir).
 func makeTempMosaicRoot(t *testing.T) string {
 	t.Helper()
 	root := t.TempDir()
-	// Write the single marker file that isMosaicRoot checks (target layout).
+	// Write the single marker file that isMosaicRoot checks.
 	mustMkdir(t, root, "Catalog")
-	mustWriteFile(t, root, filepath.Join("Catalog", "SourceFilesFormat.md"), []byte("# Source Files Format\n"))
+	mustWriteFile(t, root, catalogpaths.MosaicRelSourceFilesFormatFile, []byte("# CatalogFilesFormat\n"))
 	return root
 }
 

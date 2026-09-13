@@ -135,6 +135,156 @@ func TestResultStore_TestReportWire_NumericTestID_CarriesValue(t *testing.T) {
 	}
 }
 
+// TestResultStore_AggregateWire_Excluded_ParsesFromJSON verifies that
+// AggregateWire.Excluded is populated when the "excluded" key is present in
+// the aggregate object.
+//
+// Fails before AggregateWire gains an Excluded int field with json:"excluded".
+// After that field is added, parsing a report containing "excluded": 5 in the
+// aggregate block populates AggregateWire.Excluded == 5.
+func TestResultStore_AggregateWire_Excluded_ParsesFromJSON(t *testing.T) {
+	// Inline fixture with "excluded": 5 in the aggregate block.
+	data := []byte(`{
+		"schema_version": "1",
+		"suite_id": "excluded-field",
+		"started_at": "2026-09-01T00:00:00Z",
+		"finished_at": "2026-09-01T00:01:00Z",
+		"tests": [{
+			"test_name": "test-excl",
+			"test_id": 1,
+			"description": "excluded field test",
+			"layer": "orchestrator",
+			"aggregate": {
+				"verdict": "pass",
+				"counted": 10,
+				"passed": 8,
+				"pass_rate": 0.8,
+				"infrastructure_failure": false,
+				"total_cost": {"total_usd": 0, "attribution": ""},
+				"excluded": 5
+			},
+			"runs": [{
+				"subject_version": "v1.0.0",
+				"subject_model": "provider/model",
+				"harness_id": "test-harness",
+				"verdict": "pass",
+				"duration_ms": 100,
+				"cost": {"total_usd": 0, "attribution": ""},
+				"termination_reason": "completed",
+				"conditions": []
+			}]
+		}],
+		"counts": {"pass": 1},
+		"total_cost": {"total_usd": 0, "attribution": ""},
+		"infrastructure_failures": 0
+	}`)
+
+	parsed, err := resultstore.ParseAndValidate(data)
+	if err != nil {
+		t.Fatalf("ParseAndValidate returned unexpected error: %v", err)
+	}
+
+	const wantExcluded = 5
+	if parsed.Raw.Tests[0].Aggregate.Excluded != wantExcluded {
+		t.Errorf("AggregateWire.Excluded = %d, want %d -- AggregateWire must have Excluded int field with json:\"excluded\" tag",
+			parsed.Raw.Tests[0].Aggregate.Excluded, wantExcluded)
+	}
+}
+
+// TestResultStore_AggregateWire_Excluded_DefaultsToZeroWhenAbsent verifies
+// backward compatibility: when "excluded" is absent from the aggregate JSON
+// object (as in all pre-Stage-2 report files), AggregateWire.Excluded decodes
+// to 0 without error.
+func TestResultStore_AggregateWire_Excluded_DefaultsToZeroWhenAbsent(t *testing.T) {
+	// Use valid_report.json which predates the Excluded field and has no
+	// "excluded" key in any aggregate block.
+	data := loadFixture(t, "valid_report.json")
+
+	parsed, err := resultstore.ParseAndValidate(data)
+	if err != nil {
+		t.Fatalf("ParseAndValidate returned error for legacy fixture without excluded field: %v", err)
+	}
+
+	for i, tr := range parsed.Raw.Tests {
+		if tr.Aggregate.Excluded != 0 {
+			t.Errorf("Tests[%d].Aggregate.Excluded = %d, want 0 for legacy fixture without excluded field",
+				i, tr.Aggregate.Excluded)
+		}
+	}
+}
+
+// TestResultStore_AggregateWire_ExcludedJSONFieldName_IsExcluded locks down
+// the JSON key name for AggregateWire.Excluded. Marshalling an AggregateWire
+// with a non-zero Excluded back to JSON must produce a key named exactly
+// "excluded" -- not "Excluded", "excluded_count", or any other variant.
+//
+// This guards against accidental field renames that would break the wire format.
+func TestResultStore_AggregateWire_ExcludedJSONFieldName_IsExcluded(t *testing.T) {
+	// Inline fixture with "excluded": 7 in the aggregate block.
+	data := []byte(`{
+		"schema_version": "1",
+		"suite_id": "field-lockdown",
+		"started_at": "2026-09-01T00:00:00Z",
+		"finished_at": "2026-09-01T00:01:00Z",
+		"tests": [{
+			"test_name": "lockdown-test",
+			"test_id": 1,
+			"description": "field name lockdown",
+			"layer": "orchestrator",
+			"aggregate": {
+				"verdict": "pass",
+				"counted": 4,
+				"passed": 4,
+				"pass_rate": 1.0,
+				"infrastructure_failure": false,
+				"total_cost": {"total_usd": 0, "attribution": ""},
+				"excluded": 7
+			},
+			"runs": [{
+				"subject_version": "v1.0.0",
+				"subject_model": "provider/model",
+				"harness_id": "test-harness",
+				"verdict": "pass",
+				"duration_ms": 100,
+				"cost": {"total_usd": 0, "attribution": ""},
+				"termination_reason": "completed",
+				"conditions": []
+			}]
+		}],
+		"counts": {"pass": 1},
+		"total_cost": {"total_usd": 0, "attribution": ""},
+		"infrastructure_failures": 0
+	}`)
+
+	parsed, err := resultstore.ParseAndValidate(data)
+	if err != nil {
+		t.Fatalf("ParseAndValidate returned unexpected error: %v", err)
+	}
+
+	// Re-marshal the aggregate and decode into map[string]any so we can assert
+	// on the JSON key name without depending on any specific Go field name.
+	rawJSON, marshalErr := json.Marshal(parsed.Raw.Tests[0].Aggregate)
+	if marshalErr != nil {
+		t.Fatalf("failed to re-marshal AggregateWire: %v", marshalErr)
+	}
+	var m map[string]any
+	if decodeErr := json.Unmarshal(rawJSON, &m); decodeErr != nil {
+		t.Fatalf("failed to decode re-marshaled AggregateWire: %v", decodeErr)
+	}
+
+	rawExcluded, present := m["excluded"]
+	if !present {
+		t.Fatal("\"excluded\" key absent from re-marshaled AggregateWire -- the Excluded field must carry json:\"excluded\" tag")
+	}
+	numericVal, isFloat := rawExcluded.(float64)
+	if !isFloat {
+		t.Fatalf("\"excluded\" must be numeric (float64 in map[string]any), got %T: %v", rawExcluded, rawExcluded)
+	}
+	if int(numericVal) != 7 {
+		t.Errorf("AggregateWire \"excluded\" round-trips as %d, want 7", int(numericVal))
+	}
+}
+
 // TestResultStore_RunReportWire_TestVersion_CarriesValue verifies that
 // RunReportWire.TestVersion is populated from the "test_version" JSON key.
 //

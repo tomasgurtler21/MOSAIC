@@ -2,23 +2,40 @@ package suite_test
 
 // Tests for the bounded concurrent scheduler.
 //
-// The scheduling unit is one repetition of one test; it holds exactly one
-// slot of the bound for its whole life and runs its attempts strictly in order
-// inside that slot.
+// The scheduling unit is one repetition of one test. Under the warm-up
+// scheduling model:
+//   - Each test's first repetition (rep 1) runs alone as a warm-up before any
+//     of its remaining repetitions start.
+//   - After rep 1 completes, remaining repetitions fan out concurrently,
+//     bounded by MaxConcurrentRuns.
+//   - Tests within a suite execute one at a time; no two distinct tests' runs
+//     overlap.
 //
 // Tests that are RED-phase (fail now, pass after the scheduler is implemented):
-//   T14.1, T14.2, T14.3, T14.7 — require genuine concurrent execution that
-//   the current sequential implementation cannot produce. They use a
-//   holdingRunner whose release gate never opens when only one call is ever
-//   in-flight, so the test context times out and the peak assertion fails.
+//   T14.2 — asserts tests run one at a time with no cross-test overlap; the
+//     current shared-FIFO concurrent scheduler dispatches distinct tests to the
+//     worker pool simultaneously, triggering the overlap detector.
+//   T14.3 — asserts the bound governs concurrent repetitions within one test
+//     and no cross-test overlap occurs; fails for the same reason as T14.2.
+//   Warm-up ordering — verifies rep 1 ends before reps 2..N start; blocks rep
+//     1 long enough for a concurrent scheduler to provably start rep 2 while
+//     rep 1 is still in-flight if the warm-up gate is absent.
+//   Cancellation-during-warm-up — the current scheduler dispatches rep 2 before
+//     rep 1 completes, so the fan-out rep starts during warm-up.
 //
-// Tests that are regression guards (pass now, protect against scheduler bugs):
-//   T14.4, T14.5, T14.6, T14.8 — properties already satisfied by sequential
-//   execution that a concurrent scheduler must preserve.
+// Tests that are regression guards (pass now, protect against future bugs):
+//   T14.1 — fan-out reps execute concurrently up to bound within a single test.
+//   T14.4 — bound-of-1 determinism: sequential behavior must be preserved.
+//   T14.5 — report ordering by plan order and repetition number.
+//   T14.6 — attempt ordering within one repetition.
+//   T14.7 — lifecycle events emitted for all repetitions.
+//   T14.8 — distinct run identities for all runs.
+//   Single-rep no-op — no warm-up gate overhead for a test with one rep.
 
 import (
 	"context"
 	"fmt"
+	"runtime"
 	"sync"
 	"sync/atomic"
 	"testing"
@@ -133,6 +150,277 @@ func (r *atomicTrackingRunner) Run(ctx context.Context, key domain.RunKey, t pre
 }
 
 // ---------------------------------------------------------------------------
+// warmUpSafeHoldingRunner — gates fan-out reps, passes warmup through
+// ---------------------------------------------------------------------------
+
+// warmUpSafeHoldingRunner is like holdingRunner but lets the warm-up
+// repetition (RunNumber == 1) complete immediately without blocking. Subsequent
+// repetitions are held behind a gate that opens when releaseAt of them are
+// simultaneously in-flight, proving that the post-warm-up fan-out reaches the
+// expected concurrency level.
+//
+// The gate never re-closes once opened: after it fires for the first test's
+// fan-out, subsequent tests' fan-out reps also pass through immediately, which
+// is correct because only one test's reps are ever in-flight at a time under
+// the new scheduling model.
+type warmUpSafeHoldingRunner struct {
+	releaseAt int
+
+	mu               sync.Mutex
+	inFlight         int // counts non-warmup (RunNumber > 1) calls only
+	peak             int // peak non-warmup concurrent calls
+	releaseTriggered bool
+	gate             chan struct{} // closed once when releaseAt reached
+}
+
+func newWarmUpSafeHoldingRunner(releaseAt int) *warmUpSafeHoldingRunner {
+	return &warmUpSafeHoldingRunner{
+		releaseAt: releaseAt,
+		gate:      make(chan struct{}),
+	}
+}
+
+func (r *warmUpSafeHoldingRunner) Run(ctx context.Context, key domain.RunKey, t preflight.ResolvedTest, eval domain.AttemptEvaluator) (domain.TestResult, error) {
+	// Warm-up rep: complete immediately without joining the gate.
+	if key.RunNumber == 1 {
+		ev := passingEvidence()
+		ev.Key = key
+		if eval != nil {
+			return eval(ev), nil
+		}
+		return domain.TestResult{Key: key}, nil
+	}
+
+	// Fan-out rep: track in-flight count and open the gate when releaseAt reached.
+	r.mu.Lock()
+	r.inFlight++
+	if r.inFlight > r.peak {
+		r.peak = r.inFlight
+	}
+	shouldOpen := r.inFlight >= r.releaseAt && !r.releaseTriggered
+	if shouldOpen {
+		r.releaseTriggered = true
+	}
+	r.mu.Unlock()
+
+	if shouldOpen {
+		close(r.gate)
+	}
+
+	select {
+	case <-r.gate:
+	case <-ctx.Done():
+	}
+
+	r.mu.Lock()
+	r.inFlight--
+	r.mu.Unlock()
+
+	ev := passingEvidence()
+	ev.Key = key
+	if eval != nil {
+		return eval(ev), nil
+	}
+	return domain.TestResult{Key: key}, nil
+}
+
+// peakFanOut returns the peak number of simultaneously in-flight non-warm-up
+// (RunNumber > 1) calls observed across the lifetime of this runner.
+func (r *warmUpSafeHoldingRunner) peakFanOut() int {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	return r.peak
+}
+
+// ---------------------------------------------------------------------------
+// testSerializationDetector — detects cross-test concurrent in-flight overlap
+// ---------------------------------------------------------------------------
+
+// testSerializationDetector wraps a delegate TestRunner and records whether
+// two calls for distinct test names were ever simultaneously in-flight.
+// It yields the goroutine after updating its in-flight map so that concurrent
+// goroutines — if the scheduler dispatched them — have a chance to run and be
+// detected.
+type testSerializationDetector struct {
+	delegate    suite.TestRunner
+	mu          sync.Mutex
+	inFlight    map[string]int // test name -> current in-flight count
+	overlapSeen bool
+}
+
+func newTestSerializationDetector(delegate suite.TestRunner) *testSerializationDetector {
+	return &testSerializationDetector{
+		delegate: delegate,
+		inFlight: make(map[string]int),
+	}
+}
+
+func (d *testSerializationDetector) Run(ctx context.Context, key domain.RunKey, t preflight.ResolvedTest, eval domain.AttemptEvaluator) (domain.TestResult, error) {
+	d.mu.Lock()
+	for name, count := range d.inFlight {
+		if name != t.Definition.Name && count > 0 {
+			d.overlapSeen = true
+		}
+	}
+	d.inFlight[t.Definition.Name]++
+	d.mu.Unlock()
+
+	// Yield to the runtime: if the scheduler dispatched concurrent tests,
+	// their goroutines are now eligible to enter Run() and observe the
+	// current test's entry in the in-flight map.
+	runtime.Gosched()
+
+	result, err := d.delegate.Run(ctx, key, t, eval)
+
+	d.mu.Lock()
+	d.inFlight[t.Definition.Name]--
+	d.mu.Unlock()
+
+	return result, err
+}
+
+// overlapDetected reports whether any two distinct test names were ever
+// simultaneously in-flight during the suite run.
+func (d *testSerializationDetector) overlapDetected() bool {
+	d.mu.Lock()
+	defer d.mu.Unlock()
+	return d.overlapSeen
+}
+
+// ---------------------------------------------------------------------------
+// warmUpOrderingRunner — records start/end sequence per repetition
+// ---------------------------------------------------------------------------
+
+// warmUpOrderingRunner records the global event sequence number when each
+// repetition starts and ends, proving temporal ordering: rep 1's end sequence
+// must be strictly less than rep 2's start sequence.
+//
+// To make the ordering assertion reliable in the RED phase (before the warm-up
+// gate is implemented), rep 1 blocks until either rep 2 attempts to start or a
+// short timeout fires. This gives a concurrent scheduler without the warm-up
+// gate a clear window to dispatch rep 2 while rep 1 is still in-flight;
+// without the block, rep 1 finishes so fast that the race is rarely observable.
+//
+// With a correctly implemented warm-up gate, rep 2 never starts while rep 1 is
+// blocked, so the timeout fires and the test proceeds normally.
+type warmUpOrderingRunner struct {
+	mu          sync.Mutex
+	counter     int
+	starts      map[int]int // runNumber -> global counter value at start
+	ends        map[int]int // runNumber -> global counter value at end
+	rep2Started chan struct{} // closed when rep 2 enters Run
+	once        sync.Once
+}
+
+func newWarmUpOrderingRunner() *warmUpOrderingRunner {
+	return &warmUpOrderingRunner{
+		starts:      make(map[int]int),
+		ends:        make(map[int]int),
+		rep2Started: make(chan struct{}),
+	}
+}
+
+func (r *warmUpOrderingRunner) Run(ctx context.Context, key domain.RunKey, t preflight.ResolvedTest, eval domain.AttemptEvaluator) (domain.TestResult, error) {
+	r.mu.Lock()
+	r.counter++
+	r.starts[key.RunNumber] = r.counter
+	r.mu.Unlock()
+
+	if key.RunNumber == 2 {
+		// Signal before doing any work so rep 1 can observe this promptly.
+		r.once.Do(func() { close(r.rep2Started) })
+	}
+
+	if key.RunNumber == 1 {
+		// Hold rep 1 in-flight until rep 2 tries to start, or a timeout fires.
+		// A scheduler without the warm-up gate will dispatch rep 2 concurrently;
+		// with the gate, rep 2 is held back, the timeout fires, and the test passes.
+		select {
+		case <-r.rep2Started:
+		case <-time.After(200 * time.Millisecond):
+		case <-ctx.Done():
+		}
+	}
+
+	ev := passingEvidence()
+	ev.Key = key
+	var result domain.TestResult
+	if eval != nil {
+		result = eval(ev)
+	} else {
+		result = domain.TestResult{Key: key}
+	}
+
+	r.mu.Lock()
+	r.counter++
+	r.ends[key.RunNumber] = r.counter
+	r.mu.Unlock()
+
+	return result, nil
+}
+
+// startOf returns the sequence counter value recorded when the given
+// repetition number entered Run.
+func (r *warmUpOrderingRunner) startOf(runNumber int) int {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	return r.starts[runNumber]
+}
+
+// endOf returns the sequence counter value recorded when the given
+// repetition number exited Run.
+func (r *warmUpOrderingRunner) endOf(runNumber int) int {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	return r.ends[runNumber]
+}
+
+// ---------------------------------------------------------------------------
+// warmUpBlockingRunner — blocks the warm-up rep until ctx is cancelled
+// ---------------------------------------------------------------------------
+
+// warmUpBlockingRunner blocks Run for RunNumber == 1 until the context is
+// cancelled, and completes all other repetitions immediately. It tracks the
+// total number of calls made so the test can verify that fan-out repetitions
+// are never dispatched when cancellation occurs during warm-up.
+type warmUpBlockingRunner struct {
+	mu            sync.Mutex
+	callCount     int
+	warmUpStarted chan struct{}
+	once          sync.Once
+}
+
+func newWarmUpBlockingRunner() *warmUpBlockingRunner {
+	return &warmUpBlockingRunner{
+		warmUpStarted: make(chan struct{}),
+	}
+}
+
+func (r *warmUpBlockingRunner) Run(ctx context.Context, key domain.RunKey, t preflight.ResolvedTest, eval domain.AttemptEvaluator) (domain.TestResult, error) {
+	r.mu.Lock()
+	r.callCount++
+	r.mu.Unlock()
+
+	if key.RunNumber == 1 {
+		r.once.Do(func() { close(r.warmUpStarted) })
+		<-ctx.Done()
+	}
+
+	ev := passingEvidence()
+	ev.Key = key
+	if eval != nil {
+		return eval(ev), nil
+	}
+	return domain.TestResult{Key: key}, nil
+}
+
+func (r *warmUpBlockingRunner) totalCalls() int {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	return r.callCount
+}
+
+// ---------------------------------------------------------------------------
 // Shared helpers for this file
 // ---------------------------------------------------------------------------
 
@@ -177,22 +465,26 @@ func eventKindSeq(events []domain.ProgressEvent) []domain.ProgressKind {
 }
 
 // ---------------------------------------------------------------------------
-// T14.1 — Repetitions of one test execute concurrently up to the bound
+// T14.1 — Repetitions of one test fan out concurrently after warm-up
 // ---------------------------------------------------------------------------
 
 // TestScheduler_RepetitionsOfOneTest_ExecuteConcurrentlyUpToBound verifies
-// that when a test declares several repetitions, the scheduler sends at least
-// bound calls to the runner simultaneously. The holdingRunner's gate only
-// opens when releaseAt calls are in-flight at the same time; with sequential
-// execution only one is ever in-flight, the gate never opens, the context
-// times out, and the peak assertion fails.
+// that after the warm-up repetition (rep 1) completes, the remaining
+// repetitions fan out concurrently up to the configured bound.
+//
+// The warmUpSafeHoldingRunner passes rep 1 through immediately, then gates
+// reps 2..N until releaseAt of them are simultaneously in-flight. With
+// sequential execution (current implementation), only one non-warmup rep is
+// ever in-flight; the gate never opens, the context times out, and the
+// peak assertion fails. With the new concurrent fan-out scheduler, reps 2..N
+// dispatch simultaneously and the gate opens.
 func TestScheduler_RepetitionsOfOneTest_ExecuteConcurrentlyUpToBound(t *testing.T) {
 	const (
 		bound = 2
 		reps  = 4
 	)
 
-	runner := newHoldingRunner(bound)
+	runner := newWarmUpSafeHoldingRunner(bound)
 	s := newConcurrentSuite(runner, newFakeClock(), &recordingSink{}, bound)
 	plan := buildPlan(resolvedTest("test-a", reps, 1.0))
 
@@ -201,73 +493,85 @@ func TestScheduler_RepetitionsOfOneTest_ExecuteConcurrentlyUpToBound(t *testing.
 
 	runSuite(t, s, ctx, plan) //nolint:errcheck — timeout and completion are both acceptable
 
-	if got := runner.peakConcurrent(); got < bound {
+	if got := runner.peakFanOut(); got < bound {
 		t.Errorf(
-			"peak concurrent calls = %d, want >= %d; the scheduler must execute "+
-				"repetitions of one test concurrently up to the configured bound",
+			"peak concurrent fan-out calls = %d, want >= %d; after the warm-up "+
+				"repetition completes, the scheduler must dispatch reps 2..N "+
+				"concurrently up to the configured bound",
 			got, bound,
 		)
 	}
 }
 
 // ---------------------------------------------------------------------------
-// T14.2 — Tests within a suite execute concurrently under the same bound
+// T14.2 — Tests within a suite execute one at a time
 // ---------------------------------------------------------------------------
 
-// TestScheduler_TestsWithinSuite_ExecuteConcurrentlyUnderBound verifies that
-// distinct tests in the plan run concurrently with each other, not one after
-// another, when the bound allows it.
-func TestScheduler_TestsWithinSuite_ExecuteConcurrentlyUnderBound(t *testing.T) {
-	const (
-		bound    = 2
-		numTests = 4
-	)
+// TestScheduler_TestsWithinSuite_ExecuteOneAtATime verifies that distinct
+// tests in the plan run sequentially, with no temporal overlap between
+// different tests' runs. Under the one-test-at-a-time scheduling model, the
+// scheduler must complete all repetitions of one test before starting any
+// repetition of the next.
+//
+// The testSerializationDetector wraps a scriptedRunner and records whether any
+// two different test names were ever simultaneously in-flight. It yields the
+// goroutine after updating its tracking state so that concurrent goroutines,
+// if any were dispatched, have a chance to be observed. If tests are correctly
+// serialized, no overlap is ever recorded.
+func TestScheduler_TestsWithinSuite_ExecuteOneAtATime(t *testing.T) {
+	const numTests = 4
 
-	runner := newHoldingRunner(bound)
+	inner := newScriptedRunner()
+	runner := newTestSerializationDetector(inner)
 	tests := make([]preflight.ResolvedTest, numTests)
 	for i := range tests {
 		tests[i] = resolvedTest(fmt.Sprintf("test-%d", i), 1, 1.0)
 	}
-	s := newConcurrentSuite(runner, newFakeClock(), &recordingSink{}, bound)
+	s := newConcurrentSuite(runner, newFakeClock(), &recordingSink{}, numTests)
 	plan := buildPlan(tests...)
 
-	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
-	defer cancel()
+	_, err := runSuite(t, s, context.Background(), plan)
+	if err != nil {
+		t.Fatalf("Suite.Run returned error: %v", err)
+	}
 
-	runSuite(t, s, ctx, plan)
-
-	if got := runner.peakConcurrent(); got < bound {
+	if runner.overlapDetected() {
 		t.Errorf(
-			"peak concurrent calls across distinct tests = %d, want >= %d; "+
-				"the scheduler must execute distinct tests concurrently",
-			got, bound,
+			"two distinct tests were simultaneously in-flight; tests within a " +
+				"suite must execute one at a time with no temporal overlap — the " +
+				"scheduler must not dispatch a new test until the previous test's " +
+				"runs (all its repetitions) have completed",
 		)
 	}
 }
 
 // ---------------------------------------------------------------------------
-// T14.3 — One bound governs both nesting levels together
+// T14.3 — Bound governs concurrent repetitions within a single test
 // ---------------------------------------------------------------------------
 
 // TestScheduler_OneBoundGovernsTestsAndRepetitions_TotalInFlightNeverExceedsBound
-// verifies two complementary properties:
+// verifies two complementary properties under the one-test-at-a-time model:
 //
-//  1. The total in-flight count across ALL tests and ALL repetitions never
-//     exceeds the configured bound — one bound over the entire
-//     (test × repetition) matrix, not one bound per level.
-//  2. The scheduler actually reaches peak ≥ 2 so a trivially sequential
-//     fallback cannot satisfy the max-constraint alone.
+//  1. No two distinct tests are ever simultaneously in-flight (tests are
+//     serialized; one bound no longer spans the full test x repetition matrix).
+//  2. Within one test's fan-out, the bound is exploited: peak concurrent
+//     non-warmup reps >= 2, so a trivially sequential fallback is rejected.
 //
-// With sequential execution: the gate never opens, the context times out, and
-// peak == 1. Assertion 2 fails.
+// The warmUpSafeHoldingRunner gates non-warmup reps until bound are
+// simultaneously in-flight. With the current shared-FIFO scheduler, the gate
+// opens (cross-test reps reach the releaseAt threshold concurrently), but the
+// testSerializationDetector fires because those reps belong to distinct tests.
+// With the new scheduler, each test's reps 2..N fan out in isolation and the
+// gate opens within a single test's fan-out, with no cross-test overlap.
 func TestScheduler_OneBoundGovernsTestsAndRepetitions_TotalInFlightNeverExceedsBound(t *testing.T) {
 	const (
 		bound    = 2
 		numTests = 3
-		reps     = 3 // 9 total scheduling units
+		reps     = 3 // rep 1 of each test is warm-up; reps 2..3 fan out at bound
 	)
 
-	runner := newHoldingRunner(bound)
+	inner := newWarmUpSafeHoldingRunner(bound)
+	runner := newTestSerializationDetector(inner)
 	tests := make([]preflight.ResolvedTest, numTests)
 	for i := range tests {
 		tests[i] = resolvedTest(fmt.Sprintf("test-%d", i), reps, 1.0)
@@ -278,22 +582,32 @@ func TestScheduler_OneBoundGovernsTestsAndRepetitions_TotalInFlightNeverExceedsB
 	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
 	defer cancel()
 
-	runSuite(t, s, ctx, plan)
+	runSuite(t, s, ctx, plan) //nolint:errcheck
 
-	got := runner.peakConcurrent()
+	got := inner.peakFanOut()
 
 	if got > bound {
 		t.Errorf(
-			"peak concurrent runs = %d, exceeds bound %d; one bound must govern "+
-				"both test and repetition concurrency — not two independent bounds",
+			"peak concurrent fan-out reps = %d, exceeds bound %d; the bound must "+
+				"cap concurrent repetitions within one test — the scheduler must not "+
+				"start more than bound reps simultaneously during fan-out",
 			got, bound,
 		)
 	}
 	if got < 2 {
 		t.Errorf(
-			"peak concurrent runs = %d, want >= 2; the scheduler must exploit the "+
-				"bound and run multiple units concurrently",
+			"peak concurrent fan-out reps = %d, want >= 2; after the warm-up rep "+
+				"completes, the scheduler must exploit the bound and dispatch reps "+
+				"2..N concurrently — a fully sequential fallback is not acceptable",
 			got,
+		)
+	}
+
+	if runner.overlapDetected() {
+		t.Errorf(
+			"two distinct tests were simultaneously in-flight; under the " +
+				"one-test-at-a-time model the bound governs repetitions within one " +
+				"test, not across tests — tests must be fully serialized",
 		)
 	}
 }
@@ -468,21 +782,19 @@ func TestScheduler_AttemptWithinRepetition_RunsStrictlyInOrder(t *testing.T) {
 }
 
 // ---------------------------------------------------------------------------
-// T14.7 — Progress events emitted from concurrent evaluator closures
+// T14.7 — Progress events emitted for all repetitions
 // ---------------------------------------------------------------------------
 
 // TestScheduler_ConcurrentRuns_EmitAllLifecycleEvents verifies that every
 // repetition in the plan produces a TestStarted and a TestFinished lifecycle
-// event in the progress stream, with no event dropped, even when evaluator
-// closures execute concurrently on many goroutines.
+// event in the progress stream, with no event dropped, regardless of
+// scheduling model.
 //
-// The holdingRunner gates at bound: when bound calls are simultaneously
-// in-flight the gate opens and all proceed. With sequential execution the gate
-// never opens, the context times out, only a subset of events is emitted, and
-// the expected-count assertion fails.
-//
-// It also verifies per-run attribution: each TestStarted and TestFinished
-// event must carry a non-empty Run.RunID.
+// This test uses a scriptedRunner (non-blocking) so it passes with both
+// sequential and concurrent fan-out implementations. It is a regression guard
+// that pins the event-count contract: every rep must produce exactly one
+// TestStarted and one TestFinished event, and each must carry a non-empty
+// RunID for attribution.
 func TestScheduler_ConcurrentRuns_EmitAllLifecycleEvents(t *testing.T) {
 	const (
 		numTests = 3
@@ -490,7 +802,7 @@ func TestScheduler_ConcurrentRuns_EmitAllLifecycleEvents(t *testing.T) {
 		bound    = 3
 	)
 
-	runner := newHoldingRunner(bound)
+	runner := newScriptedRunner()
 	sink := &recordingSink{}
 	s := newConcurrentSuite(runner, newFakeClock(), sink, bound)
 
@@ -500,26 +812,26 @@ func TestScheduler_ConcurrentRuns_EmitAllLifecycleEvents(t *testing.T) {
 	}
 	plan := buildPlan(tests...)
 
-	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
-	defer cancel()
-
-	runSuite(t, s, ctx, plan)
+	_, err := runSuite(t, s, context.Background(), plan)
+	if err != nil {
+		t.Fatalf("Suite.Run returned error: %v", err)
+	}
 
 	events := sink.all()
 	totalReps := numTests * reps
 
 	if got := countEventsOfKind(events, domain.ProgressTestStarted); got != totalReps {
 		t.Errorf(
-			"ProgressTestStarted events = %d, want %d; lifecycle events must never "+
-				"be dropped even when evaluator closures execute concurrently",
+			"ProgressTestStarted events = %d, want %d; lifecycle events must "+
+				"never be dropped regardless of scheduling model",
 			got, totalReps,
 		)
 	}
 
 	if got := countEventsOfKind(events, domain.ProgressTestFinished); got != totalReps {
 		t.Errorf(
-			"ProgressTestFinished events = %d, want %d; lifecycle events must never "+
-				"be dropped even when evaluator closures execute concurrently",
+			"ProgressTestFinished events = %d, want %d; lifecycle events must "+
+				"never be dropped regardless of scheduling model",
 			got, totalReps,
 		)
 	}
@@ -531,8 +843,8 @@ func TestScheduler_ConcurrentRuns_EmitAllLifecycleEvents(t *testing.T) {
 			if ev.Run.RunID == "" {
 				t.Errorf(
 					"%v event has empty Run.RunID; per-run lifecycle events must carry "+
-						"a non-empty run identity so they are attributable under concurrent "+
-						"execution — a cross-run attribution error is undiagnosable",
+						"a non-empty run identity so they are attributable — a cross-run "+
+						"attribution error is undiagnosable",
 					ev.Kind,
 				)
 			}
@@ -582,5 +894,152 @@ func TestScheduler_ConcurrentRuns_ReceiveDistinctRunIdentities(t *testing.T) {
 	// Guard: the plan should produce at least 6 distinct run identities.
 	if len(seen) < 6 {
 		t.Errorf("only %d distinct run identities seen, want >= 6 (3 reps × 2 tests)", len(seen))
+	}
+}
+
+// ---------------------------------------------------------------------------
+// Warm-up gate test — rep 1 completes before reps 2..N start
+// ---------------------------------------------------------------------------
+
+// TestScheduler_WarmUpRep_CompletesBeforeFanOutBegins verifies that for a
+// test with 2+ repetitions, repetition 1 (the warm-up) starts and completes
+// before any of repetitions 2..N start.
+//
+// The warmUpOrderingRunner assigns a monotonically increasing sequence number
+// to each start and end event and blocks rep 1 until rep 2 attempts to start
+// (or a 200ms timeout). This hold gives a concurrent scheduler without the
+// warm-up gate a clear window to dispatch rep 2 while rep 1 is still in-flight,
+// making a scheduling violation observable and producing a reliable RED failure.
+// With the gate implemented, rep 2 is withheld until rep 1 finishes, the
+// timeout fires, and the sequence-number assertion passes.
+//
+// This is a RED-phase test: it fails with the current shared-FIFO scheduler
+// because rep 2 is dispatched while rep 1 is still blocked.
+func TestScheduler_WarmUpRep_CompletesBeforeFanOutBegins(t *testing.T) {
+	const (
+		bound = 2
+		reps  = 3
+	)
+
+	tracker := newWarmUpOrderingRunner()
+	s := newConcurrentSuite(tracker, newFakeClock(), &recordingSink{}, bound)
+	plan := buildPlan(resolvedTest("test-a", reps, 1.0))
+
+	_, err := runSuite(t, s, context.Background(), plan)
+	if err != nil {
+		t.Fatalf("Suite.Run returned error: %v", err)
+	}
+
+	rep1End := tracker.endOf(1)
+	rep2Start := tracker.startOf(2)
+
+	if rep1End == 0 {
+		t.Fatal("repetition 1 never completed; run end was not recorded")
+	}
+	if rep2Start == 0 {
+		t.Fatal("repetition 2 never started; run start was not recorded")
+	}
+
+	if rep1End >= rep2Start {
+		t.Errorf(
+			"repetition 1 ended at sequence %d but repetition 2 started at "+
+				"sequence %d; rep 1 (warm-up) must complete before any of reps 2..N "+
+				"start — the scheduler must wait for the warm-up to finish before "+
+				"dispatching fan-out repetitions",
+			rep1End, rep2Start,
+		)
+	}
+}
+
+// ---------------------------------------------------------------------------
+// Cancellation during warm-up test — fan-out never dispatched
+// ---------------------------------------------------------------------------
+
+// TestScheduler_CancellationDuringWarmUp_FanOutNeverDispatched verifies that
+// if the context is cancelled while repetition 1 (warm-up) is still in-flight,
+// repetitions 2..N are never dispatched.
+//
+// The warmUpBlockingRunner blocks rep 1 until ctx is cancelled and completes
+// all other reps immediately. The test cancels the context after rep 1 has
+// started, then verifies that runner.Run was called exactly once (only rep 1).
+func TestScheduler_CancellationDuringWarmUp_FanOutNeverDispatched(t *testing.T) {
+	const (
+		bound = 3
+		reps  = 4
+	)
+
+	runner := newWarmUpBlockingRunner()
+	s := newConcurrentSuite(runner, newFakeClock(), &recordingSink{}, bound)
+	plan := buildPlan(resolvedTest("test-a", reps, 1.0))
+
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+
+	done := make(chan struct{})
+	go func() {
+		defer close(done)
+		runSuite(t, s, ctx, plan) //nolint:errcheck
+	}()
+
+	// Wait until rep 1 (warm-up) is in-flight, then cancel. Rep 1 unblocks
+	// via ctx.Done(). Reps 2..4 must not be dispatched after cancellation.
+	select {
+	case <-runner.warmUpStarted:
+		cancel()
+	case <-time.After(2 * time.Second):
+		cancel()
+		t.Fatal("warm-up repetition did not start within 2s")
+	}
+
+	select {
+	case <-done:
+	case <-time.After(2 * time.Second):
+		t.Fatal("Suite.Run did not return within 2s after cancellation")
+	}
+
+	if got := runner.totalCalls(); got > 1 {
+		t.Errorf(
+			"runner.Run called %d times, want 1; when the context is cancelled "+
+				"during the warm-up repetition, the scheduler must not dispatch any "+
+				"of the fan-out repetitions (reps 2..N)",
+			got,
+		)
+	}
+}
+
+// ---------------------------------------------------------------------------
+// Single-repetition no-op test — no warm-up gate overhead
+// ---------------------------------------------------------------------------
+
+// TestScheduler_SingleRepetition_ExecutesWithoutWarmUpGate verifies that a
+// test with exactly 1 repetition executes identically to today: no spurious
+// wait, no gate, no changed result. This is a regression guard that protects
+// against implementations that add warm-up overhead even when there are no
+// fan-out repetitions to wait for.
+func TestScheduler_SingleRepetition_ExecutesWithoutWarmUpGate(t *testing.T) {
+	runner := newScriptedRunner()
+	s := newConcurrentSuite(runner, newFakeClock(), &recordingSink{}, 2)
+	plan := buildPlan(resolvedTest("test-a", 1, 1.0))
+
+	result, err := runSuite(t, s, context.Background(), plan)
+	if err != nil {
+		t.Fatalf("Suite.Run returned error: %v", err)
+	}
+
+	if len(result.Tests) != 1 {
+		t.Fatalf("got %d test reports, want 1", len(result.Tests))
+	}
+	if len(result.Tests[0].Runs) != 1 {
+		t.Fatalf("got %d run reports for test-a, want 1; a single-repetition test "+
+			"must produce exactly one run report with no extra gate or delay",
+			len(result.Tests[0].Runs),
+		)
+	}
+	if result.Tests[0].Runs[0].Key.RunNumber != 1 {
+		t.Errorf(
+			"run report RunNumber = %d, want 1; single-repetition test must "+
+				"produce a run with RunNumber 1",
+			result.Tests[0].Runs[0].Key.RunNumber,
+		)
 	}
 }

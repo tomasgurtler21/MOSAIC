@@ -116,7 +116,11 @@ func (m Model) viewModeSelect() string {
 		b.WriteString(tuicommon.Truncate(prefix+label, width))
 	}
 
-	return m.renderScreen("AgentTest", "Select mode", b.String(), tuicommon.EntryScreenHelp())
+	title := "AgentTest"
+	if m.opts.ToolVersion != "" {
+		title = "AgentTest v" + m.opts.ToolVersion
+	}
+	return m.renderScreen(title, "Select mode", b.String(), tuicommon.EntryScreenHelp())
 }
 
 // ---------------------------------------------------------------------------

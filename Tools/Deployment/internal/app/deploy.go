@@ -312,7 +312,8 @@ func (s *service) DeployNew(ctx context.Context, req DeployRequest) (domain.RunS
 			Harness: harnessRef.DisplayName, WorkspacePath: workspace, DeploymentRoot: workspace,
 			GeneratedAt: now, Mode: domain.ModeDeployWorkspace,
 		},
-		DryRun: req.DryRun,
+		DryRun:      req.DryRun,
+		ToolVersion: s.deps.ToolVersion,
 	}
 
 	result, err := s.deps.Executor.Execute(ctx, execReq)

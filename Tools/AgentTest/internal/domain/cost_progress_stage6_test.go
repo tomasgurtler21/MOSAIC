@@ -228,3 +228,40 @@ func TestCostReportAdd_TotalUSD_IsSummedRegardlessOfAttribution(t *testing.T) {
 		t.Errorf("Add result TotalUSD = %v, want 2.00 — TotalUSD must always be summed", got.TotalUSD)
 	}
 }
+
+// ---------------------------------------------------------------------------
+// UnknownRunResidual is propagated through Add
+// ---------------------------------------------------------------------------
+
+func TestCostReportAdd_UnknownRunResidual_IsSummedFromBothOperands(t *testing.T) {
+	a := domain.CostReport{Attribution: domain.AttributionAttributed, TotalUSD: 1.00, UnknownRunResidual: 3}
+	b := domain.CostReport{Attribution: domain.AttributionAttributed, TotalUSD: 2.00, UnknownRunResidual: 5}
+
+	got := a.Add(b)
+
+	if got.UnknownRunResidual != 8 {
+		t.Errorf("Add result UnknownRunResidual = %d, want 8 — residuals must be summed across operands", got.UnknownRunResidual)
+	}
+}
+
+func TestCostReportAdd_UnknownRunResidual_ZeroPlusNonZero_YieldsNonZero(t *testing.T) {
+	a := domain.CostReport{Attribution: domain.AttributionAttributed, TotalUSD: 1.00, UnknownRunResidual: 0}
+	b := domain.CostReport{Attribution: domain.AttributionAttributed, TotalUSD: 2.00, UnknownRunResidual: 4}
+
+	got := a.Add(b)
+
+	if got.UnknownRunResidual != 4 {
+		t.Errorf("Add result UnknownRunResidual = %d, want 4 — non-zero residual must survive Add even when the other operand is zero", got.UnknownRunResidual)
+	}
+}
+
+func TestCostReportAdd_UnknownRunResidual_BothZero_YieldsZero(t *testing.T) {
+	a := domain.CostReport{Attribution: domain.AttributionAttributed, TotalUSD: 1.00}
+	b := domain.CostReport{Attribution: domain.AttributionAttributed, TotalUSD: 2.00}
+
+	got := a.Add(b)
+
+	if got.UnknownRunResidual != 0 {
+		t.Errorf("Add result UnknownRunResidual = %d, want 0 — both operands have zero residual", got.UnknownRunResidual)
+	}
+}

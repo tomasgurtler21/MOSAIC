@@ -37,7 +37,7 @@ var registry = []FieldName{
 }
 
 // genericVocabularyKeys is the set of keys belonging to the generic agent frontmatter
-// vocabulary documented in Catalog/SourceFilesFormat.md.
+// vocabulary documented in Catalog/CatalogFilesFormat.md.
 var genericVocabularyKeys = map[string]bool{
 	"id":               true,
 	"version":          true,
@@ -97,7 +97,7 @@ func IsMosaicOnlyDeployedKey(key string) bool {
 }
 
 // IsGenericVocabularyKey reports whether key belongs to the generic agent frontmatter
-// vocabulary documented in Catalog/SourceFilesFormat.md:
+// vocabulary documented in Catalog/CatalogFilesFormat.md:
 // id, version, name, description, role, model, tools, recommended_tier,
 // tier_rationale, required_skills.
 func IsGenericVocabularyKey(key string) bool {

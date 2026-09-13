@@ -103,6 +103,10 @@ func TestMain(m *testing.M) {
 	case "env-echo":
 		runFakeHarnessEnvEcho()
 		os.Exit(0)
+	// Role wire-forwarding capture mode (T1.4):
+	case "injection-role-reflect":
+		runFakeHarnessInjectionRoleReflect()
+		os.Exit(0)
 	}
 	os.Exit(m.Run())
 }
@@ -544,6 +548,78 @@ func runFakeHarnessEnvEcho() {
 	}
 }
 
+// runFakeHarnessInjectionRoleReflect implements a fake harness that reflects the "role"
+// field from the injection request params back in the content response. It is used by
+// TestInjection_RoleForwardedOverWireProtocol to verify that the adapter includes the
+// "role" field in the wireInjectionRequest JSON payload.
+//
+// For injection requests: reflects "role=<value>" as the content, with ok=true.
+// For all other requests: responds with the same echo-style defaults as runFakeHarnessEcho.
+func runFakeHarnessInjectionRoleReflect() {
+	dec := json.NewDecoder(os.Stdin)
+	enc := json.NewEncoder(os.Stdout)
+
+	for {
+		var req map[string]any
+		if err := dec.Decode(&req); err != nil {
+			return
+		}
+		id, _ := req["id"].(string)
+		method, _ := req["method"].(string)
+
+		switch method {
+		case "handshake":
+			_ = enc.Encode(map[string]any{
+				"protocol": external.ProtocolVersion,
+				"id":       id,
+				"result": map[string]any{
+					"protocol": external.ProtocolVersion,
+					"harness": map[string]any{
+						"id":           "injection-role-reflect",
+						"display_name": "Injection Role Reflect Harness",
+						"tier":         "external",
+						"usable":       true,
+					},
+				},
+			})
+		case "descriptor":
+			_ = enc.Encode(map[string]any{
+				"protocol": external.ProtocolVersion,
+				"id":       id,
+				"result": map[string]any{
+					"descriptor": map[string]any{
+						"schema_version": "1",
+						"id":             "injection-role-reflect",
+						"display_name":   "Injection Role Reflect Harness",
+					},
+				},
+			})
+		case "injection":
+			// Reflect the "role" field back in the content so the test can verify
+			// whether the adapter forwarded it.
+			params, _ := req["params"].(map[string]any)
+			role, _ := params["role"].(string)
+			_ = enc.Encode(map[string]any{
+				"protocol": external.ProtocolVersion,
+				"id":       id,
+				"result": map[string]any{
+					"content": "role=" + role,
+					"ok":      true,
+				},
+			})
+		default:
+			_ = enc.Encode(map[string]any{
+				"protocol": external.ProtocolVersion,
+				"id":       id,
+				"error": map[string]any{
+					"code":    "unsupported_method",
+					"message": fmt.Sprintf("injection-role-reflect: unsupported method %s", method),
+				},
+			})
+		}
+	}
+}
+
 // runFakeHarnessMismatch responds to the handshake with a different protocol version.
 func runFakeHarnessMismatch() {
 	dec := json.NewDecoder(os.Stdin)
@@ -922,6 +998,94 @@ func TestProtocol_MessageTypesHaveProtocolField(t *testing.T) {
 func TestProtocol_ProtocolVersionConst(t *testing.T) {
 	if external.ProtocolVersion != "1.0" {
 		t.Errorf("ProtocolVersion = %q, want %q; protocol version is a stable contract", external.ProtocolVersion, "1.0")
+	}
+}
+
+// ---------------------------------------------------------------------------
+// Role wire-forwarding tests (T1.4)
+// ---------------------------------------------------------------------------
+
+// TestInjection_RoleForwardedOverWireProtocol verifies that when Injection is called with
+// InjectionRequest{Role: domain.RoleOrchestrator}, the adapter includes the "role" field
+// in the JSON payload sent to the external process.
+//
+// The injection-role-reflect fake harness reflects the "role" field from the params back
+// in the content response ("role=<value>"). By asserting the returned content equals
+// "role=orchestrator", this test confirms the wire payload carried the role field.
+//
+// RED: FAILS until I1.1 (add Role field to domain.InjectionRequest) and I1.6 (add Role
+// to wireInjectionRequest and populate it in adapter.Injection) are both complete.
+// Before I1.1, this test fails to compile. After I1.1 but before I1.6, the adapter does
+// not forward Role, so the reflected content is "role=" (empty) rather than
+// "role=orchestrator".
+func TestInjection_RoleForwardedOverWireProtocol(t *testing.T) {
+	desc := minimalDescriptor(t, "injection-role-reflect")
+	exePath := fakeHarnessExe(t, "injection-role-reflect")
+
+	m, err := external.New(exePath, desc, external.Options{Timeout: 5 * time.Second})
+	if err != nil {
+		t.Fatalf("external.New: %v", err)
+	}
+	defer m.Close() //nolint:errcheck
+
+	content, ok := m.Injection(domain.InjectionRequest{
+		Name:     "HarnessConstraints",
+		AgentKey: "orchestrator-script",
+		Role:     domain.RoleOrchestrator,
+	})
+	if !ok {
+		t.Fatal("Injection returned ok=false; injection-role-reflect server returns ok=true for all injection requests")
+	}
+	const wantContent = "role=orchestrator"
+	if content != wantContent {
+		t.Errorf("Injection role wire forwarding: got content %q, want %q; "+
+			"the adapter must include \"role\": \"orchestrator\" in the wireInjectionRequest JSON payload "+
+			"when InjectionRequest.Role == domain.RoleOrchestrator",
+			content, wantContent)
+	}
+}
+
+// TestInjection_ZeroRole_OmittedFromWirePayload verifies that when Injection is called with
+// a zero-value Role (the default), the "role" field is omitted from the wire JSON payload
+// (backward compatibility via omitempty on wireInjectionRequest.Role).
+//
+// The injection-role-reflect fake harness reflects the role field back in the content.
+// When "role" is omitted from the wire payload, params["role"] is absent, and the
+// reflected content is "role=" (role field absent = empty string from Go type assertion).
+//
+// This test verifies the backward-compatibility contract: zero Role must not appear in
+// the wire payload, so older external modules that do not understand the field are
+// not affected.
+//
+// RED: compile-fails until I1.1 adds the Role field to domain.InjectionRequest.
+// After I1.1 and I1.6, this test verifies that omitempty is correctly applied.
+func TestInjection_ZeroRole_OmittedFromWirePayload(t *testing.T) {
+	desc := minimalDescriptor(t, "injection-role-reflect")
+	exePath := fakeHarnessExe(t, "injection-role-reflect")
+
+	m, err := external.New(exePath, desc, external.Options{Timeout: 5 * time.Second})
+	if err != nil {
+		t.Fatalf("external.New: %v", err)
+	}
+	defer m.Close() //nolint:errcheck
+
+	content, ok := m.Injection(domain.InjectionRequest{
+		Name:     "HarnessConstraints",
+		AgentKey: "some-subagent",
+		// Role is zero value (empty string) -- must be omitted from wire payload via omitempty
+	})
+	if !ok {
+		t.Fatal("Injection returned ok=false; injection-role-reflect server returns ok=true for all injection requests")
+	}
+	// With zero Role and omitempty, the wire payload omits the "role" field entirely.
+	// The reflect server gets params["role"] as empty string (Go's zero value for missing keys).
+	// Reflected content should be "role=" (empty role), not "role=orchestrator".
+	const wantContent = "role="
+	if content != wantContent {
+		t.Errorf("Injection zero-role omitempty: got content %q, want %q; "+
+			"zero-value Role must be omitted from the wireInjectionRequest payload (omitempty), "+
+			"not forwarded as an empty string field",
+			content, wantContent)
 	}
 }
 

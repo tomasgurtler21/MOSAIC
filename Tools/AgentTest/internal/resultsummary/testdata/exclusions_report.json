@@ -1,0 +1,53 @@
+{
+  "schema_version": "1",
+  "suite_id": "route-back",
+  "started_at": "2026-09-01T10:00:00Z",
+  "finished_at": "2026-09-01T10:15:00Z",
+  "tests": [
+    {
+      "test_name": "test-1",
+      "test_id": 1,
+      "description": "Test with two excluded runs",
+      "layer": "orchestrator",
+      "aggregate": {
+        "verdict": "pass",
+        "counted": 3,
+        "passed": 3,
+        "pass_rate": 1.0,
+        "infrastructure_failure": false,
+        "total_cost": { "total_usd": 0.06, "attribution": "direct" },
+        "excluded": 2,
+        "exclusions": [
+          {
+            "key": { "run_id": "run-abc-1", "test_name": "test-1", "run_number": 4 },
+            "reason": "spawn_failed",
+            "termination_reason": "early_exit",
+            "detail": "process exited with code 1"
+          },
+          {
+            "key": { "run_id": "run-abc-2", "test_name": "test-1", "run_number": 5 },
+            "reason": "state_integrity",
+            "termination_reason": "timeout",
+            "detail": "sandbox state check failed"
+          }
+        ]
+      },
+      "runs": [
+        {
+          "subject_version": "7.4.1",
+          "subject_model": "github-copilot/claude-sonnet-4.6",
+          "harness_id": "claude-code",
+          "verdict": "pass",
+          "duration_ms": 2000,
+          "cost": { "total_usd": 0.02, "attribution": "direct" },
+          "termination_reason": "completed",
+          "conditions": [],
+          "test_version": 1
+        }
+      ]
+    }
+  ],
+  "counts": { "pass": 1 },
+  "total_cost": { "total_usd": 0.06, "attribution": "direct" },
+  "infrastructure_failures": 0
+}

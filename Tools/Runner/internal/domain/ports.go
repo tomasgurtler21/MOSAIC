@@ -333,4 +333,15 @@ const (
 
 	// Snapshot event names.
 	EventSnapshotCleanupFailed = "session.snapshot.cleanup_failed"
+
+	// Graceful-stop lifecycle event names. Silent in a run where no stop is
+	// requested: nothing here is emitted on a negative poll or an ignored key.
+	//
+	// The tui. prefix names the emitting side, which is what makes a single
+	// interleaved log readable: session-side and TUI-side stop entries share
+	// one ordered log, so the whole lifecycle is reconstructible from one file.
+	EventSessionStopObserved = "session.stop.observed"
+	EventTUIStopGateEntered  = "tui.stop.gate.entered"
+	EventTUIStopGateResolved = "tui.stop.gate.resolved"
+	EventTUIStopSignalArmed  = "tui.stop.signal.armed"
 )

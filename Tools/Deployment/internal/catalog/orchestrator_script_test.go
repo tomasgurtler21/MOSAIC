@@ -110,7 +110,7 @@ Body.
 	mustWriteFile(t, catalogRoot, filepath.Join("Orchestrator", "orchestrator-script.md"), content)
 }
 
-// makeMinimalMosaicRoot builds a temp MOSAIC root with a Catalog/SourceFilesFormat.md
+// makeMinimalMosaicRoot builds a temp MOSAIC root with a Catalog/CatalogFilesFormat.md
 // marker so catalog.Load succeeds.
 func makeMinimalMosaicRoot(t *testing.T) string {
 	t.Helper()

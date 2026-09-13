@@ -70,6 +70,7 @@ import (
 	"mosaic-deploy/internal/app"
 	"mosaic-deploy/internal/app/interactiontest"
 	"mosaic-deploy/internal/catalog"
+	"mosaic-deploy/internal/catalog/catalogpaths"
 	"mosaic-deploy/internal/domain"
 )
 
@@ -147,8 +148,8 @@ func writeMosaicRoot(t *testing.T) string {
 		t.Fatalf("writeMosaicRoot: %v", err)
 	}
 	if err := os.WriteFile(
-		filepath.Join(root, "Catalog", "SourceFilesFormat.md"),
-		[]byte("# Source Files Format\n"),
+		filepath.Join(root, catalogpaths.MosaicRelSourceFilesFormatFile),
+		[]byte("# CatalogFilesFormat\n"),
 		0o644,
 	); err != nil {
 		t.Fatalf("writeMosaicRoot: %v", err)

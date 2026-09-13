@@ -50,7 +50,7 @@ tasks:
       - "{{.DIST_DIR}}/{{.BINARY_NAME}}.exe"
 
   build:linux:
-    desc: "Cross-compile for Linux (amd64). Output: dist/mosaic-deploy-linux-amd64"
+    desc: "Cross-compile for Linux (amd64). Output: dist/mosaic-deploy"
     summary: |
       Produces a statically-linked Linux amd64 binary with no external runtime
       dependency. CGO is disabled and GOOS=linux ensures reproducible output
@@ -61,9 +61,9 @@ tasks:
       CGO_ENABLED: "0"
     cmds:
       - mkdir -p {{.DIST_DIR}}
-      - go build -ldflags="{{.LDFLAGS}}" -o {{.DIST_DIR}}/{{.BINARY_NAME}}-linux-amd64 {{.CMD_PKG}}
+      - go build -ldflags="{{.LDFLAGS}}" -o {{.DIST_DIR}}/{{.BINARY_NAME}} {{.CMD_PKG}}
     generates:
-      - "{{.DIST_DIR}}/{{.BINARY_NAME}}-linux-amd64"
+      - "{{.DIST_DIR}}/{{.BINARY_NAME}}"
 
   build:all:
     desc: Cross-compile for all supported platforms (Windows and Linux amd64)
@@ -205,11 +205,11 @@ tasks:
       binary does not exist (run `task build:linux` first). See AC24.1.
     cmds:
       - |
-        if [ ! -f {{.DIST_DIR}}/{{.BINARY_NAME}}-linux-amd64 ]; then
-          echo "ERROR: {{.DIST_DIR}}/{{.BINARY_NAME}}-linux-amd64 not found. Run: task build:linux" >&2
+        if [ ! -f {{.DIST_DIR}}/{{.BINARY_NAME}} ]; then
+          echo "ERROR: {{.DIST_DIR}}/{{.BINARY_NAME}} not found. Run: task build:linux" >&2
           exit 1
         fi
-        go tool nm {{.DIST_DIR}}/{{.BINARY_NAME}}-linux-amd64 | grep -i "libc\|libpthread\|__glibc" && \
+        go tool nm {{.DIST_DIR}}/{{.BINARY_NAME}} | grep -i "libc\|libpthread\|__glibc" && \
           { echo "ERROR: Linux binary references dynamic libraries (CGO leak?)" >&2; exit 1; } || \
           echo "OK: no dynamic library references found in Linux binary"
 

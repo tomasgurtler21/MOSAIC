@@ -777,6 +777,9 @@ func (s *sessionImpl) Start(ctx context.Context, config domain.RunConfig) (outco
 			// immediately before the invocation so an already-recorded step is
 			// never lost and this dispatch never starts once a stop is confirmed.
 			if s.deps.StopRequested() {
+				s.deps.Debug.Log(domain.EventSessionStopObserved, "graceful stop observed; not dispatching",
+					domain.F("checkpoint", StopCheckpointEngineStep),
+				)
 				return domain.RunOutcome{Status: domain.RunStopped, Message: "run stopped: graceful stop confirmed"}, nil
 			}
 
@@ -967,6 +970,9 @@ func (s *sessionImpl) Start(ctx context.Context, config domain.RunConfig) (outco
 					// Graceful-stop checkpoint: the rejected attempt above is already
 					// persisted, so it is safe to stop before the redispatch call.
 					if s.deps.StopRequested() {
+						s.deps.Debug.Log(domain.EventSessionStopObserved, "graceful stop observed; not dispatching",
+							domain.F("checkpoint", StopCheckpointEngineHITLRedispatch),
+						)
 						return domain.RunOutcome{Status: domain.RunStopped, Message: "run stopped: graceful stop confirmed"}, nil
 					}
 					rdResp, rdErr := s.invokeAndLog(ctx, hitlStep.Agent, hitlStep.Request)
@@ -1636,6 +1642,9 @@ func (s *sessionImpl) consultRoute(
 	// Graceful-stop checkpoint: the consultation record above is already
 	// persisted, so it is safe to stop before the consultant-routed dispatch.
 	if s.deps.StopRequested() {
+		s.deps.Debug.Log(domain.EventSessionStopObserved, "graceful stop observed; not dispatching",
+			domain.F("checkpoint", StopCheckpointConsultDispatch),
+		)
 		return true, domain.RunOutcome{Status: domain.RunStopped, Message: "run stopped: graceful stop confirmed"}, nil
 	}
 
@@ -1769,6 +1778,9 @@ hitlLoop:
 			// Graceful-stop checkpoint: the rejected attempt above is already
 			// persisted, so it is safe to stop before the redispatch call.
 			if s.deps.StopRequested() {
+				s.deps.Debug.Log(domain.EventSessionStopObserved, "graceful stop observed; not dispatching",
+					domain.F("checkpoint", StopCheckpointConsultHITLRedispatch),
+				)
 				return true, domain.RunOutcome{Status: domain.RunStopped, Message: "run stopped: graceful stop confirmed"}, nil
 			}
 			rdResp, rdErr := s.invokeAndLog(ctx, agentRef, rdReq)
@@ -2242,6 +2254,9 @@ func (s *sessionImpl) evaluateTriggers(
 		// fired and dispatched keeps its already-applied outcome; only this
 		// not-yet-dispatched agent (and any later declared agents) are skipped.
 		if s.deps.StopRequested() {
+			s.deps.Debug.Log(domain.EventSessionStopObserved, "graceful stop observed; not dispatching",
+				domain.F("checkpoint", StopCheckpointInfraDispatch),
+			)
 			return false, true, nil
 		}
 

@@ -43,7 +43,7 @@ func fakeSummaryFunc(result resultsummary.SummaryResult, err error) SummaryFunc 
 func newProcessOptions() Options {
 	o := newFixtureOptions([]string{"suite-a.yaml"}, newFakeSuiteRunner())
 	o.Store = fakeStoreFunc(resultstore.StoreResult{Stored: 3}, nil)
-	o.Summary = fakeSummaryFunc(resultsummary.SummaryResult{FilesWritten: []string{"TestResults/v1/summary.md"}}, nil)
+	o.Summary = fakeSummaryFunc(resultsummary.SummaryResult{FilesWritten: []string{"TestResults/v1/user-summary.md"}}, nil)
 	o.TestResultsRoot = "/TestResults"
 	return o
 }
@@ -422,11 +422,11 @@ func TestSummaryFlow_ConfirmFilter_TransitionsToSummaryResult(t *testing.T) {
 // TestSummaryFlow_Result_ShowsFilesWritten verifies that the summary-result
 // screen renders the paths of written summary files.
 func TestSummaryFlow_Result_ShowsFilesWritten(t *testing.T) {
-	m := NewModel(newProcessOptions()) // SummaryFunc returns FilesWritten: ["TestResults/v1/summary.md"]
+	m := NewModel(newProcessOptions()) // SummaryFunc returns FilesWritten: ["TestResults/v1/user-summary.md"]
 	m = advanceToSummaryResult(t, m, "")
 	view := safeView(t, m)
-	if !strings.Contains(view, "summary.md") {
-		t.Errorf("summary-result view does not contain 'summary.md':\n%s", view)
+	if !strings.Contains(view, "user-summary.md") {
+		t.Errorf("summary-result view does not contain 'user-summary.md':\n%s", view)
 	}
 }
 
@@ -610,7 +610,7 @@ func TestStoreFlow_Result_ShowsPerFileDetail(t *testing.T) {
 // appear in the summary-result view.
 func TestSummaryFlow_Result_ShowsFilesUpdated(t *testing.T) {
 	o := newFixtureOptions([]string{"suite-a.yaml"}, newFakeSuiteRunner())
-	updatedPath := "TestResults/v2/summary.md"
+	updatedPath := "TestResults/v2/user-summary.md"
 	o.Summary = fakeSummaryFunc(resultsummary.SummaryResult{
 		FilesUpdated: []string{updatedPath},
 	}, nil)

@@ -13,6 +13,16 @@ func formatPassRate(rate float64) string {
 	return fmt.Sprintf("%.0f%%", rate*100)
 }
 
+// formatSampleSize returns the sample-size annotation string.
+// When excluded == 0: "(N)" where N = counted.
+// When excluded > 0: "(N/M)" where N = counted, M = counted + excluded.
+func formatSampleSize(counted, excluded int) string {
+	if excluded > 0 {
+		return fmt.Sprintf("(%d/%d)", counted, counted+excluded)
+	}
+	return fmt.Sprintf("(%d)", counted)
+}
+
 // formatCost formats a cost value normalized to per-100-tests. When warning is
 // true the cost is unresolved and the marker "[cost?]" is returned instead of
 // a computed value. testCount is the denominator; if zero the per-100-tests
@@ -34,61 +44,6 @@ func formatDuration(d time.Duration) string {
 		return "-"
 	}
 	return d.String()
-}
-
-// RenderVersionSummary produces the complete Markdown content for one
-// version's summary.md file. The output contains marked regions
-// (<!-- generated:overview -->, <!-- generated:model-results -->, etc.)
-// so that MergeDocument can selectively update them on subsequent runs.
-//
-// The returned string is deterministic: the same VersionSummary input always
-// produces byte-identical output (maps are iterated in sorted key order,
-// floating-point values use fixed-precision formatting).
-//
-// Sections rendered (each wrapped in a <!-- generated:name --> marker):
-//   - overview: report count, suite/model/harness lists
-//   - model-results: per-model pass rates and cost tables
-//   - model-comparison: models ranked by pass rate
-//   - harness-comparison: harnesses ranked by pass rate
-//   - problem-areas: tests with lowest pass rates or highest spread
-//
-// Analysis placeholders (each wrapped in <!-- analysis:name --> markers):
-//   - overall-analysis: space for qualitative commentary on the version
-func RenderVersionSummary(v VersionSummary) string {
-	var sb strings.Builder
-
-	sb.WriteString("# Version Summary: " + v.Version + "\n\n")
-
-	// generated:overview
-	sb.WriteString("<!-- generated:overview -->\n")
-	renderOverviewSection(&sb, v)
-	sb.WriteString("<!-- /generated:overview -->\n\n")
-
-	// generated:model-comparison
-	sb.WriteString("<!-- generated:model-comparison -->\n")
-	renderModelComparisonSection(&sb, v)
-	sb.WriteString("<!-- /generated:model-comparison -->\n\n")
-
-	// generated:harness-comparison
-	sb.WriteString("<!-- generated:harness-comparison -->\n")
-	renderHarnessComparisonSection(&sb, v)
-	sb.WriteString("<!-- /generated:harness-comparison -->\n\n")
-
-	// generated:model-results
-	sb.WriteString("<!-- generated:model-results -->\n")
-	renderModelResultsSection(&sb, v)
-	sb.WriteString("<!-- /generated:model-results -->\n\n")
-
-	// generated:problem-areas
-	sb.WriteString("<!-- generated:problem-areas -->\n")
-	renderProblemAreasSection(&sb, v)
-	sb.WriteString("<!-- /generated:problem-areas -->\n\n")
-
-	// analysis:overall-analysis (empty placeholder)
-	sb.WriteString("<!-- analysis:overall-analysis -->\n")
-	sb.WriteString("<!-- /analysis:overall-analysis -->\n")
-
-	return sb.String()
 }
 
 func renderOverviewSection(sb *strings.Builder, v VersionSummary) {
@@ -131,10 +86,11 @@ func renderModelResultsSection(sb *strings.Builder, v VersionSummary) {
 
 			for _, harness := range harnesses {
 				stats := byHarness[harness]
-				sb.WriteString(fmt.Sprintf("| %s | %s | %d | %s | %s |\n",
+				sb.WriteString(fmt.Sprintf("| %s | %s | %d | %s %s | %s |\n",
 					suite, harness,
 					stats.TestCount,
 					formatPassRate(stats.PassRate),
+					formatSampleSize(stats.TestCount, stats.ExcludedCount),
 					formatCost(stats.TotalCost, stats.TestCount, stats.CostWarning),
 				))
 			}
@@ -152,6 +108,192 @@ func renderModelComparisonSection(sb *strings.Builder, v VersionSummary) {
 		byHarness := v.ByModel[model]
 
 		// Aggregate across harnesses, sorted for determinism.
+		var harnesses []string
+		for h := range byHarness {
+			harnesses = append(harnesses, h)
+		}
+		sort.Strings(harnesses)
+
+		var testCount, passCount, excludedCount int
+		var totalCost float64
+		var costWarning bool
+
+		for _, harness := range harnesses {
+			s := byHarness[harness]
+			testCount += s.TestCount
+			passCount += s.PassCount
+			excludedCount += s.ExcludedCount
+			totalCost += s.TotalCost
+			if s.CostWarning {
+				costWarning = true
+			}
+		}
+
+		var passRate float64
+		if testCount > 0 {
+			passRate = float64(passCount) / float64(testCount)
+		}
+
+		sb.WriteString(fmt.Sprintf("| %s | %d | %s %s | %s |\n",
+			model, testCount,
+			formatPassRate(passRate),
+			formatSampleSize(testCount, excludedCount),
+			formatCost(totalCost, testCount, costWarning),
+		))
+	}
+	sb.WriteString("\n")
+}
+
+func renderHarnessComparisonSection(sb *strings.Builder, v VersionSummary) {
+	sb.WriteString("## Harness Comparison\n\n")
+	sb.WriteString("| Harness | Tests | Pass Rate | Cost |\n")
+	sb.WriteString("|---------|-------|-----------|------|\n")
+
+	// Aggregate per-harness across all models.
+	type hAgg struct {
+		testCount     int
+		passCount     int
+		excludedCount int
+		totalCost     float64
+		costWarning   bool
+	}
+	aggMap := make(map[string]*hAgg)
+
+	for _, model := range v.Models {
+		byHarness := v.ByModel[model]
+		for _, harness := range v.Harnesses {
+			s, ok := byHarness[harness]
+			if !ok {
+				continue
+			}
+			if aggMap[harness] == nil {
+				aggMap[harness] = &hAgg{}
+			}
+			a := aggMap[harness]
+			a.testCount += s.TestCount
+			a.passCount += s.PassCount
+			a.excludedCount += s.ExcludedCount
+			a.totalCost += s.TotalCost
+			if s.CostWarning {
+				a.costWarning = true
+			}
+		}
+	}
+
+	for _, harness := range v.Harnesses { // already sorted
+		a, ok := aggMap[harness]
+		if !ok {
+			continue
+		}
+		var passRate float64
+		if a.testCount > 0 {
+			passRate = float64(a.passCount) / float64(a.testCount)
+		}
+		sb.WriteString(fmt.Sprintf("| %s | %d | %s %s | %s |\n",
+			harness, a.testCount,
+			formatPassRate(passRate),
+			formatSampleSize(a.testCount, a.excludedCount),
+			formatCost(a.totalCost, a.testCount, a.costWarning),
+		))
+	}
+	sb.WriteString("\n")
+}
+
+func renderProblemAreasSection(sb *strings.Builder, v VersionSummary) {
+	sb.WriteString("## Problem Areas\n\n")
+	if len(v.ProblemTests) == 0 {
+		sb.WriteString("No problem areas identified.\n\n")
+		return
+	}
+
+	sb.WriteString("| Suite | ID | Test | Best Rate | Best Combo | Worst Rate | Worst Combo | Spread |\n")
+	sb.WriteString("|-------|----|------|-----------|------------|------------|-------------|--------|\n")
+
+	for _, pt := range v.ProblemTests {
+		sb.WriteString(fmt.Sprintf("| %s | %d | %s | %s %s | %s | %s %s | %s | %s |\n",
+			pt.SuiteID, pt.NumericID, pt.TestName,
+			formatPassRate(pt.BestRate), formatSampleSize(pt.BestCounted, pt.BestExcluded), pt.BestCombo,
+			formatPassRate(pt.WorstRate), formatSampleSize(pt.WorstCounted, pt.WorstExcluded), pt.WorstCombo,
+			formatPassRate(pt.Spread),
+		))
+	}
+	sb.WriteString("\n")
+}
+
+// renderInfrastructureFailuresSection writes the infrastructure-failures
+// generated section. Same table shape as Problem Areas for rendering consistency.
+// When v.InfraTests is empty, renders "No infrastructure failures."
+func renderInfrastructureFailuresSection(sb *strings.Builder, v VersionSummary) {
+	sb.WriteString("## Infrastructure Failures\n\n")
+	if len(v.InfraTests) == 0 {
+		sb.WriteString("No infrastructure failures.\n\n")
+		return
+	}
+
+	sb.WriteString("| Suite | ID | Test | Best Rate | Best Combo | Worst Rate | Worst Combo | Spread |\n")
+	sb.WriteString("|-------|----|------|-----------|------------|------------|-------------|--------|\n")
+
+	for _, it := range v.InfraTests {
+		sb.WriteString(fmt.Sprintf("| %s | %d | %s | %s %s | %s | %s %s | %s | %s |\n",
+			it.SuiteID, it.NumericID, it.TestName,
+			formatPassRate(it.BestRate), formatSampleSize(it.BestCounted, it.BestExcluded), it.BestCombo,
+			formatPassRate(it.WorstRate), formatSampleSize(it.WorstCounted, it.WorstExcluded), it.WorstCombo,
+			formatPassRate(it.Spread),
+		))
+	}
+	sb.WriteString("\n")
+}
+
+// RenderUserSummary produces the complete Markdown content for the user-facing
+// per-version user-summary.md file. Pass-rate cells show percentage only (no
+// sample-size annotation). Sections: overview, model-comparison,
+// harness-comparison, model-results. Does NOT include problem-areas or
+// infrastructure-failures.
+//
+// Deterministic: same VersionSummary input always produces byte-identical output.
+func RenderUserSummary(v VersionSummary) string {
+	var sb strings.Builder
+
+	sb.WriteString("# Version Summary: " + v.Version + "\n\n")
+
+	// generated:overview
+	sb.WriteString("<!-- generated:overview -->\n")
+	renderOverviewSection(&sb, v)
+	sb.WriteString("<!-- /generated:overview -->\n\n")
+
+	// generated:model-comparison (percentage only, no sample-size annotation)
+	sb.WriteString("<!-- generated:model-comparison -->\n")
+	renderModelComparisonSectionUser(&sb, v)
+	sb.WriteString("<!-- /generated:model-comparison -->\n\n")
+
+	// generated:harness-comparison (percentage only, no sample-size annotation)
+	sb.WriteString("<!-- generated:harness-comparison -->\n")
+	renderHarnessComparisonSectionUser(&sb, v)
+	sb.WriteString("<!-- /generated:harness-comparison -->\n\n")
+
+	// generated:model-results (percentage only, no sample-size annotation)
+	sb.WriteString("<!-- generated:model-results -->\n")
+	renderModelResultsSectionUser(&sb, v)
+	sb.WriteString("<!-- /generated:model-results -->\n\n")
+
+	// analysis:overall-analysis (empty placeholder)
+	sb.WriteString("<!-- analysis:overall-analysis -->\n")
+	sb.WriteString("<!-- /analysis:overall-analysis -->\n")
+
+	return sb.String()
+}
+
+// renderModelComparisonSectionUser is the user-facing variant of
+// renderModelComparisonSection. It omits the formatSampleSize annotation so
+// pass-rate cells show percentage only.
+func renderModelComparisonSectionUser(sb *strings.Builder, v VersionSummary) {
+	sb.WriteString("## Model Comparison\n\n")
+	sb.WriteString("| Model | Tests | Pass Rate | Cost |\n")
+	sb.WriteString("|-------|-------|-----------|------|\n")
+
+	for _, model := range v.Models { // already sorted
+		byHarness := v.ByModel[model]
+
 		var harnesses []string
 		for h := range byHarness {
 			harnesses = append(harnesses, h)
@@ -186,12 +328,14 @@ func renderModelComparisonSection(sb *strings.Builder, v VersionSummary) {
 	sb.WriteString("\n")
 }
 
-func renderHarnessComparisonSection(sb *strings.Builder, v VersionSummary) {
+// renderHarnessComparisonSectionUser is the user-facing variant of
+// renderHarnessComparisonSection. It omits the formatSampleSize annotation so
+// pass-rate cells show percentage only.
+func renderHarnessComparisonSectionUser(sb *strings.Builder, v VersionSummary) {
 	sb.WriteString("## Harness Comparison\n\n")
 	sb.WriteString("| Harness | Tests | Pass Rate | Cost |\n")
 	sb.WriteString("|---------|-------|-----------|------|\n")
 
-	// Aggregate per-harness across all models.
 	type hAgg struct {
 		testCount   int
 		passCount   int
@@ -238,22 +382,123 @@ func renderHarnessComparisonSection(sb *strings.Builder, v VersionSummary) {
 	sb.WriteString("\n")
 }
 
-func renderProblemAreasSection(sb *strings.Builder, v VersionSummary) {
-	sb.WriteString("## Problem Areas\n\n")
-	if len(v.ProblemTests) == 0 {
-		sb.WriteString("No problem areas identified.\n\n")
+// renderModelResultsSectionUser is the user-facing variant of
+// renderModelResultsSection. It omits the formatSampleSize annotation so
+// pass-rate cells show percentage only.
+func renderModelResultsSectionUser(sb *strings.Builder, v VersionSummary) {
+	sb.WriteString("## Model Results\n\n")
+
+	for _, model := range v.Models { // v.Models is already sorted
+		sb.WriteString(fmt.Sprintf("### %s\n\n", model))
+
+		sb.WriteString("| Suite | Harness | Tests | Pass Rate | Cost |\n")
+		sb.WriteString("|-------|---------|-------|-----------|------|\n")
+
+		for _, suite := range v.Suites { // v.Suites is already sorted
+			byModel, ok := v.BySuite[suite]
+			if !ok {
+				continue
+			}
+			byHarness, ok := byModel[model]
+			if !ok {
+				continue
+			}
+
+			var harnesses []string
+			for h := range byHarness {
+				harnesses = append(harnesses, h)
+			}
+			sort.Strings(harnesses)
+
+			for _, harness := range harnesses {
+				stats := byHarness[harness]
+				sb.WriteString(fmt.Sprintf("| %s | %s | %d | %s | %s |\n",
+					suite, harness,
+					stats.TestCount,
+					formatPassRate(stats.PassRate),
+					formatCost(stats.TotalCost, stats.TestCount, stats.CostWarning),
+				))
+			}
+		}
+		sb.WriteString("\n")
+	}
+}
+
+// RenderInternalSummary produces the complete Markdown content for the
+// internal/test-owner-facing per-version internal-summary.md file. Includes
+// a minimal overview, problem areas, infrastructure failures (both with
+// sample-size annotations retained), and per-exclusion detail.
+//
+// Deterministic: same VersionSummary input always produces byte-identical output.
+//
+// Sections rendered (each wrapped in a <!-- generated:name --> marker):
+//   - internal-overview: minimal version, report count, suites, models, harnesses
+//   - problem-areas: tests with lowest pass rates or highest spread (with sample-size)
+//   - infrastructure-failures: tests flagged as infra failures (with sample-size)
+//   - exclusions-detail: per-exclusion table, or placeholder when empty
+//
+// Analysis placeholders (each wrapped in <!-- analysis:name --> markers):
+//   - internal-analysis: space for test-owner commentary
+func RenderInternalSummary(v VersionSummary) string {
+	var sb strings.Builder
+
+	sb.WriteString("# Internal Summary: " + v.Version + "\n\n")
+
+	// generated:internal-overview
+	sb.WriteString("<!-- generated:internal-overview -->\n")
+	renderInternalOverviewSection(&sb, v)
+	sb.WriteString("<!-- /generated:internal-overview -->\n\n")
+
+	// generated:problem-areas (retains formatSampleSize annotations)
+	sb.WriteString("<!-- generated:problem-areas -->\n")
+	renderProblemAreasSection(&sb, v)
+	sb.WriteString("<!-- /generated:problem-areas -->\n\n")
+
+	// generated:infrastructure-failures (retains formatSampleSize annotations)
+	sb.WriteString("<!-- generated:infrastructure-failures -->\n")
+	renderInfrastructureFailuresSection(&sb, v)
+	sb.WriteString("<!-- /generated:infrastructure-failures -->\n\n")
+
+	// generated:exclusions-detail
+	sb.WriteString("<!-- generated:exclusions-detail -->\n")
+	renderExclusionsDetailSection(&sb, v)
+	sb.WriteString("<!-- /generated:exclusions-detail -->\n\n")
+
+	// analysis:internal-analysis (empty placeholder for test-owner commentary)
+	sb.WriteString("<!-- analysis:internal-analysis -->\n")
+	sb.WriteString("<!-- /analysis:internal-analysis -->\n")
+
+	return sb.String()
+}
+
+// renderInternalOverviewSection writes the internal-overview generated section.
+// It is self-contained: version, report count, suites, models, and harnesses.
+func renderInternalOverviewSection(sb *strings.Builder, v VersionSummary) {
+	sb.WriteString("## Overview\n\n")
+	sb.WriteString(fmt.Sprintf("- **Version:** %s\n", v.Version))
+	sb.WriteString(fmt.Sprintf("- **Reports:** %d\n", v.ReportCount))
+	sb.WriteString(fmt.Sprintf("- **Suites:** %s\n", strings.Join(v.Suites, ", ")))
+	sb.WriteString(fmt.Sprintf("- **Models:** %s\n", strings.Join(v.Models, ", ")))
+	sb.WriteString(fmt.Sprintf("- **Harnesses:** %s\n", strings.Join(v.Harnesses, ", ")))
+	sb.WriteString("\n")
+}
+
+// renderExclusionsDetailSection writes the exclusions-detail generated section.
+// When ExclusionDetails is empty, renders a placeholder message. When populated,
+// renders a table with one row per ExclusionDetail.
+func renderExclusionsDetailSection(sb *strings.Builder, v VersionSummary) {
+	sb.WriteString("## Exclusions Detail\n\n")
+	if len(v.ExclusionDetails) == 0 {
+		sb.WriteString("No exclusion details available.\n\n")
 		return
 	}
 
-	sb.WriteString("| Suite | ID | Test | Best Rate | Best Combo | Worst Rate | Worst Combo | Spread |\n")
-	sb.WriteString("|-------|----|------|-----------|------------|------------|-------------|--------|\n")
+	sb.WriteString("| Suite | Test | Reason | Termination | Detail |\n")
+	sb.WriteString("|-------|------|--------|-------------|--------|\n")
 
-	for _, pt := range v.ProblemTests {
-		sb.WriteString(fmt.Sprintf("| %s | %d | %s | %s | %s | %s | %s | %s |\n",
-			pt.SuiteID, pt.NumericID, pt.TestName,
-			formatPassRate(pt.BestRate), pt.BestCombo,
-			formatPassRate(pt.WorstRate), pt.WorstCombo,
-			formatPassRate(pt.Spread),
+	for _, ed := range v.ExclusionDetails {
+		sb.WriteString(fmt.Sprintf("| %s | %s | %s | %s | %s |\n",
+			ed.Suite, ed.TestName, ed.Reason, ed.TerminationReason, ed.Detail,
 		))
 	}
 	sb.WriteString("\n")

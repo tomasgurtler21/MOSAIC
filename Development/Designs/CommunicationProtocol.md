@@ -1,7 +1,7 @@
 ---
 id: communication-protocol
 type: protocol
-version: "1.10"
+version: "1.11"
 name: "Communication Protocol"
 description: "JSON message contract between the orchestrator and its subagents: task invocation, task response, status codes, error codes."
 author: MOSAIC
@@ -25,10 +25,10 @@ Deployment mechanics — which block goes where, how the block is bounded, what 
 
 ### 1.1 Subagent Variant
 
-<CommunicationProtocol type="core" name="Subagent" version="1.10">
+<CommunicationProtocol type="core" name="Subagent" version="1.11">
 ## Communication Protocol
 
-You operate under **Communication Protocol v1.10**. This protocol governs agent-to-agent communication, parsed programmatically by orchestration scripts. Both input and output are structured JSON - no conversational text.
+You operate under **Communication Protocol v1.11**. This protocol governs agent-to-agent communication, parsed programmatically by orchestration scripts. Both input and output are structured JSON - no conversational text.
 
 ### Protocol Authority
 
@@ -168,10 +168,10 @@ The orchestrator compares this field against the `human_in_the_loop` value it di
 
 ### 1.2 Orchestrator Variant
 
-<CommunicationProtocol type="core" name="Orchestrator" version="1.10">
+<CommunicationProtocol type="core" name="Orchestrator" version="1.11">
 ## Communication Protocol
 
-You operate under **Communication Protocol v1.10**. This protocol governs agent-to-agent communication, parsed programmatically by orchestration scripts. Both input and output are structured JSON - no conversational text.
+You operate under **Communication Protocol v1.11**. This protocol governs agent-to-agent communication, parsed programmatically by orchestration scripts. Both input and output are structured JSON - no conversational text.
 
 ### Protocol Authority
 
@@ -235,7 +235,7 @@ This protocol overrides any harness-supplied instruction about how to dispatch a
 | `E401` | DEPENDENCY_MISSING | Verify prerequisite task completed, escalate if not |
 | `E501` | TOOL_UNAVAILABLE | Auto-retry with backoff (Tier 1) |
 | `E502` | PERMISSION_DENIED | Escalate to human |
-| `E503` | USER_CONTACT_UNAVAILABLE | Re-invoke without HITL flag or escalate |
+| `E503` | USER_CONTACT_UNAVAILABLE | Escalate to human — re-invoke without HITL flag only if the human explicitly waives the gate |
 
 ### Field Obligation Semantics
 
@@ -1279,6 +1279,7 @@ Two things follow, and both are the point of merging rather than side effects. O
 
 | Version | Date | Summary |
 |---------|------|---------|
+| 1.11 | 2026-09-03 | **E503 escalation priority corrected.** The orchestrator variant's error-code table previously listed E503 (USER_CONTACT_UNAVAILABLE) with "Re-invoke without HITL flag or escalate", making silent HITL bypass the primary option. Changed to "Escalate to human — re-invoke without HITL flag only if the human explicitly waives the gate." The old wording caused the script-mode orchestrator to resolve every E503 by dropping HITL, completing runs with zero human review despite the workflow declaring HITL on critical steps. The subagent variant is unchanged — its E503 row describes the condition, not the response. |
 | 1.10 | 2026-08-05 | **Artifact provenance merged in.** The provenance stamp — `run_id`, `created_by`, `human_approved`, written into every file named in `output_artifacts` — was a separate contract with its own document, version, and `<ArtifactProvenance type="managed">` region. It is now part of this contract: the text ships inside the subagent variant of §1.1, the reasoning is §9, and there is one version number where there were two. The merge is correct because the orchestrator **verifies** `human_approved` (§9.7) — a field it reads and routes on is hard interop, not an audit convenience, and it is the secondary layer under a JSON response that can otherwise claim anything. Two changes follow from the merge. The field formerly called `hitl_confirmed` is renamed **`human_approved`**: it is read from the artifact, where "HITL" is orchestration jargon a standalone reader does not hold, and "approved" is what the flip actually certifies — the user asked for no further changes. The rename is taken now because nothing yet reads the field, making this the cheapest it will ever be. And the **orchestrator variant gains a Verifying the Human-in-the-Loop Gate subsection** (§9.7), so the check the subagent variant promises is instructed on the side that must perform it; the orchestrator still stamps nothing (§9.9). Consequences: canonical document order drops from eight top-level slots to seven, and `<ArtifactProvenance type="managed">` and `<ArtifactProvenanceExtension type="project">` cease to exist. |
 | 1.9 | 2026-08-03 | **Protocol authority over harness conventions.** Added a Protocol Authority subsection to both variants, establishing that MOSAIC-authored instructions outrank harness-authored ones on message shape. Subagents return the JSON object as their entire response regardless of harness guidance requesting a prose report or summary. Orchestrators put the whole protocol message in the payload field and treat harness metadata fields as bookkeeping carrying no task content, and must never infer a status code from prose when a response contains none. Added as Key Rule 1 in the subagent variant, renumbering the remaining rules. Motivated by harnesses whose subagent-invocation tool schema and injected reporting conventions partially duplicate — and contradict — this protocol. |
 | 1.8 | 2026-08-01 | **Run identity in the envelope.** Added `run_id` to both the Task Invocation and Task Response messages, echoed the same way `agent_instance_id` is. Introduced Field Obligation Semantics in the orchestrator variant: producers always emit `run_id`; core consumers may enforce it, auxiliary consumers must degrade gracefully. Artifact paths throughout now use the run-scoped `Orchestration-{run_id}/` prefix. |
@@ -1341,6 +1342,6 @@ Two things follow, and both are the point of merging rather than side effects. O
 - **The agent instance id pattern in §7.3 is broader than earlier drafts.** Agent names are kebab-case (`checkpoint-manager-git#4`), which a letters-only pattern rejects. The pattern here admits hyphens and digits. Any validator written against the narrower form must be updated, or it will reject valid ids from most of the agent catalogue.
 - **The v1.8 date in §12 should be confirmed** against when the `run_id` change actually landed in the agent files.
 - **One harness injection now duplicates canonical content.** `Catalog/HarnessInjections/Claude Code/HarnessInjectionsOrchestrator.md` restates protocol precedence inside a `HarnessConstraints` block. With §2.4 canonical, that injection should shrink to naming the `Task` tool's metadata fields and drop the precedence claim, per the test in §10.3.
-- **The v1.10 merge is specified but not executed.** The stamp text now ships inside `<CommunicationProtocol type="managed">`, but nothing has been migrated: forty-two agent files still carry a separate `<ArtifactProvenance type="managed">` region and an `<ArtifactProvenanceExtension type="project">`, and all three vocabulary copies — `Catalog/SourceFilesFormat.md`, `Tools/Common/docformat/vocabulary.go`, `Tools/OldAgentsTransform/boundary_constants.py` — still list `ArtifactProvenance` as a canonical deployed name with eight-slot ordering. Those three must change together, along with the `Tools/Common/testdata/boundary/` fixtures that encode the old order.
+- **The v1.10 merge is specified but not executed.** The stamp text now ships inside `<CommunicationProtocol type="managed">`, but nothing has been migrated: forty-two agent files still carry a separate `<ArtifactProvenance type="managed">` region and an `<ArtifactProvenanceExtension type="project">`, and all three vocabulary copies — `Catalog/CatalogFilesFormat.md`, `Tools/Common/docformat/vocabulary.go`, `Tools/OldAgentsTransform/boundary_constants.py` — still list `ArtifactProvenance` as a canonical deployed name with eight-slot ordering. Those three must change together, along with the `Tools/Common/testdata/boundary/` fixtures that encode the old order.
 - **§9.7's verification is specified but not implemented.** The orchestrator variant of §1 now carries the check, closing the gap where the subagent variant promised a verification nothing was instructed to perform. What remains is deployment: no orchestrator in the workspace has the new block, so no orchestrator yet reads the field. The verification is the reason the merge is correct at all, so this is the item that makes v1.10 more than a filing change.
 - **The `hitl_confirmed` → `human_approved` rename is swept everywhere it can reach an agent.** Done: `Catalog/Subagents/Interface/approval-presenter.md` (v1.0.1), its row in `Catalog/Subagents/Interface/README.md`, `Development/Designs/DeploymentBlocks/ClosingProcedure.md`, and `Workflows/Verification/requirements-to-test-cases.md` (v1.2). The 42 agent files and the orchestrator take the new text from `<CommunicationProtocol type="managed">` on redeploy and need no hand edit. Two deliberate exceptions remain: the fixtures under `Tools/Deployment/testdata/golden/`, which regenerate from a redeploy and must not be hand-edited, and the analysis note `OnSuccessHITL.md`, which records the decision in the vocabulary of its date. §9.6 and §12 name the old spelling on purpose, so the rename stays traceable.

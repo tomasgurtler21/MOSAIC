@@ -98,11 +98,12 @@ var modeItems = []widgets.ListItem{
 //   - Esc   -> Back() == true (caller returns to the harness selection screen, preserving
 //              the previously selected harness so prior input is not lost).
 type ModeScreen struct {
-	list   *widgets.List
-	detail *widgets.DetailPane
-	width  int
-	height int
-	styles Styles
+	list        *widgets.List
+	detail      *widgets.DetailPane
+	width       int
+	height      int
+	styles      Styles
+	toolVersion string
 }
 
 // NewModeScreen creates the mode selection screen.
@@ -164,9 +165,19 @@ func (s *ModeScreen) updateDetail() {
 	s.detail.SetContent(item.Label, item.Detail)
 }
 
+// SetToolVersion sets the tool version string displayed in the screen title.
+// Call before the first View() for the version to appear on entry.
+func (s *ModeScreen) SetToolVersion(v string) {
+	s.toolVersion = v
+}
+
 // View renders the mode selection screen.
 func (s *ModeScreen) View() string {
-	title := s.styles.Title.Width(s.width).Render("Select Mode")
+	titleText := "Select Mode"
+	if s.toolVersion != "" {
+		titleText = "MOSAIC Deploy v" + s.toolVersion + " -- Select Mode"
+	}
+	title := s.styles.Title.Width(s.width).Render(titleText)
 	subtitle := s.styles.Subtitle.Width(s.width).Render("What do you want to do?")
 	border := s.styles.Border.Width(s.width).Render(strings.Repeat("─", s.width))
 

@@ -359,7 +359,8 @@ func deployAgents(ctx context.Context, s *service, req DeployAgentsRequest) (dom
 			Harness: harnessRef.DisplayName, WorkspacePath: workspace, DeploymentRoot: workspace,
 			GeneratedAt: now, Mode: domain.ModeDeployAgents,
 		},
-		DryRun: req.DryRun,
+		DryRun:      req.DryRun,
+		ToolVersion: s.deps.ToolVersion,
 	}
 
 	result, err := s.deps.Executor.Execute(ctx, execReq)

@@ -137,6 +137,21 @@ func agentFixturesDir(t *testing.T) string {
 	return abs
 }
 
+// frozenCatalogRoot returns the absolute path to the frozen Catalog fixture tree. This tree
+// is a snapshot of the protocol source document and all HarnessInjections files at the time
+// the golden files were last regenerated. Golden-file tests must use this root instead of the
+// live repo root so they remain immune to Catalog evolution (version bumps, prose edits, etc.).
+func frozenCatalogRoot(t *testing.T) string {
+	t.Helper()
+	// testdata/frozen-catalog/ is at Tools/Deployment/testdata/frozen-catalog/
+	rel := filepath.Join("..", "..", "..", "..", "testdata", "frozen-catalog")
+	abs, err := filepath.Abs(rel)
+	if err != nil {
+		t.Fatalf("resolve frozen catalog root: %v", err)
+	}
+	return abs
+}
+
 // newModule constructs the OpenCode module against the real repository root, failing the
 // test immediately if construction fails.
 func newModule(t *testing.T) domain.HarnessModule {
@@ -144,6 +159,18 @@ func newModule(t *testing.T) domain.HarnessModule {
 	mod, err := opencode.New(registry.BuiltinOptions{MosaicRoot: repoRoot(t)})
 	if err != nil {
 		t.Fatalf("opencode.New(): %v", err)
+	}
+	return mod
+}
+
+// newModuleFromFrozen constructs the OpenCode module against the frozen Catalog fixture root.
+// Golden-file tests use this instead of newModule so that changes to the live HarnessInjections
+// files in Catalog/ do not affect the committed golden files.
+func newModuleFromFrozen(t *testing.T) domain.HarnessModule {
+	t.Helper()
+	mod, err := opencode.New(registry.BuiltinOptions{MosaicRoot: frozenCatalogRoot(t)})
+	if err != nil {
+		t.Fatalf("opencode.New() from frozen catalog: %v", err)
 	}
 	return mod
 }
@@ -262,9 +289,8 @@ func permissionPairs(allowed map[string]bool) []domain.FieldPair {
 //   - Model changed to testModel "github-copilot/claude-sonnet-4-6" (committed uses opus).
 //   - Project injections cleared (create mode).
 func TestGoldenFile_OpenCode_ContractsReviewAgent(t *testing.T) {
-	mod := newModule(t)
-	root := repoRoot(t)
-	protocol := loadProtocol(t, root)
+	mod := newModuleFromFrozen(t)
+	protocol := loadProtocol(t, frozenCatalogRoot(t))
 
 
 	srcPath := filepath.Join(agentFixturesDir(t), "contracts-review.md")
@@ -301,9 +327,8 @@ func TestGoldenFile_OpenCode_ContractsReviewAgent(t *testing.T) {
 //   - Model changed to testModel "github-copilot/claude-sonnet-4-6".
 //   - Project injections cleared (create mode).
 func TestGoldenFile_OpenCode_TestRunnerAgent(t *testing.T) {
-	mod := newModule(t)
-	root := repoRoot(t)
-	protocol := loadProtocol(t, root)
+	mod := newModuleFromFrozen(t)
+	protocol := loadProtocol(t, frozenCatalogRoot(t))
 
 
 	srcPath := filepath.Join(agentFixturesDir(t), "test-runner.md")
@@ -340,9 +365,8 @@ func TestGoldenFile_OpenCode_TestRunnerAgent(t *testing.T) {
 //   - Model changed to testModel "github-copilot/claude-sonnet-4-6".
 //   - Project injections cleared (create mode).
 func TestGoldenFile_OpenCode_PlannerTDDSoftAgent(t *testing.T) {
-	mod := newModule(t)
-	root := repoRoot(t)
-	protocol := loadProtocol(t, root)
+	mod := newModuleFromFrozen(t)
+	protocol := loadProtocol(t, frozenCatalogRoot(t))
 
 
 	srcPath := filepath.Join(agentFixturesDir(t), "planner-tdd-soft.md")
@@ -380,9 +404,8 @@ func TestGoldenFile_OpenCode_PlannerTDDSoftAgent(t *testing.T) {
 //   - Model changed to testModel "github-copilot/claude-sonnet-4-6".
 //   - Project injections cleared (create mode).
 func TestGoldenFile_OpenCode_Orchestrator(t *testing.T) {
-	mod := newModule(t)
-	root := repoRoot(t)
-	protocol := loadProtocol(t, root)
+	mod := newModuleFromFrozen(t)
+	protocol := loadProtocol(t, frozenCatalogRoot(t))
 
 
 	srcPath := filepath.Join(agentFixturesDir(t), "orchestrator.md")
@@ -1451,20 +1474,55 @@ func TestContract_OpenCode(t *testing.T) {
 			},
 		},
 
-		InjectionCases: map[string]string{
-			"HarnessConstraints": opencodeHarnessConstraints,
-		},
-
-		NotFilled: []string{
-			"IdentityExtension",
-			"ProtocolExtension",
-			"CodebaseContext",
-			"LanguagePatterns",
-			"OutputArtifactTemplate",
-			"CustomConstraints",
-			"ErrorHandlingExtension",
-			"ContextLimits",
-			"AvailableWorkflows",
+		AgentInjectionCases: []contracttest.InjectionCase{
+			{
+				// subagent_shared_content: a non-orchestrator agent receives only shared content.
+				// For OpenCode, HarnessConstraints shared content is the parallel tool calls
+				// instruction plus the working directory note.
+				Name:    "subagent_shared_content",
+				AgentKey: "some-subagent",
+				// Role is zero value (non-orchestrator)
+				Filled: map[string]string{
+					"HarnessConstraints": opencodeHarnessConstraints,
+				},
+				NotFilled: []string{
+					"IdentityExtension",
+					"ProtocolExtension",
+					"CodebaseContext",
+					"LanguagePatterns",
+					"OutputArtifactTemplate",
+					"CustomConstraints",
+					"ErrorHandlingExtension",
+					"ContextLimits",
+					"AvailableWorkflows",
+				},
+			},
+			{
+				// orchestrator_role_non_orchestrator_key: an orchestrator-role agent with a
+				// non-"orchestrator" AgentKey must receive orchestrator-merged content.
+				// For OpenCode, HarnessInjectionsOrchestrator.md has no HarnessConstraints
+				// content, so the merged result equals the shared content.
+				// RED: compile-fails until domain.InjectionRequest gains a Role field (I1.1).
+				Name:    "orchestrator_role_non_orchestrator_key",
+				AgentKey: "orchestrator-script",
+				Role:    domain.RoleOrchestrator,
+				Filled: map[string]string{
+					// No orchestrator-specific HarnessConstraints content for OpenCode;
+					// merged content equals shared content.
+					"HarnessConstraints": opencodeHarnessConstraints,
+				},
+				NotFilled: []string{
+					"IdentityExtension",
+					"ProtocolExtension",
+					"CodebaseContext",
+					"LanguagePatterns",
+					"OutputArtifactTemplate",
+					"CustomConstraints",
+					"ErrorHandlingExtension",
+					"ContextLimits",
+					"AvailableWorkflows",
+				},
+			},
 		},
 
 		TargetPathCases: []contracttest.TargetPathCase{

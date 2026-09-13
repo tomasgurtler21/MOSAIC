@@ -354,7 +354,7 @@ func TestGhcpCli_Merging_BothNonEmpty_OrchestratorReceivesMergedWithSeparator(t 
 
 	mod := newGhcpCliModuleFromOpts(t, root)
 
-	c, ok := mod.Injection(domain.InjectionRequest{Name: "HarnessConstraints", AgentKey: "orchestrator"})
+	c, ok := mod.Injection(domain.InjectionRequest{Name: "HarnessConstraints", AgentKey: "orchestrator", Role: domain.RoleOrchestrator})
 	if !ok {
 		t.Fatal("orchestrator: Injection(HarnessConstraints) returned ok=false")
 	}
@@ -380,7 +380,7 @@ func TestGhcpCli_Merging_UndeclaredInBoth_OkFalse(t *testing.T) {
 	if okSubagent {
 		t.Error("subagent: Injection(LanguagePatterns) returned ok=true; name is undeclared in both files, must return ok=false")
 	}
-	_, okOrch := mod.Injection(domain.InjectionRequest{Name: "LanguagePatterns", AgentKey: "orchestrator"})
+	_, okOrch := mod.Injection(domain.InjectionRequest{Name: "LanguagePatterns", AgentKey: "orchestrator", Role: domain.RoleOrchestrator})
 	if okOrch {
 		t.Error("orchestrator: Injection(LanguagePatterns) returned ok=true; name is undeclared in both files, must return ok=false")
 	}

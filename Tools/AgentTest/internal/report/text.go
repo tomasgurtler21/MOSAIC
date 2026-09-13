@@ -49,6 +49,11 @@ func writeHeader(w io.Writer, r Result) error {
 			return err
 		}
 	}
+	if r.ToolVersion != "" {
+		if _, err := fmt.Fprintf(w, "Tool version: %s\n", r.ToolVersion); err != nil {
+			return err
+		}
+	}
 	if _, err := fmt.Fprintf(w, "Started: %s\n", r.StartedAt.Format(time.RFC3339)); err != nil {
 		return err
 	}

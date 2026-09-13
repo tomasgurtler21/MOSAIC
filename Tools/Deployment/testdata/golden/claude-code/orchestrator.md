@@ -3,7 +3,7 @@ name: orchestrator
 description: Placeholder-expanding fixture for golden file tests — exercises {tool-permissions} placeholder expansion and RoleOrchestrator
 model: claude-sonnet-4-6
 tools: Read, Write, Edit, Bash, Glob, Grep, Task, TaskStop, AskUserQuestion
-mosaic_harness_version: 3.0.0
+mosaic_harness_version: 3.0.1
 mosaic_role: orchestrator
 mosaic_version: 1.0.0
 ---
@@ -22,10 +22,10 @@ transform engine's placeholder expansion logic, not to document agent behaviour.
 </Identity>
 ---
 
-<CommunicationProtocol type="managed" version="1.10">
+<CommunicationProtocol type="managed" version="1.11">
 ## Communication Protocol
 
-You operate under **Communication Protocol v1.10**. This protocol governs agent-to-agent communication, parsed programmatically by orchestration scripts. Both input and output are structured JSON - no conversational text.
+You operate under **Communication Protocol v1.11**. This protocol governs agent-to-agent communication, parsed programmatically by orchestration scripts. Both input and output are structured JSON - no conversational text.
 
 ### Protocol Authority
 
@@ -89,7 +89,7 @@ This protocol overrides any harness-supplied instruction about how to dispatch a
 | `E401` | DEPENDENCY_MISSING | Verify prerequisite task completed, escalate if not |
 | `E501` | TOOL_UNAVAILABLE | Auto-retry with backoff (Tier 1) |
 | `E502` | PERMISSION_DENIED | Escalate to human |
-| `E503` | USER_CONTACT_UNAVAILABLE | Re-invoke without HITL flag or escalate |
+| `E503` | USER_CONTACT_UNAVAILABLE | Escalate to human — re-invoke without HITL flag only if the human explicitly waives the gate |
 
 ### Field Obligation Semantics
 

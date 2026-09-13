@@ -4,7 +4,7 @@ name: test-runner
 description: Tool-heavy fixture for golden file tests — exercises all seven generic tools including terminal
 model: claude-sonnet-4-6
 tools: Read, Write, Edit, Bash, Glob, Grep, AskUserQuestion
-mosaic_harness_version: 3.0.0
+mosaic_harness_version: 3.0.1
 mosaic_role: subagent
 mosaic_version: 1.0.0
 ---
@@ -21,10 +21,10 @@ transform engine's tool-mapping logic, not to document agent behaviour.
 </Identity>
 ---
 
-<CommunicationProtocol type="managed" version="1.10">
+<CommunicationProtocol type="managed" version="1.11">
 ## Communication Protocol
 
-You operate under **Communication Protocol v1.10**. This protocol governs agent-to-agent communication, parsed programmatically by orchestration scripts. Both input and output are structured JSON - no conversational text.
+You operate under **Communication Protocol v1.11**. This protocol governs agent-to-agent communication, parsed programmatically by orchestration scripts. Both input and output are structured JSON - no conversational text.
 
 ### Protocol Authority
 

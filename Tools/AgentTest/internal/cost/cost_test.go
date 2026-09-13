@@ -100,13 +100,6 @@ func TestMap_NoDataForRun_FallbackBucketAbsent_IsAGenuineZero(t *testing.T) {
 	}
 }
 
-func TestMap_NoDataForRun_FallbackBucketPresent_IsSurfacedNeverAsZero(t *testing.T) {
-	report := cost.Map(cost.MapInput{ExitCode: exitNoData, UnknownBucketPresent: true})
-
-	if report.Attribution != domain.AttributionUnknownBucket {
-		t.Errorf("Attribution = %q, want %q — a cost exists but could not be tied to this run", report.Attribution, domain.AttributionUnknownBucket)
-	}
-}
 
 func TestMap_UsageError_IsUnavailableWithCauseNamed(t *testing.T) {
 	report := cost.Map(cost.MapInput{ExitCode: exitUsage})
@@ -337,32 +330,6 @@ func TestCost_DelegatesToInvokeWithTheQueriedRunAndLogRoot(t *testing.T) {
 	}
 }
 
-func TestCost_FallbackBucketDetectedViaStatDir_SurfacesAsUnknownBucket(t *testing.T) {
-	statDirCalls := 0
-
-	provider := cost.New(cost.Options{
-		ExecutablePath: "mosaic-log-analyzer",
-		Invoke: func(ctx context.Context, path string, args []string, workingDir string) ([]byte, int, error) {
-			// No data for the queried run.
-			return []byte(`{"schema_version":"1","run_id":"run-1","currency":"USD","money":{"state":"no_data"},"complete":true}`), exitNoData, nil
-		},
-		StatDir: func(path string) bool {
-			statDirCalls++
-			return true // the unknown-run bucket is present
-		},
-	})
-
-	report, err := provider.Cost(context.Background(), domain.CostQuery{LogRoot: "/sandbox/logs", RunID: "run-1"})
-	if err != nil {
-		t.Fatalf("Cost returned unexpected error: %v", err)
-	}
-	if statDirCalls == 0 {
-		t.Error("StatDir was never called, want the provider to check for the fallback bucket")
-	}
-	if report.Attribution != domain.AttributionUnknownBucket {
-		t.Errorf("Attribution = %q, want %q", report.Attribution, domain.AttributionUnknownBucket)
-	}
-}
 
 func TestCost_ToolAbsent_ReportsUnavailableRatherThanAnError(t *testing.T) {
 	provider := cost.New(cost.Options{

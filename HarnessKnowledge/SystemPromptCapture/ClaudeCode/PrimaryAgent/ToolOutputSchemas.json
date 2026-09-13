@@ -1,0 +1,145 @@
+{
+  "_meta": {
+    "harness": "Claude Code",
+    "context": "Primary agent session",
+    "captured": "2026-09-06",
+    "note": "verbatim fields contain exact captured output. commentary fields contain human interpretation."
+  },
+  "wrapperFormat": {
+    "verbatim": "Tool results are returned in <result><name>{ToolName}</name><output>{content}</output></result> blocks. Errors use <result><name>{ToolName}</name><error>{message}</error></result>. Multiple parallel results are wrapped in <function_results>...</function_results>. A <system-reminder> block with token count follows each result batch.",
+    "commentary": "The harness wraps each tool call result in XML result tags with name and output/error fields. Parallel calls produce multiple result blocks in a single function_results wrapper. Token budget reminders are injected as system-reminder tags after results."
+  },
+  "tools": {
+    "Read": {
+      "cases": {
+        "full_file_success": {
+          "call": "Read({file_path: varied-content-test.txt})",
+          "verbatim": "1\tLine 1: Greetings, Universe! ...\n2\tLine 2: ...\n...\n20\tLine 20: Final line with trailing newline.\n21\t",
+          "commentary": "Output uses cat -n format: line_number TAB content. Line numbers start at 1. Empty lines show just the line number and tab. A trailing empty line (21) appears for files ending with a newline."
+        },
+        "partial_with_offset_limit": {
+          "call": "Read({file_path: varied-content-test.txt, offset: 5, limit: 3})",
+          "verbatim": "5\tLine 5: Special characters: ...\n6\tLine 6: Unicode: ...\n7\tLine 7: Blank line follows:",
+          "commentary": "Offset is 0-based line position (offset:5 starts at line 5). Limit restricts to N lines. Only the requested range is returned with original line numbers preserved."
+        },
+        "file_not_found": {
+          "call": "Read({file_path: nonexistent-file.txt})",
+          "verbatim": "File does not exist. Note: your current working directory is C:\\AI\\MOSAIC\\MOSAIC.",
+          "commentary": "Error message includes the working directory for context. Returned in the <error> wrapper instead of <output>."
+        },
+        "large_file_truncation": {
+          "call": "Read({file_path: large-file-3000-lines.txt}) — no limit specified",
+          "verbatim": "1\tfoxtrot golf [ROW:0001] hotel india\n...\n1518\tfoxtrot golf [ROW:1518] hotel india\n\n<system-reminder>\n[Truncated: PARTIAL view — ...large-file-3000-lines.txt: showing lines 1-1518 of 3001 total (42006 tokens, cap 25000). Call Read with offset=1519 limit=1518 for the next page, or Grep to find a specific section. Do NOT answer from this page alone if the answer may be further in the file.]\n</system-reminder>",
+          "commentary": "Despite documentation saying 2000-line default, actual truncation is TOKEN-based (cap 25000 tokens). For this file, 1518 lines fit within the token cap. The truncation message includes total lines, token count, token cap, and pagination instructions. Injected as a system-reminder block after the content."
+        }
+      }
+    },
+    "Write": {
+      "cases": {
+        "new_file_success": {
+          "call": "Write({file_path: scratchpad/write-test.txt, content: 'Test file written by capture process.'})",
+          "verbatim": "File created successfully at: C:\\Users\\tgurt\\AppData\\Local\\Temp\\claude\\...\\scratchpad\\write-test.txt (file state is current in your context — no need to Read it back)",
+          "commentary": "Success message includes full path and a hint not to re-read the file. Uses 'created' for new files."
+        }
+      }
+    },
+    "Edit": {
+      "cases": {
+        "success": {
+          "call": "Edit({file_path: edit-test-copy.txt, old_string: 'Line 16: Swap this line with different content.', new_string: 'Line 16: EDITED SUCCESSFULLY by capture test.'})",
+          "verbatim": "The file C:\\...\\edit-test-copy.txt has been updated successfully. (file state is current in your context — no need to Read it back)",
+          "commentary": "Success message includes full path and the same no-re-read hint as Write. Uses 'updated' for edits."
+        },
+        "string_not_found": {
+          "call": "Edit({file_path: edit-test-copy.txt, old_string: 'THIS STRING DOES NOT EXIST IN THE FILE', new_string: 'replacement'})",
+          "verbatim": "<tool_use_error>String to replace not found in file.\nString: THIS STRING DOES NOT EXIST IN THE FILE</tool_use_error>",
+          "commentary": "Error wrapped in <tool_use_error> tags (inside the <error> result wrapper). Echoes the old_string that was not found."
+        }
+      }
+    },
+    "Bash": {
+      "cases": {
+        "success": {
+          "call": "Bash({command: 'echo \"hello from bash\"'})",
+          "verbatim": "hello from bash",
+          "commentary": "stdout is returned directly as the output content. No wrapping, no line numbers."
+        },
+        "nonzero_exit": {
+          "call": "Bash({command: 'exit 42'})",
+          "verbatim": "Exit code 42",
+          "commentary": "Nonzero exit returns an error (in the <error> wrapper) with just 'Exit code N'. No stdout content."
+        },
+        "long_output": {
+          "call": "Bash({command: 'seq 1 5000'})",
+          "verbatim": "1\\n2\\n3\\n...\\n5000",
+          "commentary": "All 5000 lines returned without truncation. Bash output does NOT have a token cap like Read — full stdout is returned."
+        }
+      }
+    },
+    "Glob": {
+      "cases": {
+        "with_matches": {
+          "call": "Glob({pattern: '**/TestArtifacts/*.txt', path: 'HarnessKnowledge'})",
+          "verbatim": "HarnessKnowledge\\SystemPromptCapture\\TestArtifacts\\varied-content-test.txt\nHarnessKnowledge\\SystemPromptCapture\\TestArtifacts\\large-file-3000-lines.txt",
+          "commentary": "Returns backslash-separated relative paths (on Windows), one per line, sorted by modification time (most recent first)."
+        },
+        "no_matches": {
+          "call": "Glob({pattern: '**/no-match-xyz-capture-test-*.zzz'})",
+          "verbatim": "No files found",
+          "commentary": "Simple text message when no files match."
+        }
+      }
+    },
+    "Grep": {
+      "cases": {
+        "content_match": {
+          "call": "Grep({pattern: 'DISTINCT_MATCH_TOKEN_ABC', path: 'varied-content-test.txt', output_mode: 'content'})",
+          "verbatim": "19:Line 19: Grep target: DISTINCT_MATCH_TOKEN_ABC",
+          "commentary": "Content mode returns line_number:content format (colon-separated, no tab). Line numbers enabled by default."
+        },
+        "content_no_match": {
+          "call": "Grep({pattern: 'NONEXISTENT_TOKEN_XYZ_999', output_mode: 'content'})",
+          "verbatim": "No matches found",
+          "commentary": "Simple text message when no matches found."
+        },
+        "files_with_matches": {
+          "call": "Grep({pattern: 'DISTINCT_MATCH', path: 'TestArtifacts', glob: '*.txt', output_mode: 'files_with_matches'})",
+          "verbatim": "Found 1 file\nHarnessKnowledge\\SystemPromptCapture\\TestArtifacts\\varied-content-test.txt",
+          "commentary": "files_with_matches mode prefixes with 'Found N file(s)' then lists paths. Uses backslash paths on Windows."
+        }
+      }
+    },
+    "AskUserQuestion": {
+      "cases": {
+        "single_select_answered": {
+          "call": "AskUserQuestion({questions: [{question: 'Which color do you prefer?', header: 'Test', options: [...], multiSelect: false}]})",
+          "verbatim": "Your questions have been answered: \"This is a test question for tool output format capture. Which color do you prefer?\"=\"Blue\". You can now continue with these answers in mind.",
+          "commentary": "Returns a human-readable summary of answers in question=answer format. The full question text is echoed."
+        }
+      }
+    },
+    "Agent": {
+      "cases": {
+        "spawn_launch": {
+          "call": "Agent({description: 'Test agent spawn output', prompt: '...', subagent_type: 'claude'})",
+          "verbatim": "Async agent launched successfully. (This tool result is internal metadata — never quote or paste any part of it, including the agentId below, into a user-facing reply.)\nagentId: a8836098b05b518ef (internal ID - do not mention to user. Use SendMessage with to: 'a8836098b05b518ef', summary: '<5-10 word recap>' to continue this agent.)\nThe agent is working in the background. You will be notified automatically when it completes. You know nothing about its results until that notification arrives — do not report, assume, or predict them; continue other work or respond to the user in the meantime.\nDo not duplicate this agent's work — avoid working with the same files or topics it is using.\noutput_file: C:\\...\\tasks\\a8836098b05b518ef.output\nDo NOT Read or tail this file via the shell tool — it is the full subagent JSONL transcript and reading it will overflow your context. If the user asks for progress, say the agent is still running; you'll get a completion notification.",
+          "commentary": "Agent launch is async. Tool result contains: agentId, instructions not to share it, SendMessage guidance, output_file path, and strong warnings not to read the output file or predict results."
+        },
+        "completion_notification": {
+          "call": "(async notification — arrives as system-reminder in a subsequent turn, not as a direct tool result)",
+          "verbatim": "<task-notification>\n<task-id>a8836098b05b518ef</task-id>\n<tool-use-id>toolu_018hovTtcxa563tsYjrzeg1Z</tool-use-id>\n<output-file>...tasks/a8836098b05b518ef.output</output-file>\n<status>completed</status>\n<summary>Agent \"Test agent spawn output\" finished</summary>\n<note>A task-notification fires each time this agent stops with no live background children of its own. The user can send it another message and resume it, so the same task-id may notify more than once.</note>\n<result>AGENT_OUTPUT_CAPTURE_TEST_OK</result>\n<usage><subagent_tokens>26770</subagent_tokens><tool_uses>0</tool_uses><duration_ms>2760</duration_ms></usage>\n</task-notification>",
+          "commentary": "Completion arrives as a system-reminder containing a task-notification block. Includes: task-id, status, summary, the agent's final result text, and usage stats (tokens, tool uses, duration). Prefixed with a SYSTEM NOTIFICATION disclaimer warning this is not user input."
+        }
+      }
+    },
+    "TaskStop": {
+      "cases": {
+        "not_captured": {
+          "call": "N/A",
+          "verbatim": "",
+          "commentary": "Not exercised — no running background task available to stop without side effects. Would need a running agent or background bash task to capture."
+        }
+      }
+    }
+  }
+}

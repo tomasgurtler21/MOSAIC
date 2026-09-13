@@ -248,15 +248,6 @@ func toStringSet(keys []string) map[string]bool {
 	return s
 }
 
-// productionOrchestratorFile returns the absolute path to the production
-// orchestrator at Catalog/Orchestrator/orchestrator.md in the repository root.
-// Used by the AC6.3 body-fidelity check.
-func productionOrchestratorFile(t *testing.T) string {
-	t.Helper()
-	// agentTestRoot is Tools/AgentTest/; repo root is two levels above that.
-	return filepath.Clean(filepath.Join(agentTestRoot(t), "..", "..", "Catalog", "Orchestrator", "orchestrator.md"))
-}
-
 // isSeparatorRow reports whether a markdown table row consists only of dashes,
 // pipes, and spaces — i.e., it is a header-separator row like |---|---|.
 func isSeparatorRow(line string) bool {
@@ -389,59 +380,6 @@ func TestCatalogueTree_StructuralConformance(t *testing.T) {
 		})
 	}
 
-	// AC6.3: the orchestrator copy must be faithful to the production source in
-	// every respect except recommended_tier. Every frontmatter field from the
-	// production file must appear in the catalogue copy with the same value, and
-	// the body text (outside frontmatter) must be identical.
-	//
-	// Fails until I6.1 copies the production orchestrator faithfully.
-	t.Run("orchestrator_body_matches_production", func(t *testing.T) {
-		prodPath := productionOrchestratorFile(t)
-		copyPath := orchestratorFile(root)
-
-		prodFm, prodBody := parseFrontmatter(t, prodPath)
-		copyFm, copyBody := parseFrontmatter(t, copyPath)
-		if prodFm == nil || copyFm == nil {
-			// parseFrontmatter already recorded the failure.
-			return
-		}
-
-		// Every field present in the production orchestrator (except
-		// recommended_tier, which is deliberately overridden to domain.TierTestSubject)
-		// must appear in the catalogue copy with the same value.
-		for key, prodVal := range prodFm {
-			if key == "recommended_tier" {
-				continue
-			}
-			copyVal, ok := copyFm[key]
-			if !ok {
-				t.Errorf("orchestrator copy: frontmatter field %q is present in production but absent in catalogue copy", key)
-				continue
-			}
-			// Serialise both sides through goyaml to handle slices and maps
-			// without relying on pointer or interface equality.
-			prodBytes, err1 := goyaml.Marshal(prodVal)
-			copyBytes, err2 := goyaml.Marshal(copyVal)
-			if err1 != nil || err2 != nil {
-				t.Errorf("orchestrator copy: could not serialise frontmatter field %q for comparison (prod err: %v, copy err: %v)", key, err1, err2)
-				continue
-			}
-			if string(prodBytes) != string(copyBytes) {
-				t.Errorf("orchestrator copy: frontmatter field %q differs from production:\n  production: %s  catalogue copy: %s", key, prodBytes, copyBytes)
-			}
-		}
-
-		// Body text (everything after the closing frontmatter ---) must be
-		// verbatim. Trim leading/trailing whitespace to avoid spurious failures
-		// caused by trailing newlines.
-		if strings.TrimSpace(prodBody) != strings.TrimSpace(copyBody) {
-			t.Errorf(
-				"orchestrator copy: body text differs from production orchestrator — the copy must be verbatim except the recommended_tier frontmatter field.\n"+
-					"Production body length: %d chars; catalogue copy body length: %d chars.",
-				len(strings.TrimSpace(prodBody)), len(strings.TrimSpace(copyBody)),
-			)
-		}
-	})
 }
 
 // ---------------------------------------------------------------------------

@@ -22,13 +22,14 @@ const harnessListHeight = 10
 //   - Esc -> Back() == true (caller navigates to the previous screen or exits).
 //   - ctrl+c is handled by the root model before reaching this screen.
 type HarnessScreen struct {
-	harnesses  []domain.HarnessRef
-	list       *widgets.List
-	detail     *widgets.DetailPane
-	width      int
-	height     int
-	styles     Styles
-	helpText   string
+	harnesses   []domain.HarnessRef
+	list        *widgets.List
+	detail      *widgets.DetailPane
+	width       int
+	height      int
+	styles      Styles
+	helpText    string
+	toolVersion string
 }
 
 // NewHarnessScreen creates the harness selection screen. harnesses is the live registry list;
@@ -133,6 +134,12 @@ func tierLabel(tier domain.ProvisionTier) string {
 	}
 }
 
+// SetToolVersion sets the tool version string displayed in the screen title.
+// Call before the first View() for the version to appear on entry.
+func (s *HarnessScreen) SetToolVersion(v string) {
+	s.toolVersion = v
+}
+
 // Update processes a key message and delegates to the list widget.
 func (s *HarnessScreen) Update(msg tea.Msg) tea.Cmd {
 	cmd := s.list.Update(msg)
@@ -154,7 +161,11 @@ func (s *HarnessScreen) updateDetail() {
 
 // View renders the full screen: title, list+detail side by side, status, and help bar.
 func (s *HarnessScreen) View() string {
-	title := s.styles.Title.Width(s.width).Render("Select Harness")
+	titleText := "Select Harness"
+	if s.toolVersion != "" {
+		titleText = "MOSAIC Deploy v" + s.toolVersion + " -- Select Harness"
+	}
+	title := s.styles.Title.Width(s.width).Render(titleText)
 	border := s.styles.Border.Width(s.width).Render(strings.Repeat("─", s.width))
 
 	listView := s.list.View()

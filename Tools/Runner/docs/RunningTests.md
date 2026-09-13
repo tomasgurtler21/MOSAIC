@@ -13,7 +13,6 @@ Quick-start guide for running the harness conformance test suite via CLI.
 ```
 cd "<test-workspace>"
 ./mosaic-run.exe run \
-  --orchestrator-file "<harness-orchestrator-path>" \
   --workflow <workflow-id> \
   --task "<any description>" \
   --mode <mode> \
@@ -22,10 +21,12 @@ cd "<test-workspace>"
   --input "<absolute-path-to-fixture-seed-folder>"
 ```
 
-## Harness-Specific Values
+The orchestrator file is **auto-discovered** from the `--harness` value using each harness's agents directory convention (e.g., `opencode` → `.opencode/agents/orchestrator-script.md`). There is no `--orchestrator-file` flag.
 
-| Harness | `--harness` | `--orchestrator-file` |
-|---------|-------------|----------------------|
+## Harness Values
+
+| Harness | `--harness` | Auto-Discovered Orchestrator |
+|---------|-------------|------------------------------|
 | Claude Code | `claude-code` | `.claude/agents/orchestrator-script.md` |
 | OpenCode | `opencode` | `.opencode/agents/orchestrator-script.md` |
 | GHCP CLI | `ghcp-cli` | `.github/agents/orchestrator-script.md` |
@@ -55,18 +56,15 @@ cd "C:/AI/MOSAIC/script runner test"
 FIXTURES="C:/AI/MOSAIC/MOSAIC/Tools/Runner/TestCatalog/Workflows/MosaicTest/Fixtures"
 
 # Claude Code
-./mosaic-run.exe run --orchestrator-file .claude/agents/orchestrator-script.md \
-  --workflow smoke-single --task "Smoke test" --mode auto \
+./mosaic-run.exe run --workflow smoke-single --task "Smoke test" --mode auto \
   --harness claude-code --new-run --input "$FIXTURES/smoke-single"
 
 # OpenCode
-./mosaic-run.exe run --orchestrator-file .opencode/agents/orchestrator-script.md \
-  --workflow smoke-single --task "Smoke test" --mode auto \
+./mosaic-run.exe run --workflow smoke-single --task "Smoke test" --mode auto \
   --harness opencode --new-run --input "$FIXTURES/smoke-single"
 
 # GHCP CLI
-./mosaic-run.exe run --orchestrator-file .github/agents/orchestrator-script.md \
-  --workflow smoke-single --task "Smoke test" --mode auto \
+./mosaic-run.exe run --workflow smoke-single --task "Smoke test" --mode auto \
   --harness ghcp-cli --new-run --input "$FIXTURES/smoke-single"
 ```
 

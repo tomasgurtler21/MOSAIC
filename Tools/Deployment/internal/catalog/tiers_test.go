@@ -19,7 +19,7 @@ package catalog_test
 // and TestTiers_HighTier_NotLowercased, which named the five real tier strings) exist to
 // prove the loader does not lowercase, trim, or otherwise normalise tier strings — that is
 // behaviour-under-test (Plan.md's classification table), not format vocabulary:
-// Catalog/SourceFilesFormat.md documents recommended_tier as "an open string...
+// Catalog/CatalogFilesFormat.md documents recommended_tier as "an open string...
 // never validated against a fixed enum", and introduces
 // "LOW"/"MEDIUM"/"HIGH"/"LOW-MEDIUM"/"MEDIUM-HIGH" only as "examples in the current
 // source", not a closed set. Both tests were moved onto a synthetic fixture built via

@@ -55,6 +55,7 @@ const (
 	// names in sorted order. Distinct from GapDeployedRegionContentChanged, which
 	// covers the managed-region parent case.
 	GapEnclosingSectionChanged GapKind = "enclosing-section-changed"
+
 )
 
 // Gap is produced by transform, plan, and deploy when a decision could not be made automatically.
@@ -75,13 +76,13 @@ type Gap struct {
 type TodoCategory string
 
 const (
-	TodoModels       TodoCategory = "Models"
-	TodoToolMappings TodoCategory = "Tool mappings"
-	TodoInjections   TodoCategory = "Project-specific injections"
-	TodoSkippedFiles TodoCategory = "Skipped files"
-	TodoRegistration TodoCategory = "Hook registration"
-	TodoManual       TodoCategory = "Manual steps"
-	TodoEnvironment  TodoCategory = "Deployment location"
+	TodoModels        TodoCategory = "Models"
+	TodoToolMappings  TodoCategory = "Tool mappings"
+	TodoInjections    TodoCategory = "Project-specific injections"
+	TodoSkippedFiles  TodoCategory = "Skipped files"
+	TodoRegistration  TodoCategory = "Hook registration"
+	TodoManual        TodoCategory = "Manual steps"
+	TodoEnvironment   TodoCategory = "Deployment location"
 )
 
 // TodoItem is one action the user must take after the deployment run completes.

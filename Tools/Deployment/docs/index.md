@@ -30,7 +30,7 @@ then use the references below for deeper topics.
 
 | Document | What it covers |
 |----------|----------------|
-| [SourceFilesFormat.md](../../Catalog/SourceFilesFormat.md) | Generic agent frontmatter fields, boundary tag conventions (`<Name type="core">`, `<Name type="managed">`, `<Name type="project">`), version bump rules. Read this before editing generic agent files. |
+| [CatalogFilesFormat.md](../../Catalog/CatalogFilesFormat.md) | Generic agent frontmatter fields, boundary tag conventions (`<Name type="core">`, `<Name type="managed">`, `<Name type="project">`), version bump rules. Read this before editing generic agent files. |
 
 ---
 
@@ -45,7 +45,7 @@ README.md                  ← start here (users)
 ├── docs/harness-contributor-guide.md
 │   ├── docs/descriptor-schema.md   ← descriptor YAML reference
 │   └── docs/external-protocol.md  ← subprocess protocol
-└── ../../Catalog/SourceFilesFormat.md  ← generic source conventions
+└── ../../Catalog/CatalogFilesFormat.md  ← generic source conventions
 ```
 
 ---
@@ -82,8 +82,8 @@ The following table shows where each major concept is documented.
 | External protocol handshake | [External Module Protocol — Handshake](external-protocol.md) |
 | External protocol methods | [External Module Protocol — Methods](external-protocol.md) |
 | External protocol error handling | [External Module Protocol — Errors](external-protocol.md) |
-| Generic source frontmatter fields | [SourceFilesFormat.md](../../Catalog/SourceFilesFormat.md) |
-| Boundary tag conventions (`<Name type="core">`, `<Name type="managed">`, `<Name type="project">`) | [SourceFilesFormat.md](../../Catalog/SourceFilesFormat.md) |
+| Generic source frontmatter fields | [CatalogFilesFormat.md](../../Catalog/CatalogFilesFormat.md) |
+| Boundary tag conventions (`<Name type="core">`, `<Name type="managed">`, `<Name type="project">`) | [CatalogFilesFormat.md](../../Catalog/CatalogFilesFormat.md) |
 | Import-boundary guard | [README — Import-boundary guard](../README.md#import-boundary-guard) |
 | Relationship to boundary_transformer.py | [README — boundary_transformer.py](../README.md#relationship-to-boundary_transformerpy-and-boundary_validatorpy) |
 

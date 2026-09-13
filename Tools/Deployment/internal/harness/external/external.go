@@ -178,6 +178,7 @@ type wireTargetPathRequest struct {
 type wireInjectionRequest struct {
 	Name     string `json:"name"`
 	AgentKey string `json:"agent_key,omitempty"` // omitted for backward compatibility with older external modules
+	Role     string `json:"role,omitempty"`      // omitted for backward compatibility with older external modules
 }
 
 type wireHookPlanRequest struct {
@@ -924,7 +925,7 @@ func (a *adapter) TargetPath(req domain.TargetPathRequest) (string, error) {
 // intentional: callers fall back to the next harness in the chain rather than aborting the
 // transform when a single injection lookup fails.
 func (a *adapter) Injection(req domain.InjectionRequest) (string, bool) {
-	params := wireInjectionRequest{Name: req.Name, AgentKey: req.AgentKey}
+	params := wireInjectionRequest{Name: req.Name, AgentKey: req.AgentKey, Role: string(req.Role)}
 
 	raw, err := a.callMethod("injection", params)
 	if err != nil {

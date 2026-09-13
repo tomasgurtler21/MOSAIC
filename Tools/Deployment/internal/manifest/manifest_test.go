@@ -23,6 +23,7 @@ package manifest_test
 import (
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 	"time"
 
@@ -815,4 +816,171 @@ func TestState_AllFiveStates_NonEmpty(t *testing.T) {
 			t.Errorf("State constant with value %q is the empty string; all states must be non-empty", s)
 		}
 	}
+}
+
+// ---------------------------------------------------------------------------
+// ToolVersion: Save writes field, Load reads it back
+// ---------------------------------------------------------------------------
+
+// TestStore_ToolVersion_SaveWritesFieldToYAML verifies that Save writes a manifest with
+// ToolVersion set to a non-empty string and that the resulting YAML file contains the
+// tool_version key with the expected value.
+func TestStore_ToolVersion_SaveWritesFieldToYAML(t *testing.T) {
+	store := manifest.NewStore()
+	ws := makeWorkspace(t)
+
+	m := sampleManifest()
+	m.ToolVersion = "1.0.0"
+
+	must(t, store.Save(ws, m))
+
+	data, err := os.ReadFile(filepath.Join(ws, manifest.Dir, manifest.FileName))
+	if err != nil {
+		t.Fatalf("reading saved manifest file: %v", err)
+	}
+
+	if !containsSubstring(string(data), "tool_version") {
+		t.Errorf("saved YAML does not contain 'tool_version' key; got:\n%s", string(data))
+	}
+	if !containsSubstring(string(data), "1.0.0") {
+		t.Errorf("saved YAML does not contain the tool version value '1.0.0'; got:\n%s", string(data))
+	}
+}
+
+// TestStore_ToolVersion_LoadRoundTrip verifies that ToolVersion survives a write-then-read
+// cycle: the value saved in domain.Manifest.ToolVersion is loaded back unchanged.
+func TestStore_ToolVersion_LoadRoundTrip(t *testing.T) {
+	store := manifest.NewStore()
+	ws := makeWorkspace(t)
+
+	m := sampleManifest()
+	m.ToolVersion = "1.0.0"
+
+	must(t, store.Save(ws, m))
+	snap, err := store.Load(ws)
+	must(t, err)
+
+	if snap.State != manifest.StatePresent {
+		t.Fatalf("Load after Save with ToolVersion: State = %q, want %q", snap.State, manifest.StatePresent)
+	}
+	if snap.Manifest.ToolVersion != "1.0.0" {
+		t.Errorf("ToolVersion round-trip: got %q, want %q", snap.Manifest.ToolVersion, "1.0.0")
+	}
+}
+
+// TestStore_ToolVersion_EmptyValueIsNotWrittenToYAML verifies that when ToolVersion is
+// empty (the zero value), no tool_version key appears in the YAML output. This relies on
+// the omitempty tag and ensures backward-compatible manifests are not cluttered.
+func TestStore_ToolVersion_EmptyValueIsNotWrittenToYAML(t *testing.T) {
+	store := manifest.NewStore()
+	ws := makeWorkspace(t)
+
+	m := sampleManifest()
+	m.ToolVersion = "" // explicitly not set
+
+	must(t, store.Save(ws, m))
+
+	data, err := os.ReadFile(filepath.Join(ws, manifest.Dir, manifest.FileName))
+	if err != nil {
+		t.Fatalf("reading saved manifest file: %v", err)
+	}
+
+	if containsSubstring(string(data), "tool_version") {
+		t.Errorf("saved YAML contains 'tool_version' key even though ToolVersion is empty; got:\n%s", string(data))
+	}
+}
+
+// ---------------------------------------------------------------------------
+// ToolVersion: backward compatibility with old manifests
+// ---------------------------------------------------------------------------
+
+// TestStore_ToolVersion_BackwardCompat_MissingFieldLoadsAsEmptyString verifies that a
+// manifest YAML written before the ToolVersion feature (lacking the tool_version key)
+// loads successfully with Manifest.ToolVersion as empty string and no decode error.
+func TestStore_ToolVersion_BackwardCompat_MissingFieldLoadsAsEmptyString(t *testing.T) {
+	store := manifest.NewStore()
+	ws := makeWorkspace(t)
+
+	// Write a legacy manifest YAML that has no tool_version key at all.
+	legacy := []byte("schema_version: \"1\"\nharness_id: \"claude-code\"\nupdated_at: \"2024-06-15T12:00:00Z\"\nentries: []\n")
+	writeManifestFile(t, ws, legacy)
+
+	snap, err := store.Load(ws)
+	must(t, err) // must not return an error
+
+	if snap.State != manifest.StatePresent {
+		t.Fatalf("loading legacy manifest without tool_version: State = %q, want %q", snap.State, manifest.StatePresent)
+	}
+	if snap.Manifest.ToolVersion != "" {
+		t.Errorf("loading legacy manifest: ToolVersion = %q, want empty string (field absent from YAML)", snap.Manifest.ToolVersion)
+	}
+}
+
+// TestStore_ToolVersion_BackwardCompat_NoDecodeError verifies that Load does not return
+// an error when loading a manifest without the tool_version field. The missing field must
+// be treated as a zero-value (backward-additive) field, not as a decode failure.
+func TestStore_ToolVersion_BackwardCompat_NoDecodeError(t *testing.T) {
+	store := manifest.NewStore()
+	ws := makeWorkspace(t)
+
+	legacy := []byte("schema_version: \"1\"\nharness_id: \"claude-code\"\nupdated_at: \"2024-06-15T12:00:00Z\"\nentries: []\n")
+	writeManifestFile(t, ws, legacy)
+
+	_, err := store.Load(ws)
+	if err != nil {
+		t.Errorf("loading legacy manifest without tool_version returned error %v; the missing field must be tolerated silently", err)
+	}
+}
+
+// ---------------------------------------------------------------------------
+// ToolVersion: does not interfere with the SchemaVersion / StateFuture gate
+// ---------------------------------------------------------------------------
+
+// TestStore_ToolVersion_DoesNotAffectSchemaVersionGate verifies that the presence of a
+// tool_version field in a manifest with an unrecognised schema_version does not change
+// the StateFuture detection behavior. The gate checks only schema_version; tool_version
+// is irrelevant to it.
+func TestStore_ToolVersion_DoesNotAffectSchemaVersionGate(t *testing.T) {
+	store := manifest.NewStore()
+	ws := makeWorkspace(t)
+
+	// A future-schema manifest that also happens to carry tool_version.
+	future := []byte("schema_version: \"99\"\nharness_id: \"claude-code\"\nupdated_at: \"2099-01-01T00:00:00Z\"\ntool_version: \"2.0.0\"\nentries: []\n")
+	writeManifestFile(t, ws, future)
+
+	snap, err := store.Load(ws)
+	must(t, err) // Load must not return an error
+
+	if snap.State != manifest.StateFuture {
+		t.Errorf("future-schema manifest with tool_version: State = %q, want %q; tool_version must not suppress the schema gate",
+			snap.State, manifest.StateFuture)
+	}
+}
+
+// TestStore_ToolVersion_SchemaGateStillProducesNonNilErr verifies that the SchemaVersion
+// gate's Err field is still set when tool_version is present alongside a future schema_version.
+// The ToolVersion field must not interfere with diagnostic error reporting.
+func TestStore_ToolVersion_SchemaGateStillProducesNonNilErr(t *testing.T) {
+	store := manifest.NewStore()
+	ws := makeWorkspace(t)
+
+	future := []byte("schema_version: \"99\"\nharness_id: \"claude-code\"\nupdated_at: \"2099-01-01T00:00:00Z\"\ntool_version: \"2.0.0\"\nentries: []\n")
+	writeManifestFile(t, ws, future)
+
+	snap, err := store.Load(ws)
+	must(t, err)
+
+	if snap.State == manifest.StateFuture && snap.Err == nil {
+		t.Error("StateFuture snapshot (with tool_version present) has nil Err; " +
+			"the schema gate must still populate Err regardless of tool_version")
+	}
+}
+
+// ---------------------------------------------------------------------------
+// Test helper: substring check
+// ---------------------------------------------------------------------------
+
+// containsSubstring returns true if s contains the substring sub.
+func containsSubstring(s, sub string) bool {
+	return strings.Contains(s, sub)
 }

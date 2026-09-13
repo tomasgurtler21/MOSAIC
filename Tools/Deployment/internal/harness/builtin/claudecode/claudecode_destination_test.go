@@ -243,18 +243,19 @@ func TestClaudeCode_Tools_MultipleDestFieldsAllPassThroughUntouched(t *testing.T
 }
 
 // ---------------------------------------------------------------------------
-// T3.1 — Custom tools route to mcpServers with no config-declared tool_destinations
+// T3.1 — Custom tools appear as mcp__name__* wildcard in the main tools scalar
 // ---------------------------------------------------------------------------
 
-// TestClaudeCode_CustomTool_RoutesToMcpServersWithNoConfigEntry verifies that when no
-// config-declared tool_destinations entry exists for a custom (MCP-style) tool, the tool
-// routes to the mcpServers frontmatter field as a block list, not to the main tools value.
+// TestClaudeCode_CustomTool_RoutesToMainToolsAsWildcard verifies that when a custom
+// (MCP-style) tool is requested, the tool name is formatted as mcp__<name>__* via the
+// descriptor's custom_tool_template and written to the main tools scalar -- not to any
+// separate mcpServers field.
 //
 // This test loads the real Claude Code module (embedding claude-code.yaml). It fails (RED)
-// until claude-code.yaml declares custom_tool_destination routing custom tools to the
-// mcpServers field. Before that declaration, custom tools fall back to the main tools
-// scalar, so the mcpServers assertion fails.
-func TestClaudeCode_CustomTool_RoutesToMcpServersWithNoConfigEntry(t *testing.T) {
+// against the old descriptor (which routed custom tools to mcpServers) and turns GREEN
+// once claude-code.yaml declares custom_tool_template: "mcp__%s__*" with the custom tool
+// destination set to main (or omitted, since main is the default).
+func TestClaudeCode_CustomTool_RoutesToMainToolsAsWildcard(t *testing.T) {
 	mod, err := claudecode.New(registry.BuiltinOptions{MosaicRoot: repoRoot(t)})
 	if err != nil {
 		t.Fatalf("claudecode.New(): %v", err)
@@ -274,60 +275,49 @@ func TestClaudeCode_CustomTool_RoutesToMcpServersWithNoConfigEntry(t *testing.T)
 
 	toolsKey := desc.Frontmatter.ToolsKey
 
-	var mcpField *domain.FrontmatterField
 	var mainField *domain.FrontmatterField
 	for i := range result.Fields {
-		switch result.Fields[i].Key {
-		case "mcpServers":
-			mcpField = &result.Fields[i]
-		case toolsKey:
+		if result.Fields[i].Key == toolsKey {
 			mainField = &result.Fields[i]
 		}
-	}
-
-	// mcpServers must be present as a KindList (block list).
-	if mcpField == nil {
-		t.Fatalf("mcpServers field absent from Tools() result; "+
-			"with no config-declared tool_destinations entry, a custom tool must route to "+
-			"mcpServers via the descriptor's custom_tool_destination declaration; "+
-			"fields present: %v", fieldKeys(result.Fields))
-	}
-	if mcpField.Value.Kind != domain.KindList {
-		t.Errorf("mcpServers field kind: want KindList (list-block), got %v; "+
-			"the descriptor's custom_tool_destination declares format: list-block",
-			mcpField.Value.Kind)
-	}
-	var foundInMCP bool
-	for _, item := range mcpField.Value.Items {
-		if item.Scalar == "human-in-the-loop" {
-			foundInMCP = true
+		// No mcpServers field must be produced by the descriptor's custom tool routing.
+		if result.Fields[i].Key == "mcpServers" {
+			t.Errorf("mcpServers field present in Tools() result; "+
+				"after the fix, custom tools must route to the main tools scalar as mcp__<name>__*, "+
+				"not to a separate mcpServers field; fields: %v", fieldKeys(result.Fields))
 		}
 	}
-	if !foundInMCP {
-		t.Errorf("custom tool name human-in-the-loop not found in mcpServers field items %v; "+
-			"the resolved custom tool name must appear in the mcpServers block list",
-			mcpField.Value.Items)
+
+	// The main tools field must be present as a KindScalar.
+	if mainField == nil {
+		t.Fatalf("main tools field %q absent from Tools() result; "+
+			"the custom tool must appear in the main tools scalar; fields: %v",
+			toolsKey, fieldKeys(result.Fields))
+	}
+	if mainField.Value.Kind != domain.KindScalar {
+		t.Errorf("main tools field %q kind: want KindScalar, got %v", toolsKey, mainField.Value.Kind)
 	}
 
-	// The custom tool must NOT appear in the main tools comma-separated scalar.
-	if mainField != nil && mainField.Value.Kind == domain.KindScalar {
-		if strings.Contains(mainField.Value.Scalar, "human-in-the-loop") {
-			t.Errorf("custom tool human-in-the-loop found in main tools scalar %q; "+
-				"custom tools must route exclusively to mcpServers when the descriptor declares "+
-				"custom_tool_destination and no config entry overrides the default",
-				mainField.Value.Scalar)
-		}
+	// The custom tool must appear as mcp__human-in-the-loop__* in the main scalar.
+	const wantWildcard = "mcp__human-in-the-loop__*"
+	if !strings.Contains(mainField.Value.Scalar, wantWildcard) {
+		t.Errorf("main tools scalar %q does not contain %q; "+
+			"the descriptor's custom_tool_template must format the name as mcp__<name>__* "+
+			"and write it to the main tools scalar",
+			mainField.Value.Scalar, wantWildcard)
 	}
 }
 
-// TestClaudeCode_CustomTool_NoConfigEntry_BothMappedAndCustomToolRequestedTogether
-// verifies that when both a descriptor-mapped tool (file_read → Read) and a custom tool
-// (user_feedback → human-in-the-loop) are requested together, the mapped tool appears in
-// the main tools scalar and the custom tool appears in mcpServers — they do not interfere.
+// TestClaudeCode_CustomTool_BothMappedAndCustomToolRoutedToMainScalar verifies that when
+// both a descriptor-mapped tool (file_read -> Read) and a custom tool
+// (user_feedback -> human-in-the-loop) are requested together, both appear in the main
+// tools scalar: Read as its mapped name and the custom tool as mcp__human-in-the-loop__*.
+// No separate mcpServers field is produced.
 //
-// This test fails (RED) until claude-code.yaml declares custom_tool_destination, because
-// without that declaration the custom tool also falls to the main scalar, mixing with Read.
-func TestClaudeCode_CustomTool_NoConfigEntry_BothMappedAndCustomToolRequestedTogether(t *testing.T) {
+// This test fails (RED) against the old descriptor (which routed the custom tool to
+// mcpServers) and turns GREEN once claude-code.yaml declares custom_tool_template and
+// routes custom tools to the main field.
+func TestClaudeCode_CustomTool_BothMappedAndCustomToolRoutedToMainScalar(t *testing.T) {
 	mod, err := claudecode.New(registry.BuiltinOptions{MosaicRoot: repoRoot(t)})
 	if err != nil {
 		t.Fatalf("claudecode.New(): %v", err)
@@ -348,74 +338,63 @@ func TestClaudeCode_CustomTool_NoConfigEntry_BothMappedAndCustomToolRequestedTog
 	toolsKey := desc.Frontmatter.ToolsKey
 
 	var mainField *domain.FrontmatterField
-	var mcpField *domain.FrontmatterField
 	for i := range result.Fields {
-		switch result.Fields[i].Key {
-		case toolsKey:
+		if result.Fields[i].Key == toolsKey {
 			mainField = &result.Fields[i]
-		case "mcpServers":
-			mcpField = &result.Fields[i]
+		}
+		// No mcpServers field must be produced.
+		if result.Fields[i].Key == "mcpServers" {
+			t.Errorf("mcpServers field present in Tools() result; "+
+				"after the fix, custom tools must route to the main tools scalar as mcp__<name>__*, "+
+				"not to a separate mcpServers field; fields: %v", fieldKeys(result.Fields))
 		}
 	}
 
-	// mapped tool (Read) must appear in the main scalar.
+	// Main tools field must be a KindScalar.
 	if mainField == nil {
 		t.Fatalf("main tools field %q absent from result; fields: %v", toolsKey, fieldKeys(result.Fields))
 	}
 	if mainField.Value.Kind != domain.KindScalar {
 		t.Errorf("main tools field kind: want KindScalar, got %v", mainField.Value.Kind)
 	}
+
+	// Mapped tool (Read) must appear in the main scalar.
 	if !strings.Contains(mainField.Value.Scalar, "Read") {
 		t.Errorf("Read not found in main tools scalar %q; file_read must map to Read", mainField.Value.Scalar)
 	}
 
-	// custom tool must NOT appear in the main scalar.
-	if strings.Contains(mainField.Value.Scalar, "human-in-the-loop") {
-		t.Errorf("custom tool human-in-the-loop found in main tools scalar %q; "+
-			"custom tools must route to mcpServers, not to the main tools value",
-			mainField.Value.Scalar)
-	}
-
-	// custom tool must appear in mcpServers block list.
-	if mcpField == nil {
-		t.Fatalf("mcpServers field absent from result; "+
-			"custom tools must route to mcpServers via the descriptor's custom_tool_destination; "+
-			"fields: %v", fieldKeys(result.Fields))
-	}
-	var found bool
-	for _, item := range mcpField.Value.Items {
-		if item.Scalar == "human-in-the-loop" {
-			found = true
-		}
-	}
-	if !found {
-		t.Errorf("human-in-the-loop not found in mcpServers field %v", mcpField.Value.Items)
+	// Custom tool must appear as mcp__human-in-the-loop__* in the main scalar.
+	const wantWildcard = "mcp__human-in-the-loop__*"
+	if !strings.Contains(mainField.Value.Scalar, wantWildcard) {
+		t.Errorf("main tools scalar %q does not contain %q; "+
+			"the custom tool must be formatted by custom_tool_template and written to the main scalar "+
+			"alongside mapped tools",
+			mainField.Value.Scalar, wantWildcard)
 	}
 }
 
 // ---------------------------------------------------------------------------
-// T3.4 — Main tools scalar conversion leaves mcpServers field untouched
+// T3.4 — Custom tool wildcard appears in main scalar; no separate mcpServers field
 // ---------------------------------------------------------------------------
 
-// TestClaudeCode_ScalarConversion_McpServersFieldSurvivesAsBlockList verifies that when
-// the Claude Code module produces both a main tools field (comma-separated KindScalar)
-// and an mcpServers field (block-list KindList), the convertFieldsToScalar conversion
-// applies only to the main tools field. The mcpServers field passes through unchanged as
-// a KindList because its key does not equal ToolsKey.
+// TestClaudeCode_ScalarConversion_CustomToolWildcardInMainScalar verifies that when
+// the Claude Code module processes a descriptor-mapped tool and a custom tool together,
+// both appear as entries in the main tools comma-separated scalar. The custom tool is
+// formatted as mcp__<name>__* by the descriptor's custom_tool_template. No separate
+// mcpServers field is produced, confirming that convertFieldsToScalar does not need to
+// skip a non-existent mcpServers field.
 //
-// This test loads the real module and fails (RED) until claude-code.yaml declares
-// custom_tool_destination: without that declaration, no mcpServers field is produced by
-// the descriptor's custom-tool routing, and the assertion that mcpServers is a KindList
-// block list cannot pass.
-func TestClaudeCode_ScalarConversion_McpServersFieldSurvivesAsBlockList(t *testing.T) {
+// This test loads the real module and fails (RED) against the old descriptor (which
+// routed custom tools to mcpServers instead of the main scalar) and turns GREEN once
+// claude-code.yaml declares custom_tool_template: "mcp__%s__*" with custom tools
+// directed to the main field.
+func TestClaudeCode_ScalarConversion_CustomToolWildcardInMainScalar(t *testing.T) {
 	mod, err := claudecode.New(registry.BuiltinOptions{MosaicRoot: repoRoot(t)})
 	if err != nil {
 		t.Fatalf("claudecode.New(): %v", err)
 	}
 	desc := mod.Descriptor()
 
-	// Request a descriptor-mapped tool (file_read) and a custom tool. After I3.1 the
-	// custom tool routes to mcpServers via the descriptor's custom_tool_destination.
 	result, err := mod.Tools(domain.ToolRequest{
 		AgentKey: "test-agent",
 		Generic:  []string{"file_read", "user_feedback"},
@@ -430,17 +409,19 @@ func TestClaudeCode_ScalarConversion_McpServersFieldSurvivesAsBlockList(t *testi
 	toolsKey := desc.Frontmatter.ToolsKey
 
 	var mainField *domain.FrontmatterField
-	var mcpField *domain.FrontmatterField
 	for i := range result.Fields {
-		switch result.Fields[i].Key {
-		case toolsKey:
+		if result.Fields[i].Key == toolsKey {
 			mainField = &result.Fields[i]
-		case "mcpServers":
-			mcpField = &result.Fields[i]
+		}
+		// No mcpServers field should exist after the fix.
+		if result.Fields[i].Key == "mcpServers" {
+			t.Errorf("mcpServers field present in Tools() result; "+
+				"after the fix, custom tools route to the main scalar as mcp__<name>__* "+
+				"and no separate mcpServers field is produced; fields: %v", fieldKeys(result.Fields))
 		}
 	}
 
-	// Main tools field must be a comma-separated KindScalar (Claude Code's format).
+	// Main tools field must be a comma-separated KindScalar.
 	if mainField == nil {
 		t.Fatalf("main tools field %q absent from result; fields: %v", toolsKey, fieldKeys(result.Fields))
 	}
@@ -449,39 +430,18 @@ func TestClaudeCode_ScalarConversion_McpServersFieldSurvivesAsBlockList(t *testi
 			"convertFieldsToScalar must convert the main tools field to a comma-separated scalar",
 			toolsKey, mainField.Value.Kind)
 	}
+
+	// Mapped tool (Read) must appear in the main scalar.
 	if !strings.Contains(mainField.Value.Scalar, "Read") {
 		t.Errorf("main tools scalar %q does not contain Read; file_read must map to Read", mainField.Value.Scalar)
 	}
 
-	// mcpServers field must survive as an unmodified KindList block list, because its key
-	// does not equal ToolsKey and convertFieldsToScalar only converts the ToolsKey field.
-	if mcpField == nil {
-		t.Fatalf("mcpServers field absent from result; "+
-			"custom tools must route to mcpServers via the descriptor's custom_tool_destination; "+
-			"fields: %v", fieldKeys(result.Fields))
-	}
-	if mcpField.Value.Kind != domain.KindList {
-		t.Errorf("mcpServers field kind: want KindList (block list, not converted to scalar), got %v; "+
-			"convertFieldsToScalar must only convert the field identified by ToolsKey (%q); "+
-			"the mcpServers field must pass through unchanged as a block list",
-			mcpField.Value.Kind, toolsKey)
-	}
-	var foundInMCP bool
-	for _, item := range mcpField.Value.Items {
-		if item.Scalar == "human-in-the-loop" {
-			foundInMCP = true
-		}
-	}
-	if !foundInMCP {
-		t.Errorf("human-in-the-loop not found in mcpServers field items %v; "+
-			"the custom tool name must appear in the mcpServers block list after routing",
-			mcpField.Value.Items)
-	}
-
-	// Confirm the custom tool name did NOT also appear in the main tools scalar.
-	if strings.Contains(mainField.Value.Scalar, "human-in-the-loop") {
-		t.Errorf("custom tool human-in-the-loop found in main tools scalar %q; "+
-			"it must appear only in mcpServers, not in the main tools value",
-			mainField.Value.Scalar)
+	// Custom tool must appear as mcp__human-in-the-loop__* in the main scalar.
+	const wantWildcard = "mcp__human-in-the-loop__*"
+	if !strings.Contains(mainField.Value.Scalar, wantWildcard) {
+		t.Errorf("main tools scalar %q does not contain %q; "+
+			"the custom tool must be formatted by custom_tool_template as mcp__<name>__* "+
+			"and written to the main tools scalar alongside mapped tools",
+			mainField.Value.Scalar, wantWildcard)
 	}
 }

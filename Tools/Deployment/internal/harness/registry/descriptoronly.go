@@ -117,12 +117,12 @@ func (m *runtimeModule) TargetPath(req domain.TargetPathRequest) (string, error)
 
 // Injection returns the harness-level content for a canonical injection name.
 //
-// For the "orchestrator" agent key, shared content (from HarnessInjections.md) is merged
-// with orchestrator-only content (from HarnessInjectionsOrchestrator.md, loaded at
-// construction time). For all other agent keys, only shared content is returned.
+// When req.Role == domain.RoleOrchestrator, shared content (from HarnessInjections.md) is
+// merged with orchestrator-only content (from HarnessInjectionsOrchestrator.md, loaded at
+// construction time). For all other roles (including zero value), only shared content is returned.
 func (m *runtimeModule) Injection(req domain.InjectionRequest) (string, bool) {
 	sharedContent, sharedOk := m.injections[req.Name]
-	if req.AgentKey != "orchestrator" {
+	if req.Role != domain.RoleOrchestrator {
 		return sharedContent, sharedOk
 	}
 	orchContent, orchOk := m.orchInjections[req.Name]
