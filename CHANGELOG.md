@@ -1,3 +1,53 @@
+# 0.4.0 (2026-09-13)
+
+All tools now carry their own version number, displayed in TUI headers and embedded in logs/reports.
+
+## Tools
+
+### Deploy v1.0.1
+#### Changes
+- Unused tool mappings are now removed from agents frontmatter on deploy
+- Harness constraints injection version is now added even when empty for a given harness
+#### Bugfixes
+- Fix MCP server deployment for Claude Code harness
+- Fix `orchestrator-scripted` not being updated properly during deploy
+- Fix `s`/`S` key collision on TUI screen
+- Fix some incorrect TODOs at deployment
+
+### Runner v1.0.0
+#### Changes
+- Improved logging
+#### Bugfixes
+- Fix graceful stop not working
+
+### AgentTest v1.0.0
+#### Changes
+- Summary split into user-facing and internal reports
+- Scheduling adjusted to leverage Anthropic cross-process prompt caching (cost reduction)
+- Improved cost accuracy, infra errors excluded from summary problem areas and cost calculations
+
+### LogAnalyzer v1.0.0
+No changes.
+
+## Orchestration System
+- Communication protocol updated to prevent routing around HITL
+- Orchestrator instructions updated to prevent routing around HITL
+
+## Catalog
+- New standalone agents: `spearhead` (exploration), `presentation-creator`
+- `CatalogFilesFormat.md` renamed and updated
+
+## Orchestration Test Results
+- Completed remaining test suites for Claude Code with Opus 5
+- Added results for Sonnet 5, Haiku 4.5, Fable 5
+
+## Harness Knowledge
+- First harness issues capture and evaluation completed for all supported harnesses
+- System prompt captures created for each harness
+
+## Documentation
+- `CONTRIBUTING.md`, `SECURITY.md` created, README updated with Getting Started section
+
 # 0.3.0 (2026-09-01)
 ## Tools
 ### Changes
