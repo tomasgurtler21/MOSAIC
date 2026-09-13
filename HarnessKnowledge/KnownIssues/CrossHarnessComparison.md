@@ -111,12 +111,14 @@ Issues specific to MCP (Model Context Protocol) tool connectivity and execution.
 | Failure Mode | Claude Code | GHCP-CLI | OpenCode | VS Code GHCP |
 |-------------|:-----------:|:--------:|:--------:|:------------:|
 | **MCP tools not wired/connected** | CC-008 (one malformed schema drops all tools) | GC-003 (workspace .mcp.json not wired into session) | OC-061 (stale tool-set cache), OC-024 (tools drop to 0 after compaction) | VC-016 (discovery-timing race, tools rejected as "disabled") |
-| **MCP subagent permission gap** | — | GC-005 (full-tool subagents empty when schema budget exceeded) | OC-094 (subagent MCP calls all denied — 5 failed fix attempts) | — |
+| **MCP subagent permission gap** | — (no gap: native subagents get MCP tools and input schemas from turn one, foreground and background. Minor: optional server guidance arrives after the first tool turn, CC-081) | GC-005 (full-tool subagents empty when schema budget exceeded) | OC-094 (subagent MCP calls all denied — 5 failed fix attempts) | — |
 | **MCP tool errors swallowed/unhelpful** | — | — | OC-062 (bare error string), OC-064 (constant "Failed to get tools") | VC-017 (failed task payload discarded) |
 | **MCP server crashes / hangs** | — | — | OC-065 (server crash, no restart), OC-067 (tool call hangs, deadlock) | — |
 | **MCP concurrency issues** | — | — | OC-066 (CPU saturation, event-loop blocking) | — |
 
 **Cross-harness verdict:** MCP integration is the least mature subsystem across all harnesses. If MOSAIC subagents depend on MCP tools, they face silent tool-loss, permission gaps, and unhelpful error reporting on every harness. Recommendation: treat MCP tool availability as **best-effort**, not guaranteed, and have agents fall back to native tools (grep, glob, bash) when possible.
+
+**Claude Code native mode specifically:** MCP tools work for subagents dispatched via the Agent tool, in both foreground and background. The only requirement is `mcp__<server>__*` in the agent's `tools:` field — no `mcpServers:` needed (servers defined in `.mcp.json` are already connected at session level). Tool names and input schemas are present from the first turn. The `mcpServers:` frontmatter field connects a server and delivers its instructions, but does NOT add tools past the `tools:` allowlist (CC-079, reframed as Limitation). The remaining low-impact gap is *instruction routing*: the server's usage guidance arrives after the subagent's first tool turn, covering every connected server (CC-080/CC-081). A first-turn MCP call runs without guidance — observed with `harness-issue-hunter`, whose unbounded first GitHub search overflowed the tool-output limit before self-correcting. Re-verified on v2.1.270 with 5 targeted tests across `--agent` and native subagent modes. See `ClaudeCode/mcp-frontmatter-blocker.md`.
 
 ### 2.6 Worktree & Isolation Issues
 
@@ -256,7 +258,7 @@ Recommended mitigations ordered by cross-cutting impact. The **Mode** column ind
 | **3** | **Externalize durable state to on-disk artifacts early and often.** Don't rely on conversational context surviving compaction. Validates MOSAIC's Orchestration.md blackboard pattern as essential. | Both | All four | CC-006/007/067, GC-001/002, OC-021–028, VC-009 |
 | **4** | **Cap session lifetime and restart proactively** rather than running one session indefinitely. | Both | All four | CC-038/040/044, GC-001/007, OC-022/026/027/093, VC-009 |
 | **5** | **Treat harness permission/hook enforcement as convenience, not security.** Enforce critical guardrails externally. | Both | All four | CC-010/014/015/025, GC-016/017, OC-084/085/089/090, VC-005/010 |
-| **6** | **Treat MCP tool availability as best-effort.** Have agents fall back to native tools when MCP tools are unavailable or silently failing. | Both | All four | CC-008, GC-003/005, OC-024/061/062/064/065/094, VC-016/017 |
+| **6** | **Treat MCP tool availability as best-effort.** Have agents fall back to native tools when MCP tools are unavailable or silently failing. **Claude Code native mode specifically:** MCP works for native subagents in both foreground and background; Runner mode is not required. The only quirk is that optional server guidance arrives after the first tool turn (CC-081, LOW). | Both | All four | CC-008/081, GC-003/005, OC-024/061/062/064/065/094, VC-016/017 |
 | **7** | **Instruct subagents to split large artifact writes** into multiple smaller files. | Both | CC, GC, OC | GC-006, OC-041 |
 | **8** | **For GHCP-CLI headless: pass `--additional-mcp-config @.mcp.json` explicitly** and verify non-interactive permission behavior directly before relying on it. | Runner | GC only | GC-003, GC-009/012/013/019 |
 | **9** | **For Claude Code: treat worktree isolation as leaky.** Have subagents explicitly verify their cwd at the start of every Bash call. | Both | CC only | CC-023/054–057/063/073/075 |
@@ -278,7 +280,7 @@ Rating each harness on how its known issue landscape affects MOSAIC's core patte
 | **Artifact file writing** | Low risk (workarounds exist) | High risk (large-file retry loop) | Moderate risk (silent fail on 1000+ lines) | Moderate risk (success before save) |
 | **Long-running session stability** | Moderate risk (compaction, freezes) | **Highest risk** (OOM crash, compaction loop) | High risk (8 compaction issues) | Moderate risk (hallucination at high tokens) |
 | **Hang recovery (no human available)** | Low risk (Bash freeze is recoverable) | High risk (permanent "Cancelling" state) | **Highest risk** (no timeout anywhere) | High risk (tool call hangs forever) |
-| **MCP tool reliance** | Low risk (1 issue) | High risk (workspace config not wired, schema budget) | **Highest risk** (7 MCP issues) | Moderate risk (discovery race, task payload loss) |
+| **MCP tool reliance** | Low risk (Runner uses `--agent`, MCP instructions injected correctly) | High risk (workspace config not wired, schema budget) | **Highest risk** (7 MCP issues) | Moderate risk (discovery race, task payload loss) |
 | **Silent dispatch failure** | Low risk | High risk (empty subagent, zero error signal) | High risk (silent write, MCP denial) | High risk (edit success before save) |
 
 **Runner mode ranking:**
@@ -299,14 +301,14 @@ Rating each harness on how its known issue landscape affects MOSAIC's core patte
 | **Permission/hook enforcement** | Moderate risk (hook gaps, but human intervenes) | Moderate risk (hook deny/ask issues, but human catches) | High risk (evaluator ordering bugs affect both modes) | High risk (allow-list bypasses, tool restrictions ignored) |
 | **Long-running session stability** | Moderate risk (compaction, behavioral rule loss) | Moderate risk (recursive summarization, but HANDOFF.md works) | High risk (8 compaction issues) | Low risk (fewer compaction issues; hallucination only at extreme token counts) |
 | **Artifact file writing** | Low risk | Low risk (human can split files) | Moderate risk (silent fail on large files) | Moderate risk (success before save) |
-| **MCP tool reliance** | Low risk | Moderate risk (workspace config issue, but human can pass flag) | **Highest risk** (7 MCP issues) | Moderate risk (discovery race, task payload loss) |
+| **MCP tool reliance** | Low risk (native subagents get MCP tools foreground and background; optional server guidance is late and unscoped — CC-080/081, LOW) | Moderate risk (workspace config issue, but human can pass flag) | **Highest risk** (7 MCP issues) | Moderate risk (discovery race, task payload loss) |
 | **Skills injection** | Moderate risk (CC-067 compaction loss) | Unknown (not enough data) | Moderate risk (OC-088 hardcoded /tmp) | High risk (VC-004 forked skills invisible) |
 
 **Harness-native mode ranking:**
 
 | Rank | Harness | Verdict |
 |:----:|---------|---------|
-| 1 | **Claude Code** | **Lowest interactive risk.** Most issues are edge cases when a human is present. Best HITL surface. Worktree cluster is the main concern but only for multi-worktree patterns. |
+| 1 | **Claude Code** | **Lowest interactive risk overall.** Most issues are edge cases when a human is present. Best HITL surface. Worktree cluster is the main concern but only for multi-worktree patterns. |
 | 2 | **GHCP-CLI** | **Much better than its Runner ranking.** The `-p` permission breakdown cluster — its defining weakness — doesn't apply interactively. Session hangs recoverable via kill+resume. Large-file retry manageable with human intervention. |
 | 3 | **OpenCode** | **Permission and compaction issues persist in both modes.** Bash daemon hangs (5 failed fixes) and no-timeout-anywhere are real risks even with a human. But high maintainer velocity is encouraging. |
 | 4 | **VS Code GHCP** | **Most problematic for interactive use.** Agent Host plumbing instability (hangs, dropped signals, double execution) has no in-harness recovery regardless of human presence. Zero Microsoft engineering engagement. |

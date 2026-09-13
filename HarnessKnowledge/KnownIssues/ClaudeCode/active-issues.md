@@ -2483,7 +2483,7 @@ Additional note on permission layer: MCP tools that appear in the schema still r
 | **Reported** | Earliest GitHub report ~2026-02; MOSAIC observation 2026-09-12 |
 | **Last Activity** | 2026-09-12 (MOSAIC observation); #85307 still open |
 | **Confidence** | Confirmed (reproduced at MOSAIC on v2.1.269, corroborated by 5 independent GitHub reports) |
-| **Orchestration Impact** | HIGH |
+| **Orchestration Impact** | LOW (downgraded 2026-09-13 — extra context tokens only; tool access unaffected) |
 | **Reproduced at MOSAIC** | Yes |
 | **MOSAIC Response** | Awareness — primary agents receive instructions for all connected MCP servers regardless of tool scoping |
 | **Version(s) Affected** | Reported across v2.1.x from Feb–Sep 2026; confirmed on v2.1.269 |
@@ -2493,61 +2493,70 @@ Additional note on permission layer: MCP tools that appear in the schema still r
 **Summary:**
 When a session has multiple MCP servers connected (via `enabledMcpjsonServers` or `.mcp.json`), ALL servers' `# MCP Server Instructions` blocks are injected into the **primary agent's** system prompt — regardless of whether the agent's `tools:` frontmatter grants access to that server's tools. A primary agent restricted to `tools: Read, Write, Edit, Glob, Grep, Bash, WebSearch, WebFetch` (no MCP tools) still receives the full github and contact-user MCP instruction blocks in its system prompt. This wastes context tokens, confuses the model (it reads "Use `get_me` first..." but can't call it), and misleads users who see the agent discussing capabilities it doesn't have.
 
-Note: For **subagents** dispatched via the Agent tool, the behavior is different — subagents receive NO `# MCP Server Instructions` blocks at all, regardless of their tool list. See CC-081. The "inverted routing" from #85307 is between the primary agent (gets all instructions, may lack tools) and subagents (have tools, get no instructions).
+**Subagents (corrected 2026-09-13, v2.1.270):** Subagents dispatched via the Agent tool *also* receive instruction blocks for every connected server — including subagents with zero MCP tools — but late, as an `mcp_instructions_delta` attachment after their first tool turn (see CC-081). Routing is by session, not by agent tool scope, for both primary and subagents. An earlier revision of this entry said subagents receive none; that was a probe artifact (probes inspected only initial context).
 
-Per #75283, the injected content can also appear appended to Bash tool results, causing agents to flag it as prompt injection.
+Per #75283, the injected content can also appear appended to Bash tool results, causing agents to flag it as prompt injection. Round 3 probes reproduced this reaction: subagents with no MCP tools flagged the late block as possible injection.
 
 **Impact on Orchestration:**
-The primary MOSAIC orchestrator agent pays the context-token cost for instruction blocks from MCP servers it can't use. It may waste turns attempting to use tools it sees instructions for but doesn't have access to. However, the more severe impact is the CC-081 inverse: subagents that need the guidance don't get it.
+Every MOSAIC agent — primary and subagent — pays the context-token cost for instruction blocks from MCP servers it can't use, and may be misled about capabilities it doesn't have.
 
 **Workaround(s):**
-None known for preventing the injection into the primary agent. The only mitigation is to minimize the number of MCP servers enabled in `enabledMcpjsonServers` / `.mcp.json` to reduce the irrelevant instruction surface.
+1. **Scope servers to the subagents that need them:** remove the server from `.mcp.json` / `enabledMcpjsonServers` and define it inline in those subagents' `mcpServers:` (still listing `mcp__<server>__*` in `tools:`). The server never connects in the main session, so its instructions never load there. Inline definitions from project `.claude/agents/` load only in trusted folders. Caveat: #84638 (open) — concurrent subagents with byte-identical inline configs share one server process.
+2. Otherwise, minimize the number of servers enabled in the session.
 
 **Evidence (MOSAIC reproduction, 2026-09-12, v2.1.269):**
 - Primary agent (`mosaic-architect`, tools: Read,Write,Edit,Glob,Grep,Bash,WebSearch,WebFetch — no MCP tools): **receives** full `# MCP Server Instructions` block for github and contact-user.
-- Subagent (`claude` type, Tools: * including mcp__github__*): **does not** receive any MCP instructions block.
-- Subagent (`anthropic-subagent-creator`, tools: Read,Write,Edit,Glob,Grep — no MCP tools): **does not** receive any MCP instructions block.
-- Conclusion: MCP instruction injection is primary-agent-only, scope-unaware. Subagents never receive it.
+- Subagents (`claude` type with mcp__github__*; `anthropic-subagent-creator` without MCP tools): no MCP instructions block in **initial** context. (Superseded — see below.)
+
+**Evidence (MOSAIC re-test, 2026-09-13, v2.1.270):** canary MCP servers with unique `instructions` strings; subagent transcripts inspected. Every subagent — including ones with `tools: Read, Write` only — received a `# MCP Server Instructions` block after its first tool turn containing **every** session-connected server's instructions (an inline-server probe received contact-user + github + its own inline server's blocks). An inline server scoped to a subagent never appeared in the parent's tools. Full matrix in `mcp-frontmatter-blocker.md`.
 
 **Notes:**
 See also CC-081 (the inverse problem). #85307 frames these as two halves of one inverted routing bug. Additional leads: #85230 (background subagents lose MCP resource tools), #79728 (subagent tools: allowlist collapses when MCP server unavailable at spawn).
 
 ---
 
-### CC-081: Subagents with MCP tools in their `tools:` allowlist do NOT receive that server's instruction block
+### CC-081: Subagents receive MCP server instructions late — only after their first tool turn
 
 | Field | Value |
 |-------|-------|
 | **Classification** | Bug |
-| **Source** | GitHub reports: [#85307](https://github.com/anthropics/claude-code/issues/85307) (open), [#29655](https://github.com/anthropics/claude-code/issues/29655) (closed stale-bot) |
+| **Source** | GitHub reports: [#85307](https://github.com/anthropics/claude-code/issues/85307) (open), [#29655](https://github.com/anthropics/claude-code/issues/29655) (closed stale-bot); MOSAIC re-test 2026-09-13 |
 | **Reported** | ~2026-02 (#29655); consolidated in #85307 (2026-08-09) |
-| **Last Activity** | 2026-08-09 (#85307, still open) |
-| **Confidence** | Confirmed (reproduced at MOSAIC on v2.1.269) |
-| **Orchestration Impact** | HIGH |
+| **Last Activity** | 2026-09-13 (MOSAIC re-test); #85307 still open |
+| **Confidence** | Confirmed (re-tested at MOSAIC on v2.1.270 with canary servers and a real agent) |
+| **Orchestration Impact** | LOW (downgraded from HIGH 2026-09-13 — MCP tools and input schemas work from turn one; only the optional server guidance is late. Worst case: one wasted first call on servers that set `instructions`) |
 | **Reproduced at MOSAIC** | Yes |
-| **MOSAIC Response** | Awareness + workaround: agents that need MCP guidance should include it in their own body text |
-| **Version(s) Affected** | Reported on v2.1.226 (#85307); earlier reports span v2.1.x; confirmed on v2.1.269 |
-| **Latest Platform Version** | v2.1.269 (2026-09-12) |
+| **MOSAIC Response** | Awareness + workaround: deliver guidance before the first turn, or keep the first turn MCP-free |
+| **Version(s) Affected** | Reported on v2.1.226 (#85307); earlier reports span v2.1.x; confirmed on v2.1.270 |
+| **Latest Platform Version** | v2.1.270 (2026-09-13) |
 | **Labels** | `area:mcp`, `area:agents` |
 
 **Summary:**
-The inverse of CC-080: subagents dispatched via the Agent tool do NOT receive ANY `# MCP Server Instructions` blocks in their system prompt — regardless of whether they have MCP tools in their allowlist. A subagent with `mcp__github__*` tools fully available gets zero guidance on how to use them — no server-specific instructions, no usage hints, no tool selection guidance. Combined with CC-080 (primary agent gets ALL instructions regardless of tool scope), the routing is completely inverted: the primary agent that may lack MCP tools gets the instructions, while subagents that have the tools get nothing.
+Subagents dispatched via the Agent tool (foreground or background) have their MCP tools — names, descriptions, and input schemas — from the first turn and can call them. What they don't have at start is the server's `instructions` (the free-text usage guidance the server sends at connect time). That guidance arrives as an `mcp_instructions_delta` attachment, rendered as a `# MCP Server Instructions` system-reminder, **after the subagent's first tool turn completes**. It also covers every session-connected server, not just the agent's own (CC-080).
+
+Consequences:
+- Any MCP call made in the first turn runs without guidance. This includes MCP calls batched in parallel with other tools in that first turn.
+- The late block arrives mid-conversation and is sometimes treated as injected content. Canary probes whose task text contradicted it rejected it; a real agent with non-conflicting guidance followed it.
+
+**Correction:** An earlier revision of this entry (2026-09-12) said subagents receive NO instructions and that MCP was unusable for native subagents. That was a probe artifact — the probes only inspected initial context and missed the late delivery.
 
 **Impact on Orchestration:**
-MOSAIC subagents dispatched with MCP tools (e.g., `harness-issue-hunter` using `mcp__github__*`) lack the server's usage guidance (tool selection hints, authentication context, pagination advice), leading to suboptimal or incorrect tool usage. Specifically, guidance like "Always call `get_me` first", "Use `search_*` tools for targeted queries", and "Use `minimal_output` parameter" — which the primary agent sees — never reaches the subagent that actually needs it.
+MOSAIC subagents that open with an MCP call make it blind. Observed: `harness-issue-hunter` issued an unbounded `mcp__github__search_issues`; the ~186K-character result exceeded the tool-output limit and the call failed. Once the guidance arrived it retried with `fields` and `perPage: 10` and succeeded. The cost is one wasted, possibly expensive call per subagent, not a broken capability.
 
 **Workaround(s):**
-1. **⭐ Include relevant MCP server usage instructions directly in the subagent's agent definition body.** Since the harness won't inject them, the agent file itself must carry the guidance. For MOSAIC agents using `mcp__github__*`, copy the essential github MCP guidance into the agent's body text.
-2. For primary agents launched via `--agent`, this does NOT apply — primary agents DO receive MCP instructions (see CC-080).
+1. **⭐ Deliver the guidance before the first turn** with a `SubagentStart` hook returning `hookSpecificOutput.additionalContext` (documented: added "to the subagent's context at the start of its conversation, before its first prompt"; verified foreground and background). The hook can inject only the servers named in the agent's `tools:`. Trust is model-dependent: one probe followed hook guidance, one distrusted it (that probe's text carried a conspicuous test label).
+2. **Keep the first turn MCP-free.** Instruct agents to make their first turn non-MCP only (e.g. read the input artifact) and not to batch MCP calls into it. Relies on model compliance; models batch parallel calls freely.
+3. **Carry the guidance in the agent body.** This is the only fully trusted channel, but it duplicates server-owned content and drifts.
 
-**Evidence (MOSAIC reproduction, 2026-09-12, v2.1.269):**
-Three subagents dispatched via the Agent tool from a primary session with github and contact-user MCP servers connected:
-- `claude` type (Tools: *, including all mcp__github__* tools): **zero** MCP instruction blocks in context. GitHub tools listed as deferred tools but no usage guidance.
-- Second `claude` type (same config): identical result — **zero** MCP instruction blocks.
-- `anthropic-subagent-creator` type (tools: Read,Write,Edit,Glob,Grep, no github MCP tools): **zero** MCP instruction blocks. (Also no github tools, as expected.)
-- All three probes confirmed: the `# MCP Server Instructions` section that appears in the primary agent's context is simply absent from subagent contexts entirely.
+**Evidence (MOSAIC reproduction, 2026-09-12, v2.1.269) — superseded:**
+Three subagents reported no `# MCP Server Instructions` block. Their probes inspected only initial context.
+
+**Evidence (MOSAIC re-test, 2026-09-13, v2.1.270):**
+- 19 headless canary probes, foreground and background: the block always arrived after the first tool turn (transcript attachment `mcp_instructions_delta`), never in initial context.
+- Two background dispatches of the real `harness-issue-hunter`. Variant A was told to Read first but batched the Read with its first GitHub call. Variant B made a GitHub call first. Both made a blind unbounded search that failed on the size limit, received the guidance after that turn, and corrected on the next call.
+- Full matrix in `mcp-frontmatter-blocker.md`.
 
 **Notes:**
-This is the other half of #85307's "inverted routing" finding. The workaround for MOSAIC is straightforward: agents that use MCP tools should include the relevant server's usage instructions in their own body text (agent definition). This is already partially done for `harness-issue-hunter` (which has github usage patterns in its body) but should be reviewed and formalized. Additional leads: #85230 (background subagents lose MCP resource tools), #79728 (subagent tools: allowlist collapses when MCP server unavailable at spawn).
+#85307's "inverted routing" framing is partly accurate: scoping is wrong (CC-080), and delivery to subagents is late rather than absent. Additional leads: #85230 (background subagents lose MCP resource tools), #79728 (subagent `tools:` allowlist collapses when MCP server unavailable at spawn), #84638 (concurrent identical inline `mcpServers:` share one server process).
 
 ---
