@@ -51,35 +51,6 @@ func TestCollector_AddGap_UnmappedTool_MapsToToolMappingsCategory(t *testing.T) 
 	}
 }
 
-// TestCollector_AddGap_ConflictingToolField_MapsToToolConflictsCategory verifies that a
-// GapConflictingToolField gap (deployed frontmatter has both tools: and mcpServers: for a
-// Claude Code agent) produces a TodoItem in the Tool conflicts category. The conflict is
-// advisory: Claude Code silently ignores mcpServers when tools is present (CC-079), so the
-// user needs to know to remove mcpServers and re-supply any MCP tools via the correct channel.
-func TestCollector_AddGap_ConflictingToolField_MapsToToolConflictsCategory(t *testing.T) {
-	c := todo.NewCollector()
-	c.AddGap(domain.Gap{
-		Kind:    domain.GapConflictingToolField,
-		Subject: "my-agent",
-		Owner:   "my-agent",
-		Detail:  "deployed frontmatter has both tools: and mcpServers: fields; mcpServers is ignored",
-	})
-
-	items := c.Items()
-	if len(items) != 1 {
-		t.Fatalf("Items() len = %d; want 1", len(items))
-	}
-	if items[0].Category != domain.TodoToolConflicts {
-		t.Errorf("Category = %q; want %q; a GapConflictingToolField gap must be routed to "+
-			"the Tool conflicts category so it is rendered separately from Tool mappings "+
-			"(which covers planning-time concerns, not deployed-state diagnostics)",
-			items[0].Category, domain.TodoToolConflicts)
-	}
-	if items[0].Subject != "my-agent" {
-		t.Errorf("Subject = %q; want %q", items[0].Subject, "my-agent")
-	}
-}
-
 // TestCollector_AddGap_EmptyInjection_MapsToInjectionsCategory verifies that a GapEmptyInjection
 // gap produces a TodoItem in the Project-specific injections category.
 func TestCollector_AddGap_EmptyInjection_MapsToInjectionsCategory(t *testing.T) {

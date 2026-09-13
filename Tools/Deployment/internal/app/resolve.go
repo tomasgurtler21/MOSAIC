@@ -14,7 +14,6 @@ import (
 	"strings"
 	"time"
 
-	"mosaic-common/docformat"
 	"mosaic-deploy/internal/domain"
 	"mosaic-deploy/internal/pathinput"
 	"mosaic-deploy/internal/transform"
@@ -1008,16 +1007,6 @@ func (s *service) buildContent(
 		var deployed []byte
 		if deployedReader != nil {
 			deployed = deployedReader(item)
-		}
-		// Check the pre-rebuild deployed frontmatter for tool-field conflicts that the harness
-		// would silently ignore. This is advisory only: gaps are forwarded to the todo collector
-		// and do not affect the transform or the run outcome.
-		if len(deployed) > 0 {
-			if deployedDoc, parseErr := docformat.Parse(deployed); parseErr == nil {
-				for _, g := range checkConflictingToolFields(deployedDoc.Frontmatter(), module.Ref().ID, agent.Key) {
-					s.deps.Todo.AddGap(g)
-				}
-			}
 		}
 		var wfBlocks []transform.WorkflowBlock
 		var infraBlocks []transform.InfrastructureBlock
