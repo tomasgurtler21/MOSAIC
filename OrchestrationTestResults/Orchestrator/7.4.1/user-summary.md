@@ -4,10 +4,10 @@
 ## Overview
 
 - **Version:** 7.4.1
-- **Reports:** 28
-- **Total Tests:** 12305
+- **Reports:** 44
+- **Total Tests:** 18480
 - **Suites:** execution-groups, hitl-gate, infrastructure-triggers, route-back, status-routing, wildcard-expansion
-- **Models:** claude-opus-4-6, claude-opus-5, claude-sonnet-4-6, claude-sonnet-5, gpt-5.6-luna, gpt-5.6-sol, gpt-5.6-terra
+- **Models:** claude-fable-5, claude-haiku-4-5, claude-opus-4-6, claude-opus-5, claude-sonnet-4-6, claude-sonnet-5, gpt-5.6-luna, gpt-5.6-sol, gpt-5.6-terra
 - **Harnesses:** claude-code, opencode
 
 <!-- /generated:overview -->
@@ -20,10 +20,12 @@
 
 | Model | Tests | Pass Rate | Cost |
 |-------|-------|-----------|------|
+| claude-fable-5 | 174 | 39% | $0.24/100t |
+| claude-haiku-4-5 | 2501 | 52% | $7.90/100t |
 | claude-opus-4-6 | 975 | 78% | $25.45/100t |
-| claude-opus-5 | 200 | 50% | $45.14/100t |
+| claude-opus-5 | 2600 | 96% | $25.13/100t |
 | claude-sonnet-4-6 | 2547 | 86% | $12.44/100t |
-| claude-sonnet-5 | 800 | 86% | $10.04/100t |
+| claude-sonnet-5 | 1900 | 83% | $9.45/100t |
 | gpt-5.6-luna | 2593 | 32% | $0.12/100t |
 | gpt-5.6-sol | 2595 | 89% | $7.73/100t |
 | gpt-5.6-terra | 2595 | 79% | $2.66/100t |
@@ -37,13 +39,30 @@
 
 | Harness | Tests | Pass Rate | Cost |
 |---------|-------|-----------|------|
-| claude-code | 4522 | 83% | $16.27/100t |
+| claude-code | 10697 | 78% | $14.92/100t |
 | opencode | 7783 | 67% | $3.50/100t |
 
 <!-- /generated:harness-comparison -->
 
 <!-- generated:model-results -->
 ## Model Results
+
+### claude-fable-5
+
+| Suite | Harness | Tests | Pass Rate | Cost |
+|-------|---------|-------|-----------|------|
+| route-back | claude-code | 174 | 39% | $0.24/100t |
+
+### claude-haiku-4-5
+
+| Suite | Harness | Tests | Pass Rate | Cost |
+|-------|---------|-------|-----------|------|
+| execution-groups | claude-code | 300 | 68% | $3.01/100t |
+| hitl-gate | claude-code | 300 | 63% | $2.58/100t |
+| infrastructure-triggers | claude-code | 700 | 46% | $12.87/100t |
+| route-back | claude-code | 200 | 1% | $14.18/100t |
+| status-routing | claude-code | 701 | 52% | $7.70/100t |
+| wildcard-expansion | claude-code | 300 | 69% | $2.80/100t |
 
 ### claude-opus-4-6
 
@@ -56,7 +75,12 @@
 
 | Suite | Harness | Tests | Pass Rate | Cost |
 |-------|---------|-------|-----------|------|
+| execution-groups | claude-code | 300 | 100% | $13.87/100t |
+| hitl-gate | claude-code | 300 | 99% | $13.99/100t |
+| infrastructure-triggers | claude-code | 700 | 100% | $31.56/100t |
 | route-back | claude-code | 200 | 50% | $45.14/100t |
+| status-routing | claude-code | 800 | 100% | $26.80/100t |
+| wildcard-expansion | claude-code | 300 | 100% | $14.74/100t |
 
 ### claude-sonnet-4-6
 
@@ -73,7 +97,11 @@
 
 | Suite | Harness | Tests | Pass Rate | Cost |
 |-------|---------|-------|-----------|------|
+| execution-groups | claude-code | 300 | 100% | $6.84/100t |
+| hitl-gate | claude-code | 300 | 96% | $7.60/100t |
+| route-back | claude-code | 200 | 6% | $17.27/100t |
 | status-routing | claude-code | 800 | 86% | $10.04/100t |
+| wildcard-expansion | claude-code | 300 | 96% | $7.11/100t |
 
 ### gpt-5.6-luna
 
