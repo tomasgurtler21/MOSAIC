@@ -1465,17 +1465,17 @@ func TestTimeoutFlag_InvalidDurationRejectsWithUsageError(t *testing.T) {
 	}
 }
 
-// TestClaudePathFlag_Accepted verifies that --claude-path is accepted with any
+// TestExecutablePathFlag_Accepted verifies that --executable-path is accepted with any
 // non-empty string value and the session is started normally.
-func TestClaudePathFlag_Accepted(t *testing.T) {
+func TestExecutablePathFlag_Accepted(t *testing.T) {
 	sess := &scriptedSession{outcome: domain.RunOutcome{Status: domain.RunCompleted}}
-	args := append(baseHarnessArgs(), "--claude-path", "/usr/local/bin/claude")
+	args := append(baseHarnessArgs(), "--executable-path", "/usr/local/bin/claude")
 	code, _, errOut := runCLIWithStore(t, args, &spyStore{}, sess)
 	if code != cli.ExitSuccess {
 		t.Errorf("exit code = %d, want ExitSuccess (%d); stderr: %q", code, cli.ExitSuccess, errOut)
 	}
 	if !sess.called {
-		t.Error("session.Start was not called when --claude-path is provided")
+		t.Error("session.Start was not called when --executable-path is provided")
 	}
 }
 
@@ -2560,24 +2560,24 @@ func TestRunFlagSpecs_ContainsTUIFlag(t *testing.T) {
 		"it is the entry-point-only flag that RunFlagSpecs must append explicitly")
 }
 
-// TestRunFlagSpecs_ClaudePathIsValueBearing verifies that "--claude-path" appears
+// TestRunFlagSpecs_ExecutablePathIsValueBearing verifies that "--executable-path" appears
 // in RunFlagSpecs with TakesValue: true. This flag is the one directly involved
 // in the mode-detection bug and must be in the value-bearing set so hasPositionalArg
 // skips its value token.
 //
 // RED: RunFlagSpecs currently panics.
-func TestRunFlagSpecs_ClaudePathIsValueBearing(t *testing.T) {
+func TestRunFlagSpecs_ExecutablePathIsValueBearing(t *testing.T) {
 	specs := cli.RunFlagSpecs()
 	for _, s := range specs {
-		if s.Name == "--claude-path" {
+		if s.Name == "--executable-path" {
 			if !s.TakesValue {
-				t.Error("RunFlagSpecs()[--claude-path].TakesValue = false, want true; " +
-					"--claude-path consumes a following argument and must be value-bearing")
+				t.Error("RunFlagSpecs()[--executable-path].TakesValue = false, want true; " +
+					"--executable-path consumes a following argument and must be value-bearing")
 			}
 			return
 		}
 	}
-	t.Error("RunFlagSpecs() does not contain an entry for \"--claude-path\"; " +
+	t.Error("RunFlagSpecs() does not contain an entry for \"--executable-path\"; " +
 		"it is a value-bearing flag and must be declared in the arity map")
 }
 
@@ -2618,7 +2618,7 @@ func TestRunFlagSpecs_KnownArities(t *testing.T) {
 		"--run",
 		"--harness",
 		"--timeout",
-		"--claude-path",
+		"--executable-path",
 		"--infra-class",
 		"--input",
 	}
@@ -2676,7 +2676,7 @@ func TestValueBearingFlagNames_ContainsExpectedFlags(t *testing.T) {
 		"--run",
 		"--harness",
 		"--timeout",
-		"--claude-path",
+		"--executable-path",
 		"--infra-class",
 		"--input",
 		"--ghcp-permission-mode",

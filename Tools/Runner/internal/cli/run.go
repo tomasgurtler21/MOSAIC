@@ -193,7 +193,7 @@ func Run(ctx context.Context, args []string, store domain.ArtifactStore, identit
 				return nil
 			}
 
-			// --claude-path is accepted as-is; it is pre-scanned in main.go and
+			// --executable-path is accepted as-is; it is pre-scanned in main.go and
 			// passed directly to buildAdapter. No validation is needed here.
 
 			// Resolve run identity from flags or scanner.

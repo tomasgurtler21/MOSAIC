@@ -11,6 +11,10 @@ artifacts:
   - MosaicTestScript/payload-unicode.md
   - MosaicTestScript/payload-fences.md
   - MosaicTestScript/payload-json.md
+modes:
+  - auto
+  - auto-review
+  - orchestrated
 ---
 
 <Workflow type="core" name="payload-stress" version="1.0">

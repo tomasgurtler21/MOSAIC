@@ -1,0 +1,9 @@
+{
+  "exit_code": 0,
+  "dispatches": [
+    { "agent": "orchestrator-script", "expect_status": "" },
+    { "agent": "mosaictest-scripted", "expect_status": "COMPLETED_NEEDS_ACTION" },
+    { "agent": "orchestrator-script", "expect_status": "" },
+    { "agent": "mosaictest-scripted", "expect_status": "SUCCESS" }
+  ]
+}

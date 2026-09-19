@@ -1,0 +1,8 @@
+{
+  "exit_code": 6,
+  "dispatches": [
+    { "agent": "orchestrator-script", "expect_status": "" },
+    { "agent": "mosaictest-scripted", "expect_status": "BLOCKED" },
+    { "agent": "orchestrator-script", "expect_status": "" }
+  ]
+}

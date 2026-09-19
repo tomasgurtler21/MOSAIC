@@ -201,6 +201,27 @@ Behaviour files are named after what they do, not after a row number, so one fil
 
 ---
 
+## 6a. Workflow Frontmatter Fields
+
+Every workflow `.md` file under `Workflows/MosaicTest/` carries two machine-readable YAML frontmatter fields alongside the existing `version`, `name`, `id`, `referenced_agents`, and `artifacts` fields:
+
+```yaml
+modes:
+  - auto          # one or more of: auto, auto-review, orchestrated
+smoke_set:
+  - auto          # subset of modes; omit the field entirely when not in the Smoke Set
+```
+
+**`modes`** (required): The execution modes this workflow supports. A workflow with multiple modes is tested once per mode by the automation tool. Valid values are the three Runner modes: `auto`, `auto-review`, `orchestrated`.
+
+**`smoke_set`** (optional): Which of this workflow's modes belong to the Smoke Set (§9). Each entry must also appear in `modes`. When the field is absent or the list is empty, the workflow has no Smoke Set membership. The four Smoke Set entries are: `smoke-single/auto`, `orchestrated-linear/orchestrated`, `findings-loop/auto`, `findings-loop/auto-review`.
+
+**`pre_consult`** (optional, boolean): Whether the pre-consultation path is exercised for this workflow's test runs. Valid values: `true`, `false`. When the field is absent the default is `true` (pre-consultation enabled). Set to `false` only for workflows where the pre-consultation step is intentionally skipped.
+
+**Authoring rule:** When you add a new workflow, decide which modes it should run under and add the `modes` field. If any (workflow, mode) pair should be part of the Smoke Set, add `smoke_set` listing those modes. Update `RunningTests.md`'s workflow table to match.
+
+---
+
 ## 7. The Test Workflows
 
 Three existing workflows stay as they are. They test the harness connection itself and are the first thing to run against a new or changed harness: `smoke-single`, `payload-stress`, `staged-preplaced-plan`.

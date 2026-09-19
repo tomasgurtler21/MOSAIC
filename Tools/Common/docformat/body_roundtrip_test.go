@@ -28,6 +28,11 @@ import (
 	"mosaic-common/docformat"
 )
 
+// bodyRoundtripDir holds local copies of representative catalog files used by the named
+// body-roundtrip tests. Local copies insulate the tests from renames, moves, or structural
+// edits to live catalog entries during normal project work.
+const bodyRoundtripDir = "../testdata/body-roundtrip"
+
 // triggerBodyParse accesses Body().Sections() to force the body parser to run, if parsing
 // is lazy. This is the key step that distinguishes these tests from the existing round-trip
 // tests: they ensure the body tree does not corrupt the serialised output.
@@ -43,7 +48,8 @@ func triggerBodyParse(t *testing.T, doc *docformat.Document) {
 
 func TestBodyRoundTrip_GenericAgent_ByteIdentical(t *testing.T) {
 	// Generic agent with all seven sections and empty injections.
-	fpath := filepath.Join(repoRoot(), "Catalog", "Subagents", "Execution", "test-runner.md")
+	// Uses a local fixture to avoid depending on the live Catalog entry.
+	fpath := filepath.Join(bodyRoundtripDir, "generic-agent.md")
 	src, err := os.ReadFile(fpath)
 	if err != nil {
 		t.Fatalf("read file: %v", err)
@@ -64,7 +70,8 @@ func TestBodyRoundTrip_GenericAgent_ByteIdentical(t *testing.T) {
 
 func TestBodyRoundTrip_Orchestrator_ByteIdentical(t *testing.T) {
 	// Orchestrator contains <AvailableWorkflows type="project"> inside the Identity section.
-	fpath := filepath.Join(repoRoot(), "Catalog", "Orchestrator", "orchestrator.md")
+	// Uses a local fixture to avoid depending on the live Catalog entry.
+	fpath := filepath.Join(bodyRoundtripDir, "orchestrator.md")
 	src, err := os.ReadFile(fpath)
 	if err != nil {
 		t.Fatalf("read file: %v", err)
@@ -107,7 +114,8 @@ func TestBodyRoundTrip_WorkflowFileWithCompoundSection_ByteIdentical(t *testing.
 	// Workflow file contains <Workflow type="core" name="quick-fix"> — a compound section name.
 	// The content after </Workflow> is outside any boundary tag.
 	// Both must survive the round trip byte-for-byte.
-	fpath := filepath.Join(repoRoot(), "Catalog", "Workflows", "Build", "quick-fix.md")
+	// Uses a local fixture to avoid depending on the live Catalog entry.
+	fpath := filepath.Join(bodyRoundtripDir, "quick-fix.md")
 	src, err := os.ReadFile(fpath)
 	if err != nil {
 		t.Fatalf("read file: %v", err)
@@ -158,7 +166,7 @@ func TestBodyRoundTrip_AllRepositoryMarkdownFiles_ByteIdentical(t *testing.T) {
 		}
 		if d.IsDir() {
 			switch d.Name() {
-			case ".git", "node_modules", "vendor":
+			case ".git", "node_modules", "vendor", "testdata":
 				return filepath.SkipDir
 			}
 		}

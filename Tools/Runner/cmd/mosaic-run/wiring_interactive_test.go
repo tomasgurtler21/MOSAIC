@@ -66,16 +66,16 @@ func deferredTestIdentity(t *testing.T) tuiRunIdentity {
 	}
 }
 
-// sentinelClaudePath is the pre-scanned executable path the fixture hands the
+// sentinelExecPath is the pre-scanned executable path the fixture hands the
 // seam. It is deliberately not "claude": that value is byte-identical to the
 // per-harness default buildAdapter applies to an empty override for the
 // claude-code harness, so a fixture using it cannot tell a seam that forwards
-// in.ClaudePath from a seam that drops it. The path never has to exist -- no
+// in.ExecutablePath from a seam that drops it. The path never has to exist -- no
 // adapter constructed in this file spawns a process.
-const sentinelClaudePath = "/sentinel/claude-from-input"
+const sentinelExecPath = "/sentinel/claude-from-input"
 
 // sentinelOverridePath is the per-invocation executable override carried on the
-// configuration selection. Distinct from sentinelClaudePath so the two sources
+// configuration selection. Distinct from sentinelExecPath so the two sources
 // are distinguishable in an assertion.
 const sentinelOverridePath = "/sentinel/claude-from-config"
 
@@ -85,7 +85,7 @@ const sentinelOverridePath = "/sentinel/claude-from-config"
 func testWiringInput(t *testing.T, signal *session.StopSignal, identity tuiRunIdentity) interactiveWiringInput {
 	t.Helper()
 	return interactiveWiringInput{
-		ClaudePath:  sentinelClaudePath,
+		ExecutablePath: sentinelExecPath,
 		ProgramRef:  tui.NewProgramRef(),
 		Minter:      newTUIRunIdentityMinter(t.TempDir()),
 		Identity:    identity,
@@ -579,8 +579,8 @@ func TestInteractiveWiring_ExtractsTheRawInvokerIntoTheRoutingConsultant(t *test
 // wins, and the process-scoped pre-scanned path is the fallback.
 //
 // Both halves are invisible to every other test here, and both fail silently in
-// production. Dropping in.ClaudePath sends every --claude-path invocation back
-// to the harness's own default executable, because the adapter builder applies
+// production. Dropping in.ExecutablePath sends every --executable-path invocation
+// back to the harness's own default executable, because the adapter builder applies
 // that default to an empty override itself -- nothing errors, the wrong binary
 // is simply spawned. Dropping cfg.ExecutablePath breaks the exec-override
 // recovery screen: a user who supplies a corrected path after a failed spawn
@@ -601,7 +601,7 @@ func TestInteractiveWiring_HarnessExecutable_PrefersTheConfigOverride(t *testing
 			name:     "no per-invocation override",
 			runID:    "20260101T000000Z-0010",
 			override: "",
-			want:     sentinelClaudePath,
+			want:     sentinelExecPath,
 		},
 		{
 			name:     "per-invocation override present",

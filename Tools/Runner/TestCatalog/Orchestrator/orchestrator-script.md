@@ -5,7 +5,7 @@ description: Harness conformance test fixture — a stub script-mode orchestrato
 role: orchestrator
 model: {model-identifier}
 tools: [file_read]
-recommended_tier: LOW
+recommended_tier: MEDIUM
 tier_rationale: mechanical state matching against a fixed rule table with no routing judgement to exercise
 required_skills: []
 ---

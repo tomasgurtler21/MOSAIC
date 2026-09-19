@@ -28,6 +28,7 @@ import (
 	"mosaic-run/internal/runscan"
 	"mosaic-run/internal/runselect"
 	"mosaic-run/internal/session"
+	"mosaic-run/internal/testrun"
 	"mosaic-run/internal/tui/screens"
 )
 
@@ -57,6 +58,14 @@ const (
 	screenStop                           // stop recovery (retry / manual dispatch) — shown on RunStoppedByConsultant
 	screenExecOverride                   // executable-override recovery — shown on harness launch failure
 	screenDone                           // completion/error summary
+
+	// Test-flow screens (only reachable when DevMode is true).
+	screenTestCatalog  // MOSAIC repo root path entry for test mode
+	screenTestSuite    // suite/scope selection (+ workflow/mode sub-pickers)
+	screenTestHarness  // harness multi-select
+	screenTestGHCPMode // GHCP permission mode selection (conditional on ghcp-cli)
+	screenTestProgress // live test execution progress
+	screenTestResults  // results summary
 )
 
 // Options configures the TUI run. All fields are optional.
@@ -189,6 +198,28 @@ type Options struct {
 	// When set, it is included in the entry screen titles so users see the tool
 	// identity immediately on launch. An empty string omits the version.
 	ToolVersion string
+
+	// DevMode enables the test-mode flow. When true, the TUI shows a "Run Tests"
+	// option that leads to the automated test catalog screens. When false, the
+	// test flow is hidden and the test screens are not reachable.
+	DevMode bool
+
+	// TestCatalogLoader, when non-nil, is called to load the test catalog from
+	// the given catalog root directory (the Tools/Runner/TestCatalog/ path derived
+	// from the user-supplied MOSAIC root). It returns a CatalogPort that the
+	// suite selection screen uses for workflow enumeration, and the orchestrator
+	// uses for scope resolution and sidecar path derivation. When nil and DevMode
+	// is true, entering the test catalog path screen will proceed but the
+	// transition to the suite screen will fail with an error.
+	TestCatalogLoader func(catalogRoot string) (testrun.CatalogPort, error)
+
+	// TestRunnerFactory, when non-nil, is called by the test progress screen to
+	// run the test orchestration. It receives the TestConfig (collected from the
+	// test flow input screens) and a ProgressReporter (wired to the TUI via
+	// tea.Program.Send). The TUI calls it in a background goroutine and delivers
+	// the result as a testAllDoneMsg. When nil and DevMode is true, the "Run
+	// Tests" option is visible but starting a run will show an error.
+	TestRunnerFactory func(ctx context.Context, cfg testrun.TestConfig, reporter testrun.ProgressReporter) (*testrun.TestSummary, error)
 }
 
 // runSetupSelections holds all inputs collected during the setup phase.
@@ -237,6 +268,49 @@ type gracefulStopRequestMsg struct{}
 
 // artifactContentMsg carries the current artifact file content to the artifact screen.
 type artifactContentMsg struct{ content string }
+
+// testDeployStartMsg signals that catalog deployment has begun.
+type testDeployStartMsg struct{}
+
+// testDeployDoneMsg signals that deployment completed (Err is nil on success).
+type testDeployDoneMsg struct{ Err error }
+
+// testRunStartMsg signals that a single test invocation has begun.
+type testRunStartMsg struct {
+	Harness  string
+	Workflow string
+	Mode     string
+}
+
+// testRunDoneMsg signals that a single test invocation has completed.
+type testRunDoneMsg struct {
+	Result testrun.TestRunResult
+}
+
+// testAllDoneMsg signals that all tests have completed.
+type testAllDoneMsg struct {
+	Summary *testrun.TestSummary
+}
+
+// testResolvedPathsMsg carries the resolved harness binary paths to the TUI
+// progress screen before test execution begins. The factory sends this message
+// immediately after resolution succeeds so the progress screen can display
+// the "Resolved binaries:" section before the first deploy-start notification.
+type testResolvedPathsMsg struct {
+	Paths        map[string]string
+	HarnessOrder []string
+}
+
+// testFlowSelections holds the inputs collected in the test catalog/suite/harness/GHCP
+// mode screens. They are assembled into a testrun.TestConfig when the test run starts.
+type testFlowSelections struct {
+	mosaicRoot         string
+	scope              testrun.TestScope
+	workflows          []string
+	mode               string
+	harnesses          []string
+	ghcpPermissionMode string
+}
 
 // rootModel is the top-level Bubble Tea model. It owns the navigation state machine.
 type rootModel struct {
@@ -321,6 +395,30 @@ type rootModel struct {
 	// Done screen.
 	doneScreen *screens.DoneScreen
 
+	// devMode mirrors Options.DevMode: when true, the test flow screens are
+	// registered and reachable. When false, they are never constructed.
+	devMode bool
+
+	// testCatalogLoader is the injected function for loading the test catalog.
+	testCatalogLoader func(catalogRoot string) (testrun.CatalogPort, error)
+
+	// testRunnerFactory is the injected test execution function.
+	testRunnerFactory func(ctx context.Context, cfg testrun.TestConfig, reporter testrun.ProgressReporter) (*testrun.TestSummary, error)
+
+	// Test-flow input screens (only constructed when devMode is true and the
+	// user enters the test flow).
+	testCatalogScreen  *screens.TestCatalogScreen
+	testSuiteScreen    *screens.TestSuiteScreen
+	testHarnessScreen  *screens.TestHarnessScreen
+	testGHCPModeScreen *screens.TestGHCPModeScreen
+
+	// Test-flow progress and results screens.
+	testProgressScreen *screens.TestProgressScreen
+	testResultsScreen  *screens.TestResultsScreen
+
+	// testSelections holds the inputs collected in the test flow.
+	testSelections testFlowSelections
+
 	// stopSignal is the shared graceful-stop flag (session.StopSignal). See
 	// Options.StopSignal for the contract; the same instance is closed over
 	// by SessionFactory so the TUI's Request()/Reset() calls reach the
@@ -365,7 +463,14 @@ func newRootModel(ctx context.Context, sess session.Session, opts Options) *root
 	style := stylesFromTheme(opts.Theme)
 	ctx, cancel := context.WithCancel(ctx)
 
-	harnessScreen := screens.NewHarnessSelectScreen(w, h, style)
+	// When DevMode is enabled, the harness screen prepends a "Run Tests" option
+	// so the user can enter the test flow without selecting a harness.
+	var harnessScreen *screens.HarnessSelectScreen
+	if opts.DevMode {
+		harnessScreen = screens.NewHarnessSelectScreenDevMode(w, h, style)
+	} else {
+		harnessScreen = screens.NewHarnessSelectScreen(w, h, style)
+	}
 	harnessScreen.SetToolVersion(opts.ToolVersion)
 	fileScreen := screens.NewOrchestratorFileScreen(w, h, style)
 	fileScreen.SetToolVersion(opts.ToolVersion)
@@ -434,6 +539,9 @@ func newRootModel(ctx context.Context, sess session.Session, opts Options) *root
 		onRunIDResolved:        opts.OnRunIDResolved,
 		stopSignal:             opts.StopSignal,
 		debug:                  opts.Debug,
+		devMode:                opts.DevMode,
+		testCatalogLoader:      opts.TestCatalogLoader,
+		testRunnerFactory:      opts.TestRunnerFactory,
 	}
 	if m.stopSignal == nil {
 		m.stopSignal = session.NewStopSignal()
@@ -615,6 +723,49 @@ func (m *rootModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		return m, nil
 	}
 
+	// Test-flow orchestrator progress messages. These are sent via
+	// tea.Program.Send() from the orchestrator goroutine.
+	if rpMsg, ok := msg.(testResolvedPathsMsg); ok {
+		if m.testProgressScreen != nil {
+			m.testProgressScreen.SetResolvedPaths(rpMsg.Paths, rpMsg.HarnessOrder)
+		}
+		return m, nil
+	}
+	if _, ok := msg.(testDeployStartMsg); ok {
+		if m.testProgressScreen != nil {
+			m.testProgressScreen.SetDeployRunning()
+		}
+		return m, nil
+	}
+	if dMsg, ok := msg.(testDeployDoneMsg); ok {
+		if m.testProgressScreen != nil {
+			m.testProgressScreen.SetDeployDone(dMsg.Err)
+		}
+		return m, nil
+	}
+	if rsMsg, ok := msg.(testRunStartMsg); ok {
+		if m.testProgressScreen != nil {
+			m.testProgressScreen.AddTestRunning(rsMsg.Harness, rsMsg.Workflow, rsMsg.Mode)
+		}
+		return m, nil
+	}
+	if rdMsg, ok := msg.(testRunDoneMsg); ok {
+		if m.testProgressScreen != nil {
+			r := rdMsg.Result
+			m.testProgressScreen.SetTestDone(r.Harness, r.WorkflowID, r.Mode, r.Pass, r.Error != nil)
+		}
+		return m, nil
+	}
+	if adMsg, ok := msg.(testAllDoneMsg); ok {
+		if m.testProgressScreen != nil {
+			m.testProgressScreen.SetAllDone()
+		}
+		// Pre-build the results screen so it is ready when the user dismisses progress.
+		style := stylesFromTheme(m.theme)
+		m.testResultsScreen = screens.NewTestResultsScreen(m.width, m.height, style, adMsg.Summary)
+		return m, nil
+	}
+
 	// Delegate to current screen.
 	switch m.screen {
 	case screenRunSelect:
@@ -645,6 +796,20 @@ func (m *rootModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		return m.updateExecOverride(msg)
 	case screenDone:
 		return m.updateDone(msg)
+
+	// Test-flow screen handlers.
+	case screenTestCatalog:
+		return m.updateTestCatalog(msg)
+	case screenTestSuite:
+		return m.updateTestSuite(msg)
+	case screenTestHarness:
+		return m.updateTestHarness(msg)
+	case screenTestGHCPMode:
+		return m.updateTestGHCPMode(msg)
+	case screenTestProgress:
+		return m.updateTestProgress(msg)
+	case screenTestResults:
+		return m.updateTestResults(msg)
 	}
 	return m, nil
 }
@@ -688,6 +853,24 @@ func (m *rootModel) resizeScreens() {
 	}
 	if m.doneScreen != nil {
 		m.doneScreen.Resize(m.width, m.height)
+	}
+	if m.testCatalogScreen != nil {
+		m.testCatalogScreen.Resize(m.width, m.height)
+	}
+	if m.testSuiteScreen != nil {
+		m.testSuiteScreen.Resize(m.width, m.height)
+	}
+	if m.testHarnessScreen != nil {
+		m.testHarnessScreen.Resize(m.width, m.height)
+	}
+	if m.testGHCPModeScreen != nil {
+		m.testGHCPModeScreen.Resize(m.width, m.height)
+	}
+	if m.testProgressScreen != nil {
+		m.testProgressScreen.Resize(m.width, m.height)
+	}
+	if m.testResultsScreen != nil {
+		m.testResultsScreen.Resize(m.width, m.height)
 	}
 }
 
@@ -795,6 +978,15 @@ func (m *rootModel) updateSetupHarness(msg tea.Msg) (tea.Model, tea.Cmd) {
 	if m.harnessScreen.Done() {
 		harnessID := m.harnessScreen.SelectedID()
 		m.harnessScreen.Reset()
+
+		// When DevMode is true and the user selected "Run Tests", enter the
+		// test flow instead of the normal run setup sequence.
+		if m.devMode && harnessID == screens.RunTestsChoiceID {
+			style := stylesFromTheme(m.theme)
+			m.testCatalogScreen = screens.NewTestCatalogScreen(m.width, m.height, style)
+			m.screen = screenTestCatalog
+			return m, m.testCatalogScreen.InputInit()
+		}
 
 		// Auto-discover the orchestrator file from the harness's agents directory.
 		// The discoverer is injected via Options so that the TUI package does not
@@ -1356,6 +1548,276 @@ func (m *rootModel) replyToPendingQuestion(ans answerMsg) {
 }
 
 // ---------------------------------------------------------------------------
+// Test-flow screen handlers
+// ---------------------------------------------------------------------------
+
+func (m *rootModel) updateTestCatalog(msg tea.Msg) (tea.Model, tea.Cmd) {
+	if m.testCatalogScreen == nil {
+		return m, nil
+	}
+	m.testCatalogScreen.Update(msg)
+	if m.testCatalogScreen.Back() {
+		m.testCatalogScreen.Reset()
+		// Return to the harness selection screen (the test flow entry point).
+		m.screen = screenSetupHarness
+		return m, nil
+	}
+	if m.testCatalogScreen.Done() {
+		m.testSelections.mosaicRoot = m.testCatalogScreen.Value()
+		m.testCatalogScreen.Reset()
+
+		// Load the catalog and proceed to the suite selection screen.
+		catRoot := filepath.Join(m.testSelections.mosaicRoot, "Tools", "Runner", "TestCatalog")
+		loader := m.testCatalogLoader
+		if loader == nil {
+			loader = loadTestCatalog
+		}
+		cat, err := loader(catRoot)
+		if err != nil {
+			style := stylesFromTheme(m.theme)
+			m.doneScreen = screens.NewDoneScreen(
+				domain.RunOutcome{Status: domain.RunRefused, Message: fmt.Sprintf("loading test catalog: %v", err)},
+				"", m.width, m.height, style,
+			)
+			m.screen = screenDone
+			return m, nil
+		}
+		style := stylesFromTheme(m.theme)
+		m.testSuiteScreen = screens.NewTestSuiteScreen(m.width, m.height, style, cat)
+		m.screen = screenTestSuite
+		return m, nil
+	}
+	return m, nil
+}
+
+func (m *rootModel) updateTestSuite(msg tea.Msg) (tea.Model, tea.Cmd) {
+	if m.testSuiteScreen == nil {
+		return m, nil
+	}
+	m.testSuiteScreen.Update(msg)
+	if m.testSuiteScreen.Back() {
+		m.testSuiteScreen.Reset()
+		// Return to catalog path entry.
+		style := stylesFromTheme(m.theme)
+		m.testCatalogScreen = screens.NewTestCatalogScreen(m.width, m.height, style)
+		m.screen = screenTestCatalog
+		return m, m.testCatalogScreen.InputInit()
+	}
+	if m.testSuiteScreen.Done() {
+		m.testSelections.scope = m.testSuiteScreen.Scope()
+		m.testSelections.workflows = m.testSuiteScreen.SelectedWorkflows()
+		m.testSelections.mode = m.testSuiteScreen.SelectedMode()
+		m.testSuiteScreen.Reset()
+
+		style := stylesFromTheme(m.theme)
+		m.testHarnessScreen = screens.NewTestHarnessScreen(m.width, m.height, style)
+		m.screen = screenTestHarness
+		return m, nil
+	}
+	return m, nil
+}
+
+func (m *rootModel) updateTestHarness(msg tea.Msg) (tea.Model, tea.Cmd) {
+	if m.testHarnessScreen == nil {
+		return m, nil
+	}
+	m.testHarnessScreen.Update(msg)
+	if m.testHarnessScreen.Back() {
+		m.testHarnessScreen.Reset()
+		// Return to suite selection. Re-create the screen with the same catalog.
+		catRoot := filepath.Join(m.testSelections.mosaicRoot, "Tools", "Runner", "TestCatalog")
+		loader := m.testCatalogLoader
+		if loader == nil {
+			loader = loadTestCatalog
+		}
+		cat, err := loader(catRoot)
+		if err != nil {
+			// Catalog load failed on back navigation — fall back to catalog entry.
+			style := stylesFromTheme(m.theme)
+			m.testCatalogScreen = screens.NewTestCatalogScreen(m.width, m.height, style)
+			m.screen = screenTestCatalog
+			return m, m.testCatalogScreen.InputInit()
+		}
+		style := stylesFromTheme(m.theme)
+		m.testSuiteScreen = screens.NewTestSuiteScreen(m.width, m.height, style, cat)
+		m.screen = screenTestSuite
+		return m, nil
+	}
+	if m.testHarnessScreen.Done() {
+		m.testSelections.harnesses = m.testHarnessScreen.SelectedHarnesses()
+		hasGHCP := m.testHarnessScreen.HasGHCPCLI()
+		m.testHarnessScreen.Reset()
+
+		if hasGHCP {
+			style := stylesFromTheme(m.theme)
+			m.testGHCPModeScreen = screens.NewTestGHCPModeScreen(m.width, m.height, style)
+			m.screen = screenTestGHCPMode
+			return m, nil
+		}
+		// No GHCP CLI: skip mode screen and launch the test run.
+		m.testSelections.ghcpPermissionMode = ""
+		return m, m.launchTestRun()
+	}
+	return m, nil
+}
+
+func (m *rootModel) updateTestGHCPMode(msg tea.Msg) (tea.Model, tea.Cmd) {
+	if m.testGHCPModeScreen == nil {
+		return m, nil
+	}
+	m.testGHCPModeScreen.Update(msg)
+	if m.testGHCPModeScreen.Back() {
+		m.testGHCPModeScreen.Reset()
+		style := stylesFromTheme(m.theme)
+		m.testHarnessScreen = screens.NewTestHarnessScreen(m.width, m.height, style)
+		m.screen = screenTestHarness
+		return m, nil
+	}
+	if m.testGHCPModeScreen.Done() {
+		m.testSelections.ghcpPermissionMode = m.testGHCPModeScreen.Value()
+		m.testGHCPModeScreen.Reset()
+		return m, m.launchTestRun()
+	}
+	return m, nil
+}
+
+func (m *rootModel) updateTestProgress(msg tea.Msg) (tea.Model, tea.Cmd) {
+	if m.testProgressScreen == nil {
+		return m, nil
+	}
+	m.testProgressScreen.Update(msg)
+	if m.testProgressScreen.Done() {
+		// All tests finished and user dismissed progress: show results.
+		if m.testResultsScreen != nil {
+			m.screen = screenTestResults
+		} else {
+			// Results screen not built yet (no summary arrived): treat as done.
+			m.screen = screenDone
+		}
+		return m, nil
+	}
+	return m, nil
+}
+
+func (m *rootModel) updateTestResults(msg tea.Msg) (tea.Model, tea.Cmd) {
+	if m.testResultsScreen == nil {
+		return m, nil
+	}
+	m.testResultsScreen.Update(msg)
+	if m.testResultsScreen.Done() {
+		return m, tea.Quit
+	}
+	return m, nil
+}
+
+// launchTestRun starts the test orchestrator in a background goroutine, wiring
+// its progress callbacks to the TUI via tea.Program.Send. It transitions the
+// screen to screenTestProgress and returns the launch command.
+func (m *rootModel) launchTestRun() tea.Cmd {
+	style := stylesFromTheme(m.theme)
+	m.testProgressScreen = screens.NewTestProgressScreen(m.width, m.height, style)
+	m.screen = screenTestProgress
+
+	workDir, _ := os.Getwd()
+	cfg := testrun.TestConfig{
+		Scope:              m.testSelections.scope,
+		Harnesses:          m.testSelections.harnesses,
+		MosaicRoot:         m.testSelections.mosaicRoot,
+		Workspace:          workDir,
+		Workflows:          m.testSelections.workflows,
+		Mode:               m.testSelections.mode,
+		GHCPPermissionMode: m.testSelections.ghcpPermissionMode,
+	}
+
+	factory := m.testRunnerFactory
+	interact := m.interact
+	ctx := m.ctx
+
+	return func() tea.Msg {
+		if factory == nil {
+			return testAllDoneMsg{Summary: &testrun.TestSummary{
+				DeployError: fmt.Errorf("test runner not configured"),
+			}}
+		}
+
+		// Build a reporter that sends progress messages to the TUI via the
+		// stored *tea.Program reference. This mirrors how stepCompleteMsg is
+		// sent from the session goroutine through m.interact.
+		reporter := &tuiTestProgressReporter{interact: interact}
+		summary, err := factory(ctx, cfg, reporter)
+		if err != nil && summary == nil {
+			summary = &testrun.TestSummary{DeployError: err}
+		}
+		if summary == nil {
+			summary = &testrun.TestSummary{}
+		}
+		return testAllDoneMsg{Summary: summary}
+	}
+}
+
+// tuiTestProgressReporter implements testrun.ProgressReporter by forwarding
+// state transitions to the TUI as tea.Msg values via tea.Program.Send.
+type tuiTestProgressReporter struct {
+	interact *ProgramRef
+}
+
+func (r *tuiTestProgressReporter) OnDeployStart() {
+	if p := r.interact.program(); p != nil {
+		p.Send(testDeployStartMsg{})
+	}
+}
+
+func (r *tuiTestProgressReporter) OnDeployDone(err error) {
+	if p := r.interact.program(); p != nil {
+		p.Send(testDeployDoneMsg{Err: err})
+	}
+}
+
+func (r *tuiTestProgressReporter) OnTestStart(harness, workflow, mode string) {
+	if p := r.interact.program(); p != nil {
+		p.Send(testRunStartMsg{Harness: harness, Workflow: workflow, Mode: mode})
+	}
+}
+
+func (r *tuiTestProgressReporter) OnTestDone(harness, workflow, mode string, result testrun.TestRunResult) {
+	if p := r.interact.program(); p != nil {
+		p.Send(testRunDoneMsg{Result: result})
+	}
+}
+
+// OnResolvedPaths implements testrun.ResolvedPathsReporter. It sends a
+// testResolvedPathsMsg to the TUI progress screen before any deploy or test
+// start notifications arrive. This satisfies FR-7 ("shown at startup"):
+// the progress screen displays resolved binaries before the first test runs.
+func (r *tuiTestProgressReporter) OnResolvedPaths(paths map[string]string, harnessOrder []string) {
+	if p := r.interact.program(); p != nil {
+		p.Send(testResolvedPathsMsg{Paths: paths, HarnessOrder: harnessOrder})
+	}
+}
+
+// loadTestCatalog is a thin helper that returns a testrun.CatalogPort backed
+// by a real *testcatalog.Catalog. It is separated from the handler so tests
+// can inject fakes without touching the filesystem.
+func loadTestCatalog(catRoot string) (testrun.CatalogPort, error) {
+	// Import is deferred to avoid a cycle: the caller (app.go) imports testrun,
+	// which does not import testcatalog. The catalog package is an implementation
+	// detail of the wiring layer; the TUI only depends on testrun's CatalogPort.
+	// Because Go does not allow conditional imports, we call the function here
+	// and let the linker include testcatalog when this file is compiled.
+	//
+	// In production, wiring_stub.go injects a real catalog via TestRunnerFactory.
+	// In unit tests for the TUI, the TestRunnerFactory is either nil or faked,
+	// so loadTestCatalog is only called when a real filesystem path is available.
+	//
+	// Because the TUI package must not grow a direct testcatalog import (it would
+	// drag every catalog dependency into the TUI binary even for non-dev builds),
+	// the real catalog load is injected via the TestCatalogLoader option instead.
+	// This stub returns an error so the missing injection is surfaced at runtime.
+	_ = catRoot
+	return nil, fmt.Errorf("test catalog loader not configured; supply Options.TestCatalogLoader")
+}
+
+// ---------------------------------------------------------------------------
 // Restart-path stop-state reset
 // ---------------------------------------------------------------------------
 
@@ -1643,6 +2105,32 @@ func (m *rootModel) View() string {
 	case screenDone:
 		if m.doneScreen != nil {
 			return m.doneScreen.View()
+		}
+
+	// Test-flow screens.
+	case screenTestCatalog:
+		if m.testCatalogScreen != nil {
+			return m.testCatalogScreen.View()
+		}
+	case screenTestSuite:
+		if m.testSuiteScreen != nil {
+			return m.testSuiteScreen.View()
+		}
+	case screenTestHarness:
+		if m.testHarnessScreen != nil {
+			return m.testHarnessScreen.View()
+		}
+	case screenTestGHCPMode:
+		if m.testGHCPModeScreen != nil {
+			return m.testGHCPModeScreen.View()
+		}
+	case screenTestProgress:
+		if m.testProgressScreen != nil {
+			return m.testProgressScreen.View()
+		}
+	case screenTestResults:
+		if m.testResultsScreen != nil {
+			return m.testResultsScreen.View()
 		}
 	}
 	return ""

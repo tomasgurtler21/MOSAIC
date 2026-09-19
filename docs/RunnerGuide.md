@@ -81,7 +81,7 @@ All three modes are dramatically cheaper than running the orchestrator agent man
 | `--commit-branch` | No | `mosaic-owned` | Commit branch variant (`mosaic-owned`, `user-own`) |
 | `--run` | No | — | Resume a specific run by run_id |
 | `--new-run` | No | `false` | Force creation of a new run |
-| `--claude-path` | No | `claude` | Path to the Claude Code CLI binary |
+| `--executable-path` | No | _(per-harness default)_ | Executable path override for the harness selected by --harness; when absent, each harness uses its own default |
 | `--infra-class` | No | — | Non-interactive agent-per-class mappings (e.g. `checkpoint=checkpoint-manager-git,commit=commit-manager-git`) |
 
 ### Orchestrator Auto-Discovery

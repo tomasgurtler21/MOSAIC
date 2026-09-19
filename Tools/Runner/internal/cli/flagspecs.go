@@ -41,7 +41,7 @@ func RegisterRunFlags(fs *pflag.FlagSet) {
 	fs.Bool("new-run", false, "Force creation of a new run")
 	fs.String("harness", harness.FakeHarnessID, fmt.Sprintf("Harness adapter to use (%s)", harness.FlagValues()))
 	fs.String("timeout", "30m", "Invocation timeout for the harness adapter (e.g. 30m, 1h)")
-	fs.String("claude-path", "", "Executable path override for the harness selected by --harness; when absent, each harness uses its own default (claude, opencode, copilot)")
+	fs.String("executable-path", "", "Executable path override for the harness selected by --harness; when absent, each harness uses its own default (claude, opencode, copilot)")
 	fs.String("infra-class", "", "Comma-separated class=agent mappings for non-interactive agent-per-class selection (e.g. checkpoint=checkpoint-manager-git,commit=commit-manager-git)")
 	fs.StringArray("input", nil, "Path to a file or directory to copy into a new run's folder before the first dispatch; repeatable. Not permitted with --run.")
 	fs.String("ghcp-permission-mode", "", "GHCP CLI permission strategy: blanket (--yolo, grants all permissions) or allowlist (per-tool --allow-tool entries from agent frontmatter). Required when --harness=ghcp-cli.")
@@ -78,14 +78,82 @@ func RunFlagSpecs() []FlagSpec {
 	return specs
 }
 
+// RegisterTestFlags registers every flag the test subcommand accepts onto fs.
+// Both cli.RunTestCommand (with testCmd.Flags()) and TestFlagSpecs (with a
+// throwaway set it then introspects) call this function, making it the single
+// declaration that keeps registration and arity-publication in sync.
+func RegisterTestFlags(fs *pflag.FlagSet) {
+	fs.String("catalog", "", "Path to the MOSAIC repo root (required)")
+	fs.String("suite", "", "Test suite to run (smoke|full)")
+	fs.StringArray("workflow", nil, "Workflow ID to test (repeatable)")
+	fs.String("mode", "", "Execution mode for single-workflow scope")
+	fs.StringArray("harness", nil, "Harness ID to test (repeatable; default: all CLI harnesses)")
+	fs.String("ghcp-permission-mode", "", "GHCP CLI permission strategy (blanket|allowlist)")
+}
+
+// TestFlagSpecs returns the arity of every flag the test subcommand accepts,
+// for pre-scan compatibility in main.go. This is the authoritative arity
+// declaration for test flags, derived from RegisterTestFlags.
+func TestFlagSpecs() []FlagSpec {
+	fs := pflag.NewFlagSet("test-specs", pflag.ContinueOnError)
+	RegisterTestFlags(fs)
+
+	var specs []FlagSpec
+	fs.VisitAll(func(f *pflag.Flag) {
+		specs = append(specs, FlagSpec{
+			Name:       "--" + f.Name,
+			TakesValue: f.Value.Type() != "bool",
+		})
+	})
+	return specs
+}
+
 // ValueBearingFlagNames returns the names of every flag whose FlagSpec has
-// TakesValue == true. It is the set a pre-scan must skip the following token for
-// when scanning os.Args before cobra has parsed them.
+// TakesValue == true, for the run subcommand. It is the set a pre-scan must
+// skip the following token for when scanning os.Args before cobra has parsed
+// them. This function covers the run subcommand only; callers that also need
+// to recognise test subcommand flags (e.g. main.go's pre-scan) should
+// additionally call TestFlagSpecs.
 func ValueBearingFlagNames() []string {
 	specs := RunFlagSpecs()
 	var names []string
 	for _, s := range specs {
 		if s.TakesValue {
+			names = append(names, s.Name)
+		}
+	}
+	return names
+}
+
+// DefaultTestHarnesses returns the IDs of all CLI harnesses that the test
+// subcommand runs against by default when no --harness flags are supplied.
+// The list is derived from harness.CLISelections(), which is the same source
+// used by the TUI harness-selection screen and the --harness flag validation.
+func DefaultTestHarnesses() []string {
+	sels := harness.CLISelections()
+	ids := make([]string, len(sels))
+	for i, s := range sels {
+		ids[i] = s.ID
+	}
+	return ids
+}
+
+// AllValueBearingFlagNames returns the names of every value-bearing flag for
+// both the run and test subcommands, deduplicated. This is the set that
+// main.go's pre-scan functions use so that test subcommand flags (e.g.
+// --catalog) are not misidentified as positional arguments.
+func AllValueBearingFlagNames() []string {
+	seen := make(map[string]bool)
+	var names []string
+	for _, s := range RunFlagSpecs() {
+		if s.TakesValue && !seen[s.Name] {
+			seen[s.Name] = true
+			names = append(names, s.Name)
+		}
+	}
+	for _, s := range TestFlagSpecs() {
+		if s.TakesValue && !seen[s.Name] {
+			seen[s.Name] = true
 			names = append(names, s.Name)
 		}
 	}

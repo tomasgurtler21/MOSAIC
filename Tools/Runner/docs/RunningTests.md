@@ -38,14 +38,15 @@ Each workflow has a required mode. Using the wrong mode causes failures (e.g. ru
 | Workflow | Mode(s) | Fixture Seed Folder |
 |----------|---------|-------------------|
 | `smoke-single` | `auto`, `auto-review` | `Fixtures/smoke-single` |
-| `payload-stress` | `auto`, `auto-review` | `Fixtures/payload-stress` |
-| `staged-preplaced-plan` | `auto`, `auto-review` | `Fixtures/staged-preplaced-plan` |
+| `payload-stress` | `auto`, `auto-review`, `orchestrated` | `Fixtures/payload-stress` |
+| `staged-preplaced-plan` | `auto`, `auto-review`, `orchestrated` | `Fixtures/staged-preplaced-plan` |
 | `orchestrated-linear` | `orchestrated` | `Fixtures/orchestrated-linear` |
 | `orchestrated-backjump` | `orchestrated` | `Fixtures/orchestrated-backjump` |
 | `findings-loop` | `auto` **and** `auto-review` (run twice) | `Fixtures/findings-loop` |
 | `deviation-blocked` | `auto` | `Fixtures/deviation-blocked` |
 | `deviation-ambiguous` | `auto-review` | `Fixtures/deviation-ambiguous` |
 | `deviation-stop` | `auto` | `Fixtures/deviation-stop` |
+| `hitl-glob-staged` | `orchestrated` | `Fixtures/hitl-glob-staged` |
 
 Fixture seed folders live under `Tools\Runner\TestCatalog\Workflows\MosaicTest\Fixtures\`. Use absolute paths for `--input`.
 
@@ -75,6 +76,28 @@ FIXTURES="C:/AI/MOSAIC/MOSAIC/Tools/Runner/TestCatalog/Workflows/MosaicTest/Fixt
 **Runner logs** (`RunnerLogs/<run_id>/<run_id>.log`): Full harness I/O including raw stdout/stderr. Use for diagnosing parser or harness adapter bugs.
 
 **Orchestration artifact** (`Orchestration-<run_id>/Orchestration.md`): The execution log table. Compare against the expected run table in the workflow document.
+
+## Workflow Frontmatter Fields
+
+Every workflow `.md` file in `Workflows/MosaicTest/` declares two machine-readable fields in its YAML frontmatter block:
+
+**`modes`** (required, list of strings): The execution modes this workflow supports. Valid values: `auto`, `auto-review`, `orchestrated`. The test automation tool uses this to enumerate (workflow, mode) pairs. Running a workflow in a mode not declared here is unsupported and will produce unexpected behaviour.
+
+**`smoke_set`** (optional, list of strings): The subset of `modes` entries that belong to the Smoke Set. Each entry must also appear in `modes`. When absent or empty, the workflow has no Smoke Set membership.
+
+**`pre_consult`** (optional, boolean): Whether the pre-consultation path is exercised for this workflow's test runs. Valid values: `true`, `false`. When the field is absent the default is `true` (pre-consultation enabled). Set to `false` only for workflows where the pre-consultation step is intentionally skipped.
+
+Example (from `smoke-single.md`):
+
+```yaml
+modes:
+  - auto
+  - auto-review
+smoke_set:
+  - auto
+```
+
+When authoring a new workflow, add both fields to its frontmatter and update this table. Use the mode vocabulary exactly as shown above (lowercase, hyphen-separated).
 
 ## Smoke Set
 

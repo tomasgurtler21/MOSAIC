@@ -344,4 +344,17 @@ const (
 	EventTUIStopGateEntered  = "tui.stop.gate.entered"
 	EventTUIStopGateResolved = "tui.stop.gate.resolved"
 	EventTUIStopSignalArmed  = "tui.stop.signal.armed"
+
+	// Test-flow event names (used by SubprocessRunInvoker).
+	// Note: these use .fail/.done/.error suffixes rather than .failed/.ok used
+	// elsewhere. The divergence is acknowledged; changing is an option but not
+	// required. The semantics are clear either way.
+	EventTestrunInvokeStart   = "testrun.invoke.start"
+	EventTestrunInvokeDone    = "testrun.invoke.done"
+	EventTestrunInvokeError   = "testrun.invoke.error"
+	EventTestrunDiscoveryFail = "testrun.discovery.fail"
+
+	// EventTestrunResolvePath is logged once per harness when binary
+	// resolution succeeds at suite startup.
+	EventTestrunResolvePath = "testrun.resolve.path"
 )

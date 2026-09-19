@@ -9,6 +9,8 @@ referenced_agents:
   - mosaictest-scripted
 artifacts:
   - MosaicTestScript/backjump-echo.md
+modes:
+  - orchestrated
 ---
 
 <Workflow type="core" name="orchestrated-backjump" version="1.0">
@@ -60,11 +62,11 @@ Six Orchestration.md log rows. The stop consultation is NOT logged in Orchestrat
 
 | Log `Seq` | `Agent` | Kind | `Phase` | `Status` | `Summary` shows |
 |:---:|---|---|---|---|---|
-| 1 | `orchestrator-script#1` | consultation | — | SUCCESS | task description for dispatch one (no overrides) |
+| 1 | `orchestrator-script#1` | consultation | — | "" | task description for dispatch one (no overrides) |
 | 2 | `mosaictest-scripted#1` | workflow step | RESEARCH | SUCCESS | echo of task_description_1 |
-| 3 | `orchestrator-script#3` | consultation | — | SUCCESS | task description for dispatch two (input_artifacts override) |
+| 3 | `orchestrator-script#3` | consultation | — | "" | task description for dispatch two (input_artifacts override) |
 | 4 | `mosaictest-scripted#2` | workflow step | RESEARCH | SUCCESS | echo of task_description_2; Inputs shows both paths |
-| 5 | `orchestrator-script#5` | consultation | — | SUCCESS | task description for dispatch three (hitl=true) |
+| 5 | `orchestrator-script#5` | consultation | — | "" | task description for dispatch three (hitl=true) |
 | 6 | `mosaictest-scripted#3` | workflow step | RESEARCH | BLOCKED | E503 message (hitl=true, no user-interaction tool) |
 
 **Run outcome:** stopped by the orchestrator (`RunStoppedByConsultant`). The fixture's stop reason names the BLOCKED as the expected trigger.
