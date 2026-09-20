@@ -333,7 +333,13 @@ func TestResultsScreen_StderrOver8KiB_Truncated(t *testing.T) {
 		ChildStderr:    stderrContent,
 		ActualExitCode: 1,
 	}
-	got := viewOf(result)
+	// Use a tall screen (height=100) so that the scrollable window is large
+	// enough to show all content at default offset=0.  The 8KB+ stderr body
+	// produces ~48 body rows at width=200; the sentinel is at the last row.
+	// A 200x50 screen has contentHeight=45 which clips the sentinel out of
+	// the default view, so we need height > 53 (48 body + 5 reserved rows).
+	s := screens.NewTestResultsScreen(200, 100, screens.Styles{}, summaryWithOneResult(result))
+	got := stripANSIResults(s.View())
 
 	if !strings.Contains(got, "[truncated, showing last") {
 		t.Errorf("TestResultsScreen.View() ERROR with stderr > 8KiB: does not contain truncation marker\ngot (stripped, first 200): %.200s\n(stderr exceeding MaxStderrDisplayBytes must be truncated via TruncateTail)",

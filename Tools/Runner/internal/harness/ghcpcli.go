@@ -171,6 +171,7 @@ func (a *GHCPCLIAdapter) Invoke(ctx context.Context, agent domain.AgentReference
 			return domain.ProtocolResponse{}, fmt.Errorf("extract GHCP CLI tools for %s: %w", agent.Identifier, extractErr)
 		}
 		spawnReq.DerivedTools = tools
+		spawnReq.ToolsDerived = true // signals derivation was performed; empty slice is valid (all ungated tools)
 	}
 
 	resp, err := a.spawner.Spawn(ctx, spawnReq)
@@ -276,6 +277,7 @@ func (a *GHCPCLIAdapter) InvokeRaw(ctx context.Context, agent domain.AgentRefere
 			return nil, fmt.Errorf("extract GHCP CLI tools for %s: %w", agent.Identifier, extractErr)
 		}
 		spawnReq.DerivedTools = tools
+		spawnReq.ToolsDerived = true // signals derivation was performed; empty slice is valid (all ungated tools)
 	}
 
 	cmd, err := commonharness.ResolveExecutable(a.executablePath)

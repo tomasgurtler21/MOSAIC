@@ -4,8 +4,7 @@ package harness_test
 //
 // These tests cover Stage 2: replacing hardcoded --permission-mode auto with
 // --permission-mode dontAsk + --allowedTools derived from each agent's deployed
-// tools frontmatter, and FR-10's pre-spawn rejection of agents with missing or
-// empty tools.
+// tools frontmatter, and FR-10's pre-spawn rejection of agents with missing tools.
 //
 // All subprocess interaction uses the fake-CLI helper-process infrastructure
 // already in claudecode_test.go (TestMain, runHelperProcess, helperExe,
@@ -16,13 +15,18 @@ package harness_test
 //   FR-10 rejection (T2.2) -- Invoke path:
 //   - Invoke returns an error wrapping ErrToolsMissing when the agent definition
 //     file has no tools key in its frontmatter.
-//   - Invoke returns an error wrapping ErrToolsEmpty when the tools key is
-//     present but resolves to zero tool names.
 //   - The FR-10 rejection error message identifies the agent by its Identifier.
 //
 //   FR-10 rejection (T2.2) -- InvokeRaw path:
 //   - InvokeRaw returns an error wrapping ErrToolsMissing for missing tools key.
-//   - InvokeRaw returns an error wrapping ErrToolsEmpty for empty tools value.
+//
+//   Empty tools success (T2.2) -- Invoke path:
+//   - Invoke succeeds for an agent with an empty tools value, using
+//     --permission-mode dontAsk with no --allowedTools flags.
+//
+//   Empty tools success (T2.2) -- InvokeRaw path:
+//   - InvokeRaw succeeds for an agent with an empty tools value, using
+//     --permission-mode dontAsk with no --allowedTools flags.
 //
 //   Invoke integration with tool extraction (T2.3):
 //   - Invoke reads the agent's DefinitionPath, extracts Claude Code tools, and
@@ -96,7 +100,9 @@ const validClaudeCodeDef = "---\nname: test-agent\nmodel: claude-sonnet-4-6\ntoo
 const missingToolsDef = "---\nname: test-agent\nmodel: claude-sonnet-4-6\n---\n\nAgent body.\n"
 
 // emptyToolsDef is a Claude Code agent definition with an empty tools value.
-// ExtractClaudeCodeTools will return ErrToolsEmpty for this content.
+// ExtractClaudeCodeTools will return ([]string{}, nil) for this content.
+// The adapter must set ToolsDerived=true so BuildArgs selects dontAsk mode
+// with no --allowedTools flags, rather than falling back to auto mode.
 const emptyToolsDef = "---\nname: test-agent\nmodel: claude-sonnet-4-6\ntools:\n---\n\nAgent body.\n"
 
 // ---------------------------------------------------------------------------
@@ -126,11 +132,13 @@ func TestClaudeCodeAdapter_Invoke_RejectsAgentWithMissingToolsKey(t *testing.T) 
 	}
 }
 
-// TestClaudeCodeAdapter_Invoke_RejectsAgentWithEmptyToolsValue verifies that
-// when the agent's definition file has a tools key but its value resolves to
-// zero tool names, Invoke returns an error wrapping ErrToolsEmpty.
-func TestClaudeCodeAdapter_Invoke_RejectsAgentWithEmptyToolsValue(t *testing.T) {
-	setHelperEnv(t, "success")
+// TestClaudeCodeAdapter_Invoke_EmptyTools_SucceedsWithDontAskMode verifies that
+// when the agent's definition file has an empty tools value, Invoke succeeds
+// and the subprocess receives --permission-mode dontAsk with no --allowedTools
+// flags. The adapter must set ToolsDerived=true so BuildArgs selects dontAsk
+// even when DerivedTools is empty.
+func TestClaudeCodeAdapter_Invoke_EmptyTools_SucceedsWithDontAskMode(t *testing.T) {
+	argsFile := setHelperEnv(t, "success")
 
 	defPath := writeDefFile(t, emptyToolsDef)
 	agent := agentWithDef("empty-tools-agent", defPath)
@@ -138,11 +146,16 @@ func TestClaudeCodeAdapter_Invoke_RejectsAgentWithEmptyToolsValue(t *testing.T) 
 	adapter := harness.NewClaudeCodeAdapter(helperExe(t), 5*time.Second)
 	_, err := adapter.Invoke(context.Background(), agent, minimalClaudeRequest("empty-tools-agent#1"))
 
-	if err == nil {
-		t.Fatal("want error when agent definition has an empty tools value, got nil")
+	if err != nil {
+		t.Fatalf("want successful invocation for agent with empty tools value, got error: %v", err)
 	}
-	if !errors.Is(err, commonharness.ErrToolsEmpty) {
-		t.Errorf("want errors.Is(err, ErrToolsEmpty), got %v", err)
+
+	args := readArgs(t, argsFile)
+	if !containsSequence(args, "--permission-mode", "dontAsk") {
+		t.Errorf("want --permission-mode dontAsk for agent with empty tools, got %v", args)
+	}
+	if containsArg(args, "--allowedTools") {
+		t.Errorf("want no --allowedTools flags when tools list is empty, got %v", args)
 	}
 }
 
@@ -191,11 +204,13 @@ func TestClaudeCodeAdapter_InvokeRaw_RejectsAgentWithMissingToolsKey(t *testing.
 	}
 }
 
-// TestClaudeCodeAdapter_InvokeRaw_RejectsAgentWithEmptyToolsValue verifies that
-// when the agent's definition file has a tools key with an empty value,
-// InvokeRaw returns an error wrapping ErrToolsEmpty.
-func TestClaudeCodeAdapter_InvokeRaw_RejectsAgentWithEmptyToolsValue(t *testing.T) {
-	setHelperEnv(t, "success")
+// TestClaudeCodeAdapter_InvokeRaw_EmptyTools_SucceedsWithDontAskMode verifies
+// that when the agent's definition file has an empty tools value, InvokeRaw
+// succeeds and the subprocess receives --permission-mode dontAsk with no
+// --allowedTools flags. The adapter must set ToolsDerived=true so BuildArgs
+// selects dontAsk even when DerivedTools is empty.
+func TestClaudeCodeAdapter_InvokeRaw_EmptyTools_SucceedsWithDontAskMode(t *testing.T) {
+	argsFile := setHelperEnv(t, "success")
 
 	defPath := writeDefFile(t, emptyToolsDef)
 	agent := orchestratorWithDef("empty-tools-orchestrator", defPath)
@@ -203,11 +218,16 @@ func TestClaudeCodeAdapter_InvokeRaw_RejectsAgentWithEmptyToolsValue(t *testing.
 	adapter := harness.NewClaudeCodeAdapter(helperExe(t), 5*time.Second)
 	_, err := adapter.InvokeRaw(context.Background(), agent, []byte(`{"action":"route"}`))
 
-	if err == nil {
-		t.Fatal("want error when agent definition has an empty tools value (InvokeRaw), got nil")
+	if err != nil {
+		t.Fatalf("want successful InvokeRaw for agent with empty tools value, got error: %v", err)
 	}
-	if !errors.Is(err, commonharness.ErrToolsEmpty) {
-		t.Errorf("want errors.Is(err, ErrToolsEmpty) from InvokeRaw, got %v", err)
+
+	args := readArgs(t, argsFile)
+	if !containsSequence(args, "--permission-mode", "dontAsk") {
+		t.Errorf("want --permission-mode dontAsk for agent with empty tools (InvokeRaw), got %v", args)
+	}
+	if containsArg(args, "--allowedTools") {
+		t.Errorf("want no --allowedTools flags when tools list is empty (InvokeRaw), got %v", args)
 	}
 }
 

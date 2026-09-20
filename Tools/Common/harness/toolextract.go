@@ -13,17 +13,32 @@ import (
 // has no tools key in its frontmatter.
 var ErrToolsMissing = errors.New("harness: agent definition has no tools field in frontmatter")
 
-// ErrToolsEmpty is returned when the tools key is present but resolves
-// to zero tool entries.
-var ErrToolsEmpty = errors.New("harness: agent definition has an empty tools field")
+// ErrToolsEmpty is returned when the tools field is present but has a
+// wrong shape (not the expected kind for the target harness), or when
+// all items are unrecognised names (misconfiguration detection).
+//
+// For GHCP CLI: returned when tools is not a list, or when every scalar
+// item in the list is an unrecognised name.
+// For Claude Code: returned when tools is a non-empty list (wrong kind;
+// Claude Code tools are comma-separated scalars).
+var ErrToolsEmpty = errors.New("harness: agent definition tools field has wrong shape or all unrecognised names")
 
 // ExtractClaudeCodeTools reads the deployed agent definition at path,
 // parses its frontmatter, and returns the Claude Code tool names from
 // the tools field as individual strings suitable for --allowedTools.
 //
-// Returns ErrToolsMissing when the tools key is absent from the
-// frontmatter, and ErrToolsEmpty when the key is present but resolves
-// to zero tool names.
+// Return values:
+//   - (tools, nil) when the tools field is a non-empty comma-separated
+//     scalar with at least one tool name.
+//   - (empty, nil) when the tools field is present but empty:
+//     an empty/blank scalar, an all-whitespace/comma scalar, or a
+//     zero-item list (tools: []).
+//     NOTE: "empty" means len(tools) == 0. Callers and tests MUST use
+//     len(tools) == 0 to detect this case, not nil checks.
+//   - (nil, ErrToolsMissing) when the tools key is absent.
+//   - (nil, ErrToolsEmpty) when the tools field is a non-empty list
+//     (wrong kind -- Claude Code tools are comma-separated scalars;
+//     a non-empty list is misconfiguration, not a valid empty representation).
 //
 // The deployed Claude Code tools field is a comma-separated scalar
 // string (e.g. "Read, Write, Edit, Bash"). This function splits on
@@ -35,13 +50,17 @@ func ExtractClaudeCodeTools(path string) ([]string, error) {
 	}
 
 	// Claude Code expects a scalar (comma-separated string).
+	// A zero-item list is accepted as an alternative empty representation.
 	if fv.Kind != mosaic.KindScalar {
+		if fv.Kind == mosaic.KindList && len(fv.Items) == 0 {
+			return []string{}, nil
+		}
 		return nil, ErrToolsEmpty
 	}
 
 	raw := strings.TrimSpace(fv.Scalar)
 	if raw == "" {
-		return nil, ErrToolsEmpty
+		return []string{}, nil
 	}
 
 	parts := strings.Split(raw, ",")
@@ -53,7 +72,7 @@ func ExtractClaudeCodeTools(path string) ([]string, error) {
 		}
 	}
 	if len(tools) == 0 {
-		return nil, ErrToolsEmpty
+		return []string{}, nil
 	}
 	return tools, nil
 }
@@ -72,8 +91,21 @@ func ExtractClaudeCodeTools(path string) ([]string, error) {
 //	search   -> (excluded: GHCP CLI auto-allows search operations)
 //	ask_user -> (excluded: handled by --no-ask-user flag separately)
 //
-// Returns ErrToolsMissing when the tools key is absent, ErrToolsEmpty
-// when it resolves to zero tool names.
+// Return values:
+//   - (empty, nil) when the tools field is an empty list (tools: []),
+//     or when all items translate to ungated/excluded kinds and at least
+//     one item is a recognised tool name (ungated or gated).
+//     NOTE: "empty" means len(tools) == 0. The returned slice may be
+//     nil or non-nil empty depending on the code path. Callers and tests
+//     MUST use len(tools) == 0 to detect this case.
+//   - (tools, nil) when at least one item translates to a gated kind.
+//   - (nil, ErrToolsMissing) when the tools key is absent from frontmatter.
+//   - (nil, ErrToolsEmpty) when the tools field is present but has a
+//     wrong shape (not a list), or when all scalar items are unrecognised
+//     names (misconfiguration detection).
+//
+// Non-scalar list items are silently skipped and do not count as
+// recognised names.
 //
 // The deployed GHCP CLI tools field is a flow-style YAML list
 // (e.g. ['read', 'edit', 'search', 'execute', 'ask_user', 'agent']).
@@ -88,26 +120,51 @@ func ExtractGHCPCLITools(path string) ([]string, error) {
 		return nil, ErrToolsEmpty
 	}
 
+	// An explicit empty list (tools: []) is a valid empty representation.
 	if len(fv.Items) == 0 {
-		return nil, ErrToolsEmpty
+		return []string{}, nil
 	}
 
 	var tools []string
+	var anyRecognised bool
 	for _, item := range fv.Items {
 		if item.Kind != mosaic.KindScalar {
+			// Non-scalar items are silently skipped; do not set anyRecognised.
 			continue
 		}
 		name := strings.TrimSpace(item.Scalar)
 		translated, include := translateGHCPTool(name)
 		if include {
 			tools = append(tools, translated)
+			anyRecognised = true
+		} else if isUngatedGHCPTool(name) {
+			anyRecognised = true
 		}
 	}
 
-	if len(tools) == 0 {
+	if len(tools) == 0 && !anyRecognised {
+		// All items were unrecognised names: likely misconfiguration.
 		return nil, ErrToolsEmpty
 	}
+	// When all items are ungated, tools is nil (no appends).
+	// Callers use len(tools) == 0, not nil checks.
 	return tools, nil
+}
+
+// isUngatedGHCPTool reports whether name is a known GHCP CLI tool name
+// that is ungated (excluded from --allow-tool but still available without
+// explicit permission). This avoids duplicating the name set already
+// present in translateGHCPTool's switch.
+//
+// Returns true for: "read", "search", "ask_user".
+// Returns false for: everything else (gated tools, unknown names).
+func isUngatedGHCPTool(name string) bool {
+	switch name {
+	case "read", "search", "ask_user":
+		return true
+	default:
+		return false
+	}
 }
 
 // translateGHCPTool maps a MOSAIC GHCP CLI deployed tool name to the

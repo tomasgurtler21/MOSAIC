@@ -161,15 +161,65 @@ func TestExtractClaudeCodeTools_MissingToolsKey(t *testing.T) {
 	}
 }
 
-// TestExtractClaudeCodeTools_EmptyToolsValue verifies that ErrToolsEmpty is
-// returned when the tools key is present but has an empty scalar value.
+// TestExtractClaudeCodeTools_EmptyToolsValue verifies that an empty scalar
+// tools value returns success with an empty slice (not ErrToolsEmpty). An empty
+// tools key means the agent has no tools configured: a valid empty state.
 func TestExtractClaudeCodeTools_EmptyToolsValue(t *testing.T) {
 	content := "---\nname: test-agent\ntools:\n---\n\nBody.\n"
 	path := writeAgentFile(t, content)
 
+	tools, err := harness.ExtractClaudeCodeTools(path)
+	if err != nil {
+		t.Errorf("want no error for empty tools scalar, got %v", err)
+	}
+	if len(tools) != 0 {
+		t.Errorf("want empty tools slice for empty tools scalar, got %v", tools)
+	}
+}
+
+// TestExtractClaudeCodeTools_BlankScalarReturnsEmpty verifies that a blank or
+// whitespace-only scalar value returns success with an empty slice. Blank
+// scalars are a valid empty representation for Claude Code tools.
+func TestExtractClaudeCodeTools_BlankScalarReturnsEmpty(t *testing.T) {
+	content := "---\nname: test-agent\ntools: \"   \"\n---\n\nBody.\n"
+	path := writeAgentFile(t, content)
+
+	tools, err := harness.ExtractClaudeCodeTools(path)
+	if err != nil {
+		t.Errorf("want no error for blank scalar tools value, got %v", err)
+	}
+	if len(tools) != 0 {
+		t.Errorf("want empty tools slice for blank scalar, got %v", tools)
+	}
+}
+
+// TestExtractClaudeCodeTools_ZeroItemListReturnsEmpty verifies that a zero-item
+// list (tools: []) returns success with an empty slice. A zero-item list is a
+// valid alternative empty representation alongside the blank scalar form.
+func TestExtractClaudeCodeTools_ZeroItemListReturnsEmpty(t *testing.T) {
+	content := "---\nname: test-agent\ntools: []\n---\n\nBody.\n"
+	path := writeAgentFile(t, content)
+
+	tools, err := harness.ExtractClaudeCodeTools(path)
+	if err != nil {
+		t.Errorf("want no error for zero-item list tools value, got %v", err)
+	}
+	if len(tools) != 0 {
+		t.Errorf("want empty tools slice for zero-item list, got %v", tools)
+	}
+}
+
+// TestExtractClaudeCodeTools_NonEmptyListReturnsErrToolsEmpty verifies that a
+// non-empty list (e.g., tools: ['Read', 'Write']) still returns ErrToolsEmpty.
+// Claude Code tools are comma-separated scalars; a non-empty list is a
+// wrong-kind value and remains a misconfiguration error.
+func TestExtractClaudeCodeTools_NonEmptyListReturnsErrToolsEmpty(t *testing.T) {
+	content := "---\nname: test-agent\ntools: ['Read', 'Write']\n---\n\nBody.\n"
+	path := writeAgentFile(t, content)
+
 	_, err := harness.ExtractClaudeCodeTools(path)
 	if !errors.Is(err, harness.ErrToolsEmpty) {
-		t.Errorf("want errors.Is(err, ErrToolsEmpty) for empty tools value, got %v", err)
+		t.Errorf("want errors.Is(err, ErrToolsEmpty) for non-empty list tools value, got %v", err)
 	}
 }
 
@@ -389,29 +439,115 @@ func TestExtractGHCPCLITools_MissingToolsKey(t *testing.T) {
 	}
 }
 
-// TestExtractGHCPCLITools_EmptyToolsList verifies that ErrToolsEmpty is
-// returned when the tools list is present but contains zero entries.
+// TestExtractGHCPCLITools_EmptyToolsList verifies that a zero-item list
+// (tools: []) returns success with an empty slice (not ErrToolsEmpty). An
+// empty list is a valid empty representation for GHCP CLI tools.
 func TestExtractGHCPCLITools_EmptyToolsList(t *testing.T) {
 	content := "---\nname: test-agent\ntools: []\n---\n\nBody.\n"
 	path := writeAgentFile(t, content)
 
-	_, err := harness.ExtractGHCPCLITools(path)
-	if !errors.Is(err, harness.ErrToolsEmpty) {
-		t.Errorf("want errors.Is(err, ErrToolsEmpty) for empty tools list, got %v", err)
+	tools, err := harness.ExtractGHCPCLITools(path)
+	if err != nil {
+		t.Errorf("want no error for empty tools list, got %v", err)
+	}
+	if len(tools) != 0 {
+		t.Errorf("want empty tools slice for empty tools list, got %v", tools)
 	}
 }
 
-// TestExtractGHCPCLITools_AllExcludedToolsReturnsErrToolsEmpty verifies that
-// ErrToolsEmpty is returned when the tools list contains only entries that are
-// excluded from --allow-tool (read, search, ask_user), producing zero entries
-// after translation.
-func TestExtractGHCPCLITools_AllExcludedToolsReturnsErrToolsEmpty(t *testing.T) {
+// TestExtractGHCPCLITools_AllUngatedToolsReturnsEmptySuccess verifies that
+// when the tools list contains only entries that are ungated (read, search,
+// ask_user), the function returns success with an empty slice. These tools are
+// known GHCP CLI tool names that need no --allow-tool entry; having only
+// ungated tools is a valid agent configuration, not a misconfiguration.
+func TestExtractGHCPCLITools_AllUngatedToolsReturnsEmptySuccess(t *testing.T) {
 	content := "---\nname: test-agent\ntools: ['read', 'search', 'ask_user']\n---\n\nBody.\n"
+	path := writeAgentFile(t, content)
+
+	tools, err := harness.ExtractGHCPCLITools(path)
+	if err != nil {
+		t.Errorf("want no error when all tools are ungated (read/search/ask_user), got %v", err)
+	}
+	if len(tools) != 0 {
+		t.Errorf("want empty tools slice when all tools are ungated, got %v", tools)
+	}
+}
+
+// TestExtractGHCPCLITools_AllUnrecognisedNames_ReturnsErrToolsEmpty verifies
+// that when the tools list contains only names that are not recognised as either
+// gated or ungated GHCP CLI tool names, ErrToolsEmpty is returned. This is the
+// misconfiguration detection path: the agent was configured with tool names
+// that don't map to any known GHCP CLI tool, which is likely a mistake.
+func TestExtractGHCPCLITools_AllUnrecognisedNames_ReturnsErrToolsEmpty(t *testing.T) {
+	content := "---\nname: test-agent\ntools: ['typo1', 'typo2']\n---\n\nBody.\n"
 	path := writeAgentFile(t, content)
 
 	_, err := harness.ExtractGHCPCLITools(path)
 	if !errors.Is(err, harness.ErrToolsEmpty) {
-		t.Errorf("want errors.Is(err, ErrToolsEmpty) when all tools are excluded from --allow-tool, got %v", err)
+		t.Errorf("want errors.Is(err, ErrToolsEmpty) for all-unrecognised tool names, got %v", err)
+	}
+}
+
+// TestExtractGHCPCLITools_MixedRecognisedAndUnrecognised_ReturnsEmptySuccess
+// verifies that when the tools list contains at least one recognised name
+// (ungated or gated) alongside unrecognised names, the function returns success
+// with an empty slice. A single recognised name is sufficient to confirm the
+// list is not a misconfiguration -- the unrecognised names are silently dropped.
+// For example: ['read', 'typo'] -- 'read' is a recognised ungated name, so
+// the list is accepted and the result is an empty (no gated tools) slice.
+func TestExtractGHCPCLITools_MixedRecognisedAndUnrecognised_ReturnsEmptySuccess(t *testing.T) {
+	content := "---\nname: test-agent\ntools: ['read', 'typo']\n---\n\nBody.\n"
+	path := writeAgentFile(t, content)
+
+	tools, err := harness.ExtractGHCPCLITools(path)
+	if err != nil {
+		t.Errorf("want no error for mixed recognised/unrecognised list (read is recognised), got %v", err)
+	}
+	if len(tools) != 0 {
+		t.Errorf("want empty tools slice for mixed list with no gated tools, got %v", tools)
+	}
+}
+
+// TestExtractGHCPCLITools_MixedWithGatedAndUnrecognised_ReturnsGatedTools
+// verifies that when the tools list contains a gated tool alongside an
+// unrecognised name, the function returns success with the gated tool's
+// translated name. The unrecognised name is silently dropped.
+func TestExtractGHCPCLITools_MixedWithGatedAndUnrecognised_ReturnsGatedTools(t *testing.T) {
+	content := "---\nname: test-agent\ntools: ['edit', 'typo']\n---\n\nBody.\n"
+	path := writeAgentFile(t, content)
+
+	tools, err := harness.ExtractGHCPCLITools(path)
+	if err != nil {
+		t.Errorf("want no error for mixed gated/unrecognised list (edit is recognised gated), got %v", err)
+	}
+	// 'edit' translates to 'write'; 'typo' is silently dropped.
+	if !containsArg(tools, "write") {
+		t.Errorf("want 'write' (translated from 'edit') in result, got %v", tools)
+	}
+	if len(tools) != 1 {
+		t.Errorf("want exactly 1 tool entry (write), got %v", tools)
+	}
+}
+
+// TestExtractGHCPCLITools_NonScalarListItems_Skipped verifies that non-scalar
+// items in the tools list are silently skipped and do not count as recognised
+// names. If the list contains only non-scalar items (e.g., nested lists or
+// maps), all items are skipped and none are recognised, so ErrToolsEmpty is
+// returned (all-unrecognised path). This confirms the non-scalar skip behavior.
+func TestExtractGHCPCLITools_NonScalarListItems_Skipped(t *testing.T) {
+	// A nested list item is non-scalar and must be silently skipped.
+	// 'edit' is a valid scalar gated tool; the nested list item is skipped.
+	// The result is success with the gated 'write' (translated from 'edit').
+	content := "---\nname: test-agent\ntools: ['edit', ['nested']]\n---\n\nBody.\n"
+	path := writeAgentFile(t, content)
+
+	tools, err := harness.ExtractGHCPCLITools(path)
+	if err != nil {
+		t.Errorf("want no error when list contains non-scalar item alongside valid gated tool, got %v", err)
+	}
+	// 'edit' translates to 'write'; the nested list item is silently skipped.
+	if !containsArg(tools, "write") {
+		t.Errorf("want 'write' in result (non-scalar item skipped, 'edit' retained), got %v", tools)
 	}
 }
 

@@ -24,8 +24,9 @@ package harness_test
 //   - Partial Allowlist mode: -p PROMPT remains the final two arguments
 //   - Unresolved mode (zero value): returns ErrGHCPCLIModeUnresolved before any args are built
 //   - Unresolved mode: returns nil slice on error
-//   - Partial Allowlist mode with nil DerivedTools: returns ErrGHCPCLIAllowlistEmpty
-//   - Partial Allowlist mode with empty DerivedTools slice: returns ErrGHCPCLIAllowlistEmpty
+//   - Partial Allowlist mode with nil DerivedTools and ToolsDerived=false (default): returns ErrGHCPCLIAllowlistEmpty
+//   - Partial Allowlist mode with empty DerivedTools slice and ToolsDerived=false (default): returns ErrGHCPCLIAllowlistEmpty
+//   - Partial Allowlist mode with ToolsDerived=true and empty DerivedTools: succeeds, emits --no-ask-user, zero --allow-tool entries
 //   - New sentinels are errors.Is-distinguishable from each other and from existing sentinels
 
 import (
@@ -383,6 +384,89 @@ func TestBuildGHCPCLIArgs_PartialAllowlist_EmptyDerivedTools_ReturnsErrGHCPCLIAl
 	_, err := harness.BuildGHCPCLIArgs(req)
 	if !errors.Is(err, harness.ErrGHCPCLIAllowlistEmpty) {
 		t.Fatalf("want ErrGHCPCLIAllowlistEmpty for empty DerivedTools slice in Partial Allowlist mode, got %v", err)
+	}
+}
+
+// ---------------------------------------------------------------------------
+// Partial Allowlist mode with ToolsDerived=true and empty DerivedTools
+// ---------------------------------------------------------------------------
+
+// TestBuildGHCPCLIArgs_PartialAllowlist_ToolsDerivedTrue_EmptyDerivedTools_Succeeds
+// verifies that when ToolsDerived is true and DerivedTools is empty, Partial
+// Allowlist mode succeeds. This is the "all ungated tools" case: derivation ran
+// and produced an empty list (valid), so no --allow-tool entries are emitted.
+// --no-ask-user must still be present to prevent prompting.
+func TestBuildGHCPCLIArgs_PartialAllowlist_ToolsDerivedTrue_EmptyDerivedTools_Succeeds(t *testing.T) {
+	req := harness.SpawnRequest{
+		Agent:        ordinaryAgent(),
+		Prompt:       "hello",
+		GHCPCLIMode:  harness.GHCPCLIModePartialAllowlist,
+		DerivedTools: []string{},
+		ToolsDerived: true,
+	}
+	args, err := harness.BuildGHCPCLIArgs(req)
+	if err != nil {
+		t.Fatalf("want no error when ToolsDerived=true and DerivedTools is empty, got %v", err)
+	}
+	// --no-ask-user must be present (prevents unexpected prompts).
+	if !containsArg(args, "--no-ask-user") {
+		t.Errorf("want --no-ask-user when ToolsDerived=true with empty DerivedTools, got %v", args)
+	}
+	// No --allow-tool entries must be emitted (empty derived list = no gated tools).
+	if containsArg(args, "--allow-tool") {
+		t.Errorf("want zero --allow-tool entries when ToolsDerived=true with empty DerivedTools, got %v", args)
+	}
+	// --yolo must not appear (this is partial allowlist, not blanket mode).
+	if containsArg(args, "--yolo") {
+		t.Errorf("want --yolo absent in Partial Allowlist mode, got %v", args)
+	}
+}
+
+// TestBuildGHCPCLIArgs_PartialAllowlist_ToolsDerivedTrue_NilDerivedTools_Succeeds
+// verifies that ToolsDerived=true with a nil DerivedTools slice also succeeds.
+// Both nil and empty slice are valid "no gated tools" representations when
+// ToolsDerived is true.
+func TestBuildGHCPCLIArgs_PartialAllowlist_ToolsDerivedTrue_NilDerivedTools_Succeeds(t *testing.T) {
+	req := harness.SpawnRequest{
+		Agent:        ordinaryAgent(),
+		Prompt:       "hello",
+		GHCPCLIMode:  harness.GHCPCLIModePartialAllowlist,
+		DerivedTools: nil,
+		ToolsDerived: true,
+	}
+	args, err := harness.BuildGHCPCLIArgs(req)
+	if err != nil {
+		t.Fatalf("want no error when ToolsDerived=true and DerivedTools is nil, got %v", err)
+	}
+	if !containsArg(args, "--no-ask-user") {
+		t.Errorf("want --no-ask-user when ToolsDerived=true with nil DerivedTools, got %v", args)
+	}
+	if containsArg(args, "--allow-tool") {
+		t.Errorf("want zero --allow-tool entries when ToolsDerived=true with nil DerivedTools, got %v", args)
+	}
+}
+
+// TestBuildGHCPCLIArgs_PartialAllowlist_ToolsDerivedTrue_NonEmptyDerivedTools_EmitsAllowTool
+// verifies that ToolsDerived=true with a non-empty DerivedTools slice still
+// emits --allow-tool entries. The ToolsDerived flag does not suppress emission
+// when there are actual gated tools to emit.
+func TestBuildGHCPCLIArgs_PartialAllowlist_ToolsDerivedTrue_NonEmptyDerivedTools_EmitsAllowTool(t *testing.T) {
+	req := harness.SpawnRequest{
+		Agent:        ordinaryAgent(),
+		Prompt:       "hello",
+		GHCPCLIMode:  harness.GHCPCLIModePartialAllowlist,
+		DerivedTools: []string{"write", "shell"},
+		ToolsDerived: true,
+	}
+	args, err := harness.BuildGHCPCLIArgs(req)
+	if err != nil {
+		t.Fatalf("want no error when ToolsDerived=true and DerivedTools is non-empty, got %v", err)
+	}
+	if !containsSequence(args, "--allow-tool", "write") {
+		t.Errorf("want --allow-tool write when ToolsDerived=true with non-empty DerivedTools, got %v", args)
+	}
+	if !containsSequence(args, "--allow-tool", "shell") {
+		t.Errorf("want --allow-tool shell when ToolsDerived=true with non-empty DerivedTools, got %v", args)
 	}
 }
 

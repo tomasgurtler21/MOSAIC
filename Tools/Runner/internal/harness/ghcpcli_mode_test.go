@@ -30,17 +30,19 @@ package harness_test
 //   - Partial Allowlist mode: --yolo absent in subprocess args
 //   - Partial Allowlist mode: read/search excluded from --allow-tool entries
 //   - Partial Allowlist mode: missing DefinitionPath returns an error before spawning
-//   - Partial Allowlist mode: agent with only excluded tools returns ErrToolsEmpty
+//   - Partial Allowlist mode: agent with only ungated tools invokes successfully (no --allow-tool emitted)
+//   - Partial Allowlist mode: agent with tools: [] invokes successfully (no --allow-tool emitted)
 //
 // Coverage (T3.3 - InvokeRaw):
 //   - Blanket mode: --yolo present in subprocess args
 //   - Partial Allowlist mode: --allow-tool entries present (translated from frontmatter)
 //   - Partial Allowlist mode: --yolo absent, --no-ask-user present
 //   - Partial Allowlist mode: missing DefinitionPath returns an error before spawning
+//   - Partial Allowlist mode: ungated-only agent succeeds with no --allow-tool, no --yolo, --no-ask-user present, -p last
+//   - Partial Allowlist mode: tools: [] agent succeeds with no --allow-tool, no --yolo, --no-ask-user present, -p last
 
 import (
 	"context"
-	"errors"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -269,18 +271,20 @@ func TestGHCPCLIAdapterWithMode_PartialAllowlist_Invoke_MissingDefinitionPath_Re
 	}
 }
 
-// TestGHCPCLIAdapterWithMode_PartialAllowlist_Invoke_OnlyExcludedTools_ReturnsErrToolsEmpty
-// verifies that Partial Allowlist mode returns an error wrapping ErrToolsEmpty
-// when the agent's tools frontmatter contains only tools excluded from
-// --allow-tool (read, search, ask_user).
-func TestGHCPCLIAdapterWithMode_PartialAllowlist_Invoke_OnlyExcludedTools_ReturnsErrToolsEmpty(t *testing.T) {
-	// All three tools are excluded: read (ungated), search (auto-allowed),
-	// ask_user (handled by --no-ask-user). The extraction yields an empty list.
+// TestGHCPCLIAdapterWithMode_PartialAllowlist_Invoke_OnlyUngatedTools_Succeeds
+// verifies that Partial Allowlist mode invokes successfully when the agent's
+// tools frontmatter contains only ungated tools (read, search, ask_user).
+// No --allow-tool entries are emitted, no --yolo, and --no-ask-user is present.
+// The adapter must set ToolsDerived=true so BuildGHCPCLIArgs accepts the empty
+// derived-tools slice.
+func TestGHCPCLIAdapterWithMode_PartialAllowlist_Invoke_OnlyUngatedTools_Succeeds(t *testing.T) {
+	// All three tools are ungated: extraction yields an empty allowed-tool list.
+	// With ToolsDerived=true this must succeed; without it BuildGHCPCLIArgs
+	// returns ErrGHCPCLIAllowlistEmpty, causing the adapter to return an error.
 	agentFile := writeGHCPCLITestAgentFile(t, []string{"read", "search", "ask_user"})
 	agentRef := agentRefWithDefinitionPath(agentFile)
 
-	t.Setenv("GO_WANT_HELPER_PROCESS", "1")
-	t.Setenv("GO_HELPER_CMD", "ghcpcli-success")
+	argsFile := setHelperEnv(t, "ghcpcli-success")
 
 	adapter := harness.NewGHCPCLIAdapterWithMode(
 		helperExe(t),
@@ -289,11 +293,54 @@ func TestGHCPCLIAdapterWithMode_PartialAllowlist_Invoke_OnlyExcludedTools_Return
 		commonharness.GHCPCLIModePartialAllowlist,
 	)
 	_, err := adapter.Invoke(context.Background(), agentRef, minimalClaudeRequest("test-agent#1"))
-	if err == nil {
-		t.Fatal("want error when agent has only excluded tools in Partial Allowlist mode, got nil")
+	if err != nil {
+		t.Fatalf("want successful invocation for ungated-only agent, got error: %v", err)
 	}
-	if !errors.Is(err, commonharness.ErrToolsEmpty) {
-		t.Errorf("want error wrapping ErrToolsEmpty, got %v", err)
+
+	args := readArgs(t, argsFile)
+	if containsArg(args, "--allow-tool") {
+		t.Errorf("want no --allow-tool for ungated-only agent, got %v", args)
+	}
+	if containsArg(args, "--yolo") {
+		t.Errorf("want no --yolo in Partial Allowlist mode, got %v", args)
+	}
+	if !containsArg(args, "--no-ask-user") {
+		t.Errorf("want --no-ask-user in Partial Allowlist mode, got %v", args)
+	}
+}
+
+// TestGHCPCLIAdapterWithMode_PartialAllowlist_Invoke_EmptyToolsList_Succeeds
+// verifies that Partial Allowlist mode invokes successfully when the agent's
+// tools frontmatter is an explicit empty list (tools: []).
+// No --allow-tool entries are emitted, no --yolo, and --no-ask-user is present.
+func TestGHCPCLIAdapterWithMode_PartialAllowlist_Invoke_EmptyToolsList_Succeeds(t *testing.T) {
+	// tools: [] -- explicit empty list. ExtractGHCPCLITools returns ([]string{}, nil).
+	// With ToolsDerived=true this must succeed.
+	agentFile := writeGHCPCLITestAgentFile(t, []string{})
+	agentRef := agentRefWithDefinitionPath(agentFile)
+
+	argsFile := setHelperEnv(t, "ghcpcli-success")
+
+	adapter := harness.NewGHCPCLIAdapterWithMode(
+		helperExe(t),
+		5*time.Second,
+		nil,
+		commonharness.GHCPCLIModePartialAllowlist,
+	)
+	_, err := adapter.Invoke(context.Background(), agentRef, minimalClaudeRequest("test-agent#1"))
+	if err != nil {
+		t.Fatalf("want successful invocation for empty-tools-list agent, got error: %v", err)
+	}
+
+	args := readArgs(t, argsFile)
+	if containsArg(args, "--allow-tool") {
+		t.Errorf("want no --allow-tool for empty-tools-list agent, got %v", args)
+	}
+	if containsArg(args, "--yolo") {
+		t.Errorf("want no --yolo in Partial Allowlist mode for empty-tools-list agent, got %v", args)
+	}
+	if !containsArg(args, "--no-ask-user") {
+		t.Errorf("want --no-ask-user in Partial Allowlist mode for empty-tools-list agent, got %v", args)
 	}
 }
 
@@ -450,5 +497,93 @@ func TestGHCPCLIAdapterWithMode_PartialAllowlist_InvokeRaw_MissingDefinitionPath
 	_, err := adapter.InvokeRaw(context.Background(), agentRef, rawPayload)
 	if err == nil {
 		t.Fatal("want error when DefinitionPath does not exist for Partial Allowlist InvokeRaw, got nil")
+	}
+}
+
+// ---------------------------------------------------------------------------
+// T2.1: GHCPCLIAdapter.InvokeRaw -- ungated-only and empty-tools-list agents
+// ---------------------------------------------------------------------------
+
+// TestGHCPCLIAdapterWithMode_PartialAllowlist_InvokeRaw_UngatedOnlyAgent_Succeeds
+// verifies that InvokeRaw in Partial Allowlist mode succeeds for an agent whose
+// tools are all ungated (read, search, ask_user). After Stage 2, the adapter sets
+// ToolsDerived=true so BuildGHCPCLIArgs accepts the empty derived-tools slice.
+//
+// Expected arg constraints:
+//   - No --allow-tool entries
+//   - No --yolo
+//   - --no-ask-user present
+//   - -p as the second-to-last arg (prompt is last)
+func TestGHCPCLIAdapterWithMode_PartialAllowlist_InvokeRaw_UngatedOnlyAgent_Succeeds(t *testing.T) {
+	agentFile := writeGHCPCLITestAgentFile(t, []string{"read", "search", "ask_user"})
+	agentRef := agentRefWithDefinitionPath(agentFile)
+
+	argsFile := setHelperEnv(t, "ghcpcli-success")
+
+	adapter := harness.NewGHCPCLIAdapterWithMode(
+		helperExe(t),
+		5*time.Second,
+		nil,
+		commonharness.GHCPCLIModePartialAllowlist,
+	)
+	_, err := adapter.InvokeRaw(context.Background(), agentRef, rawPayload)
+	if err != nil {
+		t.Fatalf("want successful InvokeRaw for ungated-only agent, got error: %v", err)
+	}
+
+	args := readArgs(t, argsFile)
+	if containsArg(args, "--allow-tool") {
+		t.Errorf("want no --allow-tool for ungated-only agent InvokeRaw, got %v", args)
+	}
+	if containsArg(args, "--yolo") {
+		t.Errorf("want no --yolo in Partial Allowlist InvokeRaw for ungated-only agent, got %v", args)
+	}
+	if !containsArg(args, "--no-ask-user") {
+		t.Errorf("want --no-ask-user in Partial Allowlist InvokeRaw for ungated-only agent, got %v", args)
+	}
+	if len(args) < 2 || args[len(args)-2] != "-p" {
+		t.Errorf("want -p as second-to-last arg in InvokeRaw, got %v", args)
+	}
+}
+
+// TestGHCPCLIAdapterWithMode_PartialAllowlist_InvokeRaw_EmptyToolsList_Succeeds
+// verifies that InvokeRaw in Partial Allowlist mode succeeds for an agent with
+// an explicit empty tools list (tools: []). After Stage 2, the adapter sets
+// ToolsDerived=true so BuildGHCPCLIArgs accepts the empty derived-tools slice.
+//
+// Expected arg constraints:
+//   - No --allow-tool entries
+//   - No --yolo
+//   - --no-ask-user present
+//   - -p as the second-to-last arg (prompt is last)
+func TestGHCPCLIAdapterWithMode_PartialAllowlist_InvokeRaw_EmptyToolsList_Succeeds(t *testing.T) {
+	agentFile := writeGHCPCLITestAgentFile(t, []string{})
+	agentRef := agentRefWithDefinitionPath(agentFile)
+
+	argsFile := setHelperEnv(t, "ghcpcli-success")
+
+	adapter := harness.NewGHCPCLIAdapterWithMode(
+		helperExe(t),
+		5*time.Second,
+		nil,
+		commonharness.GHCPCLIModePartialAllowlist,
+	)
+	_, err := adapter.InvokeRaw(context.Background(), agentRef, rawPayload)
+	if err != nil {
+		t.Fatalf("want successful InvokeRaw for empty-tools-list agent, got error: %v", err)
+	}
+
+	args := readArgs(t, argsFile)
+	if containsArg(args, "--allow-tool") {
+		t.Errorf("want no --allow-tool for empty-tools-list agent InvokeRaw, got %v", args)
+	}
+	if containsArg(args, "--yolo") {
+		t.Errorf("want no --yolo in Partial Allowlist InvokeRaw for empty-tools-list agent, got %v", args)
+	}
+	if !containsArg(args, "--no-ask-user") {
+		t.Errorf("want --no-ask-user in Partial Allowlist InvokeRaw for empty-tools-list agent, got %v", args)
+	}
+	if len(args) < 2 || args[len(args)-2] != "-p" {
+		t.Errorf("want -p as second-to-last arg in InvokeRaw, got %v", args)
 	}
 }

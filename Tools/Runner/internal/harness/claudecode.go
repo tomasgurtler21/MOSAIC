@@ -60,9 +60,11 @@ var (
 //
 // Both invocation kinds read the agent's deployed definition file to extract
 // the tools frontmatter field, then use --permission-mode dontAsk with
-// --allowedTools entries derived from that field. An agent with a missing or
-// empty tools field is rejected before any subprocess is spawned (FR-10).
-// --dangerously-skip-permissions is never used.
+// --allowedTools entries derived from that field. An agent with a missing
+// tools field is rejected before any subprocess is spawned (FR-10). An agent
+// with an empty tools field is accepted: ToolsDerived is set to true and
+// BuildArgs selects dontAsk mode with no --allowedTools entries (strict mode,
+// no tools permitted). --dangerously-skip-permissions is never used.
 type ClaudeCodeAdapter struct {
 	executablePath string
 	timeout        time.Duration
@@ -127,8 +129,10 @@ func (a *ClaudeCodeAdapter) Invoke(ctx context.Context, agent domain.AgentRefere
 	)
 
 	// FR-10: extract tools from the agent's deployed definition file before
-	// building the spawn request. An agent with missing or empty tools is
-	// rejected here, before any subprocess is spawned.
+	// building the spawn request. An agent with a missing tools field is
+	// rejected here, before any subprocess is spawned. An empty tools field
+	// is accepted: ToolsDerived=true signals that derivation ran and produced
+	// no gated tools, so BuildArgs selects dontAsk mode with no --allowedTools.
 	derivedTools, err := commonharness.ExtractClaudeCodeTools(agent.DefinitionPath)
 	if err != nil {
 		wrapped := fmt.Errorf("agent %q (%s): %w", agent.Identifier, agent.DefinitionPath, err)
@@ -152,6 +156,7 @@ func (a *ClaudeCodeAdapter) Invoke(ctx context.Context, agent domain.AgentRefere
 		Prompt:       string(reqBytes),
 		OutputFormat: "json",
 		DerivedTools: derivedTools,
+		ToolsDerived: true, // signals derivation was performed; empty slice is valid (strict dontAsk, no tools)
 	}
 
 	resp, err := a.spawner.Spawn(ctx, spawnReq)
@@ -248,8 +253,10 @@ func (a *ClaudeCodeAdapter) InvokeRaw(ctx context.Context, agent domain.AgentRef
 	)
 
 	// FR-10: extract tools from the agent's deployed definition file before
-	// building the spawn request. An agent with missing or empty tools is
-	// rejected here, before any subprocess is spawned.
+	// building the spawn request. An agent with a missing tools field is
+	// rejected here, before any subprocess is spawned. An empty tools field
+	// is accepted: ToolsDerived=true signals that derivation ran and produced
+	// no gated tools, so BuildArgs selects dontAsk mode with no --allowedTools.
 	derivedTools, err := commonharness.ExtractClaudeCodeTools(agent.DefinitionPath)
 	if err != nil {
 		wrapped := fmt.Errorf("agent %q (%s): %w", agent.Identifier, agent.DefinitionPath, err)
@@ -268,6 +275,7 @@ func (a *ClaudeCodeAdapter) InvokeRaw(ctx context.Context, agent domain.AgentRef
 		Prompt:       string(payload),
 		OutputFormat: "json",
 		DerivedTools: derivedTools,
+		ToolsDerived: true, // signals derivation was performed; empty slice is valid (strict dontAsk, no tools)
 	}
 
 	cmd, err := commonharness.ResolveExecutable(a.executablePath)
