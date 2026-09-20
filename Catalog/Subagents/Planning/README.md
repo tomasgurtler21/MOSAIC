@@ -10,9 +10,9 @@ Planning agents define WHAT work to do, WHEN to do it, and HOW it should be stru
 
 | ID | Agent | Version | Description |
 |----|-------|---------|-------------|
-| 6 | [planner-tdd-soft](./planner-tdd-soft.md) | 4.1.0 | Creates implementation plans with task breakdown, sequencing, and dependencies |
+| 6 | [planner-tdd-soft](./planner-tdd-soft.md) | 7.3.0 | Creates implementation plans with task breakdown, sequencing, and dependencies |
 | 7 | [planner-audit](./planner-audit.md) | 3.0.0 | Creates audit plans splitting changed files into typed stages (Implementation, Tests, Architecture, Contracts) for iterative auditing |
-| 8 | [contracts-designer](./contracts-designer.md) | 2.1.0 | Defines interfaces, contracts, data structures, and component specifications |
+| 8 | [contracts-designer](./contracts-designer.md) | 4.3.0 | Defines interfaces, contracts, data structures, and component specifications |
 | 5 | [system-designer](./system-designer.md) | 2.0.1 | Designs system architecture, component interactions, and high-level structure |
 | 4 | [requirements-refinement](./requirements-refinement.md) | 2.1.0 | Refines and clarifies requirements based on research findings |
 | 24 | [knowledge-base-flag-sorter](./knowledge-base-flag-sorter.md) | 1.1.0 | Collects correction flags from KBFlags.md, organizes bottom-up by tier, creates correction stages in KBProgress.md |
