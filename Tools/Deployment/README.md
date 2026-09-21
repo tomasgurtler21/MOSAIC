@@ -592,14 +592,15 @@ an executable and a `harness.yaml` descriptor. See [docs/harness-contributor-gui
 
 ## Harness modules
 
-Four built-in harnesses are compiled into the binary:
+Five built-in harnesses are compiled into the binary:
 
-| ID | Display name |
-|----|--------------|
-| `claude-code` | Claude Code |
-| `opencode` | OpenCode |
-| `ghcp-cli` | GitHub Copilot CLI |
-| `vscode-ghcp` | VS Code GitHub Copilot |
+| ID | Display name | Notes |
+|----|--------------|-------|
+| `claude-code` | Claude Code | |
+| `opencode` | OpenCode | |
+| `ghcp-cli` | GitHub Copilot CLI | |
+| `vscode-ghcp` | VS Code GitHub Copilot | |
+| `codex` | Codex | Two departures from the Markdown norm: agent files are TOML (not Markdown), and skills are resolved from a shared `.agents/skills` root rather than a harness-local skills directory. |
 
 To add a harness without writing Go code, create a descriptor YAML file and
 pass it with `--harness /path/to/harness.yaml`. See [docs/descriptor-schema.md](docs/descriptor-schema.md).

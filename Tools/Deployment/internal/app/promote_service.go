@@ -239,42 +239,27 @@ var knownGenericToolVocab = map[string]bool{
 	"bash":           true,
 }
 
-// resolveNonRecoverablePromoteTools asks the user for a comma-separated list of
-// generic tool names when the source harness cannot recover tool information. It
-// filters the answer against knownGenericToolVocab and returns only the accepted
-// names. A blank answer, a non-interactive session, or an unanswered question all
-// return an explicit empty (non-nil) slice plus a NoticeWarning.
-func (s *service) resolveNonRecoverablePromoteTools(ctx context.Context, subject string) []string {
-	q := domain.TextQuestion{
-		Question: domain.Question{
-			ID:        domain.QPromoteNonRecoverableTools,
-			Subject:   subject,
-			Title:     "Source harness does not record tools. Enter comma-separated generic tool names (or leave blank for none):",
-			AllowSkip: true,
-		},
+// knownGenericToolVocabSorted returns a sorted comma-separated list of the known
+// generic tool vocabulary for display in re-ask prompts.
+func knownGenericToolVocabSorted() string {
+	names := make([]string, 0, len(knownGenericToolVocab))
+	for name := range knownGenericToolVocab {
+		names = append(names, name)
 	}
-	ans, err := s.deps.Interaction.AskText(ctx, q)
+	sort.Strings(names)
+	return strings.Join(names, ", ")
+}
 
-	if err != nil || ans.Status != domain.Answered {
-		// Non-interactive or unanswered: empty tools list with a warning.
-		s.deps.Interaction.Notify(ctx, domain.Notice{
-			Level:   domain.NoticeWarning,
-			Message: fmt.Sprintf("agent %q: source harness does not record tool information; tools list left empty", subject),
-		})
-		return []string{}
-	}
-
-	if strings.TrimSpace(ans.Text) == "" {
-		// Blank answer: explicit empty tools list.
-		return []string{}
-	}
-
-	// Parse the comma-separated answer and filter to known vocabulary.
-	parts := strings.Split(ans.Text, ",")
+// parseGenericToolNames splits a comma-separated answer, normalises each entry
+// (trim surrounding whitespace and lower-case), filters to knownGenericToolVocab,
+// and returns the accepted deduplicated list. An empty or all-blank input returns
+// a nil slice.
+func parseGenericToolNames(text string) []string {
+	parts := strings.Split(text, ",")
 	var result []string
 	seen := make(map[string]bool)
 	for _, part := range parts {
-		name := strings.TrimSpace(part)
+		name := strings.ToLower(strings.TrimSpace(part))
 		if name == "" {
 			continue
 		}
@@ -284,6 +269,70 @@ func (s *service) resolveNonRecoverablePromoteTools(ctx context.Context, subject
 		}
 	}
 	return result
+}
+
+// resolveNonRecoverablePromoteTools asks the user for a comma-separated list of
+// generic tool names when the source harness cannot recover tool information. It
+// normalises each entry (whitespace trim, lower-case) and filters against
+// knownGenericToolVocab, accepting only recognised names. When the user provides
+// a non-blank answer but every name is outside the vocabulary, the question is
+// re-asked with the vocabulary listed; this repeats up to maxNonRecoverableReasks
+// additional times before falling through to the empty-list warning path. A blank
+// answer, a non-interactive session, or an unanswered question all return an
+// explicit empty (non-nil) slice plus a NoticeWarning.
+//
+// maxNonRecoverableReasks limits re-ask iterations to keep the function
+// terminating in tests that script a permanently-bad answer.
+const maxNonRecoverableReasks = 3
+
+func (s *service) resolveNonRecoverablePromoteTools(ctx context.Context, subject string) []string {
+	title := "Source harness does not record tools. Enter comma-separated generic tool names (or leave blank for none):"
+
+	for attempt := 0; attempt <= maxNonRecoverableReasks; attempt++ {
+		q := domain.TextQuestion{
+			Question: domain.Question{
+				ID:        domain.QPromoteNonRecoverableTools,
+				Subject:   subject,
+				Title:     title,
+				AllowSkip: true,
+			},
+		}
+		ans, err := s.deps.Interaction.AskText(ctx, q)
+
+		if err != nil || ans.Status != domain.Answered {
+			// Non-interactive or unanswered: empty tools list with a warning.
+			s.deps.Interaction.Notify(ctx, domain.Notice{
+				Level:   domain.NoticeWarning,
+				Message: fmt.Sprintf("agent %q: source harness does not record tool information; tools list left empty", subject),
+			})
+			return []string{}
+		}
+
+		if strings.TrimSpace(ans.Text) == "" {
+			// Blank answer: explicit empty tools list.
+			return []string{}
+		}
+
+		// Normalise (trim + lower-case) and filter to known vocabulary.
+		result := parseGenericToolNames(ans.Text)
+		if len(result) > 0 {
+			return result
+		}
+
+		// All provided names were outside the known vocabulary. Re-ask with the
+		// vocabulary listed so the user knows which names are accepted.
+		title = fmt.Sprintf(
+			"Unknown tool name(s). Known generic tools: %s. Enter comma-separated names (or leave blank for none):",
+			knownGenericToolVocabSorted(),
+		)
+	}
+
+	// Re-ask limit reached: emit warning and return empty list.
+	s.deps.Interaction.Notify(ctx, domain.Notice{
+		Level:   domain.NoticeWarning,
+		Message: fmt.Sprintf("agent %q: no recognised tool names provided; tools list left empty", subject),
+	})
+	return []string{}
 }
 
 // resolvePromoteGenericFields asks for the generic-only frontmatter fields the harness drops
@@ -610,11 +659,30 @@ func (s *service) Promote(ctx context.Context, req PromoteRequest) (PromoteResul
 
 		// Unknown-field detection (FR-3): classify every source key; keys that are ClassUnknown
 		// are added to the drop set and reported as stripped.
+		//
+		// ClassHarness keys that are not already in the drop set are also dropped and reported.
+		// These are harness-specific keys (e.g. from KeyOrder) that the source harness recognises
+		// but that have no meaning in generic Markdown. They are not drop candidates (ModelKey,
+		// ToolsKey, and plan Set keys are already in dropKeys via buildPromoteHarnessDropSet), so
+		// they would otherwise be carried through to the generic output unchanged. Reporting them
+		// with StripReasonUnknownField informs the operator that the field did not travel the
+		// format-change boundary.
 		for _, k := range srcFm.Keys() {
-			if clf.Classify(k) == descriptor.ClassUnknown {
+			class := clf.Classify(k)
+			if class == descriptor.ClassUnknown {
 				if !promoteProtectedGenericKeys[k] {
 					dropKeys[k] = true
 				}
+				val, _ := srcFm.Get(k)
+				rendered := descriptor.RenderFieldValues(val)
+				strippedFields = append(strippedFields, StrippedField{
+					Key:    k,
+					Values: rendered,
+					Reason: StripReasonUnknownField,
+				})
+			} else if class == descriptor.ClassHarness && !dropKeys[k] && !promoteProtectedGenericKeys[k] {
+				// Harness-specific key not yet in the drop set: drop and report it.
+				dropKeys[k] = true
 				val, _ := srcFm.Get(k)
 				rendered := descriptor.RenderFieldValues(val)
 				strippedFields = append(strippedFields, StrippedField{

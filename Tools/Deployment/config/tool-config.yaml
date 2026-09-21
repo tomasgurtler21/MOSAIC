@@ -99,7 +99,7 @@ log_retention_runs: 0
 # both directions read this same table.
 #
 # STRUCTURE: harness-id -> ordered list of mappings.
-# Built-in harness ids: claude-code, opencode, ghcp-cli, vscode-ghcp
+# Built-in harness ids: claude-code, opencode, ghcp-cli, vscode-ghcp, codex
 # (a descriptor-only or external harness uses the `id:` in its harness.yaml).
 #
 # The syntax is intentionally IDENTICAL to the `tools.mappings:` block of a
@@ -144,7 +144,7 @@ log_retention_runs: 0
 # A mapping may declare several destinations; each is rendered independently.
 # Two destinations in one mapping may not share the same (to, field) pair.
 #
-# Generic tool names all four built-in harnesses already map (you only need an
+# Generic tool names all five built-in harnesses already map (you only need an
 # entry here to OVERRIDE one of these):
 #   file_read, file_write, file_edit, file_search, content_search,
 #   terminal, subagent, user_interaction, skill

@@ -1317,3 +1317,71 @@ func TestSkillDeploy_FrontmatterKeySet_Characterisation(t *testing.T) {
 	// This is the characterisation record required by the acceptance criteria.
 	t.Logf("observed deployed skill frontmatter keys: %v", fmKeys)
 }
+
+// ---------------------------------------------------------------------------
+// T18.1 -- collapseSandboxMode fail-safe pin
+// ---------------------------------------------------------------------------
+
+// TestCollapseSandboxMode_EmptyRequest_ReturnsReadOnly verifies that collapseSandboxMode
+// with a fully empty request (no Placeholder, empty Generic) returns "read-only".
+//
+// This pins the fail-safe default at the source: after I18.1, resolveTools calls
+// Module.Tools with an empty request for tools-less Codex sources. If collapseSandboxMode
+// were to return anything other than "read-only" for an empty request, the I18.1 fix would
+// leave a security hole -- a tools-less agent could inherit elevated sandbox permissions.
+//
+// This test passes regardless of implementation state; it is a regression guard that
+// protects the invariant the I18.1 fix depends on.
+func TestCollapseSandboxMode_EmptyRequest_ReturnsReadOnly(t *testing.T) {
+	mode := codex.CollapseSandboxModeForTesting(domain.ToolRequest{})
+	if mode != sandboxModeReadOnly {
+		t.Errorf("collapseSandboxMode(empty request) = %q, want %q; "+
+			"an empty request with no Placeholder and no Generic tools must yield the "+
+			"fail-safe read-only default; this is the value the I18.1 resolveTools fix "+
+			"relies on when it calls Module.Tools for a tools-less source",
+			mode, sandboxModeReadOnly)
+	}
+}
+
+// ---------------------------------------------------------------------------
+// T18.2 -- Real-descriptor guard: version fields non-empty
+// ---------------------------------------------------------------------------
+
+// TestDescriptor_TransformVersion_NonEmpty verifies that the Codex descriptor parsed via
+// codex.New (through DescriptorForTesting) has a non-empty TransformVersion field.
+//
+// This pins the defect location (codex.yaml missing transform_version) independently of
+// the transform-level assertion in TestCodexTransform_HarnessVersionStamp_PresentInOutput.
+// A regression that removes transform_version from codex.yaml fails here immediately,
+// without requiring a full transform pipeline run.
+//
+// This test is RED until I18.2 adds transform_version: "1.0.0" to codex.yaml.
+func TestDescriptor_TransformVersion_NonEmpty(t *testing.T) {
+	d := codex.DescriptorForTesting(t)
+	if d.TransformVersion == "" {
+		t.Errorf("Descriptor.TransformVersion is empty; "+
+			"codex.yaml must declare transform_version: \"1.0.0\" so that applyVersionStamp "+
+			"writes a '# mosaic_harness_version:' comment in every deployed Codex agent file; "+
+			"an empty TransformVersion silently omits the harness version stamp (FR-9 violation)")
+	}
+}
+
+// TestDescriptor_InjectionsVersion_NonEmpty verifies that the Codex descriptor parsed via
+// codex.New (through DescriptorForTesting) has a non-empty InjectionsVersion field.
+//
+// This pins the defect location (codex.yaml missing injections_version) independently of
+// the transform-level assertion in TestCodexTransform_InjectionsVersionOnRegionTag.
+// A regression that removes injections_version from codex.yaml fails here immediately,
+// without requiring a source with injection regions to detect the absence.
+//
+// This test is RED until I18.2 adds injections_version: "1.0.0" to codex.yaml.
+func TestDescriptor_InjectionsVersion_NonEmpty(t *testing.T) {
+	d := codex.DescriptorForTesting(t)
+	if d.InjectionsVersion == "" {
+		t.Errorf("Descriptor.InjectionsVersion is empty; "+
+			"codex.yaml must declare injections_version: \"1.0.0\" so that applyHarnessRegion "+
+			"stamps the version attribute on InjectionHarness-class region tags; "+
+			"the staleness and manifest paths read the injection version from the region tag, "+
+			"not from frontmatter; an empty InjectionsVersion silently omits this attribute (FR-9 violation)")
+	}
+}

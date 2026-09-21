@@ -52,7 +52,7 @@ import (
 	_ "mosaic-deploy/internal/agentformat/all"
 )
 
-const ToolVersion = "1.0.1"
+const ToolVersion = "1.1.0"
 
 // wantsTUI reports whether mosaic-deploy should launch the interactive TUI: no subcommand
 // was given, and both stdin and stdout are attached to a real terminal (not a pipe/redirect).

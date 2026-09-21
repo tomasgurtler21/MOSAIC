@@ -14,7 +14,7 @@ The current harnesses are AI coding tools, but the orchestration model is not li
 
 ## Quick Start
 
-> **Prerequisite:** You need a working AI coding tool — Claude Code, OpenCode, VS Code GitHub Copilot, or GitHub Copilot CLI — already installed and configured with model access.
+> **Prerequisite:** You need a working AI coding tool — Claude Code, OpenCode, VS Code GitHub Copilot, GitHub Copilot CLI, or Codex — already installed and configured with model access.
 
 1. **Clone & get tools** — `git clone https://github.com/tomasgurtler21/MOSAIC.git` + download the [latest release](https://github.com/tomasgurtler21/MOSAIC/releases) for your platform and unpack into the repo root. Windows x64 builds are tested; Linux x64 builds are provided but currently untested — if you try them, [let us know how it goes](CONTRIBUTING.md).
 2. **Deploy** — run `mosaic-deploy` from the MOSAIC repo root — pick your harness, select `kb-generation` workflow, assign models, and point it at your project workspace
@@ -62,7 +62,7 @@ Full transparency — any human can read the routing, understand what happens wh
 
 This is deliberate. MOSAIC only relies on capabilities that every AI agent harness already provides: reading files, writing files, and dispatching agents. No custom APIs, no runtime dependencies, no harness-specific hooks required. Advanced features like hooks are optional layers on top — logging hooks exist today for capturing run data, and hooks could do much more (enforcing HITL gates, validating artifacts, integrating external systems) — but the core system runs without any of them. This keeps deployment friction minimal and means MOSAIC works on any new harness that can read a file and call an agent.
 
-Today MOSAIC targets four harnesses — Claude Code, OpenCode, VS Code GitHub Copilot, and GitHub Copilot CLI — and treats them as interchangeable backends. The same agent definitions and workflows deploy to all of them through a transformation layer that adapts generic source files to each harness's syntax and conventions.
+Today MOSAIC targets five harnesses — Claude Code, OpenCode, VS Code GitHub Copilot, GitHub Copilot CLI, and Codex — and treats them as interchangeable backends. The same agent definitions and workflows deploy to all of them through a transformation layer that adapts generic source files to each harness's syntax and conventions. Codex differs from the others in two ways: agent files are TOML rather than Markdown, and skills are resolved from a shared `.agents/skills` root rather than a harness-local skills directory.
 
 ---
 
@@ -87,7 +87,7 @@ Today MOSAIC targets four harnesses — Claude Code, OpenCode, VS Code GitHub Co
 
 | Term | Meaning |
 |------|---------|
-| **Harness** | An AI agent platform that MOSAIC deploys to and runs on (Claude Code, OpenCode, VS Code GHCP, GHCP CLI) |
+| **Harness** | An AI agent platform that MOSAIC deploys to and runs on (Claude Code, OpenCode, VS Code GHCP, GHCP CLI, Codex) |
 | **Orchestrator** | The single primary agent that reads a workflow and dispatches subagents. Contains zero workflow-specific logic |
 | **Subagent** | A specialized agent dispatched by the orchestrator for a single task within a workflow (research, planning, implementation, review, etc.). Never communicates with other subagents directly — all coordination flows through the orchestrator |
 | **Utility agent** | An agent that maintains MOSAIC itself — creating subagents, authoring workflows, hunting harness issues. Not dispatched during orchestration runs |
@@ -144,6 +144,7 @@ MOSAIC/
 │   │   └── mosaic-logger/
 │   ├── HarnessInjections/           # Platform-specific deployment config
 │   │   ├── Claude Code/
+│   │   ├── Codex/
 │   │   ├── GHCP CLI/
 │   │   ├── OpenCode/
 │   │   └── VS Code GHCP/

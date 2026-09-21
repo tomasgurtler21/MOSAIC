@@ -28,7 +28,35 @@ import (
 func resolveTools(req Request, fm *docformat.Frontmatter, desc *domain.HarnessDescriptor) (domain.ToolResult, error) {
 	v, ok := fm.Get("tools")
 	if !ok {
-		// Source has no tools field — return empty, non-nil Resolutions for a safe report.
+		// Source has no tools field.
+		//
+		// Descriptor-gated path: when the descriptor declares no tools_key (e.g. Codex,
+		// which expresses tool capability via sandbox_mode rather than a tools field),
+		// call Module.Tools with an empty request so the module can emit its always-present
+		// fields. For Codex this ensures sandbox_mode is produced by collapseSandboxMode
+		// and added to touchedKeys, preventing Step 5c from copying a stale elevated value
+		// from the prior deployed file (FR-11a fail-safe default).
+		//
+		// Gated to ArtifactAgent: sandbox_mode is an agent-only field; skills and hooks
+		// remain Markdown for every harness and must not carry agent-only fields.
+		//
+		// Harnesses that declare a tools_key (all four Markdown harnesses today) skip this
+		// path — their tool fields are only emitted when the source explicitly lists tools.
+		if desc.Frontmatter.ToolsKey == "" && req.Kind == domain.ArtifactAgent {
+			result, err := req.Module.Tools(domain.ToolRequest{
+				AgentKey:     req.Key,
+				CustomNames:  req.CustomTools,
+				SkippedTools: req.SkippedTools,
+			})
+			if err != nil {
+				return domain.ToolResult{}, err
+			}
+			if result.Resolutions == nil {
+				result.Resolutions = make([]domain.ToolResolution, 0)
+			}
+			return result, nil
+		}
+		// Return empty, non-nil Resolutions for a safe report.
 		return domain.ToolResult{Resolutions: make([]domain.ToolResolution, 0)}, nil
 	}
 

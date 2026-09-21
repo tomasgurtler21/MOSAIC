@@ -736,8 +736,9 @@ func TestRetarget_MarkdownToMarkdown_OutputMatchesBuildRetargetedAgent(t *testin
 	}
 	out := result.Files[0]
 	if out.Status != app.StatusTransformed {
-		t.Skipf("source not matched as source-harness (Status=%q); "+
-			"this test requires HarnessMatchYes or Indeterminate for the source file",
+		t.Fatalf("source not matched as source-harness (Status=%q); "+
+			"harness stub setup failure: the source fixture must match the source harness "+
+			"for this test to run; fixture or stub change may have broken the setup",
 			out.Status)
 	}
 
@@ -816,7 +817,10 @@ func TestRetarget_MarkdownToMarkdown_OutputIsMarkdown(t *testing.T) {
 	}
 	out := result.Files[0]
 	if out.Status != app.StatusTransformed {
-		t.Skipf("source not matched; Status=%q", out.Status)
+		t.Fatalf("source not matched; Status=%q; "+
+			"harness stub setup failure: the source fixture must match the source harness "+
+			"for this regression guard to run",
+			out.Status)
 	}
 
 	destBytes, readErr := os.ReadFile(out.DestinationPath)

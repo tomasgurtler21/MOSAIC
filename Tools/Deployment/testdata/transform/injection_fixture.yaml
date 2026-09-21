@@ -6,11 +6,15 @@
 # The base fixture.yaml intentionally carries no injection content so that the body
 # preservation tests (Stage 8) can compare source and output bodies byte-for-byte without
 # accounting for injected text. Having a second fixture avoids perturbing those tests.
+#
+# injections_version is intentionally absent. Tests that need version attributes on region
+# tags pass InjectionsVersion explicitly in the transform.Request. Tests that verify
+# body-prose purity rely on the descriptor having no version so applyHarnessRegion's
+# descriptor-fallback path produces no stamp attribute.
 schema_version: "1"
 id: "fixture-harness"
 display_name: "Fixture Harness"
 transform_version: "3.0.0"
-injections_version: "1.2.0"
 
 models:
   ids:

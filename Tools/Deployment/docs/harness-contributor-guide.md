@@ -2,6 +2,8 @@
 
 This guide explains how to build a custom harness module for MOSAIC. A harness defines how MOSAIC transforms generic agent definitions into harness-specific deployable files. Three provision tiers exist: **built-in** (compiled into MOSAIC), **descriptor-only** (declared in a YAML file with no code), and **external** (a standalone executable).
 
+Most harnesses produce Markdown agent files, which is the default. A harness can also produce non-Markdown files by declaring a format ID in its descriptor's `agent_format_id` field. The only non-Markdown format available today is `codex-toml` (used by the Codex built-in). A non-Markdown harness must supply a translator pair registered under its format ID; see [Non-Markdown harnesses](#non-markdown-harnesses) below for the additional steps.
+
 Read this guide to decide which tier fits your harness, then follow the step-by-step instructions for your chosen approach.
 
 ## Which Tier Should You Use?
@@ -298,6 +300,62 @@ validation rules.
 **Writing to stdout before handshake response**: Any output before the first handshake response will be treated as a malformed response. Write nothing until you are ready to respond to the handshake.
 
 **Protocol version mismatch**: Always echo `"1.0"` in the `protocol` field of every response, including the handshake. A different value causes MOSAIC to reject the module with `ErrProtocolMismatch`.
+
+---
+
+---
+
+## Non-Markdown Harnesses
+
+Most harnesses write Markdown files and use the identity translator. A harness that writes a
+different file format (e.g. TOML) must do three additional things.
+
+### 1 — Declare a format ID in the descriptor
+
+Set `agent_format_id` in the descriptor to a recognised format ID string:
+
+```yaml
+agent_format_id: "codex-toml"
+```
+
+The only value other than the default empty string (`markdown`) that the tool recognises today
+is `codex-toml`. A future format requires a new constant in the `formatid` package and a new
+translator pair (see below). An unrecognised value is a fatal parse error at startup.
+
+### 2 — Supply a translator pair
+
+A translator pair is a Go value that implements the `agentformat.Translator` interface: two
+pure functions, `Encode` (canonical MOSAIC Markdown bytes to deployed file bytes) and `Decode`
+(deployed file bytes to canonical MOSAIC Markdown bytes). The translator is registered under
+its format ID from an `init()` function:
+
+```go
+func init() {
+    agentformat.Register(formatid.MyFormat, myTranslator{})
+}
+```
+
+The `agentformat/all` wiring package must blank-import your translator sub-package so that
+registration happens before any `LookupString` call at runtime. Add the import there; do not
+import your translator package directly from any other package that uses it — that would bypass
+the wiring check.
+
+### 3 — Read the deploy-only boundary
+
+The deployed artifact read funnel (`decodeDeployedBytes`) and the deployed-agent file naming
+helper (`agentFileName`) both use the format ID to select the right translator and file
+extension. These are inside `internal/app` and are updated as part of adding a format; you do
+not call them directly from the translator package.
+
+### 4 — Render tool grants through the harness module
+
+A non-Markdown harness typically cannot use the shared mapper's output directly. The Codex
+harness illustrates this: instead of a `tools` key, it always emits `sandbox_mode = "read-only"`.
+The `sandbox_mode` fallback is applied by the translator's `Encode` method, not by the shared
+mapper. When your harness uses a custom tool representation, implement it in the harness module's
+`Tools()` method and let the translator consume it; do not rely on the shared `descriptor.MapTools`
+output being present in the canonical frontmatter, because a format that does not carry a `tools`
+key will not have one.
 
 ---
 

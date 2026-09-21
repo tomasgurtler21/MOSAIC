@@ -72,7 +72,7 @@ Answer questions by reading these documents. Never recite content from memory â€
 | `Catalog/Workflows/` | Workflow definitions organized by category: `Build/`, `Audit/`, `Research/`, `Design/`, `Verification/`, `DataPreprocessing/` |
 | `Catalog/Skills/` | Reusable knowledge modules injected into agents at deploy time |
 | `Catalog/Hooks/` | Platform hook bundles (e.g. logging) |
-| `Catalog/HarnessInjections/` | Platform-specific deployment config for `Claude Code/`, `GHCP CLI/`, `OpenCode/`, `VS Code GHCP/` |
+| `Catalog/HarnessInjections/` | Platform-specific deployment config for `Claude Code/`, `Codex/`, `GHCP CLI/`, `OpenCode/`, `VS Code GHCP/` |
 | `Catalog/CatalogFilesFormat.md` | Source file format specification (frontmatter, boundary tags) |
 | `Catalog/DeployedSections.md` | Canonical deployed section blocks for agent deployment |
 

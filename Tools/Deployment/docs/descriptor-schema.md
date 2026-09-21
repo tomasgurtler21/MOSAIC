@@ -261,6 +261,8 @@ hooks:
 |-------|------|-------------|
 | `transform_version` | string | Stamped into every deployed agent's frontmatter as `transform_version`. Bump when the transform logic changes so stale agents can be detected. |
 | `injections_version` | string | Stamped into every deployed agent's frontmatter as `injections_version`. Bump when any injection content changes. |
+| `agent_format_id` | string | Identifies the file format used for deployed agent files. Empty or absent means `markdown` (the default). The only other recognised value today is `codex-toml`, which causes the deployment tool to write TOML files through the Codex translator rather than Markdown files. An unrecognised value is a fatal parse error. |
+| `tool_info_recoverable` | bool | When absent or `true` (the default), the tool's deployed format is considered to carry a recoverable tool list. Set to `false` to declare that it does not -- for example, Codex expresses tool grants via `sandbox_mode` rather than a `tools` field, so `promote` cannot reverse-map the grant and asks the user instead. Most harnesses omit this field (equivalent to `true`). |
 
 ---
 
@@ -453,13 +455,13 @@ code and are documented here so a descriptor author knows when to escalate:
 - **Custom placeholder expansion logic:** `PlaceholderExpansion` names fixed tool subsets;
   conditional expansion (e.g. "expand differently for orchestrators") requires a module.
 
-### Exceptions established across the four built-in harnesses
+### Exceptions established across the five built-in harnesses
 
-All four built-in harnesses (Claude Code, GHCP CLI, OpenCode, VS Code GHCP) were implemented
-using a module + embedded descriptor structure. The exceptions below are documented so that
-future descriptor authors recognise when a built-in module is required.
+All five built-in harnesses (Claude Code, Codex, GHCP CLI, OpenCode, VS Code GHCP) were
+implemented using a module + embedded descriptor structure. The exceptions below are documented
+so that future descriptor authors recognise when a built-in module is required.
 
-#### Exceptions common to all four harnesses
+#### Exceptions common to all five harnesses
 
 - **Tool output format serialization:** `tools.shape = "list"` produces a standard KindList
   value, but each harness serializes tools differently. Claude Code emits a comma-separated
@@ -469,7 +471,7 @@ future descriptor authors recognise when a built-in module is required.
   by `descriptor.MapTools`.
 
 - **Skill path key subdirectory:** the `paths.skills.*` templates are flat directory paths with
-  no token for an intermediate key segment. All four harnesses deploy skills under
+  no token for an intermediate key segment. The Markdown harnesses deploy skills under
   `<skills-dir>/<key>/<filename>` (e.g. `.github/skills/lean-tdd/SKILL.md`) to prevent
   filename collisions when multiple skills share the same entry filename (`SKILL.md`). Module
   code composes this path; the descriptor provides only the base directory.
@@ -481,6 +483,8 @@ future descriptor authors recognise when a built-in module is required.
   4 of `applyFrontmatter`, after the descriptor's static `add` list is applied.
 
 #### Exceptions unique to specific harnesses
+
+- **Codex — TOML agent files and no tools key:** Codex is the only built-in harness that uses a non-Markdown agent format. Its descriptor declares `agent_format_id: codex-toml`, which routes agent encoding and decoding through the Codex TOML translator rather than the Markdown identity translator. Tool grants are expressed via the TOML `sandbox_mode` field (always emitted as `"read-only"`) rather than a `tools` frontmatter key; there is no tools key at all in a Codex agent file. The `tools` field in the generic source is still read to determine whether the agent escalates beyond read-only, but it is not emitted as a field. Skills are resolved from the shared `.agents/skills` root rather than a harness-local skills directory, which is another departure from the Markdown harnesses. Because the deployed form is TOML, the deploy-path normalisations (name forcing, description fallback, sandbox_mode fallback, foreign-key drop) are applied by the Codex translator's `Encode` method rather than the shared frontmatter pipeline.
 
 - **Claude Code — comma-separated scalar tools:** Claude Code requires tools as a plain scalar
   (`"Read, Write, Edit"`). This is the only harness with this format; module code converts the
@@ -507,9 +511,9 @@ future descriptor authors recognise when a built-in module is required.
   agents (via universe sort). The `subagent` → `agent` mapping and the `skill` → `[]` (empty)
   mapping are purely data-driven in the descriptor.
 
-#### Four-harness retrospective: the module-versus-descriptor split
+#### Five-harness retrospective: the module-versus-descriptor split
 
-After implementing all four built-in harnesses, the stable split is:
+After implementing all five built-in harnesses, the stable split is:
 
 **Belongs in the descriptor (declarative, always):**
 - Tool universe and mappings (including one-to-many, many-to-one, empty, and by-convention)
@@ -529,7 +533,7 @@ After implementing all four built-in harnesses, the stable split is:
 **Conclusion:** A purely descriptor-driven harness (no module code beyond the adapter) is
 achievable when the tool output is a standard KindList (block-style YAML sequence), skills are
 deployed to a flat directory (no key subdirectory), frontmatter `add` fields are static, and
-the `{tool-permissions}` placeholder expands to a flat list. None of the four current built-ins
+the `{tool-permissions}` placeholder expands to a flat list. None of the five current built-ins
 satisfies all four conditions simultaneously. The skill key subdirectory and the tool output
 format serialization are the two most common reasons a harness needs module code. A future
 descriptor schema version could address both by adding a `skill.key_subdir: true` flag and a

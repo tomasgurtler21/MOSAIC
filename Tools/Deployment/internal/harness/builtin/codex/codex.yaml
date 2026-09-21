@@ -3,6 +3,8 @@ id: "codex"
 display_name: "Codex"
 agent_format_id: "codex-toml"
 tool_info_recoverable: false
+transform_version: "1.0.0"
+injections_version: "1.0.0"
 models:
   ids:
     - "gpt-6-astra"

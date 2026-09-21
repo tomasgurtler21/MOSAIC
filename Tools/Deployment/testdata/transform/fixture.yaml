@@ -4,15 +4,19 @@
 #   - Adds:  mode: subagent
 #   - Sets model via model_key
 #   - Sets tools via tools_key (list shape)
-#   - Stamps transform_version and injections_version
+#   - Stamps transform_version
 #   - Applies a key_order that includes the stamped fields
+#
+# injections_version is intentionally absent. Tests that need a specific injection version
+# on region tags pass InjectionsVersion explicitly in the transform.Request. Tests that
+# verify body-prose purity (region tags unchanged) rely on the descriptor having no version
+# so that the descriptor-fallback path in applyHarnessRegion produces no stamp.
 #
 # The placeholder_expansion covers the orchestrator's {tool-permissions} placeholder (T8.7).
 schema_version: "1"
 id: "fixture-harness"
 display_name: "Fixture Harness"
 transform_version: "3.0.0"
-injections_version: "1.2.0"
 
 models:
   ids:

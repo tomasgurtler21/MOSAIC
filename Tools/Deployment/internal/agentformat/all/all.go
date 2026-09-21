@@ -10,7 +10,7 @@
 //
 // Usage:
 //   - Production code: cmd/mosaic-deploy/main.go blank-imports this package beside
-//     the four built-in harness blank imports. That is the non-test owner.
+//     the five built-in harness blank imports. That is the non-test owner.
 //   - Tests outside the composition root that need a resolvable Codex translator:
 //     add _ "mosaic-deploy/internal/agentformat/all" to the test file's imports.
 //     Do NOT blank-import internal/agentformat/codextoml directly: that bypasses

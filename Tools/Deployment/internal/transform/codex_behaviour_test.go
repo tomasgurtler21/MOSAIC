@@ -38,20 +38,28 @@ package transform_test
 //     carrying sandbox_mode = "read-only" on the create path.
 //   - Assertion is by key presence in the parsed TOML, not text search.
 //
-//   Tools-less source, update path (T13.5b) -- characterisation:
+//   Tools-less source, update path (T13.5b) -- correctness assertion:
 //   - Prior deployed bytes carry sandbox_mode = "workspace-write".
 //   - A source agent declaring no tools key produces a rewriting run.
-//   - The test asserts and records the observed sandbox_mode.
-//   - Expected observed value: "workspace-write" (preserved by Step 5c).
-//   - This is a finding: a prior workspace-write grant persists after the source
-//     stops declaring tools. The root cause is transform.resolveTools returning early
-//     when no tools key is present, so Module.Tools is never called and sandbox_mode
-//     is never marked touched. Step 5c then copies the prior value unchanged.
-//     Fixing this would require changing resolveTools, which alters every existing
-//     harness's input and risks the byte-identical seam baseline. This finding
-//     is recorded here; the fix belongs to a cross-harness transform stage.
-//     The equivalent persistence occurs for the four Markdown harnesses (their tool
-//     fields persist the same way), so this is a pre-existing cross-harness property.
+//   - The test asserts sandbox_mode = "read-only" in the output.
+//   - The fix (I18.1): resolveTools calls Module.Tools with an empty request when the
+//     source has no tools key and desc.Frontmatter.ToolsKey is empty (Codex only today).
+//     collapseSandboxMode returns "read-only" for the empty request, sandbox_mode is
+//     marked touched, and Step 5c cannot copy the prior workspace-write value.
+//
+//   Tools-less update correctness / collapseSandboxMode fail-safe (T18.1):
+//   - A tools-less source updating a deployed file with workspace-write must produce
+//     read-only in the output (correctness assertion for the I18.1 fix).
+//   - collapseSandboxMode with an empty request (no Placeholder, empty Generic) returns
+//     read-only, pinning the fail-safe default that resolveTools relies on after the fix.
+//
+//   Version stamp presence (T18.2):
+//   - A Codex CREATE produces a "# mosaic_harness_version:" comment stamp with a
+//     non-empty value in the TOML output.
+//   - A Codex CREATE with an InjectionHarness region produces a version attribute on
+//     the region tag matching desc.InjectionsVersion.
+//   - Both tests are RED until I18.2 adds transform_version and injections_version to
+//     codex.yaml.
 //
 //   Owned-key precedence (T13.6):
 //   - Prior deployed bytes carry hand-edited owned keys (sandbox_mode, model).
@@ -197,11 +205,10 @@ Carry out the requested task.
 	}
 
 	// (d) The mosaic_version stamp must appear in the leading comment block.
-	// Note: mosaic_harness_version and mosaic_injections_version are only written when
-	// the harness descriptor sets transform_version / injections_version respectively.
-	// The Codex descriptor (codex.yaml) declares neither field, so those stamps are absent
-	// from a create operation. This is expected behaviour: no version to stamp means no stamp.
-	// The mosaic_version stamp IS written because the source declares version: 1.0.0.
+	// Note: mosaic_harness_version is only written when the harness descriptor sets
+	// transform_version. After I18.2 adds transform_version to codex.yaml, the
+	// mosaic_harness_version stamp will also appear.
+	// See TestCodexTransform_HarnessVersionStamp_PresentInOutput for the dedicated assertion.
 	outputStr := string(output)
 	if !strings.Contains(outputStr, "# mosaic_version:") {
 		t.Errorf("output TOML does not contain stamp comment %q in the leading comment block; "+
@@ -607,44 +614,33 @@ Agent body without any tools declaration.
 }
 
 // ---------------------------------------------------------------------------
-// T13.5b -- Tools-less source: update path characterisation
+// T13.5b -- Tools-less source: update path correctness assertion
 // ---------------------------------------------------------------------------
 
-// TestCodexTransform_ToollessUpdate_CharacteriseSandboxMode is a characterisation test
-// for the tools-less update path. Prior deployed bytes carry sandbox_mode = "workspace-write".
-// A source declaring no tools key runs an update transform (version bump ensures rewrite).
+// TestCodexTransform_ToollessUpdate_ProducesReadOnly verifies that a tools-less source
+// updating a deployed Codex file with sandbox_mode = "workspace-write" produces output
+// with sandbox_mode = "read-only".
 //
-// Observed sandbox_mode in the output: "workspace-write" (persisted from prior value).
+// This replaces the former characterisation test that pinned the observed (buggy) value
+// "workspace-write". The correct value is "read-only" per FR-11a.
 //
-// Reason for the persistence: transform.resolveTools returns early without calling
-// Module.Tools when the source has no tools key (internal/transform/frontmatter.go).
-// sandbox_mode is therefore never marked as a field touched by this run's module call,
-// and Step 5c (deployed-field preservation pass) copies the prior workspace-write value
-// unchanged into the canonical form that reaches the encoder. Because the encoder finds
-// sandbox_mode already present (it arrived from the prior canonical), the deploy-mode
-// fallback does not fire -- I2.3b(c) requires an explicitly supplied value never to be
-// overridden.
+// The fix is in resolveTools (frontmatter.go): when the source has no tools field and
+// desc.Frontmatter.ToolsKey is empty (Codex only today), resolveTools calls
+// req.Module.Tools with an empty request. collapseSandboxMode returns "read-only" for
+// an empty request (no Placeholder, no escalating Generic), sandbox_mode is added to
+// touchedKeys, and Step 5c cannot copy the prior workspace-write value.
 //
-// This is a finding: a prior workspace-write grant persists on update after the source
-// stops declaring tools, with no covering requirement and no visible change to the user.
-// The only fix site is internal/transform (change resolveTools to call Module.Tools for
-// the no-tools case), but that change alters every existing harness's input and puts the
-// byte-identical seam baseline at risk. The fix belongs to a cross-harness transform
-// stage with its own requirement and its own user decision.
-//
-// The equivalent persistence occurs for all four Markdown harnesses (their tool fields
-// persist the same way for the same reason), so this is a pre-existing cross-harness
-// property that Codex surfaces, not a Codex-specific defect.
-func TestCodexTransform_ToollessUpdate_CharacteriseSandboxMode(t *testing.T) {
+// This test is RED until I18.1 applies the resolveTools fix.
+func TestCodexTransform_ToollessUpdate_ProducesReadOnly(t *testing.T) {
 	mod := codexModuleForTransform(t)
 
-	// Prior deployed TOML carries sandbox_mode = "workspace-write" (e.g. from a previous
-	// deploy when the agent had escalating tools).
+	// Prior deployed TOML: sandbox_mode = "workspace-write" from a previous deploy that
+	// had escalating tools. The source has since dropped all tools.
 	priorTOML := []byte("# mosaic_version: 1.0.0\n" +
 		"# mosaic_harness_version: 1.0.0\n" +
 		"# mosaic_injections_version: 1.0.0\n" +
 		"name = \"toolless-update-agent\"\n" +
-		"description = \"Tools-less update characterisation agent.\"\n" +
+		"description = \"Tools-less update agent.\"\n" +
 		"model = \"gpt-5.6-sol\"\n" +
 		"sandbox_mode = \"workspace-write\"\n" +
 		"\n" +
@@ -654,11 +650,11 @@ func TestCodexTransform_ToollessUpdate_CharacteriseSandboxMode(t *testing.T) {
 
 	canonical := codexDecodeCanonical(t, priorTOML)
 
-	// Source agent: version bumped to 2.0.0 to force a rewrite; no tools key.
+	// Source agent: version bumped to 2.0.0 to force a genuine rewrite; no tools key.
 	source := []byte(`---
 id: 100
 version: 2.0.0
-description: Tools-less update characterisation agent.
+description: Tools-less update agent.
 ---
 Agent body.
 `)
@@ -683,39 +679,144 @@ Agent body.
 	if bytes.Equal(output, priorTOML) {
 		t.Fatal("output TOML is byte-identical to prior TOML; " +
 			"version bump (1.0.0 -> 2.0.0) must change the mosaic_version stamp; " +
-			"a no-op update proves nothing about sandbox_mode persistence")
+			"a no-op update proves nothing about sandbox_mode")
 	}
 
 	m := parseTomlOutput(t, output)
-	sandboxVal, hasSandbox := m["sandbox_mode"]
 
+	sandboxVal, hasSandbox := m["sandbox_mode"]
 	if !hasSandbox {
-		// sandbox_mode absent: characterise this as an unexpected absence.
 		t.Errorf("sandbox_mode absent from output TOML on tools-less update path; "+
-			"expected it to persist from prior value workspace-write; "+
-			"any absence is also security-relevant (Codex inherits parent session mode)")
+			"sandbox_mode must always be emitted for Codex files (FR-11a); "+
+			"its absence would allow Codex to inherit the parent session's mode")
 		return
 	}
 
-	observedSandbox, _ := sandboxVal.(string)
+	sandboxStr, _ := sandboxVal.(string)
+	if sandboxStr != "read-only" {
+		t.Errorf("tools-less update: sandbox_mode = %q, want %q; "+
+			"a source with no tools key must produce the fail-safe read-only default, "+
+			"not preserve the prior workspace-write value; "+
+			"root cause (before fix): resolveTools returns early for no-tools sources, "+
+			"sandbox_mode is not marked touched, Step 5c copies the prior elevated value; "+
+			"fix (I18.1): resolveTools calls Module.Tools with an empty request when "+
+			"desc.Frontmatter.ToolsKey is empty, ensuring sandbox_mode is always touched",
+			sandboxStr, "read-only")
+	}
+}
 
-	// Characterisation assertion: pin the observed value.
-	// Observed value: "workspace-write" (persisted by Step 5c from prior canonical).
-	// See test comment for the detailed explanation.
-	const expectedObservedSandbox = "workspace-write"
-	if observedSandbox != expectedObservedSandbox {
-		t.Errorf("tools-less update: observed sandbox_mode = %q, expected observed value %q; "+
-			"if the observed value changed, update this characterisation test and its comment "+
-			"to record the new behaviour, and investigate whether the change is intentional",
-			observedSandbox, expectedObservedSandbox)
+// ---------------------------------------------------------------------------
+// T18.2(a) -- Codex CREATE produces mosaic_harness_version comment stamp
+// ---------------------------------------------------------------------------
+
+// TestCodexTransform_HarnessVersionStamp_PresentInOutput verifies that a Codex CREATE
+// produces a "# mosaic_harness_version:" comment stamp in the TOML output with a
+// non-empty value.
+//
+// This test is RED until I18.2 adds transform_version: "1.0.0" to codex.yaml.
+// Without that field, applyVersionStamp skips the harness version stamp because
+// desc.TransformVersion is empty. After the fix, the stamp appears as
+// "# mosaic_harness_version: 1.0.0" in the leading TOML comment block.
+func TestCodexTransform_HarnessVersionStamp_PresentInOutput(t *testing.T) {
+	mod := codexModuleForTransform(t)
+
+	source := []byte(`---
+id: 100
+version: 1.0.0
+description: Version stamp test agent.
+---
+Agent body.
+`)
+
+	result, err := transform.Apply(transform.Request{
+		Source: source,
+		Kind:   domain.ArtifactAgent,
+		Key:    "version-stamp-agent",
+		Module: mod,
+		Model:  codexTestModel,
+		Op:     agentformat.OpCreate,
+		Scope:  domain.ScopeProject,
+	})
+	if err != nil {
+		t.Fatalf("transform.Apply: %v", err)
 	}
 
-	// Log the observed value for CI visibility.
-	t.Logf("tools-less update path (CHARACTERISATION): observed sandbox_mode = %q; "+
-		"prior had workspace-write; source declares no tools key; "+
-		"Step 5c preserved the prior value (transform.resolveTools skipped Module.Tools); "+
-		"this is a cross-harness persistence finding, not a defect in this stage",
-		observedSandbox)
+	outputStr := string(result.Output)
+	if !strings.Contains(outputStr, "# mosaic_harness_version:") {
+		t.Errorf("output TOML does not contain '# mosaic_harness_version:' in the leading comment block; "+
+			"once transform_version: \"1.0.0\" is declared in codex.yaml (I18.2), "+
+			"applyVersionStamp must write this stamp so the deployed file carries the "+
+			"harness format version (FR-9 name mapping: mosaic_transform_version -> mosaic_harness_version); "+
+			"output head:\n%s",
+			firstLines(outputStr, 10))
+	}
+}
+
+// ---------------------------------------------------------------------------
+// T18.2(b) -- Codex CREATE with injection region produces version attribute
+// ---------------------------------------------------------------------------
+
+// TestCodexTransform_InjectionsVersionOnRegionTag verifies that a Codex CREATE with a
+// harness injection region in the body produces a version attribute on the InjectionHarness
+// region tag, matching desc.InjectionsVersion.
+//
+// This test is RED until I18.2 adds injections_version: "1.0.0" to codex.yaml.
+// Without that field, applyHarnessRegion skips SetVersion because injVersion is empty
+// (injection.go guards: "if injVersion != \"\" { node.SetVersion(injVersion) }").
+// After the fix the HarnessConstraints region tag becomes:
+//
+//	<HarnessConstraints type="managed" version="1.0.0">
+func TestCodexTransform_InjectionsVersionOnRegionTag(t *testing.T) {
+	mod := codexModuleForTransform(t)
+
+	// Source with a HarnessConstraints region so applyHarnessRegion fires during the transform.
+	// The Codex module provides HarnessConstraints content; the frozen-catalog fixture at
+	// testdata/frozen-catalog/.../Codex/HarnessInjections.md declares this region.
+	source := []byte("---\n" +
+		"id: 100\n" +
+		"version: 1.0.0\n" +
+		"description: Injection version stamp test agent.\n" +
+		"---\n" +
+		"Agent body.\n" +
+		"\n" +
+		"<HarnessConstraints type=\"managed\">\n" +
+		"</HarnessConstraints>\n")
+
+	result, err := transform.Apply(transform.Request{
+		Source: source,
+		Kind:   domain.ArtifactAgent,
+		Key:    "injection-version-agent",
+		Module: mod,
+		Model:  codexTestModel,
+		Op:     agentformat.OpCreate,
+		Scope:  domain.ScopeProject,
+	})
+	if err != nil {
+		t.Fatalf("transform.Apply: %v", err)
+	}
+
+	outputStr := string(result.Output)
+
+	// Anti-vacuity: assert the HarnessConstraints region is present in the output.
+	if !strings.Contains(outputStr, "<HarnessConstraints") {
+		t.Fatalf("output does not contain HarnessConstraints region; "+
+			"the source declared a HarnessConstraints region and the Codex module provides "+
+			"content for it in the frozen-catalog fixture; if the region is absent, "+
+			"verify that the frozen-catalog fixture at testdata/frozen-catalog/.../Codex/ "+
+			"declares a HarnessConstraints region in HarnessInjections.md; "+
+			"output:\n%s", outputStr)
+	}
+
+	// The region tag must carry version="1.0.0" once injections_version is set in codex.yaml.
+	const wantVersionAttr = `version="1.0.0"`
+	if !strings.Contains(outputStr, wantVersionAttr) {
+		t.Errorf("InjectionHarness region tag does not carry version attribute %q; "+
+			"once injections_version: \"1.0.0\" is declared in codex.yaml (I18.2), "+
+			"applyHarnessRegion must stamp the version on every InjectionHarness-class "+
+			"region tag so the deployed file records the injection version it was built against; "+
+			"the staleness and manifest paths read this version from the region tag, not frontmatter",
+			wantVersionAttr)
+	}
 }
 
 // ---------------------------------------------------------------------------

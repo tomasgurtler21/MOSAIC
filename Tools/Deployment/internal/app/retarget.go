@@ -506,7 +506,16 @@ func BuildRetargetedAgent(in RetargetInput) ([]byte, RetargetReport, error) {
 		class := srcClassifier.Classify(key)
 		switch class {
 		case descriptor.ClassHarness:
-			// Source-harness-specific field (e.g. alpha_stamp): drop it.
+			// Source-harness-specific field (e.g. alpha_stamp): drop it and report it.
+			// From the target harness's perspective these fields are unknown vocabulary;
+			// reporting them lets the operator know which source-harness-specific fields
+			// did not travel the format-change boundary.
+			v, _ := fm.Get(key)
+			strippedFields = append(strippedFields, StrippedField{
+				Key:    key,
+				Values: descriptor.RenderFieldValues(v),
+				Reason: StripReasonUnknownField,
+			})
 			fm.Remove(key)
 		case descriptor.ClassDivertedTool:
 			// Source-harness diverted tool field: already processed above; drop it.

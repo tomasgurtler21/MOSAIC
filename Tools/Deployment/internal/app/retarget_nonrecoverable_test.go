@@ -194,6 +194,28 @@ func eligibleCodexTomlRetargetWithSandboxModeBytes() []byte {
 	)
 }
 
+// eligibleCodexTomlRetargetWithWorkspaceWriteSandboxModeBytes returns Codex TOML for retarget
+// tests that need a source carrying sandbox_mode = "workspace-write". This is the most
+// privileged sandbox mode value and the one an escalating-bug would read to grant extra
+// capability to the destination.
+//
+// Use this fixture in tests that verify the non-recoverable path ignores sandbox_mode entirely:
+// if an implementation reads sandbox_mode and maps "workspace-write" to an escalated grant,
+// a fixture with "read-only" (or no sandbox_mode) would not catch the bug -- but "workspace-write"
+// forces the bug to manifest as escalating tools in the output.
+func eligibleCodexTomlRetargetWithWorkspaceWriteSandboxModeBytes() []byte {
+	return []byte(
+		"# mosaic_transform_version: 2.1.0\n" +
+			"\n" +
+			"sandbox_mode = \"workspace-write\"\n" +
+			"developer_instructions = \"\"\"\n" +
+			"<Identity type=\"core\">\n" +
+			"You are a Codex retarget test agent.\n" +
+			"</Identity>\n" +
+			"\"\"\"\n",
+	)
+}
+
 // eligibleCodexTomlRetargetWithUserKeyBytes returns Codex TOML suitable for retarget tests
 // that need a user-owned key in the carriage container. The file is eligible (has both
 // eligibility signals) and carries my_custom_setting as a user key.
@@ -272,8 +294,10 @@ func TestRetarget_CodexNonRecoverable_NoQPromoteCustomToolAsked(t *testing.T) {
 // ---------------------------------------------------------------------------
 
 // TestRetarget_CodexNonRecoverable_CapabilityLoss_WarningNoticeEmitted verifies that retarget
-// from a non-recoverable source emits at least one NoticeWarning to inform the operator that
-// tools could not be recovered and a minimal read-only grant was applied instead.
+// from a non-recoverable source emits at least one NoticeWarning whose message mentions "tool"
+// (case-insensitive). This guards against an unrelated warning (e.g. an owned-key drift warning)
+// masking a missing capability-loss warning: a warning that exists but says nothing about tools
+// would not satisfy the capability-loss reporting requirement.
 func TestRetarget_CodexNonRecoverable_CapabilityLoss_WarningNoticeEmitted(t *testing.T) {
 	stub := interactiontest.NewBuilder().Build()
 	_, err := runCodexNonRecoverableRetarget(t, stub, eligibleCodexTomlRetargetBytes())
@@ -282,16 +306,17 @@ func TestRetarget_CodexNonRecoverable_CapabilityLoss_WarningNoticeEmitted(t *tes
 	}
 
 	notices := stub.Notices()
-	hasWarning := false
+	hasCapabilityLossWarning := false
 	for _, n := range notices {
-		if n.Level == domain.NoticeWarning {
-			hasWarning = true
+		if n.Level == domain.NoticeWarning && strings.Contains(strings.ToLower(n.Message), "tool") {
+			hasCapabilityLossWarning = true
 			break
 		}
 	}
-	if !hasWarning {
-		t.Errorf("no NoticeWarning emitted for retarget from non-recoverable source; "+
-			"the capability loss must be reported to the operator; got notices: %v", notices)
+	if !hasCapabilityLossWarning {
+		t.Errorf("no NoticeWarning mentioning \"tool\" emitted for retarget from non-recoverable source; "+
+			"the capability-loss warning must reference tools so it is distinguishable from unrelated warnings; "+
+			"got notices: %v", notices)
 	}
 }
 
@@ -372,13 +397,22 @@ func TestRetarget_CodexNonRecoverable_MinimalGrant_ToolsKeyPresentInOutputFile(t
 // T15.2(d) -- escalation never inferred from source sandbox_mode
 // ---------------------------------------------------------------------------
 
-// TestRetarget_CodexNonRecoverable_NoEscalationFromSandboxMode verifies that the target file
-// does not contain tool names that would only appear if the retarget flow read the source's
-// sandbox_mode value and inferred an escalated grant from it. The tools field must contain
-// exactly the minimal grant set (file_read, file_search, content_search) and nothing more.
+// TestRetarget_CodexNonRecoverable_NoEscalationFromSandboxMode verifies that when the Codex
+// source carries sandbox_mode = "workspace-write" (the most privileged value), the target file
+// still contains only the minimal read-only grant and does not contain escalating tools.
+//
+// This is the critical fixture for T15.2(d): the source deliberately carries the value that an
+// implementation bug would read and use to grant escalated capability. A fixture without
+// sandbox_mode (or with "read-only") would pass trivially even if the bug exists, because no
+// escalating value was present to read. With "workspace-write", a bug that reads sandbox_mode
+// and maps it to an escalated grant produces observable output (escalating tools in the file),
+// which this test catches.
 func TestRetarget_CodexNonRecoverable_NoEscalationFromSandboxMode(t *testing.T) {
 	stub := interactiontest.NewBuilder().Build()
-	result, err := runCodexNonRecoverableRetarget(t, stub, eligibleCodexTomlRetargetBytes())
+	// Use workspace-write fixture: if the non-recoverable path incorrectly reads sandbox_mode
+	// and escalates based on it, this value forces the bug to manifest as escalating tools in
+	// the destination file.
+	result, err := runCodexNonRecoverableRetarget(t, stub, eligibleCodexTomlRetargetWithWorkspaceWriteSandboxModeBytes())
 	if err != nil {
 		t.Fatalf("TransformHarness: unexpected error: %v", err)
 	}
@@ -397,13 +431,27 @@ func TestRetarget_CodexNonRecoverable_NoEscalationFromSandboxMode(t *testing.T) 
 	}
 	destStr := string(destBytes)
 
-	// Escalating tools must not appear in the target; the minimal grant is read-only.
+	// Escalating tools must not appear in the target; the non-recoverable branch must apply
+	// only the minimal read-only grant regardless of the source's sandbox_mode value.
 	escalatingTools := []string{"terminal", "file_write", "file_edit", "bash", "subagent"}
 	for _, tool := range escalatingTools {
 		if strings.Contains(destStr, tool) {
 			t.Errorf("destination file contains escalating tool %q; "+
 				"escalation must never be inferred from the source's sandbox_mode value; "+
 				"the non-recoverable branch must apply only the minimal read-only grant; got:\n%s",
+				tool, destStr)
+		}
+	}
+
+	// The minimal grant tools must be present: if the non-recoverable path did not run
+	// (e.g. it silently skipped the source or returned an empty grant), these tools would be
+	// absent and the escalation-absence assertion above would pass vacuously.
+	minimalGrantTools := []string{"file_read", "file_search", "content_search"}
+	for _, tool := range minimalGrantTools {
+		if !strings.Contains(destStr, tool) {
+			t.Errorf("destination file does not contain minimal grant tool %q; "+
+				"the non-recoverable path must apply the minimal read-only grant; "+
+				"absence of minimal tools means the path did not run correctly; got:\n%s",
 				tool, destStr)
 		}
 	}
@@ -957,6 +1005,248 @@ func TestRetarget_MarkdownSource_ToCodexTarget_ToolsCollapseToSandboxMode(t *tes
 }
 
 // ---------------------------------------------------------------------------
+// T15.4 (continued) -- collapse sub-cases: non-escalating and escalating tool sets
+// ---------------------------------------------------------------------------
+//
+// The test above (TestRetarget_MarkdownSource_ToCodexTarget_ToolsCollapseToSandboxMode) uses
+// a no-tools source fixture, which exercises only the empty-set fallback path ("read-only").
+// The two tests below supply actual generic tools and assert the specific sandbox_mode value
+// the collapse table must produce for each case. They use codexAsTargetModule (which implements
+// the real collapse logic) and a source module that maps both file_read and file_write.
+
+const collapseTestSourceID = "collapse-src-harness"
+
+// newCollapseTestSourceModule returns a markdownMappingSourceModule whose descriptor maps
+// "file_read" (non-escalating) and "file_write" (escalating) to the same generic names.
+// This makes descriptor.ReverseMapTools available to the retarget flow for both tool names,
+// so the target module receives a non-empty generic tool set to collapse.
+func newCollapseTestSourceModule() *markdownMappingSourceModule {
+	return &markdownMappingSourceModule{
+		d: domain.HarnessDescriptor{
+			ID:          collapseTestSourceID,
+			DisplayName: "Collapse Test Source Harness",
+			Frontmatter: domain.FrontmatterSpec{
+				ModelKey: "src_model",
+				ToolsKey: "tools",
+				KeyOrder: []string{"src_model", "tools"},
+			},
+			Extensions: map[domain.ArtifactKind]string{
+				domain.ArtifactAgent: ".md",
+			},
+			Paths: domain.PathSpec{
+				Agents: domain.ScopedPaths{Supported: true, Project: "agents"},
+			},
+			Tools: domain.ToolSpec{
+				Universe: []domain.HarnessTool{
+					{Name: "file_read"},
+					{Name: "file_write"},
+				},
+				Mappings: []domain.ToolMapping{
+					{
+						Generic: "file_read",
+						Destinations: []domain.ToolDestination{{
+							Kind:  domain.DestMain,
+							Names: []string{"file_read"},
+						}},
+					},
+					{
+						Generic: "file_write",
+						Destinations: []domain.ToolDestination{{
+							Kind:  domain.DestMain,
+							Names: []string{"file_write"},
+						}},
+					},
+				},
+			},
+		},
+	}
+}
+
+// newMarkdownToCodexCollapseRetargetDeps returns Deps wired for T15.4 collapse sub-case tests:
+// the source is the collapseTestSourceModule (maps file_read and file_write to generic names)
+// and the target is codexAsTargetModule (collapses generic tools to sandbox_mode via the collapse
+// table). Using codexAsTargetModule as the target exercises the real collapse logic; the
+// codexPromoteModule used by newMarkdownToCodexRetargetDeps does not implement the collapse.
+func newMarkdownToCodexCollapseRetargetDeps(t *testing.T, stub *interactiontest.Stub) (app.Deps, string) {
+	t.Helper()
+	deps, workspace := newBaseDeps(t, stub)
+	srcMod := newCollapseTestSourceModule()
+	tgtMod := newCodexAsTargetModule()
+	deps.Registry = &stubRegistry{
+		list: []domain.HarnessRef{
+			{ID: collapseTestSourceID, DisplayName: "Collapse Test Source Harness", Usable: true},
+			{ID: codexAsTgtID, DisplayName: "Codex As Target", Usable: true},
+		},
+		modules: map[string]domain.HarnessModule{
+			collapseTestSourceID: srcMod,
+			codexAsTgtID:         tgtMod,
+		},
+	}
+	return deps, workspace
+}
+
+// collapseSourceWithNonEscalatingToolBytes returns Markdown source bytes that carry only
+// "file_read" under the tools key. The collapseTestSourceModule maps harness "file_read" to
+// generic "file_read", which is non-escalating: the Codex collapse table must map it to
+// sandbox_mode = "read-only".
+func collapseSourceWithNonEscalatingToolBytes() []byte {
+	return []byte("---\n" +
+		"transform_version: \"2.1.0\"\n" +
+		"injections_version: \"1.0.0\"\n" +
+		"src_model: claude-3-5-sonnet\n" +
+		"name: collapse-test-agent\n" +
+		"tools:\n" +
+		"- file_read\n" +
+		"---\n" +
+		"<Identity type=\"core\">\n" +
+		"You are the collapse test agent.\n" +
+		"</Identity>\n")
+}
+
+// collapseSourceWithEscalatingToolBytes returns Markdown source bytes that carry "file_write"
+// under the tools key. The collapseTestSourceModule maps harness "file_write" to generic
+// "file_write", which is escalating: the Codex collapse table must map it to
+// sandbox_mode = "workspace-write".
+func collapseSourceWithEscalatingToolBytes() []byte {
+	return []byte("---\n" +
+		"transform_version: \"2.1.0\"\n" +
+		"injections_version: \"1.0.0\"\n" +
+		"src_model: claude-3-5-sonnet\n" +
+		"name: collapse-test-agent\n" +
+		"tools:\n" +
+		"- file_write\n" +
+		"---\n" +
+		"<Identity type=\"core\">\n" +
+		"You are the collapse test agent.\n" +
+		"</Identity>\n")
+}
+
+// TestRetarget_MarkdownSource_ToCodex_NonEscalatingTools_SandboxModeReadOnly verifies that
+// retargeting a Markdown source with only non-escalating tools (file_read) to a Codex target
+// produces sandbox_mode = "read-only" in the encoded TOML destination file. This exercises
+// the non-escalating branch of the collapse table, which the no-tools fixture in
+// TestRetarget_MarkdownSource_ToCodexTarget_ToolsCollapseToSandboxMode cannot reach.
+func TestRetarget_MarkdownSource_ToCodex_NonEscalatingTools_SandboxModeReadOnly(t *testing.T) {
+	// Arrange
+	stub := interactiontest.NewBuilder().Build()
+	deps, _ := newMarkdownToCodexCollapseRetargetDeps(t, stub)
+	svc := app.New(deps)
+
+	srcDir := t.TempDir()
+	srcPath := filepath.Join(srcDir, "collapse-test-agent.md")
+	if err := os.WriteFile(srcPath, collapseSourceWithNonEscalatingToolBytes(), 0o644); err != nil {
+		t.Fatalf("write source: %v", err)
+	}
+
+	req := app.TransformHarnessRequest{
+		SourceHarnessID: collapseTestSourceID,
+		TargetHarnessID: codexAsTgtID,
+		Path:            srcPath,
+		Overwrite:       true,
+	}
+
+	// Act
+	result, err := svc.TransformHarness(context.Background(), req)
+	if err != nil {
+		t.Fatalf("TransformHarness: unexpected error: %v", err)
+	}
+	if len(result.Files) == 0 {
+		t.Fatalf("TransformHarness: no file outcomes")
+	}
+
+	out := result.Files[0]
+	if out.Status != app.StatusTransformed {
+		t.Fatalf("file status = %q (reason: %q), want %q", out.Status, out.Reason, app.StatusTransformed)
+	}
+
+	// Assert: destination must be valid TOML with sandbox_mode = "read-only".
+	destBytes, readErr := os.ReadFile(out.DestinationPath)
+	if readErr != nil {
+		t.Fatalf("cannot read destination %q: %v", out.DestinationPath, readErr)
+	}
+
+	var parsed map[string]interface{}
+	if err := toml.Unmarshal(destBytes, &parsed); err != nil {
+		t.Fatalf("destination is not valid TOML: %v\nContent: %s", err, string(destBytes))
+	}
+
+	sandboxMode, ok := parsed["sandbox_mode"]
+	if !ok {
+		t.Fatalf("destination TOML does not contain sandbox_mode; "+
+			"a non-escalating tool set must collapse to sandbox_mode = \"read-only\"; "+
+			"present keys: %v", tomlKeys(parsed))
+	}
+	if s, isStr := sandboxMode.(string); !isStr || s != "read-only" {
+		t.Errorf("sandbox_mode = %v (%T); want string %q; "+
+			"a source with only non-escalating tools (file_read) must collapse to \"read-only\"",
+			sandboxMode, sandboxMode, "read-only")
+	}
+}
+
+// TestRetarget_MarkdownSource_ToCodex_EscalatingTool_SandboxModeWorkspaceWrite verifies that
+// retargeting a Markdown source with at least one escalating tool (file_write) to a Codex target
+// produces sandbox_mode = "workspace-write" in the encoded TOML destination file. This exercises
+// the escalating branch of the collapse table, which an empty or non-escalating tool set cannot
+// reach. A bug that maps escalating tools to "read-only" instead of "workspace-write" would
+// silently under-privilege the agent on the Codex platform; this test makes that bug observable.
+func TestRetarget_MarkdownSource_ToCodex_EscalatingTool_SandboxModeWorkspaceWrite(t *testing.T) {
+	// Arrange
+	stub := interactiontest.NewBuilder().Build()
+	deps, _ := newMarkdownToCodexCollapseRetargetDeps(t, stub)
+	svc := app.New(deps)
+
+	srcDir := t.TempDir()
+	srcPath := filepath.Join(srcDir, "collapse-test-agent.md")
+	if err := os.WriteFile(srcPath, collapseSourceWithEscalatingToolBytes(), 0o644); err != nil {
+		t.Fatalf("write source: %v", err)
+	}
+
+	req := app.TransformHarnessRequest{
+		SourceHarnessID: collapseTestSourceID,
+		TargetHarnessID: codexAsTgtID,
+		Path:            srcPath,
+		Overwrite:       true,
+	}
+
+	// Act
+	result, err := svc.TransformHarness(context.Background(), req)
+	if err != nil {
+		t.Fatalf("TransformHarness: unexpected error: %v", err)
+	}
+	if len(result.Files) == 0 {
+		t.Fatalf("TransformHarness: no file outcomes")
+	}
+
+	out := result.Files[0]
+	if out.Status != app.StatusTransformed {
+		t.Fatalf("file status = %q (reason: %q), want %q", out.Status, out.Reason, app.StatusTransformed)
+	}
+
+	// Assert: destination must be valid TOML with sandbox_mode = "workspace-write".
+	destBytes, readErr := os.ReadFile(out.DestinationPath)
+	if readErr != nil {
+		t.Fatalf("cannot read destination %q: %v", out.DestinationPath, readErr)
+	}
+
+	var parsed map[string]interface{}
+	if err := toml.Unmarshal(destBytes, &parsed); err != nil {
+		t.Fatalf("destination is not valid TOML: %v\nContent: %s", err, string(destBytes))
+	}
+
+	sandboxMode, ok := parsed["sandbox_mode"]
+	if !ok {
+		t.Fatalf("destination TOML does not contain sandbox_mode; "+
+			"a source with an escalating tool must produce sandbox_mode; "+
+			"present keys: %v", tomlKeys(parsed))
+	}
+	if s, isStr := sandboxMode.(string); !isStr || s != "workspace-write" {
+		t.Errorf("sandbox_mode = %v (%T); want string %q; "+
+			"a source with an escalating tool (file_write) must collapse to \"workspace-write\"",
+			sandboxMode, sandboxMode, "workspace-write")
+	}
+}
+
+// ---------------------------------------------------------------------------
 // T15.5 -- Markdown-to-Markdown retarget: non-recoverable branch not taken
 // ---------------------------------------------------------------------------
 
@@ -1202,5 +1492,627 @@ func TestRetarget_MarkdownToMarkdown_ReverseToolMappingProducesOutputTools(t *te
 			"the reverse-mapping path must run and produce output tools for a Markdown-to-Markdown "+
 			"retarget; this guards against a broken reverse-mapping path that silently returns an "+
 			"empty tool set; got:\n%s", string(destBytes))
+	}
+}
+
+// ---------------------------------------------------------------------------
+// T15.2(c) continued -- per-target-type exact-form assertions
+// ---------------------------------------------------------------------------
+//
+// The plan requires asserting the exact form each target harness emits for a minimal
+// grant. Four distinct rendering paths exist:
+//
+//   Claude Code:   comma-separated scalar (KindScalar), not a YAML list
+//   GHCP:          KindList in block style, plus a by-convention tool always included
+//   OpenCode:      KindMapping with per-tool "allow"/"deny" dispositions
+//   Codex target:  no tools field at all; capability expressed via sandbox_mode
+//
+// Each of the four stubs below mimics exactly one target harness's Tools() rendering
+// path. They are used only in the corresponding per-target-type test below.
+
+// ---------------------------------------------------------------------------
+// claudeCodeLikeTargetModule -- comma-separated scalar tools field
+// ---------------------------------------------------------------------------
+
+// claudeCodeLikeTargetModule is a target harness stub that mimics the Claude Code module's
+// post-processing behaviour: Tools() returns a comma-separated KindScalar rather than a
+// KindList. Claude Code always formats its tools field as a single scalar string because a
+// YAML list is read by Claude Code as "inherit all". Tests using this stub verify that the
+// scalar form reaches the output file, not a YAML list.
+type claudeCodeLikeTargetModule struct {
+	ref        domain.HarnessRef
+	descriptor domain.HarnessDescriptor
+}
+
+func (m *claudeCodeLikeTargetModule) Ref() domain.HarnessRef                { return m.ref }
+func (m *claudeCodeLikeTargetModule) Descriptor() *domain.HarnessDescriptor { return &m.descriptor }
+
+// Tools returns the requested generic tools joined as a comma-separated KindScalar, exactly
+// as the Claude Code module's convertFieldsToScalar post-processes the descriptor-driven list.
+func (m *claudeCodeLikeTargetModule) Tools(req domain.ToolRequest) (domain.ToolResult, error) {
+	resolutions := make([]domain.ToolResolution, len(req.Generic))
+	for i, g := range req.Generic {
+		resolutions[i] = domain.ToolResolution{Generic: g, Outcome: domain.ToolMapped, HarnessTools: []string{g}}
+	}
+	toolsKey := m.descriptor.Frontmatter.ToolsKey
+	if toolsKey == "" {
+		toolsKey = "tools"
+	}
+	return domain.ToolResult{
+		Fields: []domain.FrontmatterField{{
+			Key:   toolsKey,
+			Value: domain.FieldValue{Kind: domain.KindScalar, Scalar: strings.Join(req.Generic, ", ")},
+		}},
+		Resolutions: resolutions,
+	}, nil
+}
+
+func (m *claudeCodeLikeTargetModule) Frontmatter(_ domain.FrontmatterRequest) (domain.FrontmatterPlan, error) {
+	return domain.FrontmatterPlan{}, nil
+}
+
+func (m *claudeCodeLikeTargetModule) TargetPath(req domain.TargetPathRequest) (string, error) {
+	return req.Key + ".cc.md", nil
+}
+
+func (m *claudeCodeLikeTargetModule) Injection(_ domain.InjectionRequest) (string, bool) {
+	return "", false
+}
+
+func (m *claudeCodeLikeTargetModule) HookPlan(_ domain.HookPlanRequest) (domain.HookPlan, error) {
+	return domain.HookPlan{Supported: false, Reason: "stub"}, nil
+}
+
+func (m *claudeCodeLikeTargetModule) Close() error { return nil }
+
+const claudeCodeLikeTgtID = "claude-code-like-tgt"
+
+func newClaudeCodeLikeTargetModule() *claudeCodeLikeTargetModule {
+	return &claudeCodeLikeTargetModule{
+		ref: domain.HarnessRef{ID: claudeCodeLikeTgtID, DisplayName: "Claude Code Like Target", Usable: true},
+		descriptor: domain.HarnessDescriptor{
+			ID:          claudeCodeLikeTgtID,
+			DisplayName: "Claude Code Like Target",
+			Frontmatter: domain.FrontmatterSpec{
+				ToolsKey: "tools",
+			},
+			Paths: domain.PathSpec{
+				Agents: domain.ScopedPaths{Supported: true, Project: "agents"},
+			},
+			Extensions: map[domain.ArtifactKind]string{
+				domain.ArtifactAgent: ".cc.md",
+			},
+		},
+	}
+}
+
+// ---------------------------------------------------------------------------
+// openCodeLikeTargetModule -- permission-map (KindMapping) tools field
+// ---------------------------------------------------------------------------
+
+// openCodeLikeTargetModule is a target harness stub that mimics OpenCode's ShapePermission
+// rendering: Tools() returns a KindMapping field with per-tool "allow"/"deny" dispositions.
+// Granted tools (from req.Generic) receive "allow"; all other universe tools receive "deny".
+type openCodeLikeTargetModule struct {
+	ref        domain.HarnessRef
+	descriptor domain.HarnessDescriptor
+}
+
+func (m *openCodeLikeTargetModule) Ref() domain.HarnessRef                { return m.ref }
+func (m *openCodeLikeTargetModule) Descriptor() *domain.HarnessDescriptor { return &m.descriptor }
+
+// Tools returns a KindMapping permission field, assigning "allow" to each tool in req.Generic
+// and "deny" to all other tools in the universe. This is the permission-map form that
+// OpenCode reads.
+func (m *openCodeLikeTargetModule) Tools(req domain.ToolRequest) (domain.ToolResult, error) {
+	resolutions := make([]domain.ToolResolution, len(req.Generic))
+	for i, g := range req.Generic {
+		resolutions[i] = domain.ToolResolution{Generic: g, Outcome: domain.ToolMapped, HarnessTools: []string{g}}
+	}
+	granted := make(map[string]bool, len(req.Generic))
+	for _, g := range req.Generic {
+		granted[g] = true
+	}
+	// Universe of all known tools; only the granted ones get "allow".
+	universe := []string{"file_read", "file_search", "content_search", "file_write", "file_edit", "terminal", "subagent"}
+	pairs := make([]domain.FieldPair, len(universe))
+	for i, name := range universe {
+		disposition := "deny"
+		if granted[name] {
+			disposition = "allow"
+		}
+		pairs[i] = domain.FieldPair{
+			Key:   name,
+			Value: domain.FieldValue{Kind: domain.KindScalar, Scalar: disposition},
+		}
+	}
+	toolsKey := m.descriptor.Frontmatter.ToolsKey
+	if toolsKey == "" {
+		toolsKey = "permissions"
+	}
+	return domain.ToolResult{
+		Fields: []domain.FrontmatterField{{
+			Key:   toolsKey,
+			Value: domain.FieldValue{Kind: domain.KindMapping, Pairs: pairs},
+		}},
+		Resolutions: resolutions,
+	}, nil
+}
+
+func (m *openCodeLikeTargetModule) Frontmatter(_ domain.FrontmatterRequest) (domain.FrontmatterPlan, error) {
+	return domain.FrontmatterPlan{}, nil
+}
+
+func (m *openCodeLikeTargetModule) TargetPath(req domain.TargetPathRequest) (string, error) {
+	return req.Key + ".oc.md", nil
+}
+
+func (m *openCodeLikeTargetModule) Injection(_ domain.InjectionRequest) (string, bool) {
+	return "", false
+}
+
+func (m *openCodeLikeTargetModule) HookPlan(_ domain.HookPlanRequest) (domain.HookPlan, error) {
+	return domain.HookPlan{Supported: false, Reason: "stub"}, nil
+}
+
+func (m *openCodeLikeTargetModule) Close() error { return nil }
+
+const openCodeLikeTgtID = "opencode-like-tgt"
+
+func newOpenCodeLikeTargetModule() *openCodeLikeTargetModule {
+	return &openCodeLikeTargetModule{
+		ref: domain.HarnessRef{ID: openCodeLikeTgtID, DisplayName: "OpenCode Like Target", Usable: true},
+		descriptor: domain.HarnessDescriptor{
+			ID:          openCodeLikeTgtID,
+			DisplayName: "OpenCode Like Target",
+			Frontmatter: domain.FrontmatterSpec{
+				ToolsKey: "permissions",
+			},
+			Paths: domain.PathSpec{
+				Agents: domain.ScopedPaths{Supported: true, Project: "agents"},
+			},
+			Extensions: map[domain.ArtifactKind]string{
+				domain.ArtifactAgent: ".oc.md",
+			},
+		},
+	}
+}
+
+// ---------------------------------------------------------------------------
+// ghcpLikeTargetModule -- KindList with a by-convention entry
+// ---------------------------------------------------------------------------
+
+// ghcpLikeTargetModule is a target harness stub that mimics GHCP's list-format Tools()
+// output: returns a KindList (block style) that always includes a by-convention tool
+// alongside whatever generic tools are granted. The by-convention tool is emitted for
+// every agent regardless of the requested generic tool set.
+type ghcpLikeTargetModule struct {
+	ref        domain.HarnessRef
+	descriptor domain.HarnessDescriptor
+}
+
+func (m *ghcpLikeTargetModule) Ref() domain.HarnessRef                { return m.ref }
+func (m *ghcpLikeTargetModule) Descriptor() *domain.HarnessDescriptor { return &m.descriptor }
+
+// byConventionTool is the tool that ghcpLikeTargetModule always includes in its Tools()
+// output, mimicking GHCP's ByConvention tool that is emitted for every agent.
+const ghcpByConventionTool = "read_repository"
+
+// Tools returns a KindList field containing the granted tools plus the by-convention tool.
+// This mimics GHCP's buildListToolFields behaviour where ByConvention tools are always added.
+func (m *ghcpLikeTargetModule) Tools(req domain.ToolRequest) (domain.ToolResult, error) {
+	resolutions := make([]domain.ToolResolution, len(req.Generic))
+	for i, g := range req.Generic {
+		resolutions[i] = domain.ToolResolution{Generic: g, Outcome: domain.ToolMapped, HarnessTools: []string{g}}
+	}
+	toolsKey := m.descriptor.Frontmatter.ToolsKey
+	if toolsKey == "" {
+		toolsKey = "tools"
+	}
+	// Build list: all requested generic tools first, then the by-convention tool.
+	items := make([]domain.FieldValue, 0, len(req.Generic)+1)
+	for _, g := range req.Generic {
+		items = append(items, domain.FieldValue{Kind: domain.KindScalar, Scalar: g})
+	}
+	items = append(items, domain.FieldValue{Kind: domain.KindScalar, Scalar: ghcpByConventionTool})
+	return domain.ToolResult{
+		Fields: []domain.FrontmatterField{{
+			Key: toolsKey,
+			Value: domain.FieldValue{
+				Kind:  domain.KindList,
+				Items: items,
+				List:  domain.ListBlock,
+			},
+		}},
+		Resolutions: resolutions,
+	}, nil
+}
+
+func (m *ghcpLikeTargetModule) Frontmatter(_ domain.FrontmatterRequest) (domain.FrontmatterPlan, error) {
+	return domain.FrontmatterPlan{}, nil
+}
+
+func (m *ghcpLikeTargetModule) TargetPath(req domain.TargetPathRequest) (string, error) {
+	return req.Key + ".ghcp.md", nil
+}
+
+func (m *ghcpLikeTargetModule) Injection(_ domain.InjectionRequest) (string, bool) {
+	return "", false
+}
+
+func (m *ghcpLikeTargetModule) HookPlan(_ domain.HookPlanRequest) (domain.HookPlan, error) {
+	return domain.HookPlan{Supported: false, Reason: "stub"}, nil
+}
+
+func (m *ghcpLikeTargetModule) Close() error { return nil }
+
+const ghcpLikeTgtID = "ghcp-like-tgt"
+
+func newGHCPLikeTargetModule() *ghcpLikeTargetModule {
+	return &ghcpLikeTargetModule{
+		ref: domain.HarnessRef{ID: ghcpLikeTgtID, DisplayName: "GHCP Like Target", Usable: true},
+		descriptor: domain.HarnessDescriptor{
+			ID:          ghcpLikeTgtID,
+			DisplayName: "GHCP Like Target",
+			Frontmatter: domain.FrontmatterSpec{
+				ToolsKey: "tools",
+			},
+			Paths: domain.PathSpec{
+				Agents: domain.ScopedPaths{Supported: true, Project: "agents"},
+			},
+			Extensions: map[domain.ArtifactKind]string{
+				domain.ArtifactAgent: ".ghcp.md",
+			},
+		},
+	}
+}
+
+// ---------------------------------------------------------------------------
+// codexAsTargetModule -- no tools field; capability via sandbox_mode
+// ---------------------------------------------------------------------------
+
+// codexAsTargetModule is a target harness stub that mimics the Codex module's Tools()
+// behaviour: instead of a tools field, it emits a sandbox_mode field whose value is
+// "read-only" (for non-escalating grants) or "workspace-write" (for escalating grants).
+// The descriptor declares no ToolsKey, so RenderMinimalToolGrant does not apply the
+// tools-key presence/value guards, and the absent tools field is the expected outcome.
+type codexAsTargetModule struct {
+	ref        domain.HarnessRef
+	descriptor domain.HarnessDescriptor
+}
+
+func (m *codexAsTargetModule) Ref() domain.HarnessRef                { return m.ref }
+func (m *codexAsTargetModule) Descriptor() *domain.HarnessDescriptor { return &m.descriptor }
+
+// escalatingToolsSet lists the generic tool names that require workspace-level access.
+// Their presence in req.Generic causes the Codex sandbox to collapse to workspace-write.
+var escalatingToolsSet = map[string]bool{
+	"file_write": true,
+	"file_edit":  true,
+	"terminal":   true,
+	"subagent":   true,
+}
+
+// Tools collapses the requested generic tools into a sandbox_mode value, exactly as the
+// Codex built-in module does. Non-escalating tools produce "read-only". Any escalating
+// tool produces "workspace-write". The sandbox_mode field is the only field emitted;
+// no tools-key field is produced because the descriptor declares no ToolsKey.
+func (m *codexAsTargetModule) Tools(req domain.ToolRequest) (domain.ToolResult, error) {
+	resolutions := make([]domain.ToolResolution, len(req.Generic))
+	for i, g := range req.Generic {
+		resolutions[i] = domain.ToolResolution{Generic: g, Outcome: domain.ToolMapped}
+	}
+	mode := "read-only"
+	for _, g := range req.Generic {
+		if escalatingToolsSet[g] {
+			mode = "workspace-write"
+			break
+		}
+	}
+	return domain.ToolResult{
+		Fields: []domain.FrontmatterField{{
+			Key:   "sandbox_mode",
+			Value: domain.FieldValue{Kind: domain.KindScalar, Scalar: mode},
+		}},
+		Resolutions: resolutions,
+	}, nil
+}
+
+func (m *codexAsTargetModule) Frontmatter(_ domain.FrontmatterRequest) (domain.FrontmatterPlan, error) {
+	return domain.FrontmatterPlan{}, nil
+}
+
+// TargetPath returns a path with a "-codex-tgt.toml" suffix to avoid colliding with the
+// source file when both source and target are Codex-format agents in the same directory.
+func (m *codexAsTargetModule) TargetPath(req domain.TargetPathRequest) (string, error) {
+	return req.Key + "-codex-tgt.toml", nil
+}
+
+func (m *codexAsTargetModule) Injection(_ domain.InjectionRequest) (string, bool) {
+	return "", false
+}
+
+func (m *codexAsTargetModule) HookPlan(_ domain.HookPlanRequest) (domain.HookPlan, error) {
+	return domain.HookPlan{Supported: false, Reason: "stub"}, nil
+}
+
+func (m *codexAsTargetModule) Close() error { return nil }
+
+const codexAsTgtID = "codex-as-tgt"
+
+func newCodexAsTargetModule() *codexAsTargetModule {
+	return &codexAsTargetModule{
+		ref: domain.HarnessRef{ID: codexAsTgtID, DisplayName: "Codex As Target", Usable: true},
+		descriptor: domain.HarnessDescriptor{
+			ID:            codexAsTgtID,
+			DisplayName:   "Codex As Target",
+			AgentFormatID: "codex-toml",
+			// No ToolsKey: Codex expresses capability via sandbox_mode, not a tools field.
+			Frontmatter: domain.FrontmatterSpec{
+				KeyOrder: []string{"sandbox_mode"},
+			},
+			Paths: domain.PathSpec{
+				Agents: domain.ScopedPaths{Supported: true, Project: ".codex/agents"},
+			},
+			Extensions: map[domain.ArtifactKind]string{
+				domain.ArtifactAgent: ".toml",
+			},
+		},
+	}
+}
+
+// ---------------------------------------------------------------------------
+// Shared helper: deps and run for per-target-type tests
+// ---------------------------------------------------------------------------
+
+// newCodexNRRetargetWithTargetDeps returns Deps wired with the non-recoverable Codex source
+// harness and the provided target module. Used by the per-target-type T15.2(c) tests so each
+// can supply its own target module without duplicating the source-module setup.
+func newCodexNRRetargetWithTargetDeps(t *testing.T, tgtMod domain.HarnessModule, tgtID string) (app.Deps, string) {
+	t.Helper()
+	stub := interactiontest.NewBuilder().Build()
+	deps, workspace := newBaseDeps(t, stub)
+	srcMod := newCodexNonRecoverableRetargetModule()
+	deps.Registry = &stubRegistry{
+		list: []domain.HarnessRef{
+			{ID: codexNRHarnessID, DisplayName: "Codex NR Harness", Usable: true},
+			{ID: tgtID, DisplayName: "Target Harness", Usable: true},
+		},
+		modules: map[string]domain.HarnessModule{
+			codexNRHarnessID: srcMod,
+			tgtID:            tgtMod,
+		},
+	}
+	return deps, workspace
+}
+
+// runCodexNRRetargetWithTarget writes a Codex source file and runs TransformHarness from
+// the non-recoverable Codex source to the given target module. Returns the result and error.
+func runCodexNRRetargetWithTarget(t *testing.T, tgtMod domain.HarnessModule, tgtID string, srcBytes []byte) (app.TransformHarnessResult, error) {
+	t.Helper()
+	deps, _ := newCodexNRRetargetWithTargetDeps(t, tgtMod, tgtID)
+	svc := app.New(deps)
+
+	srcDir := t.TempDir()
+	srcPath := filepath.Join(srcDir, "my-codex-agent.toml")
+	if err := os.WriteFile(srcPath, srcBytes, 0o644); err != nil {
+		t.Fatalf("runCodexNRRetargetWithTarget: write source: %v", err)
+	}
+
+	req := app.TransformHarnessRequest{
+		SourceHarnessID: codexNRHarnessID,
+		TargetHarnessID: tgtID,
+		Path:            srcPath,
+		Overwrite:       true,
+	}
+
+	return svc.TransformHarness(context.Background(), req)
+}
+
+// ---------------------------------------------------------------------------
+// T15.2(c) per-target-type test: Claude Code comma-scalar form
+// ---------------------------------------------------------------------------
+
+// TestRetarget_CodexNonRecoverable_MinimalGrant_ClaudeCodeTarget_CommaScalarForm verifies
+// that when the target harness emits tools as a comma-separated scalar (mimicking Claude Code),
+// the destination file contains the minimal grant tools in a scalar field, not a YAML list.
+// A YAML list would be read by Claude Code as "inherit all" -- an escalation hazard.
+// The scalar form "tools: file_read, file_search, content_search" must appear instead.
+func TestRetarget_CodexNonRecoverable_MinimalGrant_ClaudeCodeTarget_CommaScalarForm(t *testing.T) {
+	result, err := runCodexNRRetargetWithTarget(t, newClaudeCodeLikeTargetModule(), claudeCodeLikeTgtID, eligibleCodexTomlRetargetBytes())
+	if err != nil {
+		t.Fatalf("TransformHarness: unexpected error: %v", err)
+	}
+	if len(result.Files) == 0 {
+		t.Fatalf("no file outcomes")
+	}
+	out := result.Files[0]
+	if out.Status != app.StatusTransformed {
+		t.Fatalf("file status = %q (reason: %q), want %q", out.Status, out.Reason, app.StatusTransformed)
+	}
+
+	destBytes, readErr := os.ReadFile(out.DestinationPath)
+	if readErr != nil {
+		t.Fatalf("cannot read destination: %v", readErr)
+	}
+	destStr := string(destBytes)
+
+	// Assert: all three minimal grant tools appear in the destination.
+	for _, tool := range descriptor.MinimalGenericToolSet {
+		if !strings.Contains(destStr, tool) {
+			t.Errorf("destination does not contain minimal grant tool %q; got:\n%s", tool, destStr)
+		}
+	}
+
+	// Assert: tools field is a comma-separated scalar, NOT a YAML block-list.
+	// A YAML block-list item would appear as "  - tool_name" on its own line.
+	// The comma-scalar form would appear as "tools: file_read, file_search, content_search"
+	// on a single line -- no "  - " items under the tools key.
+	for _, tool := range descriptor.MinimalGenericToolSet {
+		listItem := "\n  - " + tool
+		if strings.Contains(destStr, listItem) {
+			t.Errorf("destination tools field contains YAML list item %q; "+
+				"a Claude Code target must emit a comma-separated scalar, not a YAML list "+
+				"(a YAML list is read by Claude Code as inherit-all); got:\n%s",
+				listItem, destStr)
+		}
+	}
+}
+
+// ---------------------------------------------------------------------------
+// T15.2(c) per-target-type test: OpenCode permission-map form
+// ---------------------------------------------------------------------------
+
+// TestRetarget_CodexNonRecoverable_MinimalGrant_OpenCodeTarget_PermissionMapForm verifies
+// that when the target harness emits tools as a permission mapping (mimicking OpenCode's
+// ShapePermission), the destination file contains "allow" dispositions for each of the
+// minimal grant tools. A flat list or a scalar would indicate the permission-map path was
+// bypassed and that the output file would be misread by OpenCode.
+func TestRetarget_CodexNonRecoverable_MinimalGrant_OpenCodeTarget_PermissionMapForm(t *testing.T) {
+	result, err := runCodexNRRetargetWithTarget(t, newOpenCodeLikeTargetModule(), openCodeLikeTgtID, eligibleCodexTomlRetargetBytes())
+	if err != nil {
+		t.Fatalf("TransformHarness: unexpected error: %v", err)
+	}
+	if len(result.Files) == 0 {
+		t.Fatalf("no file outcomes")
+	}
+	out := result.Files[0]
+	if out.Status != app.StatusTransformed {
+		t.Fatalf("file status = %q (reason: %q), want %q", out.Status, out.Reason, app.StatusTransformed)
+	}
+
+	destBytes, readErr := os.ReadFile(out.DestinationPath)
+	if readErr != nil {
+		t.Fatalf("cannot read destination: %v", readErr)
+	}
+	destStr := string(destBytes)
+
+	// Assert: the permissions key is present (the OpenCode-like module uses "permissions").
+	if !strings.Contains(destStr, "permissions:") {
+		t.Errorf("destination does not contain \"permissions:\" key; "+
+			"the OpenCode permission-map form must include the declared tools key; got:\n%s", destStr)
+	}
+
+	// Assert: each minimal grant tool appears with "allow" disposition in the mapping.
+	// The YAML serialisation of a KindMapping entry is "  tool_name: allow\n".
+	for _, tool := range descriptor.MinimalGenericToolSet {
+		wantEntry := "  " + tool + ": allow"
+		if !strings.Contains(destStr, wantEntry) {
+			t.Errorf("destination does not contain permission-map entry %q for minimal grant tool %q; "+
+				"the OpenCode form must assign 'allow' to each granted tool; got:\n%s",
+				wantEntry, tool, destStr)
+		}
+	}
+}
+
+// ---------------------------------------------------------------------------
+// T15.2(c) per-target-type test: GHCP list-with-by_convention form
+// ---------------------------------------------------------------------------
+
+// TestRetarget_CodexNonRecoverable_MinimalGrant_GHCPTarget_ListWithByConvention verifies
+// that when the target harness emits tools as a YAML block list and always includes a
+// by-convention entry (mimicking GHCP), the destination file contains both the minimal
+// grant tools and the by-convention tool. The by-convention tool must be present regardless
+// of what generic tools are requested.
+func TestRetarget_CodexNonRecoverable_MinimalGrant_GHCPTarget_ListWithByConvention(t *testing.T) {
+	result, err := runCodexNRRetargetWithTarget(t, newGHCPLikeTargetModule(), ghcpLikeTgtID, eligibleCodexTomlRetargetBytes())
+	if err != nil {
+		t.Fatalf("TransformHarness: unexpected error: %v", err)
+	}
+	if len(result.Files) == 0 {
+		t.Fatalf("no file outcomes")
+	}
+	out := result.Files[0]
+	if out.Status != app.StatusTransformed {
+		t.Fatalf("file status = %q (reason: %q), want %q", out.Status, out.Reason, app.StatusTransformed)
+	}
+
+	destBytes, readErr := os.ReadFile(out.DestinationPath)
+	if readErr != nil {
+		t.Fatalf("cannot read destination: %v", readErr)
+	}
+	destStr := string(destBytes)
+
+	// Assert: each minimal grant tool appears as a YAML block-list item.
+	// The YAML serialisation of a KindList/ListBlock item is "  - tool_name\n".
+	for _, tool := range descriptor.MinimalGenericToolSet {
+		listItem := "  - " + tool
+		if !strings.Contains(destStr, listItem) {
+			t.Errorf("destination does not contain YAML list item %q for minimal grant tool %q; "+
+				"a GHCP-like target must emit tools as a YAML block list; got:\n%s",
+				listItem, tool, destStr)
+		}
+	}
+
+	// Assert: the by-convention tool is present in the list.
+	// By-convention tools are emitted for every agent regardless of the requested grant.
+	byConvItem := "  - " + ghcpByConventionTool
+	if !strings.Contains(destStr, byConvItem) {
+		t.Errorf("destination does not contain by-convention tool entry %q; "+
+			"a GHCP-like target must include the by-convention tool in every tools list; got:\n%s",
+			byConvItem, destStr)
+	}
+}
+
+// ---------------------------------------------------------------------------
+// T15.2(c) per-target-type test: Codex-as-target no-tools-field form
+// ---------------------------------------------------------------------------
+
+// TestRetarget_CodexNonRecoverable_MinimalGrant_CodexTarget_SandboxModeNoToolsKey verifies
+// that when the target is a Codex harness (no ToolsKey, capability via sandbox_mode),
+// the output TOML file carries sandbox_mode = "read-only" and no tools key. This is the
+// "no tools field for Codex" form required by the plan: the non-recoverable minimal grant
+// for a non-escalating set of generic tools collapses to "read-only" sandbox mode, and no
+// separate tools field is written.
+//
+// The test also covers the missing case identified in the review: "a test that retargets
+// from a non-recoverable Codex source to a Codex target" (Codex-to-Codex direction, in
+// contrast to T15.4 which covers Markdown-to-Codex).
+func TestRetarget_CodexNonRecoverable_MinimalGrant_CodexTarget_SandboxModeNoToolsKey(t *testing.T) {
+	result, err := runCodexNRRetargetWithTarget(t, newCodexAsTargetModule(), codexAsTgtID, eligibleCodexTomlRetargetBytes())
+	if err != nil {
+		t.Fatalf("TransformHarness: unexpected error: %v", err)
+	}
+	if len(result.Files) == 0 {
+		t.Fatalf("no file outcomes")
+	}
+	out := result.Files[0]
+	if out.Status != app.StatusTransformed {
+		t.Fatalf("file status = %q (reason: %q), want %q", out.Status, out.Reason, app.StatusTransformed)
+	}
+
+	destBytes, readErr := os.ReadFile(out.DestinationPath)
+	if readErr != nil {
+		t.Fatalf("cannot read destination: %v", readErr)
+	}
+
+	// Assert: destination file must be parseable as TOML.
+	var parsed map[string]interface{}
+	if err := toml.Unmarshal(destBytes, &parsed); err != nil {
+		t.Fatalf("destination file is not valid TOML: %v\nFirst 200 bytes: %q",
+			err, string(destBytes[:min(len(destBytes), 200)]))
+	}
+
+	// Assert: sandbox_mode = "read-only" is present.
+	// The MinimalGenericToolSet contains only non-escalating tools (file_read, file_search,
+	// content_search), so the Codex module must collapse them to "read-only".
+	sandboxMode, ok := parsed["sandbox_mode"]
+	if !ok {
+		t.Errorf("destination TOML does not contain sandbox_mode key; "+
+			"a Codex target must express capability via sandbox_mode, not a tools field; "+
+			"present keys: %v", tomlKeys(parsed))
+	} else if s, isStr := sandboxMode.(string); !isStr || s != "read-only" {
+		t.Errorf("sandbox_mode = %v (%T); want string %q; "+
+			"the minimal non-escalating grant must collapse to read-only sandbox mode",
+			sandboxMode, sandboxMode, "read-only")
+	}
+
+	// Assert: no tools key in the output TOML.
+	// Codex represents capability through sandbox_mode; a separate tools field would
+	// indicate that the wrong rendering path was taken.
+	if _, hasTools := parsed["tools"]; hasTools {
+		t.Errorf("destination TOML contains a \"tools\" key; "+
+			"a Codex target must not emit a tools field -- capability is expressed solely "+
+			"via sandbox_mode; present keys: %v", tomlKeys(parsed))
 	}
 }

@@ -10,7 +10,7 @@ This guide walks you through the **golden path**: one minimal deployment, one ze
 
 You need an AI coding tool already installed, configured, and working with model access:
 
-- **Claude Code**, **OpenCode**, **VS Code GitHub Copilot**, or **GitHub Copilot CLI**
+- **Claude Code**, **OpenCode**, **VS Code GitHub Copilot**, **GitHub Copilot CLI**, or **Codex**
 
 MOSAIC deploys agents *into* these tools — it doesn't replace them. If you can already have a working conversation with your AI coding tool, you're ready.
 
@@ -64,7 +64,7 @@ On Linux: `./mosaic-deploy`
 
 The interactive TUI walks you through:
 
-1. **Pick a harness** — which AI coding tool you use (Claude Code, OpenCode, VS Code GHCP, or GHCP CLI)
+1. **Pick a harness** — which AI coding tool you use (Claude Code, OpenCode, VS Code GHCP, GHCP CLI, or Codex)
 2. **Pick workflows** — select **only `kb-generation`** for now (you'll add more later)
 3. **Skip utility agents** — you don't need them for your first run
 4. **Assign models** — the TUI asks you to map each model tier (HIGH, MEDIUM-HIGH, etc.) to a specific model ID available in your setup. If you have one strong model and one cheaper model, use the strong one for the upper tiers and the cheaper one for the lower tiers. If you only have one model available, use it for everything — you can always redeploy with different assignments later.

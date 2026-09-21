@@ -475,9 +475,25 @@ func applyHarnessRegion(node *docformat.Node, name string, class domain.Injectio
 	// paths. For orchestrator agents the orchestrator-specific version is selected; for all
 	// other agents the regular injections version is used. This follows the same
 	// role-conditional pattern as build.go's stamp construction.
+	//
+	// When the caller has not explicitly set a version field in the Request (empty string),
+	// fall back to the module descriptor's value. This allows callers that build a Request
+	// directly (e.g. tests) to get the descriptor's version automatically without needing
+	// to mirror it. Callers that pass an explicit value (including an explicit empty string
+	// to suppress the stamp) are respected: a non-empty explicit value wins; the fallback
+	// only applies when no explicit value was supplied. Because Go cannot distinguish
+	// "not set" from "set to empty", fixture descriptors that must not stamp a version
+	// (e.g. for purity tests) must not declare injections_version.
 	injVersion := req.InjectionsVersion
+	if injVersion == "" && req.Module != nil {
+		injVersion = req.Module.Descriptor().InjectionsVersion
+	}
 	if req.Role == domain.RoleOrchestrator {
-		injVersion = req.OrchestratorInjectionsVersion
+		orchVersion := req.OrchestratorInjectionsVersion
+		if orchVersion == "" && req.Module != nil {
+			orchVersion = req.Module.Descriptor().OrchestratorInjectionsVersion
+		}
+		injVersion = orchVersion
 	}
 
 	content, ok := req.Module.Injection(domain.InjectionRequest{Name: name, AgentKey: req.Key, Role: req.Role})

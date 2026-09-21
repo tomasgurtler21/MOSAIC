@@ -18,7 +18,7 @@ This guide is for **project authors** who want to get MOSAIC running in their AI
 
 **Two ways to run:** Launch without a subcommand for the interactive TUI, or pass a subcommand for scriptable CLI mode.
 
-**Built-in harnesses:** `claude-code`, `opencode`, `ghcp-cli`, `vscode-ghcp`.
+**Built-in harnesses:** `claude-code`, `opencode`, `ghcp-cli`, `vscode-ghcp`, `codex`.
 
 ---
 
@@ -221,7 +221,7 @@ Work through this checklist before using the workspace. Filling project regions 
 | Problem | Fix |
 |---------|-----|
 | "not a MOSAIC repository" | Run from inside the MOSAIC repo, or pass `--mosaic-root /path/to/MOSAIC` |
-| "harness not found" | Check the ID (`claude-code`, `opencode`, `ghcp-cli`, `vscode-ghcp`). For custom descriptors, pass the full file path. |
+| "harness not found" | Check the ID (`claude-code`, `opencode`, `ghcp-cli`, `vscode-ghcp`, `codex`). For custom descriptors, pass the full file path. |
 | "external harness modules require explicit opt-in" | Set `allow_external_modules: true` in `tool-config.yaml`, or pass `--allow-external` |
 | Config file not picked up | The tool looks in `MosaicDeploy/config/` under the MOSAIC root. Verify `--mosaic-root` if you moved the binary. |
 

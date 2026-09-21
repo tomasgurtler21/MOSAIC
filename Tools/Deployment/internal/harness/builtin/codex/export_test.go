@@ -35,3 +35,12 @@ func DescriptorForTesting(t testing.TB) *domain.HarnessDescriptor {
 	}
 	return desc
 }
+
+// CollapseSandboxModeForTesting exposes collapseSandboxMode for direct unit testing.
+// It is used by T18.1 to pin the fail-safe default at the function level: when the
+// I18.1 fix causes resolveTools to call Module.Tools with an empty request for
+// tools-less sources, collapseSandboxMode must return "read-only" for that empty
+// request to guarantee the fail-safe default.
+func CollapseSandboxModeForTesting(req domain.ToolRequest) string {
+	return collapseSandboxMode(req)
+}

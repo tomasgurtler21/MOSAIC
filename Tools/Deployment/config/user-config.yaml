@@ -113,7 +113,7 @@ custom_model_ids: {}
 #   separator  (only when format: scalar) defaults to ", "
 #   names      (required, non-empty) harness-side tool or MCP server names.
 #
-# Built-in harness ids: claude-code, opencode, ghcp-cli, vscode-ghcp
+# Built-in harness ids: claude-code, opencode, ghcp-cli, vscode-ghcp, codex
 # Generic tools all built-ins already map: file_read, file_write, file_edit,
 # file_search, content_search, terminal, subagent, user_interaction, skill
 #

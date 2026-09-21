@@ -313,8 +313,8 @@ func TestStripCarriage_NoContainer_ReturnsDocumentUnchanged(t *testing.T) {
 	}
 }
 
-// TestStripCarriage_NoContainer_EmptyInputRoundTrips verifies that an empty canonical
-// document (if parseable) also produces a success with nil CarriedKeys.
+// TestStripCarriage_NoContainer_MinimalDocumentRoundTrips verifies that a minimal canonical
+// document (frontmatter with only a name, no container) also produces a success with nil CarriedKeys.
 func TestStripCarriage_NoContainer_MinimalDocumentRoundTrips(t *testing.T) {
 	// Minimal canonical document: frontmatter with only a name, no container.
 	input := []byte("---\nname: minimal\n---\nMinimal body.\n")

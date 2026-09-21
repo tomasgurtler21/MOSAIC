@@ -190,17 +190,10 @@ func TestPromote_NonRecoverableSource_Interactive_AnsweredTool_AppearsInPromoted
 // a tool name outside the generic vocabulary does not appear in the promoted file. The
 // implementation must reject it (re-ask or discard) rather than accepting it silently.
 //
-// The stub returns the same answer on every call, so the flow either loops until it gives up
-// (falling back to blank-answer behaviour) or rejects it; either way, the name must not reach
-// the output. The primary assertion is that result.Tools does not contain the bogus name.
-//
-// The re-ask obligation (the question is asked more than once) and the vocabulary-named-back
-// obligation are not explicitly verified here: verifying re-ask would require a stub that
-// returns different answers on subsequent calls, which the current interactiontest.Builder
-// does not support (it always returns the scripted answer). The primary behavioral protection
-// -- the bad tool name is absent from result.Tools -- is sufficient coverage for the output
-// contract. A future test could use an answer sequence stub if re-ask behavior is introduced
-// as a testable invariant.
+// The stub returns the same answer on every call; the test asserts only that the bad name is
+// absent from result.Tools. The companion test
+// TestPromote_NonRecoverableSource_Interactive_UnknownToolName_ReAskOnBadName uses
+// AnswerTextSequence to verify that the implementation re-asks after receiving a bad name.
 func TestPromote_NonRecoverableSource_Interactive_UnknownToolName_NotInPromotedFile(t *testing.T) {
 	// Arrange
 	mosaicRoot := writeMosaicRoot(t)
@@ -876,6 +869,127 @@ func TestPromote_MarkdownSource_NonRecoverableBranchNotTaken(t *testing.T) {
 			t.Errorf("QPromoteNonRecoverableTools was asked for a Markdown-source promote; "+
 				"it must only be asked when ToolInfoUnrecoverable=true on the source harness descriptor")
 			break
+		}
+	}
+}
+
+// ---------------------------------------------------------------------------
+// T15.1(b) (continued) -- re-ask on unknown name: verify question count and final output
+// ---------------------------------------------------------------------------
+
+// TestPromote_NonRecoverableSource_Interactive_UnknownToolName_ReAskOnBadName verifies that
+// when the user first provides a tool name outside the generic vocabulary the question is asked
+// again (re-ask obligation), and the valid name from the second answer appears in result.Tools.
+//
+// This uses AnswerTextSequence: the stub returns the bad name on the first call, then the valid
+// name on every subsequent call. After the flow rejects the first answer and re-asks, the stub
+// provides "file_read", which must appear in result.Tools. The call count must be >= 2.
+func TestPromote_NonRecoverableSource_Interactive_UnknownToolName_ReAskOnBadName(t *testing.T) {
+	// Arrange
+	mosaicRoot := writeMosaicRoot(t)
+	srcPath := writeCodexNonRecoverableSource(t, t.TempDir(), "my-codex-agent.toml", eligibleCodexTomlBytes())
+
+	stub := interactiontest.NewBuilder().
+		AnswerTextSequence(domain.QPromoteNonRecoverableTools, srcPath, []string{
+			"completely_unknown_tool_xyz", // first answer: bad name; must be rejected and re-asked
+			"file_read",                   // second answer: valid generic name
+		}).
+		Build()
+	deps, _ := newCodexNonRecoverablePromoteDeps(t, stub, mosaicRoot)
+	svc := app.New(deps)
+
+	req := app.PromoteRequest{
+		FilePath:  srcPath,
+		Category:  "TestCategory",
+		HarnessID: "codex-harness",
+	}
+
+	// Act
+	result, err := svc.Promote(context.Background(), req)
+	if err != nil {
+		t.Fatalf("Promote: unexpected error: %v", err)
+	}
+
+	// Assert: the question was asked more than once (the bad name triggered at least one re-ask).
+	count := stub.CountAsked(domain.QPromoteNonRecoverableTools, srcPath)
+	if count < 2 {
+		t.Errorf("QPromoteNonRecoverableTools was asked %d time(s); want >= 2; "+
+			"a tool name outside the generic vocabulary must be rejected and the question re-asked",
+			count)
+	}
+
+	// Assert: "file_read" from the second answer appears in result.Tools.
+	found := false
+	for _, tool := range result.Tools {
+		if tool == "file_read" {
+			found = true
+			break
+		}
+	}
+	if !found {
+		t.Errorf("result.Tools = %v; want \"file_read\" from the second (valid) answer; "+
+			"after re-asking the question the valid tool name must appear in the promoted file",
+			result.Tools)
+	}
+}
+
+// ---------------------------------------------------------------------------
+// T15.1 prompt contract -- whitespace and case normalisation
+// ---------------------------------------------------------------------------
+
+// TestPromote_NonRecoverableSource_Interactive_NormalisedToolName_AppearsInResult verifies that
+// tool names provided with leading/trailing whitespace and non-canonical case are normalised
+// before validation and output. The plan prompt contract states that whitespace and case
+// normalisation is applied so tests assert a defined behaviour rather than an incidental one.
+//
+// The stub returns " FILE_READ " (whitespace-padded, uppercase). The normalisation pass must
+// strip the surrounding whitespace and lower-case the name before looking it up in the generic
+// vocabulary. The normalised form "file_read" must appear in result.Tools; the raw padded form
+// must not appear.
+func TestPromote_NonRecoverableSource_Interactive_NormalisedToolName_AppearsInResult(t *testing.T) {
+	// Arrange
+	mosaicRoot := writeMosaicRoot(t)
+	srcPath := writeCodexNonRecoverableSource(t, t.TempDir(), "my-codex-agent.toml", eligibleCodexTomlBytes())
+
+	stub := interactiontest.NewBuilder().
+		AnswerText(domain.QPromoteNonRecoverableTools, srcPath, "  FILE_READ  ").
+		Build()
+	deps, _ := newCodexNonRecoverablePromoteDeps(t, stub, mosaicRoot)
+	svc := app.New(deps)
+
+	req := app.PromoteRequest{
+		FilePath:  srcPath,
+		Category:  "TestCategory",
+		HarnessID: "codex-harness",
+	}
+
+	// Act
+	result, err := svc.Promote(context.Background(), req)
+	if err != nil {
+		t.Fatalf("Promote: unexpected error: %v", err)
+	}
+
+	// Assert: the normalised form "file_read" appears in result.Tools.
+	found := false
+	for _, tool := range result.Tools {
+		if tool == "file_read" {
+			found = true
+			break
+		}
+	}
+	if !found {
+		t.Errorf("result.Tools = %v; want normalised \"file_read\" after providing \" FILE_READ \"; "+
+			"the implementation must trim surrounding whitespace and lower-case tool names before "+
+			"matching against the generic vocabulary", result.Tools)
+	}
+
+	// Assert: no non-normalised tool names appear in result.Tools.
+	// A raw padded or upper-cased entry would indicate the normalisation pass was bypassed.
+	for _, tool := range result.Tools {
+		if strings.TrimSpace(strings.ToLower(tool)) != tool {
+			t.Errorf("result.Tools contains non-normalised tool name %q; "+
+				"all tool names in result.Tools must be lowercase with no surrounding whitespace",
+				tool)
 		}
 	}
 }

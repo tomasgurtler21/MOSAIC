@@ -36,11 +36,12 @@ type Call struct {
 
 // script holds pre-configured answers keyed by question identity.
 type script struct {
-	choices      map[scriptKey]domain.ChoiceAnswer
-	multiChoices map[scriptKey]domain.MultiChoiceAnswer
-	texts        map[scriptKey]domain.TextAnswer
-	confirms     map[scriptKey]domain.ConfirmAnswer
-	reviews      []domain.ConfirmAnswer
+	choices       map[scriptKey]domain.ChoiceAnswer
+	multiChoices  map[scriptKey]domain.MultiChoiceAnswer
+	texts         map[scriptKey]domain.TextAnswer
+	confirms      map[scriptKey]domain.ConfirmAnswer
+	reviews       []domain.ConfirmAnswer
+	textSequences map[scriptKey][]domain.TextAnswer
 }
 
 type scriptKey struct {
@@ -57,10 +58,11 @@ type Builder struct {
 // NewBuilder returns an empty Builder.
 func NewBuilder() *Builder {
 	return &Builder{s: script{
-		choices:      make(map[scriptKey]domain.ChoiceAnswer),
-		multiChoices: make(map[scriptKey]domain.MultiChoiceAnswer),
-		texts:        make(map[scriptKey]domain.TextAnswer),
-		confirms:     make(map[scriptKey]domain.ConfirmAnswer),
+		choices:       make(map[scriptKey]domain.ChoiceAnswer),
+		multiChoices:  make(map[scriptKey]domain.MultiChoiceAnswer),
+		texts:         make(map[scriptKey]domain.TextAnswer),
+		confirms:      make(map[scriptKey]domain.ConfirmAnswer),
+		textSequences: make(map[scriptKey][]domain.TextAnswer),
 	}}
 }
 
@@ -111,6 +113,19 @@ func (b *Builder) AnswerText(id domain.QuestionID, subject, text string) *Builde
 	return b
 }
 
+// AnswerTextSequence scripts a sequence of text answers for successive AskText calls with
+// the given id and subject. The first call returns answers[0], the second returns answers[1],
+// and so on. Once the last element is reached it is returned for all subsequent calls.
+// A sequence takes precedence over a single AnswerText answer for the same key.
+func (b *Builder) AnswerTextSequence(id domain.QuestionID, subject string, answers []string) *Builder {
+	seq := make([]domain.TextAnswer, len(answers))
+	for i, text := range answers {
+		seq[i] = domain.TextAnswer{Status: domain.Answered, Text: text}
+	}
+	b.s.textSequences[scriptKey{id, subject}] = seq
+	return b
+}
+
 // AnswerCancelledText scripts a Cancelled response for an AskText call matching id and
 // subject. The service must treat Cancelled the same way it treats SkippedOne: carry the
 // subject verbatim into the output without blocking. This allows tests to verify that every
@@ -152,11 +167,12 @@ func (b *Builder) AnswerReview(confirm bool) *Builder {
 // Build returns a Stub ready to use as domain.Interaction.
 func (b *Builder) Build() *Stub {
 	cp := script{
-		choices:      make(map[scriptKey]domain.ChoiceAnswer, len(b.s.choices)),
-		multiChoices: make(map[scriptKey]domain.MultiChoiceAnswer, len(b.s.multiChoices)),
-		texts:        make(map[scriptKey]domain.TextAnswer, len(b.s.texts)),
-		confirms:     make(map[scriptKey]domain.ConfirmAnswer, len(b.s.confirms)),
-		reviews:      append([]domain.ConfirmAnswer(nil), b.s.reviews...),
+		choices:       make(map[scriptKey]domain.ChoiceAnswer, len(b.s.choices)),
+		multiChoices:  make(map[scriptKey]domain.MultiChoiceAnswer, len(b.s.multiChoices)),
+		texts:         make(map[scriptKey]domain.TextAnswer, len(b.s.texts)),
+		confirms:      make(map[scriptKey]domain.ConfirmAnswer, len(b.s.confirms)),
+		reviews:       append([]domain.ConfirmAnswer(nil), b.s.reviews...),
+		textSequences: make(map[scriptKey][]domain.TextAnswer, len(b.s.textSequences)),
 	}
 	for k, v := range b.s.choices {
 		cp.choices[k] = v
@@ -170,17 +186,23 @@ func (b *Builder) Build() *Stub {
 	for k, v := range b.s.confirms {
 		cp.confirms[k] = v
 	}
-	return &Stub{script: cp}
+	for k, v := range b.s.textSequences {
+		seqCopy := make([]domain.TextAnswer, len(v))
+		copy(seqCopy, v)
+		cp.textSequences[k] = seqCopy
+	}
+	return &Stub{script: cp, textSeqIndexes: make(map[scriptKey]int)}
 }
 
 // Stub is a scripted test double that implements domain.Interaction. It is safe for concurrent
 // use by a single test (the app runs sequentially within one goroutine in tests).
 type Stub struct {
-	mu          sync.Mutex
-	script      script
-	calls       []Call
-	notices     []domain.Notice
-	reviewIndex int
+	mu             sync.Mutex
+	script         script
+	calls          []Call
+	notices        []domain.Notice
+	reviewIndex    int
+	textSeqIndexes map[scriptKey]int
 }
 
 // Calls returns all recorded interaction calls in invocation order. The returned slice is a
@@ -264,11 +286,24 @@ func (s *Stub) SelectMany(ctx context.Context, q domain.ChoiceQuestion) (domain.
 	return domain.MultiChoiceAnswer{Status: domain.SkippedOne}, nil
 }
 
-// AskText implements domain.Interaction. Returns the scripted answer if configured;
-// otherwise returns SkippedOne.
+// AskText implements domain.Interaction. Returns the scripted answer if configured.
+// A sequence scripted via AnswerTextSequence takes precedence: each call advances the
+// cursor by one; once the last element is reached it is returned for all subsequent calls.
+// Falls back to a single AnswerText answer, then to SkippedOne if neither is scripted.
 func (s *Stub) AskText(ctx context.Context, q domain.TextQuestion) (domain.TextAnswer, error) {
 	s.record(Call{ID: q.ID, Subject: q.Subject, Kind: "text"})
-	if a, ok := s.script.texts[scriptKey{q.ID, q.Subject}]; ok {
+	k := scriptKey{q.ID, q.Subject}
+	if seq, ok := s.script.textSequences[k]; ok && len(seq) > 0 {
+		s.mu.Lock()
+		idx := s.textSeqIndexes[k]
+		if idx < len(seq)-1 {
+			s.textSeqIndexes[k] = idx + 1
+		}
+		a := seq[idx]
+		s.mu.Unlock()
+		return a, nil
+	}
+	if a, ok := s.script.texts[k]; ok {
 		return a, nil
 	}
 	return domain.TextAnswer{Status: domain.SkippedOne}, nil
