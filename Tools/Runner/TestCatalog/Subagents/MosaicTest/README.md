@@ -14,9 +14,10 @@ Measuring it requires real end-to-end runs, which requires agents. These are tho
 
 | ID | Agent | Version | Kind | Tier | Description |
 |----|-------|---------|------|:----:|-------------|
-| 40 | [mosaictest-scripted](./mosaictest-scripted.md) | 2.2.0 | Routed | LOW | Reads the script fixture bound to its row and returns exactly the response it specifies |
+| 40 | [mosaictest-scripted](./mosaictest-scripted.md) | 2.3.0 | Routed | LOW | Reads the script fixture bound to its row and returns exactly the response it specifies |
 | 41 | [mosaictest-checkpoint](./mosaictest-checkpoint.md) | 2.1.0 | Infrastructure, `checkpoint` | LOW | Returns SUCCESS with a fake `[checkpoint:{sha}]` marker; performs no git operations |
 | 42 | [mosaictest-review](./mosaictest-review.md) | 2.1.0 | Infrastructure, `review` | LOW | Returns SUCCESS with a self-describing message; inspects nothing |
+| 43 | [mosaictest-commit](./mosaictest-commit.md) | 2.1.0 | Infrastructure, `commit` | LOW | Returns SUCCESS with a fake `[branch:mosaictest-run]` marker; performs no git operations |
 
 ### The stub orchestrator is not in this folder
 
@@ -50,7 +51,7 @@ The script format is specified inside [mosaictest-scripted.md](./mosaictest-scri
 - **They never refuse meaningless input.** Fixture artifacts are gibberish by design. An agent that objects to content, tidies it, or asks about it destroys the measurement while leaving the run looking healthy. Obeying the fixture *is* the scope.
 - **They echo `run_id` and `agent_instance_id` verbatim.** Whether those values survive the harness round trip is one of the things under test, so a normalised or reconstructed value reports a pass that did not happen.
 - **`status_message` is the primary readout.** Evaluation is a human watching the runner's TUI, not a golden diff, so every message names its row, phase, stage where meaningful, and the status being returned.
-- **They never guess.** Where a fixture fails to determine an answer, the response is `BLOCKED`. A guessed status produces a green run that measured nothing — the only outcome worse than a loud failure.
+- **They never guess.** Where a fixture fails to determine an answer, the response is `FIXTURE_ERROR` — a status code outside the protocol that the Runner cannot process, forcing a loud crash. A guessed status produces a green run that measured nothing — the only outcome worse than a loud failure.
 - **They are stateless across invocations.** `agent_instance_id` is `{agent}#{N}` over a global counter, so it carries no "which invocation of me is this" signal. A marker artifact, checked by content and reset by overwriting, is the only legitimate source of that.
 
 ## Design Reference

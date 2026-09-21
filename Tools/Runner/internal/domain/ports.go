@@ -332,7 +332,12 @@ const (
 	EventSessionManualResolve   = "session.manual.resolve"
 
 	// Snapshot event names.
-	EventSnapshotCleanupFailed = "session.snapshot.cleanup_failed"
+	EventSnapshotCleanupFailed  = "session.snapshot.cleanup_failed"
+	EventSnapshotRestored       = "session.snapshot.restored"
+	EventSnapshotLockAcquired   = "session.snapshot.lock_acquired"
+	EventSnapshotLockReleased   = "session.snapshot.lock_released"
+	EventSnapshotBackupCreated  = "session.snapshot.backup_created"  // Stage 8: creator wrote backup
+	EventSnapshotRecovery       = "session.snapshot.recovery"        // Stage 9: recovery ran at startup
 
 	// Graceful-stop lifecycle event names. Silent in a run where no stop is
 	// requested: nothing here is emitted on a negative poll or an ignored key.

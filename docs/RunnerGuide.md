@@ -98,7 +98,13 @@ If the file does not exist, the Runner exits immediately with a message indicati
 
 ### Agent Snapshot Directories
 
-At run start, the Runner creates a run-scoped copy of the agents directory alongside the regular one (e.g., `.claude/agents-runner-{run_id}/`). This snapshot is used for all invocations and deleted automatically when the run completes or stops gracefully. If the Runner crashes mid-run, an orphaned `agents-runner-{run_id}/` directory may remain -- it is safe to delete manually and does not affect other runs.
+At run start, the Runner creates a snapshot or backup of agent files so it can apply harness-specific transforms (e.g., `mode: primary` for OpenCode) without permanently altering the deployed agents. The strategy used depends on how the harness loads agents:
+
+**Copy-and-invoke (path-based harnesses -- Claude Code):** The Runner copies the agents directory to a run-scoped sibling directory (e.g., `.claude/agents-runner-{run_id}/`), applies transforms to the copies, and invokes agents from there. Originals are never modified. On completion, the copy is deleted automatically. If the Runner crashes mid-run, an orphaned `agents-runner-{run_id}/` directory may remain; it is safe to delete manually and does not affect other runs.
+
+**Backup-and-transform (name-based harnesses -- OpenCode, GHCP CLI):** These harnesses always resolve agents by name from their canonical directory and cannot be redirected to a copy. Instead, the Runner copies originals to a shared backup directory (e.g., `.opencode/.agents-backup/`), transforms the originals in-place, and restores from backup on completion. Multiple concurrent runs share the same backup directory and coordinate via per-run lock files inside it.
+
+**Automatic crash recovery:** If the Runner crashes mid-run while using backup-and-transform, it leaves a human-readable `RUNNER-RECOVERY.txt` marker inside the agents directory explaining what happened and providing step-by-step manual restore instructions. On the next run start, the Runner automatically detects and recovers any orphaned backup state. The `.txt` extension is used for the marker so that no harness indexes it as an agent definition.
 
 ---
 

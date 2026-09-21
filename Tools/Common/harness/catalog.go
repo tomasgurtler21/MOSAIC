@@ -1,5 +1,7 @@
 package harness
 
+import "fmt"
+
 // Harness identities. These constants are the identity half of the catalog
 // entries below; they exist as named constants so a composition root's
 // switch cases and a test's expectations name the same thing.
@@ -8,6 +10,40 @@ const (
 	HarnessIDOpenCode   = "opencode"
 	HarnessIDGHCPCLI    = "ghcp-cli"
 )
+
+// LoadingMechanism describes how a CLI harness locates agent definition files.
+type LoadingMechanism int
+
+const (
+	// LoadingMechanismUnset is the zero value, indicating the field was never
+	// assigned. A catalog entry with this value is misconfigured; the Runner
+	// refuses the run rather than silently misbehaving.
+	LoadingMechanismUnset LoadingMechanism = 0
+
+	// LoadingMechanismPath means the harness accepts a full file path to the
+	// agent definition file. Runner uses the copy-and-invoke snapshot strategy.
+	LoadingMechanismPath LoadingMechanism = 1
+
+	// LoadingMechanismName means the harness resolves agents by name from the
+	// agents directory. Runner uses the backup-and-transform snapshot strategy.
+	LoadingMechanismName LoadingMechanism = 2
+)
+
+// String returns a human-readable label for the loading mechanism.
+// Returns "unset", "path", or "name" for defined constants, or
+// "unknown(<N>)" for unrecognized values.
+func (m LoadingMechanism) String() string {
+	switch m {
+	case LoadingMechanismUnset:
+		return "unset"
+	case LoadingMechanismPath:
+		return "path"
+	case LoadingMechanismName:
+		return "name"
+	default:
+		return fmt.Sprintf("unknown(%d)", int(m))
+	}
+}
 
 // CLIHarness is one CLI-backed harness this module can spawn through: its
 // stable identity and how to name it to a person.
@@ -24,9 +60,16 @@ type CLIHarness struct {
 	// AgentsDir is the harness-convention relative path (from the project
 	// root) to the directory that holds agent definition files. For example,
 	// ".claude/agents" for claude-code or ".opencode/agents" for opencode.
-	// Runner uses this value when computing the run-scoped snapshot directory
-	// path via SnapshotDirPath.
+	// Runner computes the run-scoped agents directory path from this value.
+	// Note: session.go computes the path inline; SnapshotDirPath is not used.
 	AgentsDir string
+
+	// LoadingMechanism describes how this harness locates agent definition
+	// files. Path-based harnesses (claude-code) receive a full file path;
+	// name-based harnesses (opencode, ghcp-cli) resolve agents by name.
+	// This field has no counterpart in the Deployment tool's harness YAML
+	// descriptors; it is not drift-guarded.
+	LoadingMechanism LoadingMechanism
 }
 
 // cliHarnesses is the catalog's single declaration of every CLI-backed
@@ -47,14 +90,19 @@ type CLIHarness struct {
 // name says and what this list is for. A tool-local test double is not a
 // CLI harness and has no entry; a tool that accepts one composes it into its
 // own accepted set alongside these entries.
+//
 // AgentsDir values are seeded verbatim from the Deployment tool's builtin
 // harness descriptors (paths.agents.project) and must stay in sync with
 // those YAML manifests. The consistency test in Tools/Deployment guards
 // against drift.
+//
+// LoadingMechanism values are not present in Deployment YAML descriptors and
+// are not drift-guarded; they reflect the harness's own agent-loading
+// convention.
 var cliHarnesses = []CLIHarness{
-	{ID: HarnessIDClaudeCode, Label: "Claude Code CLI", AgentsDir: ".claude/agents"},
-	{ID: HarnessIDOpenCode, Label: "OpenCode CLI", AgentsDir: ".opencode/agents"},
-	{ID: HarnessIDGHCPCLI, Label: "GitHub Copilot CLI", AgentsDir: ".github/agents"},
+	{ID: HarnessIDClaudeCode, Label: "Claude Code CLI", AgentsDir: ".claude/agents", LoadingMechanism: LoadingMechanismPath},
+	{ID: HarnessIDOpenCode, Label: "OpenCode CLI", AgentsDir: ".opencode/agents", LoadingMechanism: LoadingMechanismName},
+	{ID: HarnessIDGHCPCLI, Label: "GitHub Copilot CLI", AgentsDir: ".github/agents", LoadingMechanism: LoadingMechanismName},
 }
 
 // CLIHarnesses returns every CLI-backed harness this module can spawn

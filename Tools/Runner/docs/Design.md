@@ -358,7 +358,9 @@ The run-start sequence validates all preconditions before the first dispatch. Ev
 | 2 | Parse routing table from workflow region | Refusal |
 | 3 | Read existing artifact (if resuming) or verify none exists (if new) | Refusal |
 | 4 | Admit workflow (compat checks, execution group resolution) | Refusal |
+| **4b** | **Recovery check: scan for orphaned `.agents-backup/` directory next to the agents directory; restore originals if found and no active runs are detected** | **Refusal if restore fails** |
 | 5 | Resolve every agent identifier to a definition file | Refusal |
+| **5b** | **Create snapshot (copy-and-invoke) or backup and transform originals (backup-and-transform), per harness strategy** | **Refusal** |
 | 6 | Read stage set from Plan.md (if present) | Refusal if parse error; absence is normal |
 | 6b | Enumerate declared infrastructure agents | Refusal |
 | 6c | Validate per-class agent selections (gated classes: one active per class) | Refusal |
@@ -427,55 +429,179 @@ Regular orchestration and Runner execution have different deployment requirement
 
 ### 6.1 The Problem
 
-The deployed agents directory (e.g., `.opencode/agents/`) serves both interactive orchestration and the Runner. These two execution models have conflicting requirements for the same agent files. The Runner cannot modify the shared directory because: (a) a crash mid-modification leaves corrupted agents for interactive orchestration, (b) interactive orchestration may be running in parallel, and (c) reverting after the run adds failure modes.
+The deployed agents directory (e.g., `.opencode/agents/`) serves both interactive orchestration and the Runner. These two execution models have conflicting requirements for the same agent files. The Runner needs transformed copies (e.g., `mode: primary` instead of `mode: subagent`), but the regular agents must remain unchanged for interactive orchestration.
 
-### 6.2 Runner-Owned Snapshot
+Harnesses differ fundamentally in how they load agent definitions:
 
-At run start, before the first dispatch, the Runner creates a **snapshot** of the deployed agents in a runner-owned directory alongside the regular one:
+| Harness | Agent loading | Mechanism |
+|---------|-------------|-----------|
+| Claude Code | **Path-based** | `--append-system-prompt-file <path>` — loads the file at the given path directly |
+| OpenCode | **Name-based** | `--agent <name>` — resolves the name from its canonical agents directory |
+| GitHub Copilot CLI | **Name-based** | `--agent <name>` — resolves the name from its scoped agent directories |
 
-| Harness | Regular directory | Runner snapshot |
-|---------|------------------|-----------------|
-| OpenCode | `.opencode/agents/` | `.opencode/agents-runner-{run_id}/` |
-| Claude Code | `.claude/agents/` | `.claude/agents-runner-{run_id}/` |
-| GitHub Copilot CLI | `.github/agents/` | `.github/agents-runner-{run_id}/` |
+Path-based harnesses can be pointed at an arbitrary file — a snapshot copy works naturally. Name-based harnesses always read from their canonical directory regardless of what path the Runner has resolved internally. A snapshot sitting in a sibling directory is invisible to them.
 
-The snapshot directory is **scoped to the run ID**, so parallel Runner executions each get their own isolated snapshot. At run start, the Runner creates a fresh copy from the current regular directory. At run end (successful completion or graceful stop), the Runner deletes its own snapshot directory. Cleanup failure is non-fatal -- an orphaned snapshot directory is harmless and never interferes with other runs.
+### 6.2 Dual-Strategy Snapshot
 
-This guarantees:
+The Runner selects a snapshot strategy per harness based on its agent loading mechanism:
 
-- **No drift.** The snapshot always reflects the current state of the regular directory, including any project-specific content the user has filled into injection regions.
-- **Crash safety.** If the Runner crashes mid-run, an orphaned snapshot sits harmlessly on disk. It is scoped to the crashed run's ID and does not interfere with subsequent runs.
-- **Parallel safety.** Interactive orchestration reads from the regular directory. Each Runner instance reads from its own run-scoped snapshot. Multiple concurrent Runner executions never interfere with each other or with interactive orchestration.
+| Strategy | How it works | Used by |
+|----------|-------------|---------|
+| **Copy-and-invoke** | Copy agents to a run-scoped snapshot dir, apply transforms, invoke from snapshot path. Originals untouched. | Path-based harnesses (Claude Code) |
+| **Backup-and-transform** | Copy originals to a shared backup dir, transform originals in-place, restore from backup on completion. | Name-based harnesses (OpenCode, GHCP CLI) |
 
-### 6.3 Snapshot Transformations
+Both strategies create sibling directories next to the regular agents directory:
 
-After copying, the Runner applies harness-specific transformations to make the snapshot compatible with CLI invocation:
+| Strategy | Harness | Regular directory | Sibling directory | Role |
+|----------|---------|------------------|-------------------|------|
+| Copy-and-invoke | Claude Code | `.claude/agents/` | `.claude/agents-runner-{run_id}/` | Working snapshot (invoked from here); one per run |
+| Backup-and-transform | OpenCode | `.opencode/agents/` | `.opencode/.agents-backup/` | Shared safety backup (restore source); one per workspace |
+| Backup-and-transform | GHCP CLI | `.github/agents/` | `.github/.agents-backup/` | Shared safety backup (restore source); one per workspace |
+
+Copy-and-invoke creates a **per-run** directory (scoped by run ID) because each run needs its own independent copy. Backup-and-transform creates a **shared** backup directory because all concurrent runs share the same transformed originals and need the same original-state backup to restore from.
+
+#### 6.2.1 Copy-and-Invoke (Path-Based Harnesses)
+
+This is the current mechanism, unchanged:
+
+1. Copy agents directory to `agents-runner-{run_id}/`
+2. Apply harness-specific transformations to the copies
+3. Re-resolve all agent paths to point into the snapshot
+4. Invoke agents using the snapshot paths
+5. On completion: delete snapshot directory
+
+**Crash safety:** Inherent. Originals are never modified. An orphaned snapshot directory is harmless.
+
+**Concurrency:** Naturally concurrent — each run has its own snapshot directory. No coordination needed.
+
+#### 6.2.2 Backup-and-Transform (Name-Based Harnesses)
+
+For harnesses that resolve agents by name from a canonical directory, the Runner must transform the originals in-place so the harness naturally reads the correct content. Multiple concurrent runs share one backup and coordinate via per-run lock files (§6.3).
+
+**First run to start (backup directory does not exist):**
+
+1. **Recovery check:** Scan for orphaned backup state from prior crashes (§6.3.2). Restore if found.
+2. **Create backup directory:** Attempt `os.Mkdir(".agents-backup", 0755)`. This is atomic on both Windows and Linux — exactly one caller succeeds when multiple runs race. If the call fails with "already exists," this run is not first — fall through to the concurrent join protocol below.
+
+   **Creator failure handling:** If lock creation (step 3) fails because the directory was concurrently deleted (by a recovery check that saw the partial backup), the creator must not proceed with copying or transforming — it retries from step 2 (re-attempt `os.Mkdir`). Similarly, if copy (step 4) or manifest write (step 5) fails because the directory vanished mid-operation, the creator must not transform. The invariant is: a creator never transforms unless its own lock is held AND the manifest write succeeded.
+3. **Acquire lock:** Create `.lock-{run_id}` inside the backup directory and hold an exclusive OS-level file lock on it for the duration of the run. This must happen **before** copying files, so that a concurrent recovery check or joiner sees "lock held" and does not treat the in-progress backup as orphaned.
+4. **Copy originals:** Copy all agent files into the backup directory.
+5. **Write manifest:** Write `recovery-manifest.json` into the backup directory. The manifest lists the files that will be transformed, computed in memory by a dry-run of the transformation rules (no disk writes yet). The manifest's presence is the completion signal for backup creation — a concurrent joiner that sees the backup directory but no manifest knows the creator is still copying and must wait.
+6. **Drop recovery marker:** Write a human-readable recovery file into the agents directory itself (§6.3.3).
+7. **Transform in-place:** Apply harness-specific transformations to the original agent files.
+8. **Write setup-complete signal:** Write a `.setup-complete` file into the backup directory after all transforms have been applied. A concurrent joiner that sees the manifest but no `.setup-complete` file knows the creator is still transforming and must wait for it before proceeding to run. This prevents a joiner from running against untransformed agents between manifest write and transform completion.
+9. **Run.**
+
+**Subsequent concurrent runs (backup directory already exists):**
+
+1. **Wait for manifest:** If `recovery-manifest.json` does not yet exist in the backup directory, the creator is still copying. Poll with a bounded timeout (refuse the run if exceeded) until the manifest appears. During each poll iteration, also check: (a) if the backup directory has disappeared, start fresh as a first run (go to step 2 of the first-run protocol above); (b) if `.restoring` becomes held, enter the `.restoring` re-poll loop described in step 3 below instead of continuing to wait for the manifest.
+2. **Wait for setup-complete:** If `.setup-complete` does not yet exist in the backup directory, the creator has finished copying but is still transforming the originals. Poll with a bounded timeout (refuse the run if exceeded) until `.setup-complete` appears. This prevents a joiner from running against untransformed agents. During each poll iteration, also check: (a) if the backup directory has disappeared, start fresh as a first run; (b) if `.restoring` becomes held, enter the `.restoring` re-poll loop described in step 3 below instead of continuing to wait for setup-complete. This prevents a joiner from timing out and refusing the run when a last-out teardown deletes the manifest or backup directory mid-wait.
+3. **Check for active restore:** Attempt to acquire an exclusive lock on `.restoring` inside the backup directory. If the lock is held, a restore or exit serialization is in progress — poll in a loop until either: (i) `.restoring` becomes acquirable (acquire it briefly, then re-check backup directory existence: if the backup directory is gone, release `.restoring` and start fresh as a first run; if the backup directory still exists with its manifest, release `.restoring` and proceed to step 4), or (ii) the backup directory disappears (meaning restore completed and the directory was deleted — start fresh as a first run). If the lock is acquirable on the first attempt (or the file does not exist), acquire it briefly, re-check backup directory existence, release it, and proceed.
+4. **Acquire lock:** Create `.lock-{run_id}` inside the backup directory and hold an exclusive lock on it.
+5. **Post-lock re-verification:** After acquiring the lock, re-check that `.restoring` is not held and that the backup directory and manifest still exist. This closes the check-then-act window between step 3 and step 4: a last-out run could have acquired `.restoring` and begun restoring in that interval. If re-verification fails (`.restoring` is now held, or the backup directory/manifest no longer exists), release and delete the lock file, wait for the backup directory to disappear (bounded timeout), then start fresh as a first run (go to step 2 of the first-run protocol above).
+6. No backup or transform needed — originals are already transformed (transforms are idempotent) and the backup already holds the true originals.
+7. **Run.**
+
+**On clean completion (any run):**
+
+1. **Acquire restore sentinel:** Create `.restoring` inside the backup directory and acquire an exclusive **blocking Lock** (not TryLock) on it. This serializes all exits: when multiple runs exit simultaneously, they queue on `.restoring` — the second exit blocks until the first completes. This prevents new runs from joining mid-restore (they will see the held `.restoring` lock and wait). This must happen **before** releasing the run's own lock, so that no window exists where a joiner sees "no `.restoring` held, backup exists" and joins between this run's lock release and `.restoring` acquisition.
+2. Release the lock on `.lock-{run_id}` and delete the lock file.
+3. **Last-out check:** List remaining `.lock-*` files in the backup directory. For each, attempt to acquire an exclusive lock:
+   - Lock acquired → owner crashed → delete the lock file.
+   - Lock held → another run is still active → **release `.restoring`** (do NOT delete it), leave everything in place, done. Deleting `.restoring` while another run is blocked on it breaks mutual exclusion: on Unix the waiter holds a lock on the unlinked inode while the next arrival creates a fresh file (two holders simultaneously); on Windows the delete fails because the waiter has the file open.
+4. If no lock files remain → this is the last active run → restore originals from backup, remove recovery marker, then perform **Windows-safe backup directory deletion**: (a) delete `recovery-manifest.json` while `.restoring` is still held (a joiner's post-lock re-verification checks manifest existence and will detect its absence), (b) delete `.setup-complete`, (c) close and release the `.restoring` file handle, (d) call `os.RemoveAll` on the backup directory. This ordering is necessary because Go opens files on Windows without `FILE_SHARE_DELETE`, so `os.RemoveAll` would fail if `.restoring` were still held. On Linux the ordering is harmless.
+
+### 6.3 Concurrency and Crash Recovery
+
+The backup-and-transform strategy modifies user files in-place. Multiple concurrent runs share the same transformed originals and the same backup. Coordination uses **per-run lock files** inside the backup directory — OS-level file locks (`flock` on Linux, `LockFileEx` on Windows) that are released automatically when a process exits or crashes. No heartbeats, no PID checks, no staleness thresholds.
+
+#### 6.3.1 Race Resolution
+
+Two concurrency races require explicit handling:
+
+**Race (a): Simultaneous first-run backup creation.** Multiple runs start when no backup directory exists. Each attempts `os.Mkdir(".agents-backup", 0755)` — this is atomic on both Windows and Linux: exactly one succeeds, others receive "already exists." The winner creates the backup; losers fall through to the concurrent-join protocol (§6.2.2, "Subsequent concurrent runs"). The winner acquires its `.lock-{run_id}` immediately after `os.Mkdir` and before copying files, so that any concurrent recovery check or joiner sees "lock held" rather than treating the in-progress backup as orphaned. The manifest (`recovery-manifest.json`) is written **last** and serves as the completion signal: a joiner that sees the backup directory but no manifest knows the creator is still copying and polls until the manifest appears before joining.
+
+**Race (a) — partial backup from crash:** If the creator crashes after `os.Mkdir` but before writing the manifest, the backup directory contains files (or is empty) with no manifest and no held lock (the OS released it on crash). This is a partial backup; originals are still untouched because transforms have not been applied (transforms follow the manifest write). The recovery check (§6.3.2) detects this state — backup exists, no manifest, no held locks — and safely deletes the partial backup directory.
+
+**Race (a) — creator failure before lock acquisition:** If N runs start simultaneously and the `os.Mkdir` winner crashes or has the directory removed between `os.Mkdir` and lock acquisition, a recoverer may delete the partial backup. A retrying creator re-attempts `os.Mkdir`. The invariant is that exactly one creator advances to file copying; all others join or retry.
+
+**Race (b): A run joining while a last-out run is restoring.** The last-out run acquires an exclusive **blocking Lock** on a `.restoring` sentinel file inside the backup directory **before** releasing its own `.lock-{run_id}` and before probing other locks or starting the restore (§6.2.2, "On clean completion," step 1). A joining run checks for `.restoring` before creating its own lock: if `.restoring` is held, the joiner polls until either `.restoring` becomes acquirable or the backup directory disappears (see §6.2.2 step 3). After acquiring its own lock, the joiner performs a **post-lock re-verification**: it re-checks that `.restoring` is not held and that the backup directory and manifest still exist. If re-verification fails, the joiner releases its lock, deletes its lock file, and re-enters the `.restoring` poll loop or waits for the backup directory to disappear before starting fresh. This two-step check (pre-lock + post-lock) closes the check-then-act window and ensures a joiner never creates a lock inside a backup directory that is being deleted, and never runs against agents mid-restore.
+
+**Race (b) — two simultaneous exits:** When two runs exit at the same time, both attempt to acquire `.restoring` as a blocking Lock. Exactly one acquires it first; the other blocks. The first performs the last-out check — if it detects the second run's `.lock-{run_id}` as still held (because the second run has not yet had a chance to release it), it releases `.restoring` without restoring. The second run then unblocks, acquires `.restoring`, re-runs the last-out check, finds no remaining locks, and performs the restore. Exactly one of the two exits performs the restore.
+
+**Race (c): A run joining while the creator is still transforming.** After the manifest is written (step 5) but before `.setup-complete` is written (step 8), the originals are not yet transformed. A joiner that sees the manifest but no `.setup-complete` must wait for it before proceeding. The `.setup-complete` file is the signal that transforms are complete and it is safe to run.
+
+#### 6.3.2 Automatic Recovery (Runner Startup)
+
+Every Runner start begins with a recovery check — before any other run-start logic:
+
+1. Scan the agents directory's sibling for the `.agents-backup/` directory. If not found → no recovery needed → done.
+2. List all `.lock-*` files inside the backup directory. For each, attempt to acquire an exclusive lock:
+   - Lock held → another Runner is actively running → **do not recover**. Leave the backup in place and proceed (this run will join as a concurrent run per §6.2.2).
+   - Lock acquired → owner crashed → delete the lock file (release the lock first).
+3. If no held locks remain (all lock files were orphaned or none existed), acquire `.restoring` as a **blocking Lock**. Two simultaneous recoverers serialize on `.restoring` — the second blocks until the first finishes, then finds no backup directory and no-ops.
+4. **Re-probe all `.lock-*` files under `.restoring`:** A joiner may have acquired a lock between the initial probe (step 2) and `.restoring` acquisition (step 3). For each `.lock-*` file found now, attempt to acquire an exclusive lock:
+   - Lock held → a run became active between steps 2 and 3 → release `.restoring` and **skip recovery** (leave the backup in place; this run will join per §6.2.2).
+   - Lock acquired → orphaned → delete the lock file.
+5. If any held lock was found in step 4 → recovery skipped (released `.restoring` in that step). Done.
+6. If still no held locks → no active runs → check the manifest:
+   - **Manifest present and readable** → **recover:** restore modified files from backup copies, remove the recovery marker from the agents directory, delete the backup directory, release `.restoring`.
+   - **Manifest absent** → **partial backup** from a crash during backup creation (§6.3.1, Race (a) — partial backup). Originals are still untouched (transforms follow the manifest write). Delete the partial backup directory, release `.restoring`, and proceed as if no backup existed.
+   - **Manifest present but corrupt/unreadable** → release `.restoring`, **refuse the run** with a clear error. The backup may contain the only copy of original field values, and restoring from a corrupt manifest risks data loss.
+
+This is idempotent: running it when no recovery is needed is a no-op. Running it when another run is active correctly detects the live run and skips recovery.
+
+#### 6.3.3 Manual Recovery (User Self-Service)
+
+If the user abandons the Runner and returns to native harness usage, they need to be able to recover without Runner knowledge. The recovery marker file placed in the agents directory serves this purpose:
+
+- **Location:** Inside the agents directory (e.g., `.opencode/agents/RUNNER-RECOVERY.txt`)
+- **Visibility:** Not hidden, not dot-prefixed — visible to anyone who lists the directory
+- **Content:** Plain-language explanation of what happened, where the backup is, and step-by-step restore instructions: (1) copy the `.md` files from the `.agents-backup/` directory back into the agents directory (overwrite the modified files), (2) delete the `.agents-backup/` directory, (3) delete this marker file. The instructions must NOT tell the user to rename or replace the agents directory with the backup directory, because the backup contains only `.md` files and renaming would destroy any subdirectories or non-`.md` files the user has in the agents directory.
+- **Format:** `.txt` — empirical testing shows that a stray `.md` file in the agents directory is listed as an available agent by OpenCode, while `.txt` files are ignored by all harnesses (Claude Code, OpenCode, GHCP CLI)
+
+#### 6.3.4 What "Corrupted" Means in Practice
+
+Today's only transformation is `mode: subagent → mode: primary` for OpenCode. If left unreversed:
+
+- The agents become directly invocable as primary agents — **more permissive, not broken**
+- Interactive orchestration still works (the orchestrator can still spawn them)
+- The semantic meaning is wrong but the functional impact is minimal
+
+This is a fortunate property of the current transformation set, not a design guarantee. Future transformations could be more destructive, which is why the recovery mechanism exists regardless of current severity.
+
+### 6.4 Snapshot Transformations
+
+Both strategies apply the same harness-specific transformation rules to make agent files compatible with CLI invocation:
 
 | Harness | Field | Regular value | Runner value | Reason |
 |---------|-------|---------------|--------------|--------|
 | OpenCode | `mode` | `subagent` | `primary` | `mode: subagent` blocks `opencode run --agent` CLI invocation |
 
-This table is expected to grow as new harness-specific constraints are discovered. The transformation set is hardcoded per harness in the Runner's harness adapter layer.
+This table is expected to grow as new harness-specific constraints are discovered. The transformation set is hardcoded per harness. The transformation mechanism is currently limited to frontmatter field rewrites; broader file transforms can be introduced when needed without changing the snapshot strategy selection.
 
-### 6.4 Orchestrator Resolution
+### 6.5 Orchestrator Resolution
 
 The Runner derives the script-mode orchestrator path from the harness convention -- it looks for `orchestrator-script` in the regular agents directory (e.g., `.opencode/agents/orchestrator-script.md`). The `--orchestrator-file` flag is removed; the path is fully determined by harness selection. If the orchestrator is not found at the expected path, the Runner refuses to start with a clear error indicating the workspace is not properly deployed.
 
 This requires the deploy tool to place the script-mode orchestrator in the regular agents directory alongside all other agents. The regular orchestrator and script-mode orchestrator coexist in the same directory -- the regular orchestrator is used by interactive orchestration, the script-mode orchestrator is used by the Runner.
 
-### 6.5 Run-Start Integration
+### 6.6 Run-Start Integration
 
-The snapshot step is inserted into the Run-Start Sequence (SS4) between step 5 (agent resolution) and step 6 (stage set reading):
+The snapshot step is inserted into the Run-Start Sequence (§4). Recovery runs before agent resolution (step 5) so that agent files are in their original state when ResolveAll reads them:
 
 | Step | What | Failure |
 |------|------|---------|
+| **4b** | **Recovery check: scan for the `.agents-backup/` directory next to the current harness's agents directory, restore if found** | **Refusal if restore fails** |
 | 5 | Resolve every agent identifier to a definition file | Refusal |
-| **5a** | **Create run-scoped snapshot: copy agents to `agents-runner-{run_id}/`, apply transformations** | **Refusal** |
+| **5b** | **Create snapshot (copy-and-invoke) or backup + transform (backup-and-transform), per harness strategy** | **Refusal** |
 | 6 | Read stage set from Plan.md (if present) | Refusal if parse error |
 
-Agent resolution at step 5 validates that all required agents exist in the regular directory. Step 5a then creates the run-scoped snapshot and rewrites the resolved paths to point into the snapshot directory. All subsequent steps (and the dispatch loop) use the snapshot paths.
+Step 4b runs unconditionally for CLI harnesses — it is a no-op when no recovery is needed (and correctly detects active concurrent runs via lock files, skipping recovery in that case). Step 5b creates the snapshot or backup depending on the harness's agent loading mechanism. For copy-and-invoke, resolved paths are rewritten to point into the snapshot. For backup-and-transform, resolved paths remain unchanged (originals are now transformed).
 
-**Cleanup:** On run completion (successful or graceful stop), the Runner deletes its snapshot directory. Cleanup failure is logged but does not change the run's exit code -- the run itself succeeded. Crashed runs leave orphaned snapshot directories that the user can delete manually; they do not interfere with anything.
+**Cleanup:** On run completion (any terminal outcome):
+- **Copy-and-invoke:** Delete the snapshot directory. Cleanup failure is non-fatal.
+- **Backup-and-transform:** Release lock, delete own lock file, perform last-out check (§6.2.2). If last out: restore originals, remove marker, delete backup directory. If not last out: leave everything for the remaining active runs. Restore failure is logged as an error but does not change the run's exit code — the run itself succeeded, and the next Runner start will retry recovery automatically.
 
 ---
 
@@ -551,4 +677,5 @@ No open design items remain. All items from the initial draft have been resolved
 | Version | Date | Summary |
 |---------|------|---------|
 | 0.1 | 2026-08-16 | Initial design. Three execution modes (Orchestrated, Auto, Auto-review) with cost model and dispatch intelligence gap as central tensions. Single-decision principle. Two-action orchestrator contract (dispatch + stop) with free table navigation. Dispatch instruction carries optional artifact/constraint overrides (table row defaults, orchestrator overrides on re-invocations). Mode 3 engine injects review artifact on CNA auto-route back. Pre-consultation for environment plumbing (Modes 2/3). Run-start sequence with run configuration (checkpoints, commits, branch variant, commit setup dispatch). Stop-action UX: CLI terminal, TUI offers retry + manual dispatch. Infrastructure agent triggers. All open items resolved. |
-| 0.2 | 2026-08-26 | Runner Agent Snapshot (SS6). Runner creates a run-ID-scoped snapshot of deployed agents (`agents-runner-{run_id}/`) at every run start, with harness-specific transformations applied (e.g., `mode: primary` for OpenCode). Run-scoped directories enable safe parallel execution. Snapshot cleaned up on run completion; orphaned snapshots from crashes are harmless. Orchestrator file auto-discovered from harness convention, `--orchestrator-file` flag removed. Snapshot step inserted into Run-Start Sequence as step 5a. |
+| 0.2 | 2026-08-26 | Runner Agent Snapshot (§6). Runner creates a run-ID-scoped snapshot of deployed agents (`agents-runner-{run_id}/`) at every run start, with harness-specific transformations applied (e.g., `mode: primary` for OpenCode). Run-scoped directories enable safe parallel execution. Snapshot cleaned up on run completion; orphaned snapshots from crashes are harmless. Orchestrator file auto-discovered from harness convention, `--orchestrator-file` flag removed. Snapshot step inserted into Run-Start Sequence as step 5a. |
+| 0.3 | 2026-09-20 | Dual-strategy snapshot (§6 rewrite). Harnesses that resolve agents by name (OpenCode, GHCP CLI) cannot read from a snapshot directory — the copy-and-invoke mechanism only works for path-based harnesses (Claude Code). New backup-and-transform strategy for name-based harnesses: backup originals, transform in-place, restore on completion. Concurrent runs coordinate via per-run OS-level file locks in a shared backup directory — no heartbeats or PID checks. Crash recovery via startup reconciliation (automatic, lock-aware) and user-visible recovery marker file (manual self-service). Run-start sequence gains step 4b (recovery check, before ResolveAll at step 5) and step 5b (snapshot/backup creation, after ResolveAll). |

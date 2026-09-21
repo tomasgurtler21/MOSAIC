@@ -1,0 +1,13 @@
+{
+  "exit_code": 0,
+  "dispatches": [
+    { "agent": "orchestrator-script", "expect_status": "" },
+    { "agent": "mosaictest-commit", "expect_status": "SUCCESS" },
+    { "agent": "mosaictest-scripted", "expect_status": "SUCCESS" },
+    { "agent": "mosaictest-checkpoint", "expect_status": "SUCCESS" },
+    { "agent": "mosaictest-commit", "expect_status": "SUCCESS" },
+    { "agent": "mosaictest-scripted", "expect_status": "SUCCESS" },
+    { "agent": "mosaictest-checkpoint", "expect_status": "SUCCESS" },
+    { "agent": "mosaictest-commit", "expect_status": "SUCCESS" }
+  ]
+}

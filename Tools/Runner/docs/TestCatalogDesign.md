@@ -79,28 +79,35 @@ Four rules already apply to the existing stubs and still hold. Two are new, need
 
 | Stub | What it is | State |
 |------|-----------|-------|
-| `mosaictest-scripted` | A normal subagent. Returns whatever protocol response its fixture tells it to. | Exists. E2 added; E1 and E3 still needed (§4.1) |
+| `mosaictest-scripted` | A normal subagent. Returns whatever protocol response its fixture tells it to. | Exists. E1, E2, E3 all done (§4.1) |
 | `orchestrator-script` | A stub orchestrator. Returns whatever routing instruction its fixture tells it to. | Written (§5) |
 | `orchestrator` | A placeholder, never invoked (§4.2). | Written |
 | `mosaictest-checkpoint` | Checkpoint infrastructure stub. Returns success with a fake checkpoint marker, touches no git. | Exists, but no workflow uses it yet |
-| `mosaictest-review` | Review infrastructure stub. Returns success, inspects nothing. | Exists, but no workflow uses it yet |
+| `mosaictest-commit` | Commit infrastructure stub. Returns success with a fake `[branch:mosaictest-run]` marker, touches no git. Used for both the run-start setup dispatch and subsequent `STAGE_END` trigger dispatches. | **Needed** (§4.3) |
+| `mosaictest-review` | Review infrastructure stub. Returns success with a canned observation message, inspects nothing. | Exists, but no workflow uses it yet |
 
 ### 4.1 Three Additions Needed to `mosaictest-scripted`
 
-Some planned workflows cannot be built until these exist.
+Some planned workflows cannot be built until these exist. All three are small — each is a single new field in the fixture format.
 
 **E1 — Let the fixture set the approval flag.**
 When the stub writes an artifact it stamps provenance frontmatter, but it cannot control the `human_approved` field inside it. To test the approval check we need the stub to write an artifact that is deliberately *not* approved, then one that *is*. So the fixture's write section must specify the approval value.
+
+**State: Implemented.** The stub reads `### HitlApproval` (`true`|`false`) from the outcome block. When present, stamps `human_approved: <value>` in output artifacts after provenance. When absent, no `human_approved` line (current behaviour preserved).
 
 **E2 — Let the fixture make the stub echo back the task description it received.**
 Right now the stub only repeats text from its own fixture. It never reports what the Runner actually sent it. That means nothing in the run shows whether the orchestrator's task description arrived.
 
 This matters more than it sounds: **echoing is the only way this suite can see what was sent in a dispatch.** Without it, Mode 1's whole point — that the orchestrator writes a useful task description and the subagent receives it — is assumed, never checked.
 
+**State: Implemented.** The stub reads `echo: task_description` from the fixture and includes the received task_description in its status_message.
+
 **E3 — Make the human-review refusal a fixture choice instead of automatic.**
 Today, if the stub is dispatched with human review turned on, it immediately returns `BLOCKED` / `E503` and does nothing else. That is intentional — it has no tool for talking to a user. But it also means **every human-review row is impossible to test**, so the approval check can never run.
 
 Fix: the fixture decides. One fixture keeps the old refusal behaviour (that check is still worth having). Another tells the stub to write its artifacts and report success, so the approval path can be tested.
+
+**State: Implemented.** The stub reads `### HitlBehaviour` (`proceed`|`refuse`) from the outcome block. When `proceed`, skips the `human_in_the_loop` E503 check and processes the fixture normally. When `refuse` or absent, current behaviour (immediate `BLOCKED`/`E503`).
 
 ---
 
@@ -114,6 +121,28 @@ Two consequences:
 
 - The stub orchestrator is `TestCatalog/Orchestrator/orchestrator-script.md`. Its frontmatter carries no `id`, because the schema gives orchestrators none.
 - A **placeholder `orchestrator.md`** sits beside it. The deployment tool includes a catalogue's conversational orchestrator unconditionally, and a catalogue lacking one deploys an empty unnamed agent artifact while still reporting success. The placeholder removes that failure mode. Nothing invokes it; if it ever runs, it says so and stops.
+
+### 4.3 `mosaictest-commit` — Commit Infrastructure Stub
+
+Structurally identical to `mosaictest-checkpoint`: zero tools, hardcoded behaviour, one predetermined response shape. Different class, different marker.
+
+**Class:** `commit` (frontmatter `infrastructure: commit`).
+**Trigger:** `STAGE_END`.
+**Marker:** `[branch:mosaictest-run]` — a fixed fake branch name. Unlike the checkpoint stub's per-invocation sha, the branch name is constant because the real commit agent establishes a branch once and reuses it.
+
+**Two invocation contexts, same response:**
+
+1. **Run-start setup dispatch** (Design.md §4.2): The Runner dispatches the commit-class agent once before the dispatch loop. The stub returns SUCCESS with `[branch:mosaictest-run]` at the end of `status_message`. The Runner extracts `commit_branch` from the marker and records it in the artifact frontmatter. If the marker is missing, the run refuses to start.
+
+2. **Trigger dispatches** (during the run): Fired by `STAGE_END`. Same SUCCESS, same marker. The Runner records the commit row as an infrastructure-flagged execution log entry.
+
+**Message template** (for `mosaictest-commit#3`):
+
+```
+MosaicTest infrastructure stub / class=commit / declared trigger=STAGE_END / instance=mosaictest-commit#3 / no git performed / returning SUCCESS [branch:mosaictest-run]
+```
+
+**Error handling:** Same as `mosaictest-checkpoint` — `BLOCKED`/`E503` for `human_in_the_loop: true`, SUCCESS for everything else. `on_failure: halt` (matching the real commit agent: a commit failure that passes silently would lose work).
 
 ---
 
@@ -214,7 +243,7 @@ smoke_set:
 
 **`modes`** (required): The execution modes this workflow supports. A workflow with multiple modes is tested once per mode by the automation tool. Valid values are the three Runner modes: `auto`, `auto-review`, `orchestrated`.
 
-**`smoke_set`** (optional): Which of this workflow's modes belong to the Smoke Set (§9). Each entry must also appear in `modes`. When the field is absent or the list is empty, the workflow has no Smoke Set membership. The four Smoke Set entries are: `smoke-single/auto`, `orchestrated-linear/orchestrated`, `findings-loop/auto`, `findings-loop/auto-review`.
+**`smoke_set`** (optional): Which of this workflow's modes belong to the Smoke Set (§10). Each entry must also appear in `modes`. When the field is absent or the list is empty, the workflow has no Smoke Set membership. The four Smoke Set entries are: `smoke-single/auto`, `orchestrated-linear/orchestrated`, `findings-loop/auto`, `findings-loop/auto-review`.
 
 **`pre_consult`** (optional, boolean): Whether the pre-consultation path is exercised for this workflow's test runs. Valid values: `true`, `false`. When the field is absent the default is `true` (pre-consultation enabled). Set to `false` only for workflows where the pre-consultation step is intentionally skipped.
 
@@ -224,22 +253,28 @@ smoke_set:
 
 ## 7. The Test Workflows
 
-Three existing workflows stay as they are. They test the harness connection itself and are the first thing to run against a new or changed harness: `smoke-single`, `payload-stress`, `staged-preplaced-plan`.
+Three original workflows test the harness connection itself and are the first thing to run against a new or changed harness: `smoke-single`, `payload-stress`, `staged-preplaced-plan`.
 
-Nine are added:
+The remaining workflows test Runner modes, routing mechanisms, and edge cases. The table below shows every workflow — implemented and planned.
 
-| Workflow | Mode | What it tests |
-|----------|------|--------------|
-| `orchestrated-linear` | Orchestrated | Orchestrator is asked before every step including the first; the stop instruction works; the task description it writes actually reaches the subagent |
-| `orchestrated-backjump` | Orchestrated | Orchestrator sends the run back to an earlier row; instruction replacements for artifacts, constraints and human review |
-| `findings-loop` | Auto **and** Auto-review | The one difference between these two modes (§7.1) |
-| `deviation-blocked` | Auto | A `BLOCKED` result becomes a deviation, the orchestrator is asked, and the run carries on |
-| `deviation-ambiguous` | Auto | A routing hint the Runner cannot resolve becomes a deviation |
-| `deviation-stop` | Auto | The orchestrator ends the run, and the artifact can still be resumed afterwards |
-| `hitl-approve` | Auto | The approval check passes — and only after one re-dispatch |
-| `hitl-escalate` | Auto | The approval check uses up its re-dispatch and escalates to a deviation |
-| `infra-triggers` | Auto | Checkpoint and review triggers fire; the checkpoint marker is picked up; no cascading |
-| `preconsult-advice` | Auto | Pre-consultation advice reaches auto-routed dispatches, and does **not** reach orchestrator-written ones |
+| Workflow | Mode | What it tests | State |
+|----------|------|--------------|-------|
+| `smoke-single` | Auto, Auto-review | Harness works at all; single invocation, envelope parse, identifier echo | **Implemented** |
+| `payload-stress` | Auto, Auto-review, Orchestrated | Fenced blocks, JSON in messages, Unicode survive the round trip | **Implemented** |
+| `staged-preplaced-plan` | Auto, Auto-review, Orchestrated | Staged execution with a pre-placed Plan.md | **Implemented** |
+| `orchestrated-linear` | Orchestrated | Orchestrator is asked before every step including the first; the stop instruction works; the task description it writes actually reaches the subagent | **Implemented** |
+| `orchestrated-backjump` | Orchestrated | Instruction overrides for artifacts, constraints and human review on successive dispatches of the same row | **Implemented** |
+| `findings-loop` | Auto **and** Auto-review | The one difference between these two modes (§7.1) | **Implemented** |
+| `deviation-blocked` | Auto | A `BLOCKED` result becomes a deviation, the orchestrator is asked, and the run carries on | **Implemented** |
+| `deviation-ambiguous` | Auto-review | A routing hint the Runner cannot resolve becomes a deviation | **Implemented** |
+| `deviation-stop` | Auto | The orchestrator ends the run, and the artifact can still be resumed afterwards | **Implemented** |
+| `hitl-glob-staged` | Orchestrated | HITL approval check with `Stage-*` glob output artifacts; glob expansion resolves to concrete Stage-N paths before approval is read (§7.3) | **Implemented** |
+| `infra-checkpoint-commit` | Auto | Checkpoint trigger (`INVOCATION_INTERVAL`) and commit trigger (`STAGE_END`) both fire; checkpoint marker picked up; commit `[branch:{name}]` marker extracted; no cascading between infrastructure dispatches (§7.6) | **Implemented** |
+| `infra-review-consult` | Auto | Review trigger (`PHASE_END`) fires; review agent returns observations; Runner follows up with an orchestrator routing consultation passing the review's `status_message` as `last_status_message` (§7.7) | **Implemented** |
+| `preconsult-advice` | Auto | Pre-consultation advice reaches auto-routed dispatches, and does **not** reach orchestrator-written ones | **Implemented** |
+| `staged-multigroup` | Auto | Multi-group staged execution (TDD approach: Test group → Implementation group); exercises `EXECUTION.Test.[StageNumber]` and `EXECUTION.Implementation.[StageNumber]` phase parsing through a real harness (§7.4) | **Implemented** |
+| `hitl-escalate` | Auto | The approval check uses up its re-dispatch and escalates to a deviation. Uses stub enhancements E1 + E3 (§7.8) | **Implemented** |
+| `deviation-chain` | Auto | Two consecutive deviations requiring two orchestrator consultations before the run completes; exercises the single-decision chain through a real harness (§7.5) | **Implemented** |
 
 ### 7.1 `findings-loop` — One Workflow, Run Under Two Modes
 
@@ -256,9 +291,139 @@ In Auto-review, the routing fixture's findings rule simply never fires. That the
 
 Pre-consultation advice is added only to dispatches the Runner builds itself, never to ones the orchestrator writes. To show the "never" half, the run needs both kinds — so this workflow also causes one deviation. The echoing stub (E2) then shows the advice present on the auto-built dispatch and absent on the orchestrator-written one.
 
+### 7.3 `hitl-glob-staged` — Glob Expansion in HITL Approval Checks
+
+Added during implementation to cover a real bug: the HITL approval check was reading from the literal `Stage-*/HITLGlobStage.md` path instead of expanding the glob. This workflow exercises the `expandStageGlobs` path with `Stage-*` output artifacts and orchestrator-controlled `hitl_override`.
+
+This replaces the originally planned `hitl-approve` workflow. The original design assumed E1 and E3 stub enhancements would be available; `hitl-glob-staged` works with the existing stub by using the `Status != SUCCESS` shortcut in `DecideHITLCompliance`.
+
+**Coverage note:** The approval-reading-from-artifacts path (where an agent returns `SUCCESS` with HITL=true and the Runner reads `human_approved` from the artifact) is exercised by `hitl-escalate` (§7.8), which uses E1 and E3.
+
+### 7.4 `staged-multigroup` — Multi-Group Staged Execution
+
+This workflow exercises the full group-ordering path through a real harness: `EXECUTION.Test.[StageNumber]` rows dispatched first, then `EXECUTION.Implementation.[StageNumber]` rows, across at least two stages.
+
+**Why this matters:** The engine's group-ordering logic is covered by unit tests, but the phase-column notation (`EXECUTION.Test.[StageNumber]`) passes through the harness CLI and model response parsing. A historical crash occurred when the engine tried to resolve a glob/wildcard dispatch after the design phase finished — exactly the kind of bug that only manifests through a real harness. A multi-group staged workflow is the most complex routing path the engine handles, and proving it works end-to-end through every harness is essential for a confident compatibility declaration.
+
+**Shape:** Two execution groups (Test, Implementation), two stages, with the TDD approach. At least 8 EXECUTION dispatches total (2 groups × 2 rows × 2 stages, or similar). Uses the `mosaictest-scripted` stub with appropriate per-group fixtures.
+
+### 7.5 `deviation-chain` — Consecutive Deviations
+
+This workflow exercises the single-decision principle (Design.md §2.6) through a real harness: the first agent returns `BLOCKED`, the orchestrator re-dispatches a different agent, that agent also returns `BLOCKED`, the orchestrator is consulted again and re-dispatches the original agent (which now succeeds).
+
+**Why this matters:** `deviation-blocked` tests a single deviation → single consultation → resolution. But the single-decision principle means complex deviations produce a chain of consultations. Each consultation is a fresh session through the harness adapter; consecutive consultations test parsing fidelity under back-to-back orchestrator calls. The routing fixture needs at least three rules to drive this scenario.
+
+### 7.6 `infra-checkpoint-commit` — Checkpoint and Commit Triggers
+
+A staged Auto-mode workflow (at least 2 stages) with both checkpoint-class and commit-class infrastructure agents declared. Requires `commits: enabled` and `checkpoints: enabled` at run start.
+
+**Stubs used:**
+
+| Stub | Class | Trigger | What it proves |
+|------|-------|---------|----------------|
+| `mosaictest-checkpoint` | checkpoint | `STAGE_END` (from agent frontmatter) | Checkpoint trigger fires at stage boundary; fake `[checkpoint:f00d{NNNN}]` marker extracted and recorded |
+| `mosaictest-commit` | commit | `STAGE_END` (from agent frontmatter) | Commit setup dispatch at run start extracts `[branch:mosaictest-run]`; subsequent `STAGE_END` triggers fire and record commit rows |
+
+**What this proves:**
+- Commit setup dispatch runs at run start and extracts the branch marker into artifact frontmatter
+- `STAGE_END` fires exactly at stage boundaries for both checkpoint and commit agents
+- Trigger evaluation fires after workflow steps (not after infrastructure steps — no cascading)
+- Checkpoint marker is recorded in the execution log
+- Infrastructure steps are recorded as infrastructure-flagged rows (don't update `current_state`)
+
+**Shape:** 2 stages × 1 row per stage = 2 workflow steps. After stage 1 completes, `STAGE_END` fires for both checkpoint and commit. After stage 2 completes (end of run), `STAGE_END` fires again for both. Plus the commit setup dispatch at run start. Minimal workflow that exercises both classes.
+
+**Run configuration:** `--checkpoints enabled --commits enabled --commit-branch mosaic-owned`. The commit setup dispatch is the first thing that fires (before any workflow step), which is itself a key assertion — if the setup fails or the branch marker is missing, the run refuses to start.
+
+### 7.7 `infra-review-consult` — Review Trigger and Orchestrator Follow-Up
+
+An Auto-mode workflow with a review-class infrastructure agent (`mosaictest-review`) declared. The agent's default trigger is `INVOCATION_INTERVAL(3)` (from its frontmatter), so the workflow must have at least 3 workflow steps to fire it.
+
+**What this proves:** The unique thing about the review class — after the review agent fires, the Runner does a **follow-up routing consultation** with the script-mode orchestrator, passing the review's `status_message` as `last_status_message` (ScriptOrchestratorContract.md §2.1). This is the only infrastructure class that triggers an additional orchestrator invocation.
+
+**Stubs used:**
+
+| Stub | Class | Trigger | Role |
+|------|-------|---------|------|
+| `mosaictest-scripted` | (workflow) | — | 3+ workflow rows to trigger the review agent |
+| `mosaictest-review` | review | `INVOCATION_INTERVAL(3)` | Fires after 3rd workflow step; returns canned observation |
+| `orchestrator-script` | (routing) | — | Receives the review's `status_message` in a follow-up consultation |
+
+**Shape:** 3 workflow rows (e.g. RESEARCH → PLANNING → DESIGN, one `mosaictest-scripted` row each). After the 3rd row completes, `INVOCATION_INTERVAL(3)` fires `mosaictest-review`. The review returns its canned message. The Runner then does a routing consultation with `orchestrator-script`, passing the review's `status_message` as `last_status_message`. The orchestrator fixture needs a rule matching the post-review state — it can simply dispatch the next agent or stop.
+
+**Expected log:** 3 workflow steps → review infra step → consultation step → (continue or stop). The consultation step proves the review-to-orchestrator chain works end to end. The `last_status_message` in the consultation request contains the review's canned observation text.
+
+### 7.8 `hitl-escalate` — HITL Approval Failure and Escalation
+
+An Auto-mode workflow where the stub returns SUCCESS with HITL=true, but the artifact has `human_approved: false`. The approval check fails, the Runner re-dispatches (one retry), the stub returns SUCCESS again with `human_approved: false` again, and the Runner escalates to a deviation. The orchestrator then stops the run.
+
+**Uses stub enhancements E1 + E3** (§4.1):
+- E3: `HitlBehaviour: proceed` — stub processes the fixture normally instead of auto-refusing on HITL=true
+- E1: `HitlApproval: false` — stub writes `human_approved: false` in the output artifact
+
+**What this proves:**
+- HITL approval check reads `human_approved` from the artifact (not just the `Status != SUCCESS` shortcut)
+- Failed approval triggers a re-dispatch (not an immediate escalation)
+- Second failure escalates to a deviation
+- The deviation reaches the orchestrator
+
+**Shape:** One row, HITL=true. Fixture writes artifact with `human_approved: false` on both invocations. Expected log: dispatch → SUCCESS (approval fails) → redispatch → SUCCESS (approval fails again) → deviation → consultation → stop.
+
 ---
 
-## 8. Checking a Run
+## 8. Automated Test Execution
+
+### 8.1 The `test` Subcommand
+
+The Runner includes a `test` subcommand, gated behind the `--dev` flag, that automates the deploy → seed → run → check cycle for every (workflow, mode, harness) combination in the test catalog:
+
+```
+mosaic-run --dev test --catalog <path-to-MOSAIC-repo> --suite smoke --harness claude-code
+```
+
+**Key flags:**
+
+| Flag | Required | Description |
+|------|----------|-------------|
+| `--catalog` | Yes | Path to the MOSAIC repo root (where `Tools/Runner/TestCatalog/` lives) |
+| `--suite` | One of suite/workflow | `smoke` (the 4-run smoke set) or `full` (all implemented workflows) |
+| `--workflow` | One of suite/workflow | Specific workflow ID (repeatable); mutually exclusive with `--suite` |
+| `--mode` | No | Execution mode filter; only valid with `--workflow` |
+| `--harness` | No | Harness ID filter (repeatable); defaults to all CLI harnesses |
+| `--ghcp-permission-mode` | When ghcp-cli | `blanket` or `allowlist` |
+
+**What it does per test case:**
+
+1. Loads the test catalog from `TestCatalog/Workflows/MosaicTest/`
+2. Reads each workflow's frontmatter (`modes`, `smoke_set`, `pre_consult`) to enumerate (workflow, mode) pairs
+3. For each pair × each harness: deploys the test catalog, seeds fixtures, runs `mosaic-run run` with the correct flags, and checks the result
+4. Prints a structured pass/fail summary and exits 0 (all pass) or 1 (any failure)
+
+**What it checks:** The current checker validates run outcome (completed, stopped, refused) and execution log structure.
+
+### 8.2 What the Automated Checker Cannot Do
+
+The `test` subcommand cannot:
+
+- **Kill and resume a run** — resume testing requires process lifecycle control. See §13.2.
+- **Simulate harness errors** — timeout/crash injection requires adapter-level hooks. See §13.3.
+- **Evaluate subjective quality** — whether a task description is "good enough" is a human judgement.
+
+These gaps are covered by manual procedures documented in `RunningTests.md`. Tooling gaps that prevent specific test workflows from running are tracked separately in `ToolingGaps.md`.
+
+### 8.3 Relationship to Workflow Frontmatter
+
+The `test` subcommand reads the `modes`, `smoke_set`, and `pre_consult` frontmatter fields (§6a) from each workflow file. These fields are the contract between the workflow author and the automation tool:
+
+- `modes` → which (workflow, mode) pairs to enumerate
+- `smoke_set` → which pairs belong to the `--suite smoke` set
+- `pre_consult` → whether `--pre-consult=false` should be passed to the run
+
+When adding a new workflow, setting these fields correctly is what makes it runnable by `mosaic-run --dev test`.
+
+---
+
+## 9. Checking a Run Manually
 
 A person reads the run output and the resulting `Orchestration.md`. That is fine, but "look at it and see" is not good enough on its own.
 
@@ -285,17 +450,17 @@ Why bother: it turns checking into a comparison instead of an opinion, and a mis
 
 Each workflow document also says what a failure of *its own* mechanism looks like, so someone who did not write it can act on a mismatch.
 
-### 8.1 Where the Actual Run Comes From
+### 9.1 Where the Actual Run Comes From
 
 **Nothing needs to be built to capture it.** The Runner already writes the run as a table: the Execution Log inside `Orchestration.md`. It has one row per step, with these columns:
 
 `Seq` · `Agent` · `Phase` · `Stage` · `Status` · `Timestamp` · `Summary` · `Inputs` · `Checkpoint`
 
-That table *is* the actual run. Checking a run means comparing it against the expected table in the workflow document. By hand today; by machine later if we choose (§8.2).
+That table *is* the actual run. Checking a run means comparing it against the expected table in the workflow document. By hand today; by machine later if we choose (§9.2).
 
 There is also a debug log file, which records harness stdin/stdout, parse failures and consultation events. That is for diagnosing *why* a step went wrong, not for checking *which* steps ran.
 
-### 8.2 Automating the Comparison Later
+### 9.2 Automating the Comparison Later
 
 Automating this is worth doing and is smaller than it sounds — but it should come second, not first.
 
@@ -319,9 +484,9 @@ So a byte-for-byte file comparison will not work. A comparison of selected colum
 
 ---
 
-## 9. The Smoke Set
+## 10. The Smoke Set
 
-The full suite is 12 workflows and 13 runs per harness. That is too slow to run on every change.
+The full suite is 16 workflows and 18 runs per harness (when all planned workflows are implemented). That is too slow to run on every change.
 
 **The smoke set is 4 runs and covers all three modes plus talking to the orchestrator:**
 
@@ -336,7 +501,7 @@ Run the smoke set on any change to the Runner or an adapter. Run the full suite 
 
 ---
 
-## 10. Naming Conventions
+## 11. Naming Conventions
 
 | Thing | Convention |
 |-------|-----------|
@@ -349,7 +514,7 @@ Run the smoke set on any change to the Runner or an adapter. Run the full suite 
 
 ---
 
-## 11. Decisions Worth Recording
+## 12. Decisions Worth Recording
 
 **Match fixtures on run state, not on invocation number.** A numbered list keeps answering plausibly when the Runner consults an unexpected number of times, so the exact bug we want to catch produces a green run. State matching stops loudly instead. It also means the stub does not care how consultation rows are labelled in the log.
 
@@ -365,9 +530,23 @@ Run the smoke set on any change to the Runner or an adapter. Run the full suite 
 
 ---
 
-## 12. Open Items
+## 13. Open Items
 
-None. Both earlier open questions are now decided:
+### 13.1 Resolved — Stub Enhancements E1 and E3
+
+E1 (`HitlApproval`) and E3 (`HitlBehaviour`) are implemented in mosaictest-scripted v2.3.0. The `hitl-escalate` workflow (§7.8) uses both.
+
+### 13.2 Resume Procedure
+
+Resume testing is documented as a manual procedure (§12, decision 6) but the procedure itself is not written up in `RunningTests.md`. It should be: run `orchestrated-linear`, kill the process mid-run, restart against the same run folder, confirm continuation. This cannot be automated within the current test automation harness — it requires process lifecycle control that `mosaic-run test` does not provide.
+
+### 13.3 Harness Error Simulation
+
+No test workflow exercises the harness-error-to-synthetic-BLOCKED path (Design.md §3.3). This is hard to trigger reliably in E2E: it requires making a real harness call fail (agent file missing at invoke time, timeout, etc.). The session unit tests cover this via fake adapter error injection. Documenting this as a known gap; automated coverage may require a dedicated test mode in the harness adapter.
+
+### 13.5 Resolved
+
+Both earlier open questions are decided:
 
 - **All three harness adapters get the code for asking the orchestrator what to run next.** The goal is to test every harness, so every adapter needs it. (Requirement RUN-4.)
-- **The comparison is automated in a second phase**, not the first. See §8.2 for why, and for what the checker can and cannot compare.
+- **The comparison is automated in a second phase**, not the first. See §9.2 for why, and for what the checker can and cannot compare.

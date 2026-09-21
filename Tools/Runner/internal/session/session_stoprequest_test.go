@@ -258,6 +258,8 @@ func TestSession_EvaluateTriggers_StopRequest_BetweenAgents_StopsBeforeSecondDis
 	orchPath := copyOrchestratorFile(t, dir, "review-class-orch.md")
 	writeAgentFile(t, dir, "agent-a")
 	writeAgentFile(t, dir, "agent-b")
+	writeAgentFile(t, dir, "review-agent-a")
+	writeAgentFile(t, dir, "review-agent-b")
 
 	f := harness.NewFakeAdapter()
 	store := &memStore{}

@@ -230,9 +230,9 @@ invocation of agents deployed with restrictive frontmatter — for example,
 OpenCode refuses to run agents marked `mode: subagent` from the command line
 because that mode is reserved for agents spawned as child tasks by another agent.
 
-Runner deployment produces a **second parallel directory** of agent files with
-Runner-compatible transformations applied. Both the deploy and update flows
-support this via the `--runner` flag:
+Runner deployment places the script-mode orchestrator alongside the regular
+agents in the harness's standard agents directory. Both the deploy and update
+flows support this via the `--runner` flag:
 
 ```sh
 # First deploy — opt in to Runner support.
@@ -252,20 +252,30 @@ support this via the `--runner` flag:
 
 **What changes:**
 
-| | Regular directory | Runner directory |
+| | Regular directory | Notes |
 |---|---|---|
-| **Path** | `.opencode/agents/` | `.opencode/agents-runner/` |
-| **Subagents** | Standard frontmatter (e.g., `mode: subagent`) | Runner-compatible frontmatter (e.g., `mode: primary`) |
-| **Orchestrator** | Regular orchestrator | Script-mode orchestrator only |
+| **Path** | `.opencode/agents/` | Single directory; Runner reads from here |
+| **Subagents** | Standard frontmatter (e.g., `mode: subagent`) | Runner transforms these at runtime (see below) |
+| **Orchestrator** | Both regular and script-mode orchestrator | `orchestrator-script.md` added alongside the regular orchestrator |
 
-The regular directory is unchanged — interactive orchestration works exactly as
-before. The runner directory is invisible to the harness's interactive agent
-selection because harnesses only discover agents in their standard directory.
+The regular directory is unchanged for interactive orchestration. The Runner
+applies harness-specific transforms to agent files at runtime without modifying
+the deployed files permanently — it backs up the originals, transforms in-place
+for the run, and restores on completion. See the Runner's agent snapshot
+documentation for details.
 
-**Auto-detection on update:** Once a runner directory exists in the workspace,
-the deploy tool automatically includes it in every subsequent deploy and update
-run. No repeated `--runner` flag is needed — directory presence is the opt-in
-signal. This prevents stale runner agents when you forget the flag.
+**Note on runtime directories:** The Runner creates a `.agents-backup/` sibling
+directory (e.g., `.opencode/.agents-backup/`) at runtime for name-based harnesses
+(OpenCode, GHCP CLI) as a safety backup during active runs. This directory is
+created and deleted by the Runner and is not a deployment artifact. For
+path-based harnesses (Claude Code), the Runner creates a run-scoped
+`agents-runner-{run_id}/` directory at runtime; these are also not deployment
+artifacts and are safe to delete if orphaned.
+
+**Auto-detection on update:** Once a runner-compatible workspace exists,
+the deploy tool automatically includes runner-specific files in every subsequent
+deploy and update run. No repeated `--runner` flag is needed — workspace state
+is the opt-in signal. This prevents stale runner agents when you forget the flag.
 
 **Known Runner-specific transformations:**
 

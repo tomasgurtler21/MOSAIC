@@ -151,6 +151,13 @@ type Deps struct {
 	// Optional: nil is normalised in New to a function that always returns
 	// false, so the dispatch loop never nil-checks it.
 	StopRequested func() bool
+
+	// BackupStateHook is an optional function called immediately after
+	// SetupBackupAndTransform returns a non-nil *BackupState, before the
+	// deferred Cleanup is registered. Tests use this to inject RestoreFunc
+	// (an injectable error seam on BackupState) so that Cleanup can be forced
+	// to fail without relying on filesystem tricks. Nil in production.
+	BackupStateHook func(*snapshot.BackupState)
 }
 
 // New creates a new Session with the given port dependencies.
@@ -243,9 +250,15 @@ type sessionImpl struct {
 	// call so that subsequent routing decisions use the configured consultant.
 	manualDispatchPending bool
 	// snapshotDir is the absolute path to the run-scoped agent snapshot
-	// directory created at step 5a. Empty until step 5a succeeds. Used by
-	// cleanup to know what to delete on terminal completion.
+	// directory created by the copy-and-invoke strategy at step 5b. Empty
+	// until step 5b succeeds for path-based harnesses. Used by cleanup to
+	// know what to delete on terminal completion.
 	snapshotDir string
+	// backupState is the handle returned by SetupBackupAndTransform for
+	// name-based harnesses (backup-and-transform strategy). Nil for path-based
+	// harnesses and non-CLI harnesses. Its Cleanup method is registered in a
+	// defer immediately after setup succeeds.
+	backupState *snapshot.BackupState
 }
 
 // invokeAndLog wraps s.deps.Harness.Invoke with dispatch logging. It logs the
@@ -384,69 +397,127 @@ func (s *sessionImpl) Start(ctx context.Context, config domain.RunConfig) (outco
 		return s.refusal(err.Error()), nil
 	}
 
-	// Step 5: Resolve every agent identifier to a definition file.
+	// orchDir is used by steps 4b and 5 (hoisted here so step 4b can refer to it).
 	orchDir := filepath.Dir(config.OrchestratorFilePath)
+
+	// Step 4b: Recovery check (CLI harnesses only). Runs BEFORE step 5 (ResolveAll)
+	// so that any orphaned backup-and-transform state from a previous crashed run is
+	// restored before agents are resolved. If recovery fails (corrupt manifest),
+	// refuse the run.
+	if commonharness.IsCLIHarness(config.HarnessID) {
+		if rcErr := snapshot.RecoveryCheck(orchDir, s.deps.Debug); rcErr != nil {
+			return s.refusal(rcErr.Error()), nil
+		}
+	}
+
+	// Step 5: Resolve every agent identifier to a definition file.
 	identifiers := uniqueAgentIdentifiers(table)
 	agents, err := agentresolve.ResolveAll(orchDir, identifiers)
 	if err != nil {
 		return s.refusal(err.Error()), nil
 	}
 
-	// Step 5a: Create a run-scoped agent snapshot (CLI harnesses only).
-	// Skip for non-CLI harnesses (e.g. the "fake" test double) which have
-	// no agents directory convention. For CLI harnesses, copy the agents
-	// directory to a sibling snapshot directory, re-resolve all agents against
-	// the snapshot, and re-bind consultants with the snapshot-resolved
-	// orchestrator reference. On failure, refuse the run.
-	if commonharness.IsCLIHarness(config.HarnessID) {
-		// The snapshot directory is a sibling of the agents directory, named
-		// by appending "-runner-{runID}" to the agents directory base name.
-		snapshotDir := filepath.Join(filepath.Dir(orchDir), filepath.Base(orchDir)+"-runner-"+config.RunID)
-		rules := snapshot.TransformationsFor(config.HarnessID)
-		if err := snapshot.CreateSnapshot(orchDir, snapshotDir, rules); err != nil {
-			return s.refusal(err.Error()), nil
-		}
-		s.snapshotDir = snapshotDir
-
-		// Defer cleanup: delete the snapshot directory on terminal completion
-		// (RunCompleted or RunStopped). Non-terminal outcomes leave the snapshot
-		// in place so the run can be resumed with access to the original agent files.
-		// The named return variable 'outcome' is read by the deferred function after
-		// all return statements have set it.
-		defer func() {
-			if s.snapshotDir == "" {
-				return
+	// Step 5b: Snapshot/backup strategy selection (CLI harnesses only).
+	// Non-CLI harnesses (e.g. the "fake" test double) skip this block entirely:
+	// they have no agents directory convention and no snapshot or backup setup.
+	//
+	// For CLI harnesses, the loading mechanism in the catalog entry determines
+	// which strategy to use:
+	//   LoadingMechanismPath (claude-code): copy-and-invoke -- copy the agents
+	//     directory to a sibling snapshot directory, re-resolve all agents against
+	//     the snapshot, and re-bind consultants with the snapshot-resolved
+	//     orchestrator reference.
+	//   LoadingMechanismName (opencode, ghcp-cli): backup-and-transform -- modify
+	//     originals in-place after backing them up. If rules is nil (ghcp-cli),
+	//     skip backup-and-transform entirely and dispatch from the original agents
+	//     directory (FR-3). Does NOT re-resolve agents or re-bind orchRef.
+	//   LoadingMechanismUnset: refuse the run (catalog misconfiguration).
+	if entry, ok := commonharness.LookupCLIHarness(config.HarnessID); ok {
+		switch entry.LoadingMechanism {
+		case commonharness.LoadingMechanismPath:
+			// Copy-and-invoke strategy. The snapshot directory is a sibling of the
+			// agents directory, named by appending "-runner-{runID}" to the agents
+			// directory base name.
+			snapshotDir := filepath.Join(filepath.Dir(orchDir), filepath.Base(orchDir)+"-runner-"+config.RunID)
+			rules := snapshot.TransformationsFor(config.HarnessID)
+			if err := snapshot.CreateSnapshot(orchDir, snapshotDir, rules); err != nil {
+				return s.refusal(err.Error()), nil
 			}
-			if outcome.Status == domain.RunCompleted || outcome.Status == domain.RunStopped {
+			s.snapshotDir = snapshotDir
+
+			// Defer cleanup: delete the snapshot directory on all terminal outcomes
+			// (FR-21: all six RunStatus values are terminal). The named return
+			// variable 'outcome' is read by the deferred function after all return
+			// statements have set it.
+			defer func() {
+				if s.snapshotDir == "" {
+					return
+				}
 				if rmErr := os.RemoveAll(s.snapshotDir); rmErr != nil {
 					s.deps.Debug.Log(domain.EventSnapshotCleanupFailed,
 						fmt.Sprintf("failed to remove snapshot directory %s: %v", s.snapshotDir, rmErr))
 				}
+			}()
+
+			// Re-resolve all agents against the snapshot directory so every dispatch
+			// uses the transformed snapshot copies, not the originals.
+			agents, err = agentresolve.ResolveAll(snapshotDir, identifiers)
+			if err != nil {
+				return s.refusal(err.Error()), nil
 			}
-		}()
 
-		// Re-resolve all agents against the snapshot directory so every dispatch
-		// uses the transformed snapshot copies, not the originals.
-		agents, err = agentresolve.ResolveAll(snapshotDir, identifiers)
-		if err != nil {
-			return s.refusal(err.Error()), nil
+			// Re-resolve the orchestrator against the snapshot directory.
+			snapshotOrchPath := filepath.Join(snapshotDir, filepath.Base(config.OrchestratorFilePath))
+			orchRef, err = agentresolve.ResolveOrchestrator(snapshotOrchPath)
+			if err != nil {
+				return s.refusal(err.Error()), nil
+			}
+			s.orchRef = orchRef
+
+			// Re-bind consultants with the snapshot-resolved orchestrator reference
+			// so consultation dispatches the transformed copy of the orchestrator
+			// script rather than the original.
+			rc = domain.RunContext{Orchestrator: orchRef, Table: table}
+			bindRunContext(s.deps.Routing, rc)
+			bindRunContext(s.deps.Manual, rc)
+			bindRunContext(s.deps.PreConsult, rc)
+
+		case commonharness.LoadingMechanismName:
+			// Backup-and-transform strategy. Originals are modified in-place after
+			// being backed up. If TransformationsFor returns nil (FR-3, e.g. ghcp-cli),
+			// SetupBackupAndTransform returns (nil, nil) and we skip backup entirely,
+			// dispatching from the original agents directory.
+			//
+			// Note: backup-and-transform does NOT re-resolve agents or re-bind orchRef.
+			// The orchestrator file is transformed in-place at its original path, so
+			// the references resolved at step 5 remain valid.
+			rules := snapshot.TransformationsFor(config.HarnessID)
+			bs, bsErr := snapshot.SetupBackupAndTransform(orchDir, config.RunID, rules, s.deps.Debug)
+			if bsErr != nil {
+				return s.refusal(bsErr.Error()), nil
+			}
+			if bs != nil {
+				// Register defer immediately after successful setup so that post-setup
+				// refusals (e.g. step 7.5a mode=unset) still release the backup lock.
+				s.backupState = bs
+				if s.deps.BackupStateHook != nil {
+					s.deps.BackupStateHook(bs)
+				}
+				defer func(localBS *snapshot.BackupState) {
+					if cleanupErr := localBS.Cleanup(); cleanupErr != nil {
+						s.deps.Debug.Log(domain.EventSnapshotCleanupFailed, cleanupErr.Error())
+					}
+				}(bs)
+			}
+			// If bs == nil (nil rules, FR-3): no backup acquired, dispatch from originals.
+
+		default:
+			// LoadingMechanismUnset or unrecognized: catalog misconfiguration.
+			return s.refusal(fmt.Sprintf(
+				"harness %q has unset or unrecognized loading mechanism (%s); catalog misconfiguration",
+				config.HarnessID, entry.LoadingMechanism,
+			)), nil
 		}
-
-		// Re-resolve the orchestrator against the snapshot directory.
-		snapshotOrchPath := filepath.Join(snapshotDir, filepath.Base(config.OrchestratorFilePath))
-		orchRef, err = agentresolve.ResolveOrchestrator(snapshotOrchPath)
-		if err != nil {
-			return s.refusal(err.Error()), nil
-		}
-		s.orchRef = orchRef
-
-		// Re-bind consultants with the snapshot-resolved orchestrator reference
-		// so consultation dispatches the transformed copy of the orchestrator
-		// script rather than the original.
-		rc = domain.RunContext{Orchestrator: orchRef, Table: table}
-		bindRunContext(s.deps.Routing, rc)
-		bindRunContext(s.deps.Manual, rc)
-		bindRunContext(s.deps.PreConsult, rc)
 	}
 
 	// Step 6: Read the stage set from the run folder, if a plan file is
@@ -2059,9 +2130,9 @@ func (s *sessionImpl) doCommitSetupDispatch(
 	if commitAgent == nil {
 		return nil, "commits enabled but no commit-class agent found"
 	}
-	agentRef := domain.AgentReference{
-		Identifier:     commitAgent.Name,
-		DefinitionPath: filepath.Join(orchDir, commitAgent.Name+".md"),
+	agentRef, resolveErr := agentresolve.ResolveOne(orchDir, commitAgent.Name)
+	if resolveErr != nil {
+		return nil, "commit setup: cannot resolve agent definition: " + resolveErr.Error()
 	}
 	req := domain.ProtocolRequest{
 		AgentInstanceID: fmt.Sprintf("%s#1", commitAgent.Name),
@@ -2240,36 +2311,45 @@ func (s *sessionImpl) evaluateTriggers(
 
 		// Dispatch the infrastructure agent.
 		infraSeq := *seq + 1
-		agentRef := domain.AgentReference{
-			Identifier:     agent.Name,
-			DefinitionPath: filepath.Join(orchDir, agent.Name+".md"),
-		}
 		req := domain.ProtocolRequest{
 			AgentInstanceID: fmt.Sprintf("%s#%d", agent.Name, infraSeq),
 			RunID:           state.RunID,
 			TaskDescription: fmt.Sprintf("infrastructure agent dispatch: %s", agent.Name),
 		}
 
-		// Graceful-stop checkpoint: any earlier agent in this pass that already
-		// fired and dispatched keeps its already-applied outcome; only this
-		// not-yet-dispatched agent (and any later declared agents) are skipped.
-		if s.deps.StopRequested() {
-			s.deps.Debug.Log(domain.EventSessionStopObserved, "graceful stop observed; not dispatching",
-				domain.F("checkpoint", StopCheckpointInfraDispatch),
-			)
-			return false, true, nil
-		}
-
-		response, invokeErr := s.invokeAndLog(ctx, agentRef, req)
-		if invokeErr != nil {
-			if ctx.Err() != nil {
-				return true, false, ctx.Err()
-			}
-			// Harness-level error: treat as non-SUCCESS and apply on_failure policy.
+		agentRef, resolveErr := agentresolve.ResolveOne(orchDir, agent.Name)
+		var response domain.ProtocolResponse
+		if resolveErr != nil {
+			// Cannot locate the agent definition file; treat as non-SUCCESS and
+			// apply the on_failure policy without dispatching.
 			response = domain.ProtocolResponse{
 				AgentInstanceID: req.AgentInstanceID,
 				StatusCode:      domain.StatusBLOCKED,
-				StatusMessage:   invokeErr.Error(),
+				StatusMessage:   resolveErr.Error(),
+			}
+		} else {
+			// Graceful-stop checkpoint: any earlier agent in this pass that already
+			// fired and dispatched keeps its already-applied outcome; only this
+			// not-yet-dispatched agent (and any later declared agents) are skipped.
+			if s.deps.StopRequested() {
+				s.deps.Debug.Log(domain.EventSessionStopObserved, "graceful stop observed; not dispatching",
+					domain.F("checkpoint", StopCheckpointInfraDispatch),
+				)
+				return false, true, nil
+			}
+
+			var invokeErr error
+			response, invokeErr = s.invokeAndLog(ctx, agentRef, req)
+			if invokeErr != nil {
+				if ctx.Err() != nil {
+					return true, false, ctx.Err()
+				}
+				// Harness-level error: treat as non-SUCCESS and apply on_failure policy.
+				response = domain.ProtocolResponse{
+					AgentInstanceID: req.AgentInstanceID,
+					StatusCode:      domain.StatusBLOCKED,
+					StatusMessage:   invokeErr.Error(),
+				}
 			}
 		}
 
