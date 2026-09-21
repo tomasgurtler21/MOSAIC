@@ -42,9 +42,11 @@ type HarnessDescriptor struct {
 	SchemaVersion                 string
 	ID                            string
 	DisplayName                   string
+	AgentFormatID                 string // agent file format identifier; defaults to "markdown" when absent
 	TransformVersion              string // stamped into every deployed agent
 	InjectionsVersion             string // stamped into every deployed agent
 	OrchestratorInjectionsVersion string // stamped into the orchestrator's deployed file only; populated at module construction time from HarnessInjectionsOrchestrator.md frontmatter
+	ToolInfoUnrecoverable         bool   // true when wire tool_info_recoverable is explicitly false (polarity inversion)
 	Models                        ModelCatalog
 	Tools                         ToolSpec
 	Paths                         PathSpec

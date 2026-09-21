@@ -14,6 +14,7 @@ import (
 	"strings"
 	"time"
 
+	"mosaic-deploy/internal/agentformat"
 	"mosaic-deploy/internal/domain"
 	"mosaic-deploy/internal/pathinput"
 	"mosaic-deploy/internal/transform"
@@ -944,6 +945,12 @@ type harnessOnlyContentPlan struct {
 // (from config.HashToolDestinations). It is forwarded to transform.Apply so the transform
 // can stamp it into the deployed file frontmatter as `tool_mappings_version`, closing the
 // probe → planner → executor → frontmatter staleness loop for config-mapping changes.
+//
+// ownedKeyDiffSink, when non-nil, receives any OwnedKeyDifference entries emitted during
+// this run. The content callback appends to it for each agent item that carries conflict
+// classification with a parseable deployed form. Callers that do not need this reporting
+// must pass nil. The sink is written sequentially (the executor calls the content callback
+// one item at a time) and requires no synchronisation from the caller.
 func (s *service) buildContent(
 	module domain.HarnessModule,
 	agentByKey map[string]domain.Agent,
@@ -953,7 +960,11 @@ func (s *service) buildContent(
 	workflowBlocks []transform.WorkflowBlock,
 	infrastructureBlocks []transform.InfrastructureBlock,
 	scope domain.Scope,
-	deployedReader func(domain.PlanItem) []byte,
+	// deployedReader returns (DeployedRead, agentformat.Operation, error) for a plan item.
+	// The DeployedRead carries both the raw on-disk bytes and the decoded canonical bytes.
+	// The Operation carries the create-vs-update signal derived from item.Action.
+	// A non-nil error means the item cannot be processed at all (e.g. unrecognised Action).
+	deployedReader func(domain.PlanItem) (DeployedRead, agentformat.Operation, error),
 	toolMappingsVersion string,
 	protocol domain.ProtocolContent,
 	bundle domain.BundleContent,
@@ -961,6 +972,10 @@ func (s *service) buildContent(
 	// means no harness-only agents are in this run and the callback behaves exactly as
 	// it does today.
 	harnessOnly map[string]harnessOnlyContentPlan,
+	// ownedKeyDiffSink accumulates owned-key difference entries across all items this run.
+	// Nil means no collection. Non-nil callers must merge the resulting slice into the
+	// RunSummary after the executor returns.
+	ownedKeyDiffSink *[]domain.OwnedKeyDifference,
 ) func(domain.PlanItem) ([]byte, error) {
 	return func(item domain.PlanItem) ([]byte, error) {
 		// Harness-only route: checked first, before the artifact-kind switch. A harness-only
@@ -968,17 +983,34 @@ func (s *service) buildContent(
 		// bypassed: it rejects any path the catalog did not emit, and a harness-only agent
 		// has no catalog entry and no SourcePath.
 		if plan, ok := harnessOnly[item.TargetPath]; ok {
-			var deployed []byte
+			var read DeployedRead
 			if deployedReader != nil {
-				deployed = deployedReader(item)
+				var rdErr error
+				var op agentformat.Operation
+				read, op, rdErr = deployedReader(item)
+				_ = op // harness-only refresh does not call transform.Apply, so Op is unused
+				if rdErr != nil {
+					return nil, rdErr
+				}
+				if read.ReadErr != nil {
+					return nil, read.ReadErr
+				}
+				if read.DecodeErr != nil {
+					// Harness-only agents are never conflict items, so decode failure
+					// always fails the artifact.
+					return nil, read.DecodeErr
+				}
 			}
 			res, err := refreshHarnessOnly(HarnessOnlyRefreshRequest{
-				Deployed: deployed,
-				Scope:    plan.Scope,
-				Role:     plan.Agent.Role,
-				Protocol: protocol,
-				Bundle:   bundle,
-				Subject:  item.TargetPath,
+				Deployed:    read.Canonical,
+				DeployedRaw: read.Raw,
+				AgentKey:    plan.Agent.Key,
+				FormatID:    module.Descriptor().AgentFormatID,
+				Scope:       plan.Scope,
+				Role:        plan.Agent.Role,
+				Protocol:    protocol,
+				Bundle:      bundle,
+				Subject:     item.TargetPath,
 			})
 			if err != nil {
 				return nil, err
@@ -1004,21 +1036,79 @@ func (s *service) buildContent(
 		if err != nil {
 			return nil, err
 		}
-		var deployed []byte
+
+		// Read the deployed file through the decode funnel (Layer 3). This provides both
+		// the raw on-disk bytes (DeployedRaw, for the translator's preservation channel)
+		// and the decoded canonical bytes (Deployed, for transform's inject/tool branches).
+		var deployedCanonical []byte
+		var deployedRaw []byte
+		var op agentformat.Operation
+		var decodeReport agentformat.Report
 		if deployedReader != nil {
-			deployed = deployedReader(item)
+			var rdErr error
+			var read DeployedRead
+			read, op, rdErr = deployedReader(item)
+			if rdErr != nil {
+				return nil, rdErr
+			}
+			if read.ReadErr != nil {
+				return nil, read.ReadErr
+			}
+			if read.DecodeErr != nil {
+				// A deployed file that failed to decode fails the artifact on a non-conflict
+				// item. On a conflict item (ActionConflict), the user chose to overwrite and
+				// the decode error is discharged by that decision. We proceed with raw bytes
+				// set and nil canonical, so the translator can still run the tolerant stamp
+				// and header-comment scan over the raw bytes.
+				if item.Action != domain.ActionConflict {
+					return nil, read.DecodeErr
+				}
+				// Conflict-overwrite path: Deployed nil, DeployedRaw set, Op OpUpdate.
+				deployedCanonical = nil
+				deployedRaw = read.Raw
+				op = agentformat.OpUpdate
+			} else {
+				deployedCanonical = read.Canonical
+				deployedRaw = read.Raw
+			}
+			decodeReport = read.Report
+			// Decode notices (e.g. missing developer_instructions) will be forwarded to the
+			// todo collector after Apply returns via mergeDecodeReport below.
 		}
+
 		var wfBlocks []transform.WorkflowBlock
 		var infraBlocks []transform.InfrastructureBlock
 		if agent.Role == domain.RoleOrchestrator {
 			wfBlocks = workflowBlocks
 			infraBlocks = infrastructureBlocks
 		}
+
+		// Derive Origin from the plan item's conflict classification and whether the
+		// deployed file was parseable (canonical bytes non-nil). The plan layer is the
+		// single source of truth; transform never recomputes the classification.
+		//
+		// item.Conflict == nil  → OriginConfirmed (zero value; no entry emitted)
+		// item.Conflict != nil, deployedCanonical != nil → OriginUnconfirmed
+		// item.Conflict != nil, deployedCanonical == nil → OriginUnconfirmedUnparseable
+		//
+		// The gate is item.Conflict != nil; agent conflicts always set ManifestMissing and
+		// leave RecordedHash empty, so no condition on hash fields is needed or correct.
+		origin := transform.OriginConfirmed
+		if item.Conflict != nil {
+			if deployedCanonical != nil {
+				origin = transform.OriginUnconfirmed
+			} else {
+				origin = transform.OriginUnconfirmedUnparseable
+			}
+		}
+
 		desc := module.Descriptor()
 		res, err := transform.Apply(transform.Request{
 			Source: src, Kind: domain.ArtifactAgent, Key: agent.Key, Module: module,
 			Model: models[agent.Key], CustomTools: customTools, SkippedTools: skippedTools,
-			Scope: scope, Deployed: deployed, Workflows: wfBlocks,
+			Scope: scope, Deployed: deployedCanonical, DeployedRaw: deployedRaw, Op: op,
+			Origin:                        origin,
+			Workflows:                     wfBlocks,
 			InfrastructureAgents:          infraBlocks,
 			ToolMappingsVersion:           toolMappingsVersion,
 			Role:                          agent.Role,
@@ -1031,10 +1121,29 @@ func (s *service) buildContent(
 		if err != nil {
 			return nil, err
 		}
-		// Forward any gaps produced by the transform (e.g. parking events) to the
-		// todo collector so they appear in the TODO report for the user to act on.
+
+		// Merge the decode report into the transform result so that gaps emitted during
+		// format decoding (e.g. EntryMissingInstructions → GapManualStep) reach the
+		// same gap collector as transform gaps. For Markdown harnesses decodeReport is
+		// always empty so this is a no-op for the four existing harnesses.
+		mergeDecodeReport(&res.Report, decodeReport)
+		// Forward all gaps (transform + merged decode) to the todo collector.
 		for _, g := range res.Report.Gaps {
 			s.deps.Todo.AddGap(g)
+		}
+		// Collect owned-key differences for surfacing in the run report. Only populated
+		// for conflict-classified artifacts with parseable deployed bytes; empty otherwise.
+		if ownedKeyDiffSink != nil && len(res.Report.OwnedKeyDifferences) > 0 {
+			for _, d := range res.Report.OwnedKeyDifferences {
+				*ownedKeyDiffSink = append(*ownedKeyDiffSink, domain.OwnedKeyDifference{
+					Key:             d.Key,
+					Deployed:        d.Deployed,
+					Incoming:        d.Incoming,
+					Reason:          d.Reason,
+					DeployedPresent: d.DeployedPresent,
+					IncomingPresent: d.IncomingPresent,
+				})
+			}
 		}
 		return res.Output, nil
 	}

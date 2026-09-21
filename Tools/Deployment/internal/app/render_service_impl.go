@@ -18,7 +18,6 @@ import (
 	"path/filepath"
 	"strings"
 
-	"mosaic-common/docformat"
 	"mosaic-deploy/internal/config"
 	"mosaic-deploy/internal/domain"
 	"mosaic-deploy/internal/transform"
@@ -113,7 +112,7 @@ func renderAgent(_ context.Context, s *service, req RenderAgentRequest) (RenderA
 	// -----------------------------------------------------------------------
 	// 6. Source parseable
 	// -----------------------------------------------------------------------
-	doc, parseErr := docformat.Parse(srcBytes)
+	doc, parseErr := ParseGenericSource(srcBytes)
 	if parseErr != nil {
 		return RenderAgentResult{}, fmt.Errorf("%w: %v", ErrRenderSourceNotGeneric, parseErr)
 	}

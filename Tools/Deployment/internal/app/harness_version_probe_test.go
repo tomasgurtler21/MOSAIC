@@ -31,6 +31,7 @@ package app
 import (
 	"testing"
 
+	"mosaic-deploy/internal/domain"
 	"mosaic-deploy/internal/manifest"
 )
 
@@ -46,7 +47,7 @@ func TestProbeDeployedArtifact_MosaicHarnessVersion_PopulatesHarnessVersion(t *t
 	content := []byte("---\nmosaic_version: \"2.0\"\nmosaic_harness_version: \"4.0\"\n---\n\nAgent body.\n")
 	writeFile(t, ws, "agent.md", content)
 
-	state := probeDeployedArtifact(ws, "agent.md", "")
+	state := probeDeployedArtifact(ws, "agent.md", "", domain.ArtifactAgent, &domain.HarnessDescriptor{})
 
 	if !state.Present {
 		t.Fatal("expected Present: true for readable file")
@@ -66,7 +67,7 @@ func TestProbeDeployedArtifact_BothHarnessVersionAndLegacyTransformVersion_Prefe
 	content := []byte("---\nmosaic_harness_version: \"4.0\"\nmosaic_transform_version: \"3.0\"\n---\n\nAgent body.\n")
 	writeFile(t, ws, "agent.md", content)
 
-	state := probeDeployedArtifact(ws, "agent.md", "")
+	state := probeDeployedArtifact(ws, "agent.md", "", domain.ArtifactAgent, &domain.HarnessDescriptor{})
 
 	if state.HarnessVersion != "4.0" {
 		t.Errorf("HarnessVersion = %q, want %q; "+
@@ -84,7 +85,7 @@ func TestProbeDeployedArtifact_HarnessVersionAbsent_HarnessVersionFieldEmpty(t *
 	content := []byte("---\nmosaic_version: \"2.0\"\n---\n\nAgent body.\n")
 	writeFile(t, ws, "agent.md", content)
 
-	state := probeDeployedArtifact(ws, "agent.md", "")
+	state := probeDeployedArtifact(ws, "agent.md", "", domain.ArtifactAgent, &domain.HarnessDescriptor{})
 
 	if state.HarnessVersion != "" {
 		t.Errorf("HarnessVersion = %q, want empty when mosaic_harness_version is absent from frontmatter",
@@ -215,7 +216,7 @@ func TestProbeDeployedArtifact_HarnessRegionWithVersionTag_PopulatesInjectionsVe
 		"</HarnessConstraints>\n")
 	writeFile(t, ws, "agent.md", content)
 
-	state := probeDeployedArtifact(ws, "agent.md", "")
+	state := probeDeployedArtifact(ws, "agent.md", "", domain.ArtifactAgent, &domain.HarnessDescriptor{})
 
 	if state.InjectionsVersion != "1.7" {
 		t.Errorf("InjectionsVersion = %q, want %q; "+
@@ -239,7 +240,7 @@ func TestProbeDeployedArtifact_OrchestratorInjectionsVersionAlwaysEmpty(t *testi
 		"---\n\nOrchestrator body.\n")
 	writeFile(t, ws, "orchestrator.md", content)
 
-	state := probeDeployedArtifact(ws, "orchestrator.md", "")
+	state := probeDeployedArtifact(ws, "orchestrator.md", "", domain.ArtifactAgent, &domain.HarnessDescriptor{})
 
 	if state.OrchestratorInjectionsVersion != "" {
 		t.Errorf("OrchestratorInjectionsVersion = %q, want empty; "+
@@ -260,7 +261,7 @@ func TestProbeDeployedArtifact_HarnessVersionAndInjectionsVersionPopulatedTogeth
 		"</HarnessConstraints>\n")
 	writeFile(t, ws, "agent.md", content)
 
-	state := probeDeployedArtifact(ws, "agent.md", "")
+	state := probeDeployedArtifact(ws, "agent.md", "", domain.ArtifactAgent, &domain.HarnessDescriptor{})
 
 	if state.HarnessVersion != "4.1" {
 		t.Errorf("HarnessVersion = %q, want %q", state.HarnessVersion, "4.1")
@@ -288,7 +289,7 @@ func TestProbeDeployedArtifact_LegacyMosaicTransformVersion_FallsBackToHarnessVe
 	content := []byte("---\nmosaic_version: \"2.0\"\nmosaic_transform_version: \"3.5\"\n---\n\nAgent body.\n")
 	writeFile(t, ws, "agent.md", content)
 
-	state := probeDeployedArtifact(ws, "agent.md", "")
+	state := probeDeployedArtifact(ws, "agent.md", "", domain.ArtifactAgent, &domain.HarnessDescriptor{})
 
 	if state.HarnessVersion != "3.5" {
 		t.Errorf("HarnessVersion = %q, want %q; "+
@@ -306,7 +307,7 @@ func TestProbeDeployedArtifact_LegacyUnprefixedTransformVersion_FallsBackToHarne
 	content := []byte("---\nversion: \"1.0\"\ntransform_version: \"2.0\"\n---\n\nAgent body.\n")
 	writeFile(t, ws, "agent.md", content)
 
-	state := probeDeployedArtifact(ws, "agent.md", "")
+	state := probeDeployedArtifact(ws, "agent.md", "", domain.ArtifactAgent, &domain.HarnessDescriptor{})
 
 	if state.HarnessVersion != "2.0" {
 		t.Errorf("HarnessVersion = %q, want %q; "+
@@ -370,7 +371,7 @@ func TestProbeDeployedArtifact_OrchestratorInjectionsVersionAlwaysEmpty_TagOnlyC
 		"</HarnessConstraints>\n")
 	writeFile(t, ws, "orchestrator.md", content)
 
-	state := probeDeployedArtifact(ws, "orchestrator.md", "")
+	state := probeDeployedArtifact(ws, "orchestrator.md", "", domain.ArtifactAgent, &domain.HarnessDescriptor{})
 
 	if state.InjectionsVersion != "7.0" {
 		t.Errorf("InjectionsVersion = %q, want %q; "+
@@ -397,7 +398,7 @@ func TestProbeDeployedArtifact_LegacyInjectionsFrontmatter_PopulatesInjectionsVe
 		"</HarnessConstraints>\n")
 	writeFile(t, ws, "agent.md", content)
 
-	state := probeDeployedArtifact(ws, "agent.md", "")
+	state := probeDeployedArtifact(ws, "agent.md", "", domain.ArtifactAgent, &domain.HarnessDescriptor{})
 
 	if state.InjectionsVersion != "3.0" {
 		t.Errorf("InjectionsVersion = %q, want %q; "+

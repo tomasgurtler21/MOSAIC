@@ -14,6 +14,11 @@ const (
 	// StripReasonUnknownField — the field is unknown to MOSAIC and to the identified
 	// harness (FR-3). Values are the field's rendered contents.
 	StripReasonUnknownField StripReason = "unknown-field"
+	// StripReasonCarriedKey — the field was held in the carriage container (mosaic_carriage
+	// or mosaic_carriage_markers) at the source document and did not travel the format-change
+	// boundary. It is reported because the value cannot reach the target format, not because
+	// it was unknown to the source harness.
+	StripReasonCarriedKey StripReason = "carried-key"
 )
 
 // StrippedField reports one frontmatter field removed from generated output, with enough

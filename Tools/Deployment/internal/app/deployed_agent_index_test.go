@@ -101,7 +101,7 @@ func TestBuildDeployedAgentIndex_FileWithID_IsIndexed(t *testing.T) {
 	writeDeployedFileWithID(t, filepath.Join(workspace, agentsDir), "my-agent.md", "42")
 
 	// Act
-	index := buildDeployedAgentIndex(workspace, agentsDir)
+	index, _ := buildDeployedAgentIndex(workspace, agentsDir, &domain.HarnessDescriptor{})
 
 	// Assert
 	entries := index.Lookup("42")
@@ -121,7 +121,7 @@ func TestBuildDeployedAgentIndex_FileWithID_EntryContainsRelativePath(t *testing
 	writeDeployedFileWithID(t, filepath.Join(workspace, agentsDir), "my-agent.md", "42")
 
 	// Act
-	index := buildDeployedAgentIndex(workspace, agentsDir)
+	index, _ := buildDeployedAgentIndex(workspace, agentsDir, &domain.HarnessDescriptor{})
 
 	// Assert
 	entries := index.Lookup("42")
@@ -146,7 +146,7 @@ func TestBuildDeployedAgentIndex_FileWithNoID_IsSkipped(t *testing.T) {
 	writeDeployedFileNoID(t, filepath.Join(workspace, agentsDir), "no-id.md")
 
 	// Act — must return without panicking
-	index := buildDeployedAgentIndex(workspace, agentsDir)
+	index, _ := buildDeployedAgentIndex(workspace, agentsDir, &domain.HarnessDescriptor{})
 
 	// Assert — the index must be non-nil and contain no entries.
 	if index == nil {
@@ -171,7 +171,7 @@ func TestBuildDeployedAgentIndex_UnparseableFile_IsSkipped(t *testing.T) {
 	writeUnparseableDeployedFile(t, filepath.Join(workspace, agentsDir), "bad.md")
 
 	// Act — must not panic
-	index := buildDeployedAgentIndex(workspace, agentsDir)
+	index, _ := buildDeployedAgentIndex(workspace, agentsDir, &domain.HarnessDescriptor{})
 
 	// Assert — the unparseable file must have produced no index entries.
 	if index == nil {
@@ -195,7 +195,7 @@ func TestBuildDeployedAgentIndex_EmptyAgentsDir_ReturnsEmptyIndex(t *testing.T) 
 	}
 
 	// Act
-	index := buildDeployedAgentIndex(workspace, agentsDir)
+	index, _ := buildDeployedAgentIndex(workspace, agentsDir, &domain.HarnessDescriptor{})
 
 	// Assert
 	if index == nil {
@@ -225,7 +225,7 @@ func TestBuildDeployedAgentIndex_RenamedFile_FoundByID(t *testing.T) {
 	writeDeployedFileWithID(t, filepath.Join(workspace, agentsDir), "old-agent-name.md", numericID)
 
 	// Act
-	index := buildDeployedAgentIndex(workspace, agentsDir)
+	index, _ := buildDeployedAgentIndex(workspace, agentsDir, &domain.HarnessDescriptor{})
 
 	// Assert — the file must be found by id "7", not by its filename.
 	entries := index.Lookup(numericID)
@@ -409,7 +409,7 @@ func TestBuildDeployedAgentIndex_TwoFilesWithSameID_BothIndexed(t *testing.T) {
 	writeDeployedFileWithID(t, filepath.Join(workspace, agentsDir), "beta.md", "12")
 
 	// Act
-	index := buildDeployedAgentIndex(workspace, agentsDir)
+	index, _ := buildDeployedAgentIndex(workspace, agentsDir, &domain.HarnessDescriptor{})
 
 	// Assert — both entries must be present so the caller can report the collision.
 	entries := index.Lookup("12")
@@ -467,7 +467,7 @@ func TestDeployedAgentIndex_EndToEnd_WholeLocationScan(t *testing.T) {
 	writeUnparseableDeployedFile(t, filepath.Join(workspace, agentsDir), "bad.md")
 
 	// Act
-	index := buildDeployedAgentIndex(workspace, agentsDir)
+	index, _ := buildDeployedAgentIndex(workspace, agentsDir, &domain.HarnessDescriptor{})
 
 	// Assert — all three id-carrying files must be indexed.
 	for _, id := range []string{"10", "20", "30"} {
@@ -502,7 +502,7 @@ func TestDeployedAgentIndex_EndToEnd_DeployResolutionPipeline(t *testing.T) {
 	writeDeployedFileWithID(t, filepath.Join(workspace, agentsDir), "renamed-b.md", "20")
 
 	// Build the index once (as the deploy flow does).
-	index := buildDeployedAgentIndex(workspace, agentsDir)
+	index, _ := buildDeployedAgentIndex(workspace, agentsDir, &domain.HarnessDescriptor{})
 
 	// Define four agents covering distinct resolution paths.
 	agentA := domain.Agent{Key: "agent-a", NumericID: "10", Role: domain.RoleSubagent}

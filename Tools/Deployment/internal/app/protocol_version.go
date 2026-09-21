@@ -1,7 +1,5 @@
 package app
 
-import "mosaic-common/docformat"
-
 // extractDeployedProtocolVersion returns the protocol version recorded in the version
 // attribute on the deployed file's CommunicationProtocol region's opening tag.
 //
@@ -13,7 +11,7 @@ func extractDeployedProtocolVersion(data []byte) string {
 	if len(data) == 0 {
 		return ""
 	}
-	doc, err := docformat.Parse(data)
+	doc, err := ParseGenericSource(data)
 	if err != nil {
 		return ""
 	}

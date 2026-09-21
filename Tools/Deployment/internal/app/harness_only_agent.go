@@ -15,10 +15,10 @@ type HarnessOnlyAgent struct {
 	TargetPath string
 	// FileName is the base file name including its extension.
 	FileName string
-	// Key is the agent key derived from FileName the same way the catalog derives a key
-	// from a generic source file name: the base name with a trailing ".agent.md" or
-	// ".md" removed. Used only for catalog-counterpart exclusion and for log subjects;
-	// it is never registered in the catalog.
+	// Key is the agent key derived from FileName by stripping the harness's declared
+	// agent extension and its ".agent.<ext>" variant (via agentKeyFromFileName). Used
+	// only for catalog-counterpart exclusion and for log subjects; it is never
+	// registered in the catalog.
 	Key string
 	// NumericID is the frontmatter `id` scalar, or "" when absent.
 	NumericID string

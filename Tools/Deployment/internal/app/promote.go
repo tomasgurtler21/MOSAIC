@@ -39,7 +39,6 @@ import (
 	"errors"
 	"fmt"
 
-	"mosaic-common/docformat"
 	"mosaic-deploy/internal/agentfields"
 	"mosaic-deploy/internal/domain"
 	"mosaic-deploy/internal/harness/descriptor"
@@ -97,9 +96,17 @@ type PromoteInput struct {
 	// Tools is the authoritative generic tools list reconstructed by reverse mapping.
 	// A nil slice means no reconstruction was attempted and any source `tools` key is
 	// carried through unchanged. A non-nil slice (including empty) is authoritative and
-	// replaces the key outright; a non-nil empty slice removes the key entirely. Entries
-	// are written in slice order as a flow-style list (AD-7).
+	// replaces the key outright; a non-nil empty slice removes the key entirely unless
+	// WriteEmptyToolsList is true. Entries are written in slice order as a flow-style
+	// list (AD-7).
 	Tools []string
+
+	// WriteEmptyToolsList overrides the default removal behavior when Tools is a non-nil
+	// empty slice. When true, the tools key is written with an explicit empty flow list
+	// (tools: []) rather than removed. This is used by the non-recoverable promote path
+	// where a blank answer by the operator must produce tools: [] rather than no tools
+	// key, because an absent tools field is interpreted as "inherit all" by some consumers.
+	WriteEmptyToolsList bool
 
 	// RecommendedTier is the generic-only field recovered from the user during promote.
 	// An empty string means the field was not supplied and is written as an empty scalar
@@ -156,7 +163,7 @@ type promoteSourceFacts struct {
 // Pure: it parses src and returns; it performs no I/O and asks nothing. A source that
 // fails to parse returns an error wrapping ErrPromoteNotTransformed.
 func inspectPromoteSource(src []byte, d *domain.HarnessDescriptor) (promoteSourceFacts, error) {
-	doc, err := docformat.Parse(src)
+	doc, err := ParseGenericSource(src)
 	if err != nil {
 		return promoteSourceFacts{}, fmt.Errorf("%w: %s", ErrPromoteNotTransformed, err.Error())
 	}
@@ -237,7 +244,7 @@ func buildGenericAgent(in PromoteInput) ([]byte, error) {
 
 	// Parse the source. eligibleHarnessOnly already parsed successfully, but guard
 	// defensively in case an edge case reaches here.
-	doc, err := docformat.Parse(in.Source)
+	doc, err := ParseGenericSource(in.Source)
 	if err != nil {
 		return nil, fmt.Errorf("%w: %s", ErrPromoteNotTransformed, err.Error())
 	}
@@ -316,12 +323,17 @@ func buildGenericAgent(in PromoteInput) ([]byte, error) {
 	fm.Set("role", domain.ScalarValue(string(role), domain.QuotePlain))
 
 	// Apply the tools reconstruction contract (AD-7).
-	//   nil  → carry source tools key unchanged (no-op here; existing carry logic handles it)
-	//   []   → remove the tools key (non-nil empty is an authoritative removal)
+	//   nil   → carry source tools key unchanged (no-op here; existing carry logic handles it)
+	//   []    → remove the tools key (non-nil empty is an authoritative removal), UNLESS
+	//           WriteEmptyToolsList is true, in which case write tools: [] explicitly
 	//   [...] → replace or add the tools key with the supplied list in flow-style order (AD-6)
 	if in.Tools != nil {
 		if len(in.Tools) == 0 {
-			fm.Remove("tools")
+			if in.WriteEmptyToolsList {
+				fm.Set("tools", domain.ListValue(nil, domain.ListFlow))
+			} else {
+				fm.Remove("tools")
+			}
 		} else {
 			items := make([]domain.FieldValue, len(in.Tools))
 			for i, t := range in.Tools {

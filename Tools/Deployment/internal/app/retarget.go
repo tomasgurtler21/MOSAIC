@@ -14,7 +14,6 @@ import (
 	"fmt"
 	"strings"
 
-	"mosaic-common/docformat"
 	"mosaic-deploy/internal/agentfields"
 	"mosaic-deploy/internal/domain"
 	"mosaic-deploy/internal/harness/descriptor"
@@ -109,7 +108,7 @@ func DetectHarnessMatch(src []byte, module domain.HarnessModule, kind domain.Art
 	}
 
 	// Parse the document. eligibleHarnessOnly already succeeded, but guard defensively.
-	doc, err := docformat.Parse(src)
+	doc, err := ParseGenericSource(src)
 	if err != nil {
 		return HarnessMatchVerdict{
 			Status: HarnessMatchNotAgent,
@@ -254,6 +253,11 @@ type RetargetInput struct {
 	// harness, computed by the service layer from project + user config. Empty when the
 	// target has no config mappings.
 	ToolMappingsVersion string
+	// NonRecoverableGrantFields, when non-nil, replaces the forward-leg tool-mapping result.
+	// It is set by the service layer when the source harness has ToolInfoUnrecoverable=true
+	// and a minimal read-only grant has been rendered through the target module's own Tools()
+	// method. A nil value means the normal forward-mapping path runs.
+	NonRecoverableGrantFields []domain.FrontmatterField
 }
 
 // RetargetReport is the audit trail of one file's transform.
@@ -312,7 +316,7 @@ func BuildRetargetedAgent(in RetargetInput) ([]byte, RetargetReport, error) {
 	}
 
 	// Parse source. eligibleHarnessOnly already succeeded, but guard defensively.
-	doc, err := docformat.Parse(in.Source)
+	doc, err := ParseGenericSource(in.Source)
 	if err != nil {
 		return nil, RetargetReport{}, fmt.Errorf("%w: %s", ErrRetargetNotTransformed, err.Error())
 	}
@@ -582,13 +586,22 @@ func BuildRetargetedAgent(in RetargetInput) ([]byte, RetargetReport, error) {
 	}
 
 	// Forward-map generic tools to target harness tool names.
-	toolReq := domain.ToolRequest{
-		AgentKey: in.AgentKey,
-		Generic:  genericTools,
-	}
-	toolResult, err := in.TargetModule.Tools(toolReq)
-	if err != nil {
-		return nil, RetargetReport{}, fmt.Errorf("target module Tools failed: %w", err)
+	// When NonRecoverableGrantFields is set the service layer has already rendered the
+	// minimal grant through the target module; use those fields directly and skip the
+	// module Tools() call so the pre-rendered result is not discarded.
+	var toolResult domain.ToolResult
+	if in.NonRecoverableGrantFields != nil {
+		toolResult = domain.ToolResult{Fields: in.NonRecoverableGrantFields}
+	} else {
+		toolReq := domain.ToolRequest{
+			AgentKey: in.AgentKey,
+			Generic:  genericTools,
+		}
+		var toolErr error
+		toolResult, toolErr = in.TargetModule.Tools(toolReq)
+		if toolErr != nil {
+			return nil, RetargetReport{}, fmt.Errorf("target module Tools failed: %w", toolErr)
+		}
 	}
 
 	// Append custom (verbatim-carried) tools to the target's main tools field.

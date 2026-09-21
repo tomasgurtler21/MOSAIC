@@ -48,7 +48,7 @@ func probeTempAgent(t *testing.T, content []byte) domain.DeployedArtifactState {
 	t.Helper()
 	ws := t.TempDir()
 	writeFile(t, ws, "agent.md", content)
-	return probeDeployedArtifact(ws, "agent.md", "")
+	return probeDeployedArtifact(ws, "agent.md", "", domain.ArtifactAgent, &domain.HarnessDescriptor{})
 }
 
 // ---------------------------------------------------------------------------

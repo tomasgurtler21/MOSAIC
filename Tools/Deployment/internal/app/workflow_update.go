@@ -9,9 +9,11 @@ import (
 	"context"
 	"path/filepath"
 
+	"mosaic-deploy/internal/agentformat"
 	"mosaic-deploy/internal/config"
 	"mosaic-deploy/internal/deploy"
 	"mosaic-deploy/internal/domain"
+	"mosaic-deploy/internal/logging"
 	"mosaic-deploy/internal/plan"
 	"mosaic-deploy/internal/todo"
 )
@@ -72,7 +74,11 @@ func (s *service) UpdateWorkflows(ctx context.Context, req WorkflowUpdateRequest
 	agentsDir := module.Descriptor().Paths.Agents.Project
 	var deployedAgentIndex DeployedAgentIndex
 	if module.Descriptor().Paths.Agents.Supported && agentsDir != "" {
-		deployedAgentIndex = buildDeployedAgentIndex(workspace, agentsDir)
+		var indexNotices []string
+		deployedAgentIndex, indexNotices = buildDeployedAgentIndex(workspace, agentsDir, module.Descriptor())
+		for _, notice := range indexNotices {
+			s.deps.Logger.Event(logging.Event{Level: logging.LevelWarn, Kind: "decode", Message: notice})
+		}
 	}
 
 	snap, _ := s.deps.Manifest.Load(workspace)
@@ -90,7 +96,7 @@ func (s *service) UpdateWorkflows(ctx context.Context, req WorkflowUpdateRequest
 		GOOS:     s.deps.GOOS,
 	}); pathErr == nil {
 		orchTargetPath = orchPath
-		orchState = probeDeployedArtifact(workspace, orchTargetPath, module.Descriptor().Frontmatter.ModelKey)
+		orchState = probeDeployedArtifact(workspace, orchTargetPath, module.Descriptor().Frontmatter.ModelKey, domain.ArtifactAgent, module.Descriptor())
 	}
 
 	// Replace semantics: use the user's selection directly. No union with the deployed set.
@@ -159,9 +165,14 @@ func (s *service) UpdateWorkflows(ctx context.Context, req WorkflowUpdateRequest
 		probeAgentByKey[a.Key] = a
 	}
 
-	deployedState, err := probeDeployedStateWithIndex(workspace, plannedPaths, module.Descriptor().Frontmatter.ModelKey, seed, deployedAgentIndex, probeAgentByKey, nil)
+	deployedState, err := probeDeployedStateWithIndex(workspace, plannedPaths, module.Descriptor().Frontmatter.ModelKey, seed, deployedAgentIndex, probeAgentByKey, nil, module.Descriptor())
 	if err != nil {
 		return domain.RunSummary{}, err
+	}
+	for _, state := range deployedState {
+		for _, notice := range state.DecodeNotices {
+			s.deps.Logger.Event(logging.Event{Level: logging.LevelWarn, Kind: "decode", Message: notice})
+		}
 	}
 
 	// Detect agents required by the selected workflows that have no file in the workspace.
@@ -305,12 +316,14 @@ func (s *service) UpdateWorkflows(ctx context.Context, req WorkflowUpdateRequest
 	}
 
 	workflowBlocks := s.buildWorkflowBlocks(workflowIDs)
-	deployedReader := func(item domain.PlanItem) []byte {
-		return readDeployedFile(workspace, item.TargetPath)
+	desc := module.Descriptor()
+	deployedReader := func(item domain.PlanItem) (DeployedRead, agentformat.Operation, error) {
+		return readDeployedPlanItem(workspace, desc, item)
 	}
 	// Custom tools resolved above for new agents; already-deployed agents are never in the
 	// input to resolveCustomTools so no already-deployed agent can trigger a tool question.
-	contentFn := s.buildContent(module, agentByKey, models, customTools, skippedTools, workflowBlocks, nil, scope, deployedReader, toolMappingsVersion, protocol, bundle, nil)
+	var ownedKeyDiffs []domain.OwnedKeyDifference
+	contentFn := s.buildContent(module, agentByKey, models, customTools, skippedTools, workflowBlocks, nil, scope, deployedReader, toolMappingsVersion, protocol, bundle, nil, &ownedKeyDiffs)
 
 	// Version stamps cover the orchestrator and all admitted new-agent and new-skill items.
 	// set.Skills is passed so admitted skill items are stamped; set.Hooks is nil because hook
@@ -373,5 +386,7 @@ func (s *service) UpdateWorkflows(ctx context.Context, req WorkflowUpdateRequest
 		}
 	}
 
-	return s.buildSummary(domain.ModeUpdateWorkflows, harnessRef, workspace, result), nil
+	summary := s.buildSummary(domain.ModeUpdateWorkflows, harnessRef, workspace, result)
+	summary.OwnedKeyDifferences = ownedKeyDiffs
+	return summary, nil
 }

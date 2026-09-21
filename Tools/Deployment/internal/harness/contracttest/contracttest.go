@@ -413,6 +413,62 @@ func runUniversalInvariants(t *testing.T, m domain.HarnessModule) {
 			t.Errorf("second Close() returned %v; Close must be idempotent and return nil on repeated calls", err)
 		}
 	})
+
+	// Placement 2 of the always-emitted tools field invariant (Stage 14, I14.4).
+	//
+	// Every registered module must state capability in at least one non-absent field
+	// when called with an empty resolved generic set:
+	//   - If the descriptor declares a tools key, that key must be present in Fields.
+	//     An absent tools key with an empty generic set is the "inherit all" hazard.
+	//   - If the descriptor declares no tools key (e.g. Codex), Fields must be non-empty:
+	//     capability is stated through another field (e.g. sandbox_mode) and returning
+	//     nothing would leave the deployed file with no capability statement.
+	//
+	// This placement covers modules that never go through the minimal-grant entry point
+	// and fires for every harness the contract suite already runs, including ones added
+	// later. The guard is placed here rather than in internal/transform or internal/app
+	// so that shared rendering code is not affected and the golden baseline is unchanged.
+	t.Run("Tools_always_emits_capability_field_for_empty_generic", func(t *testing.T) {
+		req := domain.ToolRequest{
+			AgentKey: "capability-invariant-check",
+			Generic:  []string{},
+		}
+		result, err := m.Tools(req)
+		if err != nil {
+			t.Fatalf("Tools with empty Generic: %v", err)
+		}
+		desc := m.Descriptor()
+		toolsKey := desc.Frontmatter.ToolsKey
+		if toolsKey != "" {
+			// The descriptor declares a tools key: that key must be present in Fields.
+			// An absent tools key for an empty generic set means the deployed file either
+			// has no tools field (absent = unrestricted on many platforms) or carries a
+			// stale value from a prior deployment. Neither is acceptable.
+			found := false
+			for _, f := range result.Fields {
+				if f.Key == toolsKey {
+					found = true
+					break
+				}
+			}
+			if !found {
+				t.Errorf("module declares tools key %q but it is absent from Tools() result "+
+					"for empty generic set; a harness declaring a tools key must always emit "+
+					"that field so that 'no tools' cannot degrade into 'inherit all'", toolsKey)
+			}
+		} else {
+			// The descriptor declares no tools key: Fields must be non-empty.
+			// A module with no tools key states capability through another field
+			// (e.g. sandbox_mode for Codex). Returning empty Fields would leave the
+			// deployed agent file with no capability statement.
+			if len(result.Fields) == 0 {
+				t.Errorf("module declares no tools key and returned empty Fields for empty "+
+					"generic set; a harness with no declared tools key must emit at least one "+
+					"field stating capability (e.g. sandbox_mode) so that the deployed file "+
+					"is never left without a capability statement")
+			}
+		}
+	})
 }
 
 // ---------------------------------------------------------------------------

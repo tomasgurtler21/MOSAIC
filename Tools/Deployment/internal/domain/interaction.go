@@ -106,6 +106,22 @@ const (
 	// ModeDeployAgents. It supersedes QUtilityAgents/QInfrastructureAgents/QStandaloneAgents
 	// for that mode only; those three questions remain in use by the Deploy workspace flow.
 	QDeployAgents QuestionID = "deploy-agents"
+
+	// QPromoteNonRecoverableTools is asked during promote when the source harness cannot
+	// recover tool information (ToolInfoUnrecoverable=true on the source descriptor). The
+	// question names the source harness and states that tool information is not recorded;
+	// the user supplies a comma-separated list of generic tool names. Subject is the source
+	// file path.
+	//
+	// Answer format: a comma-separated list of generic names (e.g. "bash, file_read").
+	// Whitespace around names is stripped. Names are compared case-insensitively against
+	// the generic vocabulary. An unknown name is rejected with the vocabulary named back
+	// to the user and the question re-asked. A blank answer means an explicit empty tools
+	// list, never "all tools".
+	//
+	// Non-interactive: the flow uses an explicit empty tools list and emits a warning
+	// Notice at NoticeWarning level.
+	QPromoteNonRecoverableTools QuestionID = "promote-nonrecoverable-tools"
 )
 
 // PlanReviewer is the deployment-specific interface for plan review. The shared Interaction

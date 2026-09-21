@@ -2,6 +2,7 @@ package transform
 
 import (
 	"mosaic-common/docformat"
+	"mosaic-deploy/internal/agentformat"
 	"mosaic-deploy/internal/domain"
 )
 
@@ -61,8 +62,12 @@ func Apply(req Request) (Result, error) {
 	}
 
 	// Apply the frontmatter plan (descriptor drops/adds/order) plus model, version
-	// stamps, and tool fields. Returns FieldChange audit entries and any gaps.
-	fieldChanges, gaps := applyFrontmatter(fm, fmPlan, toolResult, req, desc)
+	// stamps, and tool fields. Returns FieldChange audit entries, gaps, and owned-key
+	// differences for conflict-classified artifacts (empty on every ordinary run).
+	// Owned-key differences are computed inside applyFrontmatter before the Step 5c
+	// preservation pass, so "incoming" reflects source-driven transforms, not deployed
+	// values copied back by the preservation step.
+	fieldChanges, gaps, ownedKeyDiffs := applyFrontmatter(fm, fmPlan, toolResult, req, desc)
 
 	// Process managed regions in the body, applying the merge policy:
 	//   injection regions (user-owned) — preserved from deployed on update, emptied on create.
@@ -75,7 +80,91 @@ func Apply(req Request) (Result, error) {
 	}
 
 	// Serialise the transformed document to bytes.
-	output := doc.Bytes()
+	//
+	// For agent artifacts, delegate to the translator named by the descriptor's agent
+	// format ID. Transform stays pure: it resolves the translator by format ID and passes
+	// the full artifact context. Skills and hooks remain Markdown for every harness (AD-4).
+	//
+	// Transform threads Op and DeployedRaw through to ArtifactContext but does NOT enforce
+	// them. Enforcement is format-conditional and belongs to the translator (Codex raises
+	// ErrUnspecifiedOperation / ErrMissingPriorBytes; Markdown ignores Op entirely).
+	//
+	// Precondition: req.Deployed always holds the CANONICAL form. Raw on-disk bytes are
+	// in req.DeployedRaw. The application layer decodes before calling Apply.
+	var output []byte
+	var encodeReport agentformat.Report
+	if req.Kind == domain.ArtifactAgent {
+		t, lookupErr := agentformat.LookupString(desc.AgentFormatID)
+		if lookupErr != nil {
+			return Result{}, lookupErr
+		}
+		ctx := agentformat.ArtifactContext{
+			AgentKey:      req.Key,
+			Kind:          req.Kind,
+			PriorDeployed: req.DeployedRaw,
+			Op:            req.Op,
+		}
+		var encErr error
+		output, encodeReport, encErr = t.Encode(doc.Bytes(), ctx)
+		if encErr != nil {
+			return Result{}, encErr
+		}
+	} else {
+		output = doc.Bytes()
+	}
+
+	// Merge the encode report into fieldChanges using the entry-kind mapping table
+	// from the transform pipeline contract. This is the single place the encode-side
+	// vocabulary is translated into the run's reporting vocabulary.
+	for _, entry := range encodeReport.Entries {
+		switch entry.Kind {
+		case agentformat.EntryDroppedForeignKey:
+			fieldChanges = append(fieldChanges, FieldChange{
+				Key:    entry.Key,
+				Before: entry.Detail,
+				After:  "",
+				Reason: entry.Reason,
+			})
+		case agentformat.EntryOverriddenName:
+			fieldChanges = append(fieldChanges, FieldChange{
+				Key:    entry.Key,
+				Before: entry.Detail,
+				After:  req.Key,
+				Reason: entry.Reason,
+			})
+		case agentformat.EntryAppliedFallback:
+			fieldChanges = append(fieldChanges, FieldChange{
+				Key:    entry.Key,
+				Before: "",
+				After:  entry.Detail,
+				Reason: entry.Reason,
+			})
+		case agentformat.EntryStrippedContainer:
+			fieldChanges = append(fieldChanges, FieldChange{
+				Key:    entry.Key,
+				Before: entry.Detail,
+				After:  "",
+				Reason: entry.Reason,
+			})
+		case agentformat.EntryRefusedMarker:
+			fieldChanges = append(fieldChanges, FieldChange{
+				Key:    entry.Key,
+				Before: "",
+				After:  entry.Detail,
+				Reason: entry.Reason,
+			})
+		case agentformat.EntryCarriedContainer:
+			// Nothing: the key was re-emitted, so no field changed and there is nothing
+			// to tell the user. This is what keeps an ordinary Codex redeploy silent
+			// about the user's preserved keys.
+		case agentformat.EntryDroppedComment:
+			// A free-standing comment that did not travel. Not a FieldChange (a comment
+			// is not a field and has no key to put in Key). Not a gap either — there is
+			// no existing gap kind for a dropped comment. A later stage that adds a
+			// user-facing notice channel for comments may map it there.
+		}
+		// EntryMissingInstructions is decode-only and never appears in an encode report.
+	}
 
 	// Merge frontmatter gaps with region gaps into one ordered slice.
 	allGaps := append(gaps, regionGaps...)
@@ -88,6 +177,7 @@ func Apply(req Request) (Result, error) {
 		Workflows:            workflowIDs,
 		InfrastructureAgents: infraAgentKeys,
 		OutputBytes:          len(output),
+		OwnedKeyDifferences:  ownedKeyDiffs,
 	}
 
 	return Result{Output: output, Report: report}, nil

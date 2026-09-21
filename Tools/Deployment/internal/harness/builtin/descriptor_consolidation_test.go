@@ -186,6 +186,7 @@ func TestDescriptorConsolidation_MosaicOrchestratorInjectionsVersionAbsentFromKe
 		{harness: "claude-code", dir: "claudecode", file: "claude-code.yaml"},
 		{harness: "ghcp-cli", dir: "ghcpcli", file: "ghcp-cli.yaml"},
 		{harness: "vscode-ghcp", dir: "vscodeghcp", file: "vscode-ghcp.yaml"},
+		{harness: "codex", dir: "codex", file: "codex.yaml"},
 	}
 
 	for _, tc := range cases {
@@ -198,6 +199,19 @@ func TestDescriptorConsolidation_MosaicOrchestratorInjectionsVersionAbsentFromKe
 					tc.harness, d.Frontmatter.KeyOrder)
 			}
 		})
+	}
+}
+
+// TestDescriptorConsolidation_Codex_HasNonEmptyModelList verifies that the Codex
+// embedded descriptor carries a non-empty model list. Unlike the CLI-backed harnesses
+// that retire their models block, Codex is not CLI-backed and keeps its own
+// YAML-sourced model catalog.
+func TestDescriptorConsolidation_Codex_HasNonEmptyModelList(t *testing.T) {
+	d := loadEmbeddedDescriptor(t, "codex", "codex.yaml")
+	if len(d.Models.IDs) == 0 {
+		t.Errorf("codex: Models.IDs is empty; "+
+			"Codex is not a CLI-backed harness and must declare its own model list in the embedded YAML; "+
+			"the four expected model IDs are gpt-6-astra, gpt-5.6-sol, gpt-5.6-terra, gpt-5.6-luna")
 	}
 }
 

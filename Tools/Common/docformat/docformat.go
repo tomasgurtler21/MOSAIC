@@ -856,6 +856,18 @@ func parseBlockMapping(lines [][]byte, startLine int) (mosaic.FieldValue, error)
 			continue
 		}
 
+		// Flow sequence value inside a block mapping: "[item1, item2, ...]".
+		// Handled the same way parseGroupValue handles '[' at the top level.
+		if len(after) > 0 && after[0] == '[' {
+			val, err := parseFlowSequence(after, startLine)
+			if err != nil {
+				return mosaic.FieldValue{}, fmt.Errorf("frontmatter: line %d: %w", lineNum, err)
+			}
+			pairs = append(pairs, mosaic.FieldPair{Key: key, Value: val})
+			i++
+			continue
+		}
+
 		val, err := parseScalarBytes(after)
 		if err != nil {
 			return mosaic.FieldValue{}, fmt.Errorf("frontmatter: line %d: %w", lineNum, err)

@@ -11,6 +11,7 @@ import (
 	"sort"
 
 	"mosaic-deploy/internal/agentfields"
+	"mosaic-deploy/internal/agentformat"
 	"mosaic-deploy/internal/domain"
 )
 
@@ -154,6 +155,11 @@ func NewFieldClassifier(d *domain.HarnessDescriptor, plan domain.FrontmatterPlan
 // what protects the AD-4 protected generic keys.
 func (c FieldClassifier) Classify(key string) FieldClass {
 	if agentfields.IsKnownMosaicKey(key) {
+		return ClassMosaic
+	}
+	// Carriage container keys are MOSAIC-owned infrastructure regardless of harness.
+	// They must never be classified as ClassUnknown or ClassHarness.
+	if agentformat.IsCarriageKey(key) {
 		return ClassMosaic
 	}
 	if _, ok := c.divertedFields[key]; ok {

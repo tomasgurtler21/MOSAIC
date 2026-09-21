@@ -30,6 +30,15 @@ type DeployedArtifactState struct {
 	// Populated by the probe layer (app/deployedstate.go) during extraction.
 	// The zero value (false) means "no injection region found or file absent."
 	HasInjectionRegion bool
+
+	// DecodeNotices carries non-fatal decode observations from the funnel's decode report,
+	// rendered as human-readable strings by decodeReportNotices in deployed_read.go.
+	// Non-nil only for successfully decoded files that produced at least one report entry
+	// (e.g. a Codex agent with no developer_instructions raises EntryMissingInstructions).
+	// Nil for Markdown harnesses (identity decode produces no entries) and for absent or
+	// unreadable files. Callers in deploy.go / update.go / workflow_update.go emit these
+	// through s.deps.Logger.Event so they reach the run log.
+	DecodeNotices []string
 }
 
 // HasVersionInfo reports whether the deployed file carries at least one readable version stamp.

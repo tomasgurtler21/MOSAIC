@@ -21,6 +21,8 @@ package app
 
 import (
 	"testing"
+
+	"mosaic-deploy/internal/domain"
 )
 
 // ---------------------------------------------------------------------------
@@ -39,7 +41,7 @@ func TestProbeDeployedArtifact_SkillWithLegacyVersionField_VersionPopulated(t *t
 	content := []byte("---\nmosaic_id: lean-tdd\nversion: \"1.5.0\"\nname: Lean TDD\n---\n\nSkill body.\n")
 	writeFile(t, ws, "lean-tdd.md", content)
 
-	state := probeDeployedArtifact(ws, "lean-tdd.md", "")
+	state := probeDeployedArtifact(ws, "lean-tdd.md", "", domain.ArtifactAgent, &domain.HarnessDescriptor{})
 
 	if !state.Present {
 		t.Fatal("expected Present: true for a readable file, got false")
@@ -66,7 +68,7 @@ func TestProbeDeployedArtifact_SkillWithMosaicVersionField_VersionPopulated(t *t
 	content := []byte("---\nmosaic_id: lean-tdd\nmosaic_version: \"2.0.0\"\nname: Lean TDD\n---\n\nSkill body.\n")
 	writeFile(t, ws, "lean-tdd.md", content)
 
-	state := probeDeployedArtifact(ws, "lean-tdd.md", "")
+	state := probeDeployedArtifact(ws, "lean-tdd.md", "", domain.ArtifactAgent, &domain.HarnessDescriptor{})
 
 	if !state.Present {
 		t.Fatal("expected Present: true for a readable file, got false")
@@ -88,7 +90,7 @@ func TestProbeDeployedArtifact_SkillWithMosaicVersionField_NoBareVersionInFile(t
 	content := []byte("---\nmosaic_id: some-skill\nmosaic_version: \"3.1.0\"\n---\n\nBody.\n")
 	writeFile(t, ws, "some-skill.md", content)
 
-	state := probeDeployedArtifact(ws, "some-skill.md", "")
+	state := probeDeployedArtifact(ws, "some-skill.md", "", domain.ArtifactAgent, &domain.HarnessDescriptor{})
 
 	if state.Version == "" {
 		t.Error("Version is empty; \"mosaic_version\" must be read even when bare \"version\" is absent; " +
@@ -116,7 +118,7 @@ func TestProbeDeployedArtifact_SkillWithBothVersionFields_PrefixedWins(t *testin
 	content := []byte("---\nmosaic_id: dual-version-skill\nmosaic_version: \"2.0.0\"\nversion: \"1.0.0\"\n---\n\nBody.\n")
 	writeFile(t, ws, "skill.md", content)
 
-	state := probeDeployedArtifact(ws, "skill.md", "")
+	state := probeDeployedArtifact(ws, "skill.md", "", domain.ArtifactAgent, &domain.HarnessDescriptor{})
 
 	if state.Version != "2.0.0" {
 		t.Errorf("Version = %q, want %q (prefixed value); when both \"mosaic_version\" and \"version\" are present, "+
@@ -139,7 +141,7 @@ func TestProbeDeployedArtifact_SkillWithNoVersionField_VersionIsEmpty(t *testing
 	content := []byte("---\nmosaic_id: no-version-skill\nname: No Version\n---\n\nBody.\n")
 	writeFile(t, ws, "skill.md", content)
 
-	state := probeDeployedArtifact(ws, "skill.md", "")
+	state := probeDeployedArtifact(ws, "skill.md", "", domain.ArtifactAgent, &domain.HarnessDescriptor{})
 
 	if !state.Present {
 		t.Fatal("expected Present: true")
@@ -167,7 +169,7 @@ func TestProbeDeployedArtifact_AgentWithBareVersionField_VersionReadCorrectly(t 
 	content := []byte("---\nmosaic_id: 42\nversion: \"5.0.0\"\nmosaic_transform_version: \"3.0.0\"\n---\n\nAgent body.\n")
 	writeFile(t, ws, "agent.md", content)
 
-	state := probeDeployedArtifact(ws, "agent.md", "")
+	state := probeDeployedArtifact(ws, "agent.md", "", domain.ArtifactAgent, &domain.HarnessDescriptor{})
 
 	if !state.Present {
 		t.Fatal("expected Present: true")

@@ -30,7 +30,7 @@ import (
 func TestProbeDeployedArtifact_AbsentFile_PresentIsFalse(t *testing.T) {
 	ws := t.TempDir()
 
-	state := probeDeployedArtifact(ws, "nonexistent.md", "")
+	state := probeDeployedArtifact(ws, "nonexistent.md", "", domain.ArtifactAgent, &domain.HarnessDescriptor{})
 
 	if state.Present {
 		t.Error("expected Present: false for absent file, got true")
@@ -43,7 +43,7 @@ func TestProbeDeployedArtifact_AbsentFile_PresentIsFalse(t *testing.T) {
 func TestProbeDeployedArtifact_AbsentFile_ContentHashIsEmpty(t *testing.T) {
 	ws := t.TempDir()
 
-	state := probeDeployedArtifact(ws, "nonexistent.md", "")
+	state := probeDeployedArtifact(ws, "nonexistent.md", "", domain.ArtifactAgent, &domain.HarnessDescriptor{})
 
 	if state.ContentHash != "" {
 		t.Errorf("absent file must have empty ContentHash, got %q", state.ContentHash)
@@ -66,7 +66,7 @@ func TestProbeDeployedArtifact_FullFrontmatter_PresentAndVersionsPopulated(t *te
 	content := []byte("---\nversion: \"2.0\"\ntransform_version: \"1.5\"\ninjections_version: \"1.2\"\n---\n\nAgent body.\n")
 	writeFile(t, ws, "agent.md", content)
 
-	state := probeDeployedArtifact(ws, "agent.md", "")
+	state := probeDeployedArtifact(ws, "agent.md", "", domain.ArtifactAgent, &domain.HarnessDescriptor{})
 
 	if !state.Present {
 		t.Fatal("expected Present: true for a readable file, got false")
@@ -90,7 +90,7 @@ func TestProbeDeployedArtifact_FullFrontmatter_ContentHashMatchesManifestHash(t 
 	content := []byte("---\nversion: \"2.0\"\ntransform_version: \"1.5\"\ninjections_version: \"1.2\"\n---\n\nAgent body.\n")
 	writeFile(t, ws, "agent.md", content)
 
-	state := probeDeployedArtifact(ws, "agent.md", "")
+	state := probeDeployedArtifact(ws, "agent.md", "", domain.ArtifactAgent, &domain.HarnessDescriptor{})
 
 	want := manifest.Hash(content)
 	if state.ContentHash != want {
@@ -114,7 +114,7 @@ func TestProbeDeployedArtifact_PartialFrontmatter_MissingFieldsAreEmpty(t *testi
 	content := []byte("---\nversion: \"3.0\"\n---\n\nAgent without transform/injections stamps.\n")
 	writeFile(t, ws, "agent.md", content)
 
-	state := probeDeployedArtifact(ws, "agent.md", "")
+	state := probeDeployedArtifact(ws, "agent.md", "", domain.ArtifactAgent, &domain.HarnessDescriptor{})
 
 	if !state.Present {
 		t.Fatal("expected Present: true, got false")
@@ -143,7 +143,7 @@ func TestProbeDeployedArtifact_MalformedFrontmatter_PresentTrueVersionsEmpty(t *
 	content := []byte("---\nversion: \"1.0\"\nversion: \"2.0\"\n---\n\nBody after malformed frontmatter.\n")
 	writeFile(t, ws, "agent.md", content)
 
-	state := probeDeployedArtifact(ws, "agent.md", "")
+	state := probeDeployedArtifact(ws, "agent.md", "", domain.ArtifactAgent, &domain.HarnessDescriptor{})
 
 	if !state.Present {
 		t.Fatal("malformed frontmatter must not make the file appear absent; got Present: false")
@@ -164,7 +164,7 @@ func TestProbeDeployedArtifact_NoFrontmatter_PresentTrueVersionsEmpty(t *testing
 	content := []byte("This file has no frontmatter at all. Just raw content.\n")
 	writeFile(t, ws, "agent.md", content)
 
-	state := probeDeployedArtifact(ws, "agent.md", "")
+	state := probeDeployedArtifact(ws, "agent.md", "", domain.ArtifactAgent, &domain.HarnessDescriptor{})
 
 	if !state.Present {
 		t.Fatal("expected Present: true for a readable file with no frontmatter")
@@ -188,7 +188,7 @@ func TestProbeDeployedArtifact_TargetIsDirectory_PresentIsFalse(t *testing.T) {
 		t.Fatalf("mkdir hook-bundle: %v", err)
 	}
 
-	state := probeDeployedArtifact(ws, "hook-bundle", "")
+	state := probeDeployedArtifact(ws, "hook-bundle", "", domain.ArtifactAgent, &domain.HarnessDescriptor{})
 
 	if state.Present {
 		t.Error("expected Present: false when target path is a directory, got true")
@@ -222,7 +222,7 @@ func TestProbeDeployedArtifact_OrchestratorWithWorkflows_WorkflowsPopulated(t *t
 		"</Identity>\n")
 	writeFile(t, ws, "orchestrator.md", content)
 
-	state := probeDeployedArtifact(ws, "orchestrator.md", "")
+	state := probeDeployedArtifact(ws, "orchestrator.md", "", domain.ArtifactAgent, &domain.HarnessDescriptor{})
 
 	if !state.Present {
 		t.Fatal("expected Present: true")
@@ -261,7 +261,7 @@ func TestProbeDeployedArtifact_OrchestratorWithDuplicateWorkflowBlock_Deduplicat
 		"</Identity>\n")
 	writeFile(t, ws, "orchestrator.md", content)
 
-	state := probeDeployedArtifact(ws, "orchestrator.md", "")
+	state := probeDeployedArtifact(ws, "orchestrator.md", "", domain.ArtifactAgent, &domain.HarnessDescriptor{})
 
 	if len(state.Workflows) != 1 {
 		t.Errorf("expected 1 deduplicated workflow, got %d: %v", len(state.Workflows), state.Workflows)
@@ -282,7 +282,7 @@ func TestProbeDeployedArtifact_WorkflowBlockWithNoVersionAttribute_VersionIsEmpt
 		"</Identity>\n")
 	writeFile(t, ws, "orchestrator.md", content)
 
-	state := probeDeployedArtifact(ws, "orchestrator.md", "")
+	state := probeDeployedArtifact(ws, "orchestrator.md", "", domain.ArtifactAgent, &domain.HarnessDescriptor{})
 
 	if len(state.Workflows) != 1 {
 		t.Fatalf("expected 1 workflow, got %d", len(state.Workflows))
@@ -300,7 +300,7 @@ func TestProbeDeployedArtifact_NonOrchestratorFile_WorkflowsNil(t *testing.T) {
 	content := []byte("---\nversion: \"1.0\"\n---\n\nPlain worker agent with no workflow sections.\n")
 	writeFile(t, ws, "worker.md", content)
 
-	state := probeDeployedArtifact(ws, "worker.md", "")
+	state := probeDeployedArtifact(ws, "worker.md", "", domain.ArtifactAgent, &domain.HarnessDescriptor{})
 
 	if state.Workflows != nil {
 		t.Errorf("expected nil Workflows for a file with no workflow section markers, got %v", state.Workflows)
@@ -319,7 +319,7 @@ func TestProbeDeployedArtifact_ModelKeyPresentInFrontmatter_ModelIDExtractedVerb
 	content := []byte("---\nversion: \"1.0\"\nmodel: \"claude-opus-4-5\"\n---\n\nAgent body.\n")
 	writeFile(t, ws, "agent.md", content)
 
-	state := probeDeployedArtifact(ws, "agent.md", "model")
+	state := probeDeployedArtifact(ws, "agent.md", "model", domain.ArtifactAgent, &domain.HarnessDescriptor{})
 
 	if state.ModelID != "claude-opus-4-5" {
 		t.Errorf("ModelID = %q, want %q; model key in frontmatter must be extracted verbatim",
@@ -335,7 +335,7 @@ func TestProbeDeployedArtifact_ModelKeyAbsentFromFrontmatter_ModelIDEmpty(t *tes
 	content := []byte("---\nversion: \"1.0\"\ntransform_version: \"2.0\"\n---\n\nAgent without model.\n")
 	writeFile(t, ws, "agent.md", content)
 
-	state := probeDeployedArtifact(ws, "agent.md", "model")
+	state := probeDeployedArtifact(ws, "agent.md", "model", domain.ArtifactAgent, &domain.HarnessDescriptor{})
 
 	if state.ModelID != "" {
 		t.Errorf("ModelID = %q, want empty; model key absent from frontmatter must yield empty ModelID",
@@ -353,7 +353,7 @@ func TestProbeDeployedArtifact_EmptyModelKey_ModelIDEmpty(t *testing.T) {
 	content := []byte("---\nversion: \"1.0\"\nmodel: \"claude-opus-4-5\"\n---\n\nAgent body.\n")
 	writeFile(t, ws, "agent.md", content)
 
-	state := probeDeployedArtifact(ws, "agent.md", "")
+	state := probeDeployedArtifact(ws, "agent.md", "", domain.ArtifactAgent, &domain.HarnessDescriptor{})
 
 	if state.ModelID != "" {
 		t.Errorf("ModelID = %q, want empty; empty modelKey must produce empty ModelID with no lookup",
@@ -366,7 +366,7 @@ func TestProbeDeployedArtifact_EmptyModelKey_ModelIDEmpty(t *testing.T) {
 func TestProbeDeployedArtifact_AbsentFile_ModelIDEmpty(t *testing.T) {
 	ws := t.TempDir()
 
-	state := probeDeployedArtifact(ws, "nonexistent.md", "model")
+	state := probeDeployedArtifact(ws, "nonexistent.md", "model", domain.ArtifactAgent, &domain.HarnessDescriptor{})
 
 	if state.Present {
 		t.Fatal("expected Present: false for absent file")
@@ -384,7 +384,7 @@ func TestProbeDeployedArtifact_MalformedFrontmatter_ModelIDEmpty(t *testing.T) {
 	content := []byte("---\nversion: \"1.0\"\nversion: \"2.0\"\n---\n\nBody.\n")
 	writeFile(t, ws, "agent.md", content)
 
-	state := probeDeployedArtifact(ws, "agent.md", "model")
+	state := probeDeployedArtifact(ws, "agent.md", "model", domain.ArtifactAgent, &domain.HarnessDescriptor{})
 
 	if state.ModelID != "" {
 		t.Errorf("ModelID = %q, want empty when frontmatter is malformed", state.ModelID)
@@ -398,7 +398,7 @@ func TestProbeDeployedArtifact_NoFrontmatter_ModelIDEmpty(t *testing.T) {
 	content := []byte("This file has no frontmatter at all.\n")
 	writeFile(t, ws, "agent.md", content)
 
-	state := probeDeployedArtifact(ws, "agent.md", "model")
+	state := probeDeployedArtifact(ws, "agent.md", "model", domain.ArtifactAgent, &domain.HarnessDescriptor{})
 
 	if state.ModelID != "" {
 		t.Errorf("ModelID = %q, want empty when file has no frontmatter", state.ModelID)
@@ -414,7 +414,7 @@ func TestProbeDeployedArtifact_DirectoryTarget_ModelIDEmpty(t *testing.T) {
 		t.Fatalf("mkdir hook-bundle: %v", err)
 	}
 
-	state := probeDeployedArtifact(ws, "hook-bundle", "model")
+	state := probeDeployedArtifact(ws, "hook-bundle", "model", domain.ArtifactAgent, &domain.HarnessDescriptor{})
 
 	if state.Present {
 		t.Fatal("expected Present: false when target path is a directory")
@@ -433,7 +433,7 @@ func TestProbeDeployedArtifact_ModelIDDoesNotAffectVersionFields(t *testing.T) {
 	content := []byte("---\nversion: \"2.0\"\ntransform_version: \"1.5\"\ninjections_version: \"1.2\"\nmodel: \"claude-sonnet-4\"\n---\n\nAgent body.\n")
 	writeFile(t, ws, "agent.md", content)
 
-	state := probeDeployedArtifact(ws, "agent.md", "model")
+	state := probeDeployedArtifact(ws, "agent.md", "model", domain.ArtifactAgent, &domain.HarnessDescriptor{})
 
 	if state.ModelID != "claude-sonnet-4" {
 		t.Errorf("ModelID = %q, want %q", state.ModelID, "claude-sonnet-4")
@@ -464,7 +464,7 @@ func TestProbeDeployedArtifact_ModelIDDoesNotAffectWorkflows(t *testing.T) {
 		"</Identity>\n")
 	writeFile(t, ws, "orchestrator.md", content)
 
-	state := probeDeployedArtifact(ws, "orchestrator.md", "model")
+	state := probeDeployedArtifact(ws, "orchestrator.md", "model", domain.ArtifactAgent, &domain.HarnessDescriptor{})
 
 	if state.ModelID != "claude-opus-4-5" {
 		t.Errorf("ModelID = %q, want %q", state.ModelID, "claude-opus-4-5")
@@ -486,7 +486,7 @@ func TestProbeDeployedArtifact_ModelIDNotIncludedInHasVersionInfo(t *testing.T) 
 	content := []byte("---\nmodel: \"claude-opus-4-5\"\n---\n\nAgent body.\n")
 	writeFile(t, ws, "agent.md", content)
 
-	state := probeDeployedArtifact(ws, "agent.md", "model")
+	state := probeDeployedArtifact(ws, "agent.md", "model", domain.ArtifactAgent, &domain.HarnessDescriptor{})
 
 	if state.ModelID != "claude-opus-4-5" {
 		t.Errorf("ModelID = %q, want %q", state.ModelID, "claude-opus-4-5")
@@ -506,13 +506,13 @@ func TestProbeDeployedArtifact_CustomModelKey_ExtractsFromCorrectKey(t *testing.
 	writeFile(t, ws, "agent.md", content)
 
 	// Probe with the correct key.
-	stateCorrect := probeDeployedArtifact(ws, "agent.md", "active_model")
+	stateCorrect := probeDeployedArtifact(ws, "agent.md", "active_model", domain.ArtifactAgent, &domain.HarnessDescriptor{})
 	if stateCorrect.ModelID != "gpt-4o" {
 		t.Errorf("ModelID = %q, want %q when probing with the correct key", stateCorrect.ModelID, "gpt-4o")
 	}
 
 	// Probe with a wrong key — must yield empty ModelID.
-	stateWrong := probeDeployedArtifact(ws, "agent.md", "model")
+	stateWrong := probeDeployedArtifact(ws, "agent.md", "model", domain.ArtifactAgent, &domain.HarnessDescriptor{})
 	if stateWrong.ModelID != "" {
 		t.Errorf("ModelID = %q, want empty when probing with a key that is absent from frontmatter", stateWrong.ModelID)
 	}
@@ -529,7 +529,7 @@ func TestProbeDeployedArtifact_ModelKeyIsNonScalar_ModelIDEmpty(t *testing.T) {
 	content := []byte("---\nversion: \"1.0\"\nmodel:\n  provider: anthropic\n  name: claude\n---\n\nAgent body.\n")
 	writeFile(t, ws, "agent.md", content)
 
-	state := probeDeployedArtifact(ws, "agent.md", "model")
+	state := probeDeployedArtifact(ws, "agent.md", "model", domain.ArtifactAgent, &domain.HarnessDescriptor{})
 
 	if state.ModelID != "" {
 		t.Errorf("ModelID = %q, want empty when model key maps to a non-scalar YAML value; "+
@@ -549,7 +549,7 @@ func TestProbeDeployedArtifact_ModelIDWithLeadingTrailingSpaces_PreservedVerbati
 	content := []byte("---\nversion: \"1.0\"\nmodel: \"  claude-opus-4-5  \"\n---\n\nAgent body.\n")
 	writeFile(t, ws, "agent.md", content)
 
-	state := probeDeployedArtifact(ws, "agent.md", "model")
+	state := probeDeployedArtifact(ws, "agent.md", "model", domain.ArtifactAgent, &domain.HarnessDescriptor{})
 
 	want := "  claude-opus-4-5  "
 	if state.ModelID != want {
@@ -867,7 +867,7 @@ func TestProbeDeployedState_AllPathsAbsent_HasEntryPerPathWithPresentFalse(t *te
 		{Ref: domain.ArtifactRef{Kind: domain.ArtifactAgent, Key: "agent-b"}, TargetPath: "agent-b.md"},
 	}
 
-	result := probeDeployedState(ws, paths, "", nil)
+	result := probeDeployedState(ws, paths, "", nil, &domain.HarnessDescriptor{})
 
 	if len(result) != 2 {
 		t.Fatalf("expected 2 entries in result (one per planned path), got %d", len(result))
@@ -897,7 +897,7 @@ func TestProbeDeployedState_MixedPresenceAbsence_EntryPerPathIncludingAbsent(t *
 		{Ref: domain.ArtifactRef{Kind: domain.ArtifactAgent, Key: "absent-agent"}, TargetPath: "absent-agent.md"},
 	}
 
-	result := probeDeployedState(ws, paths, "", nil)
+	result := probeDeployedState(ws, paths, "", nil, &domain.HarnessDescriptor{})
 
 	if len(result) != 2 {
 		t.Fatalf("expected 2 entries, got %d", len(result))
@@ -941,7 +941,7 @@ func TestProbeDeployedState_SeedEntryReused_FileNotReRead(t *testing.T) {
 		{Ref: domain.ArtifactRef{Kind: domain.ArtifactAgent, Key: "orchestrator"}, TargetPath: "orchestrator.md"},
 	}
 
-	result := probeDeployedState(ws, paths, "", seed)
+	result := probeDeployedState(ws, paths, "", seed, &domain.HarnessDescriptor{})
 
 	s := result["orchestrator.md"]
 	// The seeded value must be used as-is; the on-disk version "1.0" must not overwrite it.
@@ -956,7 +956,7 @@ func TestProbeDeployedState_SeedEntryReused_FileNotReRead(t *testing.T) {
 func TestProbeDeployedState_EmptyPaths_ReturnsEmptyMap(t *testing.T) {
 	ws := t.TempDir()
 
-	result := probeDeployedState(ws, plan.PlannedPaths{}, "", nil)
+	result := probeDeployedState(ws, plan.PlannedPaths{}, "", nil, &domain.HarnessDescriptor{})
 
 	if result == nil {
 		t.Error("expected non-nil empty map for empty path list, got nil")
@@ -981,7 +981,7 @@ func TestProbeDeployedState_ModelKeyForwarded_ModelIDPopulatedInResults(t *testi
 		{Ref: domain.ArtifactRef{Kind: domain.ArtifactAgent, Key: "agent-b"}, TargetPath: "agent-b.md"},
 	}
 
-	result := probeDeployedState(ws, paths, "model", nil)
+	result := probeDeployedState(ws, paths, "model", nil, &domain.HarnessDescriptor{})
 
 	stateA := result["agent-a.md"]
 	if stateA.ModelID != "claude-opus-4-5" {
@@ -1008,7 +1008,7 @@ func TestProbeDeployedState_EmptyModelKey_NoModelIDInResults(t *testing.T) {
 		{Ref: domain.ArtifactRef{Kind: domain.ArtifactAgent, Key: "agent"}, TargetPath: "agent.md"},
 	}
 
-	result := probeDeployedState(ws, paths, "", nil)
+	result := probeDeployedState(ws, paths, "", nil, &domain.HarnessDescriptor{})
 
 	state := result["agent.md"]
 	if state.ModelID != "" {
@@ -1043,7 +1043,7 @@ func TestProbeDeployedState_SeededEntryWithEmptyModelID_NotReProbed(t *testing.T
 		{Ref: domain.ArtifactRef{Kind: domain.ArtifactAgent, Key: "orchestrator"}, TargetPath: "orchestrator.md"},
 	}
 
-	result := probeDeployedState(ws, paths, "model", seed)
+	result := probeDeployedState(ws, paths, "model", seed, &domain.HarnessDescriptor{})
 
 	s := result["orchestrator.md"]
 	// The seeded entry must be returned verbatim: ModelID stays empty even though the
@@ -1151,7 +1151,7 @@ func TestProbeDeployedStateWithIndex_NilParseFailedPaths_NoPanic(t *testing.T) {
 	}
 
 	// Act — must not panic with nil parseFailedPaths.
-	result, err := probeDeployedStateWithIndex(ws, paths, "", nil, index, agentByKey, nil)
+	result, err := probeDeployedStateWithIndex(ws, paths, "", nil, index, agentByKey, nil, &domain.HarnessDescriptor{})
 
 	// Assert
 	if err != nil {
@@ -1202,7 +1202,7 @@ func TestProbeDeployedStateWithIndex_ParseFailedPathsNotContainingAgentPath_Pars
 	parseFailedPaths := map[string]bool{someOtherPath: true}
 
 	// Act
-	result, err := probeDeployedStateWithIndex(ws, paths, "", nil, index, agentByKey, parseFailedPaths)
+	result, err := probeDeployedStateWithIndex(ws, paths, "", nil, index, agentByKey, parseFailedPaths, &domain.HarnessDescriptor{})
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -1252,7 +1252,7 @@ func TestProbeDeployedStateWithIndex_ParseFailedPathPresent_StateHasParseFailedT
 	parseFailedPaths := map[string]bool{targetPath: true}
 
 	// Act
-	result, err := probeDeployedStateWithIndex(ws, paths, "", nil, index, agentByKey, parseFailedPaths)
+	result, err := probeDeployedStateWithIndex(ws, paths, "", nil, index, agentByKey, parseFailedPaths, &domain.HarnessDescriptor{})
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -1312,7 +1312,7 @@ func TestProbeDeployedStateWithIndex_ParseFailedPathAbsentFile_PresentFalse(t *t
 	parseFailedPaths := map[string]bool{targetPath: true}
 
 	// Act
-	result, err := probeDeployedStateWithIndex(ws, paths, "", nil, index, agentByKey, parseFailedPaths)
+	result, err := probeDeployedStateWithIndex(ws, paths, "", nil, index, agentByKey, parseFailedPaths, &domain.HarnessDescriptor{})
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}

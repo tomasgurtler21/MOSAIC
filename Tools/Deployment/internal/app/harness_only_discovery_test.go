@@ -758,7 +758,7 @@ func TestScanHarnessOnlyAgents_EligibleFile_IsReturned(t *testing.T) {
 	writeHarnessOnlyAgentFile(t, fullDir, "my-agent.md", minimalEligibleAgentBytes())
 
 	// Act
-	result := scanHarnessOnlyAgents(workspace, agentsDir, map[string]bool{})
+	result, _ := scanHarnessOnlyAgents(workspace, agentsDir, map[string]bool{})
 
 	// Assert
 	if len(result) == 0 {
@@ -781,7 +781,7 @@ func TestScanHarnessOnlyAgents_EligibleFile_TargetPathIsRelative(t *testing.T) {
 	writeHarnessOnlyAgentFile(t, fullDir, "my-agent.md", minimalEligibleAgentBytes())
 
 	// Act
-	result := scanHarnessOnlyAgents(workspace, agentsDir, map[string]bool{})
+	result, _ := scanHarnessOnlyAgents(workspace, agentsDir, map[string]bool{})
 
 	// Assert
 	if len(result) == 0 {
@@ -805,7 +805,7 @@ func TestScanHarnessOnlyAgents_EligibleFile_KeyIsDerivedFromFileName(t *testing.
 	writeHarnessOnlyAgentFile(t, fullDir, "my-agent.md", minimalEligibleAgentBytes())
 
 	// Act
-	result := scanHarnessOnlyAgents(workspace, agentsDir, map[string]bool{})
+	result, _ := scanHarnessOnlyAgents(workspace, agentsDir, map[string]bool{})
 
 	// Assert
 	if len(result) == 0 {
@@ -827,7 +827,7 @@ func TestScanHarnessOnlyAgents_AgentMdExtension_KeyStripsAgentMd(t *testing.T) {
 	writeHarnessOnlyAgentFile(t, fullDir, "my-agent.agent.md", minimalEligibleAgentBytes())
 
 	// Act
-	result := scanHarnessOnlyAgents(workspace, agentsDir, map[string]bool{})
+	result, _ := scanHarnessOnlyAgents(workspace, agentsDir, map[string]bool{})
 
 	// Assert
 	if len(result) == 0 {
@@ -850,7 +850,7 @@ func TestScanHarnessOnlyAgents_EligibleFile_TransformVersionCarried(t *testing.T
 	// minimalEligibleAgentBytes sets transform_version: "1.0.0"
 
 	// Act
-	result := scanHarnessOnlyAgents(workspace, agentsDir, map[string]bool{})
+	result, _ := scanHarnessOnlyAgents(workspace, agentsDir, map[string]bool{})
 
 	// Assert
 	if len(result) == 0 {
@@ -874,7 +874,7 @@ func TestScanHarnessOnlyAgents_CatalogCounterpartKey_IsExcluded(t *testing.T) {
 	catalogKeys := map[string]bool{"my-agent": true}
 
 	// Act
-	result := scanHarnessOnlyAgents(workspace, agentsDir, catalogKeys)
+	result, _ := scanHarnessOnlyAgents(workspace, agentsDir, catalogKeys)
 
 	// Assert
 	if len(result) != 0 {
@@ -895,7 +895,7 @@ func TestScanHarnessOnlyAgents_OrchestratorNamedFile_IsExcluded(t *testing.T) {
 	writeHarnessOnlyAgentFile(t, fullDir, "orchestrator.md", minimalEligibleAgentBytes())
 
 	// Act
-	result := scanHarnessOnlyAgents(workspace, agentsDir, map[string]bool{})
+	result, _ := scanHarnessOnlyAgents(workspace, agentsDir, map[string]bool{})
 
 	// Assert
 	if len(result) != 0 {
@@ -914,7 +914,7 @@ func TestScanHarnessOnlyAgents_OrchestratorAgentMdFile_IsExcluded(t *testing.T) 
 	writeHarnessOnlyAgentFile(t, fullDir, "orchestrator.agent.md", minimalEligibleAgentBytes())
 
 	// Act
-	result := scanHarnessOnlyAgents(workspace, agentsDir, map[string]bool{})
+	result, _ := scanHarnessOnlyAgents(workspace, agentsDir, map[string]bool{})
 
 	// Assert
 	if len(result) != 0 {
@@ -933,7 +933,7 @@ func TestScanHarnessOnlyAgents_NonMdFile_IsIgnored(t *testing.T) {
 	writeHarnessOnlyAgentFile(t, fullDir, "my-agent.txt", minimalEligibleAgentBytes())
 
 	// Act
-	result := scanHarnessOnlyAgents(workspace, agentsDir, map[string]bool{})
+	result, _ := scanHarnessOnlyAgents(workspace, agentsDir, map[string]bool{})
 
 	// Assert
 	if len(result) != 0 {
@@ -953,7 +953,7 @@ func TestScanHarnessOnlyAgents_IneligibleFile_IsSkippedSilently(t *testing.T) {
 	writeIneligibleParseable(t, fullDir, "generic-agent.md")
 
 	// Act — must not panic.
-	result := scanHarnessOnlyAgents(workspace, agentsDir, map[string]bool{})
+	result, _ := scanHarnessOnlyAgents(workspace, agentsDir, map[string]bool{})
 
 	// Assert
 	if len(result) != 0 {
@@ -977,7 +977,7 @@ func TestScanHarnessOnlyAgents_DirectoryEntryNamedMd_IsSkippedSilently(t *testin
 	}
 
 	// Act — must not panic or return an error.
-	result := scanHarnessOnlyAgents(workspace, agentsDir, map[string]bool{})
+	result, _ := scanHarnessOnlyAgents(workspace, agentsDir, map[string]bool{})
 
 	// Assert — the directory must produce no result entry.
 	if len(result) != 0 {
@@ -1001,7 +1001,7 @@ func TestScanHarnessOnlyAgents_EmptyAgentsDir_ReturnsEmpty(t *testing.T) {
 	}
 
 	// Act
-	result := scanHarnessOnlyAgents(workspace, "", map[string]bool{})
+	result, _ := scanHarnessOnlyAgents(workspace, "", map[string]bool{})
 
 	// Assert
 	if len(result) != 0 {
@@ -1020,7 +1020,7 @@ func TestScanHarnessOnlyAgents_AgentsDirDoesNotExist_ReturnsEmpty(t *testing.T) 
 	agentsDir := ".claude/agents" // not created
 
 	// Act — must not panic.
-	result := scanHarnessOnlyAgents(workspace, agentsDir, map[string]bool{})
+	result, _ := scanHarnessOnlyAgents(workspace, agentsDir, map[string]bool{})
 
 	// Assert
 	if result == nil {
@@ -1048,7 +1048,7 @@ func TestScanHarnessOnlyAgents_MultipleEligibleFiles_ReturnedSortedByTargetPath(
 	}
 
 	// Act
-	result := scanHarnessOnlyAgents(workspace, agentsDir, map[string]bool{})
+	result, _ := scanHarnessOnlyAgents(workspace, agentsDir, map[string]bool{})
 
 	// Assert — must have 3 results.
 	if len(result) != 3 {
@@ -1093,7 +1093,7 @@ func TestScanHarnessOnlyAgents_MixedFiles_OnlyEligibleHarnessOnlyReturned(t *tes
 	catalogKeys := map[string]bool{"catalog-agent": true}
 
 	// Act
-	result := scanHarnessOnlyAgents(workspace, agentsDir, catalogKeys)
+	result, _ := scanHarnessOnlyAgents(workspace, agentsDir, catalogKeys)
 
 	// Assert — only "harness-agent" should appear.
 	if len(result) != 1 {
@@ -1121,7 +1121,7 @@ func TestScanHarnessOnlyAgents_EligibleFile_RoleCarried(t *testing.T) {
 		eligibleAgentWithRoleBytes("orchestrator"))
 
 	// Act
-	result := scanHarnessOnlyAgents(workspace, agentsDir, map[string]bool{})
+	result, _ := scanHarnessOnlyAgents(workspace, agentsDir, map[string]bool{})
 
 	// Assert
 	if len(result) == 0 {
@@ -1150,7 +1150,7 @@ func TestScanHarnessOnlyAgents_EligibleFile_AllFrontmatterFieldsCarried(t *testi
 	// minimalEligibleAgentBytes sets: transform_version="1.0.0", version="2.1.0", id="42"
 
 	// Act
-	result := scanHarnessOnlyAgents(workspace, agentsDir, map[string]bool{})
+	result, _ := scanHarnessOnlyAgents(workspace, agentsDir, map[string]bool{})
 
 	// Assert
 	if len(result) == 0 {
@@ -1210,7 +1210,7 @@ func TestScanHarnessOnlyAgents_PerformsNoWrites_EligibleFileBytesUnchanged(t *te
 	}
 
 	// Act — run the scan.
-	_ = scanHarnessOnlyAgents(workspace, agentsDir, map[string]bool{})
+	_, _ = scanHarnessOnlyAgents(workspace, agentsDir, map[string]bool{})
 
 	// Assert — every file must be byte-identical to its pre-scan bytes.
 	for _, f := range files {
@@ -1244,7 +1244,7 @@ func TestScanHarnessOnlyAgents_PerformsNoWrites_IneligibleFileBytesUnchanged(t *
 	}
 
 	// Act
-	_ = scanHarnessOnlyAgents(workspace, agentsDir, map[string]bool{})
+	_, _ = scanHarnessOnlyAgents(workspace, agentsDir, map[string]bool{})
 
 	// Assert
 	after, err := os.ReadFile(filepath.Join(fullDir, filename))
@@ -1516,7 +1516,7 @@ func TestScanHarnessOnlyAgents_OrchestratorScriptInCatalog_NotHarnessOnly(t *tes
 	catalogKeys := catalogAgentKeys(cat)
 
 	// Act
-	result := scanHarnessOnlyAgents(workspace, agentsDir, catalogKeys)
+	result, _ := scanHarnessOnlyAgents(workspace, agentsDir, catalogKeys)
 
 	// Assert — the orchestrator-script.md must not appear in the harness-only set.
 	if len(result) != 0 {
@@ -1544,7 +1544,7 @@ func TestScanHarnessOnlyAgents_OrchestratorScriptFileName_ExcludedByFilename(t *
 	writeHarnessOnlyAgentFile(t, fullDir, "orchestrator-script.md", minimalEligibleAgentBytes())
 
 	// Act — empty catalogKeys: only the filename exclusion channel can exclude this file.
-	result := scanHarnessOnlyAgents(workspace, agentsDir, map[string]bool{})
+	result, _ := scanHarnessOnlyAgents(workspace, agentsDir, map[string]bool{})
 
 	// Assert — excluded by isOrchestratorFileName before the catalog-key check is reached.
 	if len(result) != 0 {
@@ -1581,7 +1581,7 @@ func TestScanHarnessOnlyAgents_OrchestratorScriptExcluded_GenuineHarnessOnlyStil
 	catalogKeys := catalogAgentKeys(cat)
 
 	// Act
-	result := scanHarnessOnlyAgents(workspace, agentsDir, catalogKeys)
+	result, _ := scanHarnessOnlyAgents(workspace, agentsDir, catalogKeys)
 
 	// Assert — exactly one result: the genuine harness-only file, not the script orchestrator.
 	if len(result) != 1 {

@@ -21,9 +21,10 @@ import (
 	"path/filepath"
 	"testing"
 
-	// Side-effect imports ensure the four builtin harness init() functions run, registering
+	// Side-effect imports ensure the five builtin harness init() functions run, registering
 	// their factories with the package-level registry. Discover then constructs and hooks them.
 	_ "mosaic-deploy/internal/harness/builtin/claudecode"
+	_ "mosaic-deploy/internal/harness/builtin/codex"
 	_ "mosaic-deploy/internal/harness/builtin/ghcpcli"
 	_ "mosaic-deploy/internal/harness/builtin/opencode"
 	_ "mosaic-deploy/internal/harness/builtin/vscodeghcp"
@@ -75,7 +76,7 @@ func testModelCatalogHook() func(string, domain.ModelCatalog) domain.ModelCatalo
 
 // discoverBuiltinsWithModelHook calls registry.Discover with the real repo root (so builtin
 // factories can load their content files from Catalog/HarnessInjections/) and the test
-// ModelCatalog hook. The four builtin harnesses must have registered themselves via init()
+// ModelCatalog hook. The five builtin harnesses must have registered themselves via init()
 // through the side-effect imports above before this function is called.
 func discoverBuiltinsWithModelHook(t *testing.T) registry.Registry {
 	t.Helper()
@@ -86,6 +87,35 @@ func discoverBuiltinsWithModelHook(t *testing.T) registry.Registry {
 	})
 	if err != nil {
 		t.Fatalf("Discover with ModelCatalog hook: %v", err)
+	}
+	return reg
+}
+
+// frozenCatalogRoot returns the absolute path to the frozen Catalog fixture tree at
+// Tools/Deployment/testdata/frozen-catalog. The frozen catalog carries
+// Catalog/HarnessInjections/Codex/ so the Codex module initialises with Usable:true,
+// unlike the live repo root which does not yet have that directory.
+func frozenCatalogRoot(t *testing.T) string {
+	t.Helper()
+	root := repoRoot(t)
+	return filepath.Join(root, "Tools", "Deployment", "testdata", "frozen-catalog")
+}
+
+// discoverBuiltinsWithModelHookFromFrozen calls registry.Discover with the frozen Catalog
+// root and the test ModelCatalog hook. Use this instead of discoverBuiltinsWithModelHook
+// for any test that resolves the "codex" module, because the live Catalog does not yet
+// contain Catalog/HarnessInjections/Codex/ (that directory is created by the catalog
+// stage). Using the frozen root ensures the Codex factory initialises with Usable:true
+// and the test does not fail for a missing catalog artifact.
+func discoverBuiltinsWithModelHookFromFrozen(t *testing.T) registry.Registry {
+	t.Helper()
+	root := frozenCatalogRoot(t)
+	reg, err := registry.Discover(registry.Options{
+		MosaicRoot:   root,
+		ModelCatalog: testModelCatalogHook(),
+	})
+	if err != nil {
+		t.Fatalf("Discover (frozen catalog) with ModelCatalog hook: %v", err)
 	}
 	return reg
 }
@@ -293,6 +323,73 @@ func TestModelSource_VsCodeGHCP_HasNonEmptyModelListFromDescriptor(t *testing.T)
 		t.Errorf("vscode-ghcp: Descriptor().Models.IDs is empty after discovery with ModelCatalog hook; "+
 			"the vscode-ghcp YAML descriptor declares model IDs and the empty-IDs fallback must preserve them; "+
 			"confirm registry.Options.ModelCatalog empty-IDs fallback rule is implemented")
+	}
+}
+
+// ---------------------------------------------------------------------------
+// T5.5 — Codex keeps its own descriptor-sourced model catalog
+// ---------------------------------------------------------------------------
+
+// TestModelSource_Codex_KeepsDescriptorSourcedIDs verifies that the codex module, when
+// discovered with a ModelCatalog hook that returns empty IDs for "codex" (because it is
+// not in the shared CLI-only catalog), keeps its own YAML-sourced model catalog unchanged.
+// Codex is not CLI-backed and its models are sourced from the embedded descriptor.
+//
+// This test uses the frozen catalog root (testdata/frozen-catalog) rather than the live
+// repo root, because the live Catalog does not yet carry Catalog/HarnessInjections/Codex/
+// (that directory is created by the catalog stage). Using the live root would cause the
+// Codex factory to initialise with Usable:false and Resolve("codex") to return an error,
+// failing the test for the wrong reason.
+func TestModelSource_Codex_KeepsDescriptorSourcedIDs(t *testing.T) {
+	reg := discoverBuiltinsWithModelHookFromFrozen(t)
+
+	m, err := reg.Resolve("codex")
+	if err != nil {
+		t.Fatalf("Resolve(%q): %v", "codex", err)
+	}
+
+	got := m.Descriptor().Models.IDs
+	if len(got) == 0 {
+		t.Fatal("codex: Descriptor().Models.IDs is empty after discovery with ModelCatalog hook; " +
+			"codex must keep its own descriptor-sourced catalog when the hook returns empty IDs; " +
+			"the codex YAML descriptor declares model IDs and the empty-IDs fallback must preserve them")
+	}
+
+	// The test hook's IDs (prefixed "shared-") appear in no real YAML descriptor. If any
+	// appear in codex's list, the fallback rule is broken.
+	sharedOnlyIDs := []string{
+		"shared-claude-model-1", "shared-claude-model-2",
+		"shared-opencode-provider/shared-model",
+		"shared-ghcp-model-a", "shared-ghcp-model-b",
+	}
+	if anyOfIn(got, sharedOnlyIDs) {
+		t.Errorf("codex: Descriptor().Models.IDs = %v; "+
+			"none of the shared-catalog hook IDs must appear; "+
+			"codex must source its models from its own descriptor, not the CLI-only shared catalog",
+			got)
+	}
+}
+
+// TestModelSource_Codex_HasNonEmptyModelListFromDescriptor verifies that codex offers a
+// non-empty model list from its embedded YAML descriptor even when the hook applies.
+// This guards the base invariant: the Codex descriptor must declare at least one model ID.
+//
+// This test uses the frozen catalog root for the same reason as
+// TestModelSource_Codex_KeepsDescriptorSourcedIDs: the live Catalog does not yet carry
+// Catalog/HarnessInjections/Codex/, which the catalog stage will add.
+func TestModelSource_Codex_HasNonEmptyModelListFromDescriptor(t *testing.T) {
+	reg := discoverBuiltinsWithModelHookFromFrozen(t)
+
+	m, err := reg.Resolve("codex")
+	if err != nil {
+		t.Fatalf("Resolve(%q): %v", "codex", err)
+	}
+
+	ids := m.Descriptor().Models.IDs
+	if len(ids) == 0 {
+		t.Errorf("codex: Descriptor().Models.IDs is empty after discovery with ModelCatalog hook; "+
+			"the codex YAML descriptor must declare model IDs and the empty-IDs fallback must preserve them; "+
+			"confirm the Codex descriptor has a models: block and registry.Options.ModelCatalog empty-IDs fallback is implemented")
 	}
 }
 

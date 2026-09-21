@@ -1,0 +1,7 @@
+# Descriptor fixture: agent_format_id set to an unknown value.
+# Used by T5.5 tests to verify that an unrecognised format ID is rejected at parse time
+# (I5.1 adds validation via formatid.Parse). This must not load successfully.
+schema_version: "1"
+id: "unknown-format-test"
+display_name: "Unknown Format Test"
+agent_format_id: "totally-unknown-format-that-does-not-exist"

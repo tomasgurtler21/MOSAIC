@@ -79,9 +79,10 @@ const (
 	HarnessDirNameGhcpCLI    = "GHCP CLI"
 	HarnessDirNameOpenCode   = "OpenCode"
 	HarnessDirNameVSCodeGHCP = "VS Code GHCP"
+	HarnessDirNameCodex      = "Codex"
 )
 
-// HarnessContentDir* are the MOSAIC-root-relative content directories for the four
+// HarnessContentDir* are the MOSAIC-root-relative content directories for the five
 // built-in harnesses, in slash form. Declared as const-by-concatenation so each
 // harness package's exported RepoContentDir stays a compile-time constant.
 const (
@@ -89,6 +90,7 @@ const (
 	HarnessContentDirGhcpCLI    = MosaicRelHarnessInjectionsDir + "/" + HarnessDirNameGhcpCLI
 	HarnessContentDirOpenCode   = MosaicRelHarnessInjectionsDir + "/" + HarnessDirNameOpenCode
 	HarnessContentDirVSCodeGHCP = MosaicRelHarnessInjectionsDir + "/" + HarnessDirNameVSCodeGHCP
+	HarnessContentDirCodex      = MosaicRelHarnessInjectionsDir + "/" + HarnessDirNameCodex
 )
 
 // ---------------------------------------------------------------------------

@@ -5,6 +5,7 @@ import (
 
 	"mosaic-common/docformat"
 	"mosaic-deploy/internal/agentfields"
+	"mosaic-deploy/internal/agentformat"
 	"mosaic-deploy/internal/domain"
 	"mosaic-deploy/internal/harness/descriptor"
 )
@@ -84,6 +85,10 @@ func resolveTools(req Request, fm *docformat.Frontmatter, desc *domain.HarnessDe
 //   - fieldChanges: one FieldChange per frontmatter key that was added, overwritten, or
 //     removed (satisfying AC8.5).
 //   - gaps: domain.Gap entries produced during the transformation (e.g. GapNoModel).
+//   - ownedKeyDiffs: owned-key differences for conflict-classified artifacts; empty for
+//     all ordinary runs. Computed before the Step 5c preservation pass so that the
+//     "incoming" side reflects MOSAIC's active source-driven transforms, not values copied
+//     back from the deployed file.
 //
 // Step order is significant: removes happen before adds so that a key that is dropped and
 // re-added with a different value under the same name works correctly. Version stamps and
@@ -95,7 +100,7 @@ func applyFrontmatter(
 	toolResult domain.ToolResult,
 	req Request,
 	desc *domain.HarnessDescriptor,
-) ([]FieldChange, []domain.Gap) {
+) ([]FieldChange, []domain.Gap, []OwnedKeyDifference) {
 	var changes []FieldChange
 	var gaps []domain.Gap
 
@@ -388,6 +393,13 @@ func applyFrontmatter(
 		changes = append(changes, mergeChanges...)
 	}
 
+	// Owned-key diff computation: computed here, after MOSAIC's active source-driven
+	// transforms (steps 1-5b) and before the Step 5c preservation pass. Step 5c copies
+	// deployed values back into fm for fields the transform did not explicitly touch,
+	// which would mask differences if the computation ran after it. Computing here means
+	// "incoming" reflects what MOSAIC's source transforms produce, not the preserved copy.
+	ownedKeyDiffs := computeOwnedKeyDifferences(req, fm)
+
 	// Step 5c: Preserve user-owned fields from the deployed file. After all managed-field
 	// steps have run, any key in the deployed file's frontmatter that was not touched by
 	// this transform is considered user-owned and is copied verbatim into the output. This
@@ -433,7 +445,7 @@ func applyFrontmatter(
 		fm.Reorder(plan.KeyOrder)
 	}
 
-	return changes, gaps
+	return changes, gaps, ownedKeyDiffs
 }
 
 // applyVersionStamp sets a single version stamp field in the frontmatter and returns the
@@ -600,6 +612,102 @@ func mergeDeployedTools(fm *docformat.Frontmatter, deployed []byte, desc *domain
 	return changes
 }
 
+// computeOwnedKeyDifferences computes the list of owned-key differences between
+// the decoded canonical deployed form and the outgoing transform output.
+// It returns nil when Origin is not OriginUnconfirmed (the ordinary case), when
+// req.Deployed is nil, or when the deployed bytes cannot be parsed.
+//
+// For each frontmatter key present in either the deployed or the outgoing form:
+//   - Stamp keys (agentfields.All() Deployed names only) are excluded. Legacy names
+//     such as "role" are not in the exclusion set, so keys the user can hand-edit
+//     remain in scope. This is the same Deployed-only decision as the translator's
+//     stamp predicate.
+//   - If the decoded canonical values differ (by value or by presence), one
+//     OwnedKeyDifference entry is emitted naming the key, both values, and a reason.
+//
+// Comparison is always between decoded canonical values (renderValue of domain.FieldValue),
+// never raw bytes, so formatting differences do not masquerade as edits.
+func computeOwnedKeyDifferences(req Request, outgoingFM *docformat.Frontmatter) []OwnedKeyDifference {
+	if req.Origin != OriginUnconfirmed {
+		return nil
+	}
+	if req.Deployed == nil {
+		return nil
+	}
+
+	// Parse the deployed canonical bytes. If they cannot be parsed here (e.g. the caller
+	// passed OriginUnconfirmed when the decode step succeeded but produced empty output),
+	// return nil rather than crashing. The normal unparseable path sets
+	// OriginUnconfirmedUnparseable, which is gated out above.
+	deployedDoc, err := docformat.Parse(req.Deployed)
+	if err != nil {
+		return nil
+	}
+	deployedFM := deployedDoc.Frontmatter()
+
+	// Build the stamp exclusion set from agentfields.All() Deployed names ONLY.
+	// The Legacy names (e.g. role maps to the mosaic-role Deployed form) are
+	// deliberately absent so that generic-vocabulary keys the user can hand-edit
+	// remain in scope.
+	stampSet := make(map[string]bool)
+	for _, f := range agentfields.All() {
+		stampSet[f.Deployed] = true
+	}
+
+	// Walk the union of key names: deployed-order first, then keys only in outgoing.
+	keysSeen := make(map[string]bool)
+	var allKeys []string
+	for _, k := range deployedFM.Keys() {
+		if !keysSeen[k] {
+			keysSeen[k] = true
+			allKeys = append(allKeys, k)
+		}
+	}
+	for _, k := range outgoingFM.Keys() {
+		if !keysSeen[k] {
+			keysSeen[k] = true
+			allKeys = append(allKeys, k)
+		}
+	}
+
+	var diffs []OwnedKeyDifference
+	for _, key := range allKeys {
+		if stampSet[key] {
+			continue
+		}
+		if agentformat.IsCarriageKey(key) {
+			continue
+		}
+
+		deployedVal, deployedPresent := deployedFM.Get(key)
+		incomingVal, incomingPresent := outgoingFM.Get(key)
+
+		deployedStr := ""
+		if deployedPresent {
+			deployedStr = renderOwnedValue(deployedVal)
+		}
+		incomingStr := ""
+		if incomingPresent {
+			incomingStr = renderOwnedValue(incomingVal)
+		}
+
+		if deployedPresent == incomingPresent && deployedStr == incomingStr {
+			continue
+		}
+
+		diffs = append(diffs, OwnedKeyDifference{
+			Key:             key,
+			Deployed:        deployedStr,
+			Incoming:        incomingStr,
+			Reason:          "origin could not be confirmed; deployed value differs from incoming",
+			DeployedPresent: deployedPresent,
+			IncomingPresent: incomingPresent,
+		})
+	}
+
+	return diffs
+}
+
 // renderValue converts a domain.FieldValue to a concise string for use in FieldChange
 // Before/After fields. The rendering is for human-readable audit purposes only; it is
 // not a YAML round-trip serialisation. Callers must not parse the returned string.
@@ -617,6 +725,31 @@ func renderValue(v domain.FieldValue) string {
 		pairs := make([]string, len(v.Pairs))
 		for i, p := range v.Pairs {
 			pairs[i] = p.Key + ": " + renderValue(p.Value)
+		}
+		return "{" + strings.Join(pairs, ", ") + "}"
+	default:
+		return ""
+	}
+}
+
+// renderOwnedValue converts a domain.FieldValue to a concise string for use in
+// OwnedKeyDifference Deployed/Incoming fields. Unlike renderValue, lists are rendered
+// as their element texts joined by ", " with no surrounding brackets, matching the
+// contract that OwnedKeyDifference report fields read like descriptor.RenderFieldValues.
+func renderOwnedValue(v domain.FieldValue) string {
+	switch v.Kind {
+	case domain.KindScalar:
+		return v.Scalar
+	case domain.KindList:
+		items := make([]string, len(v.Items))
+		for i, item := range v.Items {
+			items[i] = renderOwnedValue(item)
+		}
+		return strings.Join(items, ", ")
+	case domain.KindMapping:
+		pairs := make([]string, len(v.Pairs))
+		for i, p := range v.Pairs {
+			pairs[i] = p.Key + ": " + renderOwnedValue(p.Value)
 		}
 		return "{" + strings.Join(pairs, ", ") + "}"
 	default:

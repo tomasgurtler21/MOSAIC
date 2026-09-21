@@ -64,7 +64,7 @@ var blockingValidationCodes = map[string]bool{
 // yield an ineligible verdict with a Reason, never an error return.
 func eligibleHarnessOnly(src []byte) EligibilityVerdict {
 	// Parse the document. Unparseable bytes are ineligible.
-	doc, err := docformat.Parse(src)
+	doc, err := ParseGenericSource(src)
 	if err != nil {
 		return EligibilityVerdict{
 			Eligible: false,
@@ -170,31 +170,95 @@ func eligibleHarnessOnly(src []byte) EligibilityVerdict {
 	}
 }
 
-// isOrchestratorFileName reports whether name is one of the two orchestrator-role agent file
-// names. True if and only if name equals, case-insensitively, one of:
+// finalSuffix returns the final dotted component of ext. This is the single file
+// extension used to construct the orchestrator exclusion set and the agent-file filter.
+//
+//	finalSuffix(".md")       == ".md"
+//	finalSuffix(".agent.md") == ".md"
+//	finalSuffix(".toml")     == ".toml"
+func finalSuffix(ext string) string {
+	i := strings.LastIndex(ext, ".")
+	if i <= 0 {
+		return ext
+	}
+	return ext[i:]
+}
+
+// agentFileName returns the on-disk file name for an agent given its key and the
+// harness's declared agent extension.
+func agentFileName(key, agentExt string) string {
+	return key + agentExt
+}
+
+// isAgentFile reports whether name ends in the final suffix of agentExt and therefore
+// belongs to the harness's agent file set.
+//
+// The filter uses finalSuffix so that a harness declaring ".agent.md" (GHCP CLI)
+// continues to accept plain ".md" files alongside ".agent.md" files, exactly as
+// the previous hard-coded ".md" filter did.
+func isAgentFile(name, agentExt string) bool {
+	return strings.HasSuffix(name, finalSuffix(agentExt))
+}
+
+// agentKeyFromFileName derives an agent key from a deployed file name by stripping the
+// declared agent extension and its ".agent.<suffix>" variant, matching how the catalog
+// derives a key from a generic source file name.
+//
+// The derivation uses finalSuffix(agentExt) as the single extension component:
+//
+//   - For agentExt ".md" or ".agent.md": strips ".agent.md" then ".md" (existing behaviour).
+//   - For agentExt ".toml": strips ".agent.toml" then ".toml".
+//
+// No extension component leaks into the derived key.
+func agentKeyFromFileName(name, agentExt string) string {
+	suffix := finalSuffix(agentExt)
+	agentSuffix := ".agent" + suffix
+	if strings.HasSuffix(name, agentSuffix) {
+		return strings.TrimSuffix(name, agentSuffix)
+	}
+	return strings.TrimSuffix(name, suffix)
+}
+
+// mosaicOrchestratorFileNames returns the set of lower-case file names that identify
+// MOSAIC's own orchestrator agents for the given declared agent extension.
+//
+// Per CD-5, the derivation uses finalSuffix(agentExt). For agentExt ".md" and ".agent.md"
+// this reproduces the four existing names exactly; for ".toml" it yields the four .toml
+// names. Nothing is removed from any existing harness's set.
+//
+// The returned set always has exactly four members.
+func mosaicOrchestratorFileNames(agentExt string) map[string]bool {
+	suffix := finalSuffix(agentExt)
+	return map[string]bool{
+		"orchestrator" + suffix:              true,
+		"orchestrator.agent" + suffix:        true,
+		"orchestrator-script" + suffix:       true,
+		"orchestrator-script.agent" + suffix: true,
+	}
+}
+
+// isOrchestratorFileName reports whether name is one of MOSAIC's orchestrator agent
+// file names for the harness declared in src. Matching is whole-name, case-insensitive.
+//
+// When src is omitted or nil, ".md" is used as the declared extension, which reproduces
+// today's four Markdown names:
 //
 //	"orchestrator.md", "orchestrator.agent.md",
 //	"orchestrator-script.md", "orchestrator-script.agent.md"
 //
-// Frontmatter is never consulted: a `role: orchestrator` value in a differently-named file
-// does not make it an orchestrator for this purpose. Matching is whole-name equality, never a
-// prefix or substring test — a file named "orchestrator-script-custom.md" is not excluded.
-func isOrchestratorFileName(name string) bool {
-	lower := strings.ToLower(name)
-	return lower == "orchestrator.md" ||
-		lower == "orchestrator.agent.md" ||
-		lower == "orchestrator-script.md" ||
-		lower == "orchestrator-script.agent.md"
-}
-
-// agentKeyFromFileName derives an agent key from a deployed file name by stripping the
-// trailing ".agent.md" or ".md" suffix, matching how the catalog derives a key from a
-// generic source file name.
-func agentKeyFromFileName(name string) string {
-	if strings.HasSuffix(name, ".agent.md") {
-		return strings.TrimSuffix(name, ".agent.md")
+// Frontmatter is never consulted: a `role: orchestrator` value in a differently-named
+// file does not make it an orchestrator for this purpose. Matching is whole-name
+// equality, never a prefix or substring test — a file named "orchestrator-script-custom.md"
+// is not excluded.
+func isOrchestratorFileName(name string, src ...*domain.HarnessDescriptor) bool {
+	agentExt := ".md"
+	if len(src) > 0 && src[0] != nil {
+		if ext, ok := src[0].Extensions[domain.ArtifactAgent]; ok && ext != "" {
+			agentExt = ext
+		}
 	}
-	return strings.TrimSuffix(name, ".md")
+	lower := strings.ToLower(name)
+	return mosaicOrchestratorFileNames(agentExt)[lower]
 }
 
 // catalogAgentKeys returns the set of every agent key the generic catalog knows about:
@@ -230,29 +294,51 @@ func catalogAgentKeys(c catalog.Catalog) map[string]bool {
 // relative to workspace) and returns every eligible harness-only agent found.
 //
 // A file is returned only when ALL hold:
-//   - it is a regular file whose name ends in ".md";
-//   - !isOrchestratorFileName(name);
+//   - it matches the declared agent extension (isAgentFile);
+//   - !isOrchestratorFileName(name, src);
 //   - its derived key is not in catalogKeys;
-//   - eligibleHarnessOnly(bytes).Eligible is true.
+//   - eligibleHarnessOnly(canonicalBytes).Eligible is true.
 //
-// Tolerance is the contract: a file that cannot be read or parsed is skipped silently.
+// The optional src parameter supplies the harness descriptor used to determine the
+// declared agent extension and to decode file bytes through the funnel. When src is
+// omitted or nil, ".md" is used as the declared extension and the identity decoder is
+// applied (Markdown harness behaviour, identical to the previous implementation).
+//
+// Tolerance is the contract: a file that cannot be read or decoded is skipped silently.
 // The walk is non-recursive. The function opens no file for writing and leaves every
 // scanned file byte-identical. Results are sorted by TargetPath.
 //
 // An empty agentsDir yields an empty result rather than scanning the workspace root.
-func scanHarnessOnlyAgents(workspace, agentsDir string, catalogKeys map[string]bool) []HarnessOnlyAgent {
+//
+// The second return value carries decode-report notices for every file that decoded
+// through the funnel. Callers surface these at their own named merge point.
+func scanHarnessOnlyAgents(workspace, agentsDir string, catalogKeys map[string]bool, srcs ...*domain.HarnessDescriptor) ([]HarnessOnlyAgent, []string) {
+	var src *domain.HarnessDescriptor
+	if len(srcs) > 0 {
+		src = srcs[0]
+	}
+
 	result := []HarnessOnlyAgent{}
+	var notices []string
 
 	// Guard: an empty agentsDir must yield an empty result without scanning workspace root.
 	if agentsDir == "" {
-		return result
+		return result, notices
+	}
+
+	// Determine the declared agent extension. Default to ".md" when undeclared.
+	agentExt := ".md"
+	if src != nil {
+		if ext, ok := src.Extensions[domain.ArtifactAgent]; ok && ext != "" {
+			agentExt = ext
+		}
 	}
 
 	dir := filepath.Join(workspace, agentsDir)
 	entries, err := os.ReadDir(dir)
 	if err != nil {
 		// Directory does not exist or is unreadable — return empty result.
-		return result
+		return result, notices
 	}
 
 	for _, entry := range entries {
@@ -263,33 +349,39 @@ func scanHarnessOnlyAgents(workspace, agentsDir string, catalogKeys map[string]b
 
 		name := entry.Name()
 
-		// Only .md files.
-		if !strings.HasSuffix(name, ".md") {
+		// Only files matching the declared agent extension (using finalSuffix for the
+		// GHCP CLI ".agent.md" case — plain ".md" files are still accepted).
+		if !isAgentFile(name, agentExt) {
 			continue
 		}
 
 		// Exclude orchestrator-named files by canonical filename check.
-		if isOrchestratorFileName(name) {
+		if isOrchestratorFileName(name, src) {
 			continue
 		}
 
 		// Derive agent key and check against catalog.
-		key := agentKeyFromFileName(name)
+		key := agentKeyFromFileName(name, agentExt)
 		if catalogKeys[key] {
 			// This file has a generic catalog counterpart; not harness-only.
 			continue
 		}
 
-		// Read file bytes tolerantly — skip silently on error.
+		// Read and decode through the funnel (Layer 2 — PlanItem-free path).
+		// Discovery never holds a plan item, so readDeployedArtifact is the entry point.
 		filePath := filepath.Join(dir, name)
-		data, err := os.ReadFile(filePath)
-		if err != nil {
-			// Unreadable — skip silently.
+		dr := readDeployedArtifact(filePath, domain.ArtifactAgent, src)
+
+		// Surface the decode report at this named merge point.
+		notices = append(notices, decodeReportNotices(name, dr.Report)...)
+
+		// Skip unreadable, missing, or undecodable files silently.
+		if !dr.Present || dr.ReadErr != nil || dr.DecodeErr != nil || dr.Canonical == nil {
 			continue
 		}
 
-		// Apply two-signal eligibility check.
-		verdict := eligibleHarnessOnly(data)
+		// Apply two-signal eligibility check on the canonical (decoded) bytes.
+		verdict := eligibleHarnessOnly(dr.Canonical)
 		if !verdict.Eligible {
 			// Not an eligible harness-only agent — skip silently.
 			continue
@@ -312,5 +404,5 @@ func scanHarnessOnlyAgents(workspace, agentsDir string, catalogKeys map[string]b
 		return result[i].TargetPath < result[j].TargetPath
 	})
 
-	return result
+	return result, notices
 }

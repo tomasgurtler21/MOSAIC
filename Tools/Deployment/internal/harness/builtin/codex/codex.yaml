@@ -1,0 +1,70 @@
+schema_version: "1"
+id: "codex"
+display_name: "Codex"
+agent_format_id: "codex-toml"
+tool_info_recoverable: false
+models:
+  ids:
+    - "gpt-6-astra"
+    - "gpt-5.6-sol"
+    - "gpt-5.6-terra"
+    - "gpt-5.6-luna"
+tools:
+  # Codex declares no universe and no tools_key. Sandbox capability is expressed
+  # via the sandbox_mode field, which the module computes from the generic tool set.
+  # Each generic tool in the known vocabulary is mapped with an empty destinations
+  # list so it resolves ToolMapped (no harness-side tool names). An unknown generic
+  # tool falls through to ToolUnmapped but never escalates the sandbox mode.
+  mappings:
+    - generic: "file_read"
+      destinations: []
+    - generic: "file_write"
+      destinations: []
+    - generic: "file_edit"
+      destinations: []
+    - generic: "file_search"
+      destinations: []
+    - generic: "content_search"
+      destinations: []
+    - generic: "terminal"
+      destinations: []
+    - generic: "user_interaction"
+      destinations: []
+    - generic: "subagent"
+      destinations: []
+    - generic: "skill"
+      destinations: []
+    - generic: "web_fetch"
+      destinations: []
+    - generic: "web_search"
+      destinations: []
+paths:
+  agents:
+    supported: true
+    project: ".codex/agents"
+  skills:
+    supported: true
+    project: ".agents/skills"
+  hooks:
+    supported: false
+extensions:
+  agent: ".toml"
+frontmatter:
+  model_key: "model"
+  # No tools_key: sandbox_mode is the module's own field, not from the shared field builder.
+  drop:
+    - "name"
+    - "recommended_tier"
+    - "tier_rationale"
+    - "required_skills"
+    - "tools"
+  key_order:
+    - "mosaic_id"
+    - "version"
+    - "mosaic_transform_version"
+    - "mosaic_injections_version"
+    - "description"
+    - "model"
+    - "sandbox_mode"
+hooks:
+  supported: false

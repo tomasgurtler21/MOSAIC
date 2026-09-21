@@ -16,7 +16,7 @@
 //
 // # Rules enforced
 //
-// The tool checks three categories of rule:
+// The tool checks four categories of rule:
 //
 //  1. Dependency direction: packages at each layer may only import inward.
 //     domain → nothing; transform → domain+docformat; app → core packages,
@@ -26,9 +26,22 @@
 //     no filesystem, network, terminal, time, or randomness imports. This is
 //     what makes byte-exact golden testing possible.
 //
-//  3. Harness-name isolation: no package outside internal/harness/builtin/*
+//  3. Translator-layer purity and direction: the translator layer
+//     (internal/agentformat and its sub-packages) must be a pure function with
+//     no I/O, clock, or randomness, and must never import a harness package, the
+//     application layer, transform, the frontends, or any infrastructure package.
+//     internal/agentfields is explicitly permitted: it is the repository's
+//     authority for MOSAIC-owned and stamp key vocabulary, and its source file
+//     declares no imports at all, making it a leaf vocabulary package.
+//
+//  4. Harness-name isolation: no package outside internal/harness/builtin/*
 //     may import a harness builtin sub-package directly. All harness access
 //     goes through the registry.
+//
+//  5. Read-boundary rule: application-layer code must not call the raw-bytes
+//     docformat entry points (docformat.Parse and docformat.SplitFrontmatter)
+//     directly. Only deployed_read.go (the decode funnel) and
+//     parse_generic_source.go (the named generic-source operation) are permitted.
 //
 // # Scope
 //
@@ -40,6 +53,7 @@ package main
 
 import (
 	"fmt"
+	"go/ast"
 	"go/parser"
 	"go/token"
 	"os"
@@ -69,6 +83,63 @@ type rule struct {
 	// forbidAllModuleImports, when true, bans any import that starts with modulePrefix.
 	// This enforces "this package must not import anything from this module."
 	forbidAllModuleImports bool
+	// forbidModuleImportsExcept, when non-nil, bans any import starting with modulePrefix
+	// unless it also starts with one of these exception prefixes. This enforces "this package
+	// may only import the listed sub-paths from this module."
+	forbidModuleImportsExcept []string
+}
+
+// callBoundaryRule describes a call-level constraint for a single package directory.
+// It forbids direct calls to specific functions in a named import package from any
+// file in the directory except those listed in allowedFiles.
+type callBoundaryRule struct {
+	// dir is the directory path relative to the module root.
+	dir string
+	// desc is a human-readable description of the constraint, shown in violation messages.
+	desc string
+	// forbidCalls maps import paths to the set of function names that are forbidden in
+	// non-allowed files. Example: {"mosaic-common/docformat": ["Parse", "SplitFrontmatter"]}.
+	forbidCalls map[string][]string
+	// allowedFiles lists file names (base names only, not full paths) that are exempt
+	// from the call ban. Files in this list may call any function without restriction.
+	allowedFiles []string
+}
+
+// translatorForbidPrefix is the I/O, clock, and randomness prefix list that the
+// translator layer and transform share. Stated once so the two rules cannot diverge.
+var translatorForbidPrefix = []string{
+	"os",            // filesystem and process — covers os, os/exec, os/signal, os/user
+	"io/fs",         // filesystem abstraction
+	"path/filepath", // filesystem path manipulation
+	"net",           // network — covers net, net/http, net/url, net/rpc
+	"time",          // clock reads — nondeterministic
+	"math/rand",     // pseudo-random — nondeterministic
+	"crypto/rand",   // cryptographic random — nondeterministic
+	"log",           // terminal/stderr output — side-effectful
+}
+
+// translatorForbidExact is the exact-match forbidden set for the translator layer and transform.
+var translatorForbidExact = []string{
+	"syscall", // OS-level access
+	"flag",    // CLI flag parsing
+	"bufio",   // typically used for I/O buffering
+}
+
+// translatorForbidModulePrefix is the set of module-internal package prefixes that
+// the translator layer must never import. Importing any of these would invert the
+// dependency direction: the translator is below all of them in the architecture.
+var translatorForbidModulePrefix = []string{
+	modulePrefix + "internal/harness",
+	modulePrefix + "internal/app",
+	modulePrefix + "internal/transform",
+	modulePrefix + "internal/cli",
+	modulePrefix + "internal/tui",
+	modulePrefix + "internal/deploy",
+	modulePrefix + "internal/catalog",
+	modulePrefix + "internal/manifest",
+	modulePrefix + "internal/plan",
+	modulePrefix + "internal/config",
+	modulePrefix + "internal/logging",
 }
 
 // rules is the authoritative list of import-boundary constraints.
@@ -76,6 +147,7 @@ type rule struct {
 //
 //	tui, cli → app → core packages → domain → (nothing in this module)
 //	transform → domain, docformat (no I/O)
+//	agentformat → domain, agentfields, docformat, mosaic (no I/O, no upward deps)
 //
 // Adding a violation here means the architecture has drifted; fix the code,
 // not this list.
@@ -86,23 +158,10 @@ var rules = []rule{
 		forbidAllModuleImports: true,
 	},
 	{
-		dir:  "internal/transform",
-		desc: "transform must be a pure function: no filesystem, network, terminal, time, or randomness imports",
-		forbidPrefix: []string{
-			"os",            // filesystem — covers os, os/exec, os/signal, os/user
-			"io/fs",         // filesystem abstraction
-			"path/filepath", // filesystem path manipulation
-			"net",           // network — covers net, net/http, net/url, net/rpc
-			"time",          // clock reads — nondeterministic
-			"math/rand",     // pseudo-random — nondeterministic
-			"crypto/rand",   // cryptographic random — nondeterministic
-			"log",           // terminal/stderr output — side-effectful
-		},
-		forbidExact: []string{
-			"syscall",  // OS-level access
-			"flag",     // CLI flag parsing
-			"bufio",    // typically used for I/O buffering
-		},
+		dir:          "internal/transform",
+		desc:         "transform must be a pure function: no filesystem, network, terminal, time, or randomness imports",
+		forbidPrefix: translatorForbidPrefix,
+		forbidExact:  translatorForbidExact,
 	},
 	{
 		dir:  "internal/app",
@@ -188,6 +247,72 @@ var rules = []rule{
 			modulePrefix + "internal/docformat",
 		},
 	},
+	// Translator-layer purity and direction rules (one per directory, since rules do
+	// not cover sub-packages). The translator layer is a pure function with no I/O,
+	// clock, or randomness, and must depend only downward in the architecture.
+	//
+	// internal/agentfields is on the permitted list deliberately: it is the repository's
+	// authority for MOSAIC-owned and stamp key vocabulary. Forbidding it would force the
+	// translator into a duplicated key list. Its source file declares no imports of its
+	// own, making it a leaf vocabulary package equivalent to internal/domain.
+	{
+		dir: "internal/agentformat",
+		desc: "the translator layer (agentformat) must be a pure function: no I/O, clock, or randomness; " +
+			"and must depend only downward — it must never import harness, app, transform, cli, tui, or " +
+			"infrastructure packages. Permitted module dependencies: internal/domain, internal/agentfields, " +
+			"internal/agentformat siblings, mosaic-common/docformat, mosaic-common/mosaic",
+		forbidPrefix: append(translatorForbidPrefix, translatorForbidModulePrefix...),
+		forbidExact:  translatorForbidExact,
+	},
+	{
+		dir: "internal/agentformat/codextoml",
+		desc: "the translator layer (agentformat/codextoml) must be a pure function: no I/O, clock, or randomness; " +
+			"and must depend only downward — it must never import harness, app, transform, cli, tui, or " +
+			"infrastructure packages. Permitted module dependencies: internal/domain, internal/agentfields, " +
+			"internal/agentformat, mosaic-common/docformat, mosaic-common/mosaic",
+		forbidPrefix: append(translatorForbidPrefix, translatorForbidModulePrefix...),
+		forbidExact:  translatorForbidExact,
+	},
+	{
+		dir:                    "internal/agentformat/formatid",
+		desc:                   "formatid is a leaf vocabulary package and must not import any package from this module",
+		forbidAllModuleImports: true,
+	},
+	{
+		dir: "internal/agentformat/all",
+		desc: "the agentformat/all wiring package must only import translator sub-packages from this module; " +
+			"importing any other module-internal package would widen the wiring package's scope beyond its " +
+			"single responsibility of registering translator implementations",
+		forbidModuleImportsExcept: []string{
+			modulePrefix + "internal/agentformat/",
+		},
+	},
+}
+
+// callBoundaryRules is the authoritative list of call-level constraints.
+// Each rule names a package directory and the set of function calls forbidden
+// from non-permitted files within that directory.
+var callBoundaryRules = []callBoundaryRule{
+	{
+		dir: "internal/app",
+		desc: "application-layer code must not call raw-bytes docformat entry points directly " +
+			"(docformat.Parse and docformat.SplitFrontmatter consume raw document bytes and bypass " +
+			"the format-selection logic needed for non-Markdown harnesses such as Codex TOML); " +
+			"use the decode funnel (deployed_read.go: decodeDeployedBytes, readDeployedArtifact) " +
+			"for deployed agent files, or ParseGenericSource (parse_generic_source.go) for catalog " +
+			"sources, injection content, render inputs, and other non-deployed documents. " +
+			"The remaining docformat functions (Validate, ClassifyRegion, CanonicalDeployed, " +
+			"CanonicalSections, CanonicalOrder, NodeDeployed, DeployedParent, RenderOpenTagLine, " +
+			"RenderCloseTagLine, RetypeOpenTagLine) operate on an already-parsed *docformat.Document " +
+			"or on region vocabulary, not on raw bytes, and are not banned",
+		forbidCalls: map[string][]string{
+			"mosaic-common/docformat": {"Parse", "SplitFrontmatter"},
+		},
+		allowedFiles: []string{
+			"deployed_read.go",
+			"parse_generic_source.go",
+		},
+	},
 }
 
 // harnessBuiltinPackages lists the import paths for every built-in harness
@@ -196,6 +321,7 @@ var rules = []rule{
 // packages; all harness access goes through the registry).
 var harnessBuiltinPackages = []string{
 	modulePrefix + "internal/harness/builtin/claudecode",
+	modulePrefix + "internal/harness/builtin/codex",
 	modulePrefix + "internal/harness/builtin/ghcpcli",
 	modulePrefix + "internal/harness/builtin/opencode",
 	modulePrefix + "internal/harness/builtin/vscodeghcp",
@@ -232,9 +358,16 @@ func main() {
 // runChecks applies all rules and also checks harness-name isolation across
 // the whole source tree.
 func runChecks(moduleRoot string) (violations []string, errs []string) {
-	// Apply per-package rules.
+	// Apply per-package import rules.
 	for _, r := range rules {
 		vs, es := checkRule(moduleRoot, r)
+		violations = append(violations, vs...)
+		errs = append(errs, es...)
+	}
+
+	// Apply per-package call-boundary rules.
+	for _, r := range callBoundaryRules {
+		vs, es := checkCallBoundary(moduleRoot, r)
 		violations = append(violations, vs...)
 		errs = append(errs, es...)
 	}
@@ -302,6 +435,21 @@ func checkImport(imp string, r rule, fileName string) string {
 		return fmt.Sprintf("%s: imports %q — %s", location, imp, r.desc)
 	}
 
+	// Module-wide ban with exceptions: this package may only import the listed
+	// sub-paths from this module.
+	if len(r.forbidModuleImportsExcept) > 0 && strings.HasPrefix(imp, modulePrefix) {
+		allowed := false
+		for _, exc := range r.forbidModuleImportsExcept {
+			if strings.HasPrefix(imp, exc) {
+				allowed = true
+				break
+			}
+		}
+		if !allowed {
+			return fmt.Sprintf("%s: imports %q — %s", location, imp, r.desc)
+		}
+	}
+
 	// Prefix-based bans.
 	for _, prefix := range r.forbidPrefix {
 		if imp == prefix || strings.HasPrefix(imp, prefix+"/") {
@@ -319,6 +467,119 @@ func checkImport(imp string, r rule, fileName string) string {
 	}
 
 	return ""
+}
+
+// checkCallBoundary scans every non-test .go file in the named directory for calls
+// to the forbidden functions, and reports any call from a non-allowed file.
+func checkCallBoundary(moduleRoot string, r callBoundaryRule) (violations []string, errs []string) {
+	pkgDir := filepath.Join(moduleRoot, filepath.FromSlash(r.dir))
+
+	entries, err := os.ReadDir(pkgDir)
+	if err != nil {
+		// A missing directory is not a tool error.
+		if os.IsNotExist(err) {
+			return nil, nil
+		}
+		return nil, []string{fmt.Sprintf("ReadDir(%q): %v", pkgDir, err)}
+	}
+
+	fset := token.NewFileSet()
+
+	// Build a set of allowed file names for fast lookup.
+	allowedSet := make(map[string]bool, len(r.allowedFiles))
+	for _, f := range r.allowedFiles {
+		allowedSet[f] = true
+	}
+
+	for _, entry := range entries {
+		if entry.IsDir() {
+			continue
+		}
+		name := entry.Name()
+		if !strings.HasSuffix(name, ".go") {
+			continue
+		}
+		if strings.HasSuffix(name, "_test.go") {
+			continue
+		}
+		if allowedSet[name] {
+			continue // this file is explicitly permitted to make these calls
+		}
+
+		filePath := filepath.Join(pkgDir, name)
+		f, parseErr := parser.ParseFile(fset, filePath, nil, 0)
+		if parseErr != nil {
+			errs = append(errs, fmt.Sprintf("parse %q: %v", filePath, parseErr))
+			continue
+		}
+
+		// Build a map from local package alias to import path.
+		aliases := buildImportAliasMap(f)
+
+		// Walk the AST looking for calls to forbidden functions.
+		ast.Inspect(f, func(n ast.Node) bool {
+			callExpr, ok := n.(*ast.CallExpr)
+			if !ok {
+				return true
+			}
+			selExpr, ok := callExpr.Fun.(*ast.SelectorExpr)
+			if !ok {
+				return true
+			}
+			pkgIdent, ok := selExpr.X.(*ast.Ident)
+			if !ok {
+				return true
+			}
+
+			importPath, found := aliases[pkgIdent.Name]
+			if !found {
+				return true
+			}
+
+			bannedFns, hasBan := r.forbidCalls[importPath]
+			if !hasBan {
+				return true
+			}
+
+			for _, fn := range bannedFns {
+				if selExpr.Sel.Name == fn {
+					pos := fset.Position(callExpr.Pos())
+					violations = append(violations, fmt.Sprintf(
+						"%s/%s:%d: calls %s.%s — %s",
+						r.dir, name, pos.Line,
+						pkgIdent.Name, fn,
+						r.desc,
+					))
+				}
+			}
+			return true
+		})
+	}
+
+	return violations, errs
+}
+
+// buildImportAliasMap returns a map from local package name to import path for
+// the imports in f. Blank imports ("_") and dot imports (".") are excluded.
+// When a package has an explicit alias, the alias is used; otherwise the last
+// path component of the import path is used.
+func buildImportAliasMap(f *ast.File) map[string]string {
+	m := make(map[string]string, len(f.Imports))
+	for _, imp := range f.Imports {
+		importPath := strings.Trim(imp.Path.Value, `"`)
+		var localName string
+		if imp.Name != nil {
+			localName = imp.Name.Name
+		} else {
+			parts := strings.Split(importPath, "/")
+			localName = parts[len(parts)-1]
+		}
+		if localName == "_" || localName == "." {
+			continue
+		}
+		m[localName] = importPath
+	}
+	return m
 }
 
 // checkHarnessIsolation scans every non-test .go file in the module and

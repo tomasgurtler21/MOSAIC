@@ -671,6 +671,121 @@ func TestLoad_ValueByRole_UnrecognizedRoleKey_ReturnsError(t *testing.T) {
 	}
 }
 
+// --- agent_format_id and tool_info_recoverable parsing (T5.5, TDD RED) ---
+//
+// These tests cover the two new optional descriptor schema fields added by I5.1:
+//   - agent_format_id (string wire key -> domain.HarnessDescriptor.AgentFormatID)
+//   - tool_info_recoverable (bool wire key -> domain.HarnessDescriptor.ToolInfoUnrecoverable,
+//     with polarity inversion: wire false -> domain true)
+//
+// RED: every test in this section references d.AgentFormatID or d.ToolInfoUnrecoverable,
+// which do not exist on domain.HarnessDescriptor until I5.1 is implemented. The tests
+// fail to compile until then, confirming the TDD RED state for this stage.
+
+// TestLoad_AgentFormatID_CodexTOML_ParsesSuccessfully verifies that a descriptor
+// with agent_format_id: "codex-toml" loads without error and that the field is
+// accessible on the domain type (a).
+// RED: fails to compile until I5.1 adds AgentFormatID to domain.HarnessDescriptor.
+func TestLoad_AgentFormatID_CodexTOML_ParsesSuccessfully(t *testing.T) {
+	d, err := descriptor.Load(filepath.Join(testdataDir, "valid-agent-format-id.yaml"))
+	if err != nil {
+		t.Fatalf("Load(valid-agent-format-id.yaml): unexpected error: %v", err)
+	}
+	// d.AgentFormatID does not exist yet -- RED until I5.1.
+	const wantID = "codex-toml"
+	if string(d.AgentFormatID) != wantID {
+		t.Errorf("AgentFormatID = %q, want %q", d.AgentFormatID, wantID)
+	}
+}
+
+// TestLoad_AgentFormatID_Absent_DefaultsToMarkdown verifies that a descriptor without
+// agent_format_id loads successfully and the field defaults to the Markdown format (b).
+// RED: fails to compile until I5.1 adds AgentFormatID to domain.HarnessDescriptor.
+func TestLoad_AgentFormatID_Absent_DefaultsToMarkdown(t *testing.T) {
+	d, err := descriptor.Load(filepath.Join(testdataDir, "valid-minimal.yaml"))
+	if err != nil {
+		t.Fatalf("Load(valid-minimal.yaml): unexpected error: %v", err)
+	}
+	// d.AgentFormatID does not exist yet -- RED until I5.1.
+	const wantID = "markdown"
+	if string(d.AgentFormatID) != wantID {
+		t.Errorf("AgentFormatID (absent field): got %q, want %q (default Markdown)", d.AgentFormatID, wantID)
+	}
+}
+
+// TestLoad_ToolInfoRecoverableFalse_ParsesAndInvertsPolarity verifies that
+// tool_info_recoverable: false in the wire format loads and maps to
+// domain.ToolInfoUnrecoverable = true (polarity inversion, c).
+// RED: fails to compile until I5.1 adds ToolInfoUnrecoverable to domain.HarnessDescriptor.
+func TestLoad_ToolInfoRecoverableFalse_ParsesAndInvertsPolarity(t *testing.T) {
+	d, err := descriptor.Load(filepath.Join(testdataDir, "valid-tool-info-recoverable-false.yaml"))
+	if err != nil {
+		t.Fatalf("Load(valid-tool-info-recoverable-false.yaml): unexpected error: %v", err)
+	}
+	// d.ToolInfoUnrecoverable does not exist yet -- RED until I5.1.
+	if !d.ToolInfoUnrecoverable {
+		t.Errorf("ToolInfoUnrecoverable = false; want true; "+
+			"wire key tool_info_recoverable: false must invert to domain ToolInfoUnrecoverable = true")
+	}
+}
+
+// TestLoad_ToolInfoRecoverable_Absent_DefaultsToFalse verifies that a descriptor without
+// tool_info_recoverable has ToolInfoUnrecoverable = false (the Go zero value, representing
+// today's behaviour: tool info is recoverable) (d).
+// RED: fails to compile until I5.1 adds ToolInfoUnrecoverable to domain.HarnessDescriptor.
+func TestLoad_ToolInfoRecoverable_Absent_DefaultsToFalse(t *testing.T) {
+	d, err := descriptor.Load(filepath.Join(testdataDir, "valid-minimal.yaml"))
+	if err != nil {
+		t.Fatalf("Load(valid-minimal.yaml): unexpected error: %v", err)
+	}
+	// d.ToolInfoUnrecoverable does not exist yet -- RED until I5.1.
+	if d.ToolInfoUnrecoverable {
+		t.Errorf("ToolInfoUnrecoverable = true for a descriptor without tool_info_recoverable; "+
+			"the absent field must default to false (tool info is recoverable, today's behaviour)")
+	}
+}
+
+// TestLoad_UnknownAgentFormatID_RejectedAtParseTime verifies that an unrecognised
+// agent_format_id value is rejected at parse time with an error, not at write time (e).
+// RED: currently passes (unknown field is not validated until I5.1 adds validation).
+func TestLoad_UnknownAgentFormatID_RejectedAtParseTime(t *testing.T) {
+	_, err := descriptor.Load(filepath.Join(testdataDir, "invalid", "unknown-agent-format-id.yaml"))
+	if err == nil {
+		t.Fatal("Load(invalid/unknown-agent-format-id.yaml): expected error for unknown agent_format_id, got nil; " +
+			"an unrecognised format ID must be rejected at parse time (I5.1 adds formatid.Parse validation)")
+	}
+}
+
+// TestLoad_ExistingDescriptors_ParseIdentically verifies that all four existing built-in
+// harness descriptors still load without error after the schema is extended with the
+// new optional fields (f). Their zero-value defaults must not break existing descriptors.
+//
+// NOTE: This test references descriptor file paths relative to the descriptor package
+// directory. It is a regression guard that the schema change is backward-compatible.
+func TestLoad_ExistingDescriptors_ParseIdentically(t *testing.T) {
+	existing := []struct {
+		harness string
+		relPath string
+	}{
+		{"claude-code", filepath.Join("..", "builtin", "claudecode", "claude-code.yaml")},
+		{"opencode", filepath.Join("..", "builtin", "opencode", "opencode.yaml")},
+		{"ghcp-cli", filepath.Join("..", "builtin", "ghcpcli", "ghcp-cli.yaml")},
+		{"vscode-ghcp", filepath.Join("..", "builtin", "vscodeghcp", "vscode-ghcp.yaml")},
+	}
+	for _, tc := range existing {
+		tc := tc
+		t.Run(tc.harness, func(t *testing.T) {
+			d, err := descriptor.Load(tc.relPath)
+			if err != nil {
+				t.Fatalf("Load(%s): unexpected error after schema extension: %v", tc.harness, err)
+			}
+			if d.ID == "" {
+				t.Errorf("Load(%s): ID is empty; descriptor must be fully populated", tc.harness)
+			}
+		})
+	}
+}
+
 // --- helpers ---
 
 func genericNamesSlice(mappings []domain.ToolMapping) []string {

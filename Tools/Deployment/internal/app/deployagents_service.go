@@ -21,6 +21,7 @@ import (
 	"mosaic-deploy/internal/config"
 	"mosaic-deploy/internal/deploy"
 	"mosaic-deploy/internal/domain"
+	"mosaic-deploy/internal/logging"
 	"mosaic-deploy/internal/plan"
 	"mosaic-deploy/internal/todo"
 )
@@ -238,7 +239,11 @@ func deployAgents(ctx context.Context, s *service, req DeployAgentsRequest) (dom
 	agentsDir := module.Descriptor().Paths.Agents.Project
 	var deployedAgentIndex DeployedAgentIndex
 	if module.Descriptor().Paths.Agents.Supported && agentsDir != "" {
-		deployedAgentIndex = buildDeployedAgentIndex(workspace, agentsDir)
+		var indexNotices []string
+		deployedAgentIndex, indexNotices = buildDeployedAgentIndex(workspace, agentsDir, module.Descriptor())
+		for _, notice := range indexNotices {
+			s.deps.Logger.Event(logging.Event{Level: logging.LevelWarn, Kind: "decode", Message: notice})
+		}
 	}
 
 	probeAgentByKey := make(map[string]domain.Agent, len(probeSet.Agents))
@@ -250,9 +255,14 @@ func deployAgents(ctx context.Context, s *service, req DeployAgentsRequest) (dom
 	if pathErr != nil {
 		return domain.RunSummary{}, pathErr
 	}
-	deployedState, err := probeDeployedStateWithIndex(workspace, plannedPaths, module.Descriptor().Frontmatter.ModelKey, nil, deployedAgentIndex, probeAgentByKey, nil)
+	deployedState, err := probeDeployedStateWithIndex(workspace, plannedPaths, module.Descriptor().Frontmatter.ModelKey, nil, deployedAgentIndex, probeAgentByKey, nil, module.Descriptor())
 	if err != nil {
 		return domain.RunSummary{}, err
+	}
+	for _, state := range deployedState {
+		for _, notice := range state.DecodeNotices {
+			s.deps.Logger.Event(logging.Event{Level: logging.LevelWarn, Kind: "decode", Message: notice})
+		}
 	}
 
 	toolCfg, _ := s.deps.ToolConfig.Load()
@@ -344,7 +354,7 @@ func deployAgents(ctx context.Context, s *service, req DeployAgentsRequest) (dom
 
 	// No workflow blocks and no infrastructure blocks: this mode never rewrites the
 	// orchestrator's workflow or infrastructure managed regions.
-	contentFn := s.buildContent(module, agentByKey, modelRes.models, customTools, skippedTools, nil, nil, scope, nil, toolMappingsVersion, protocol, bundle, nil)
+	contentFn := s.buildContent(module, agentByKey, modelRes.models, customTools, skippedTools, nil, nil, scope, nil, toolMappingsVersion, protocol, bundle, nil, nil)
 
 	now := s.now()
 	execReq := deploy.ExecRequest{

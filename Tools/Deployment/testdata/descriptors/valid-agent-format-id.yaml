@@ -1,0 +1,7 @@
+# Descriptor fixture: agent_format_id set to "codex-toml".
+# Used by T5.5 tests to verify that the new optional field parses and maps correctly
+# to domain.HarnessDescriptor.AgentFormatID.
+schema_version: "1"
+id: "format-id-test"
+display_name: "Format ID Test"
+agent_format_id: "codex-toml"

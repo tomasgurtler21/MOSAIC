@@ -23,6 +23,7 @@ import (
 	"path/filepath"
 	"strings"
 
+	"mosaic-deploy/internal/agentformat"
 	"mosaic-deploy/internal/config"
 	"mosaic-deploy/internal/deploy"
 	"mosaic-deploy/internal/domain"
@@ -112,7 +113,11 @@ func (s *service) Update(ctx context.Context, req UpdateRequest) (domain.RunSumm
 	agentsDir := module.Descriptor().Paths.Agents.Project
 	var deployedAgentIndex DeployedAgentIndex
 	if module.Descriptor().Paths.Agents.Supported && agentsDir != "" {
-		deployedAgentIndex = buildDeployedAgentIndex(workspace, agentsDir)
+		var indexNotices []string
+		deployedAgentIndex, indexNotices = buildDeployedAgentIndex(workspace, agentsDir, module.Descriptor())
+		for _, notice := range indexNotices {
+			s.deps.Logger.Event(logging.Event{Level: logging.LevelWarn, Kind: "decode", Message: notice})
+		}
 	}
 
 	// Scan the deployed-agents directory in one pass to classify every file found there.
@@ -121,7 +126,11 @@ func (s *service) Update(ctx context.Context, req UpdateRequest) (domain.RunSumm
 	// Guarded on the harness declaring a supported agents directory.
 	scan := WorkspaceAgentScan{}
 	if module.Descriptor().Paths.Agents.Supported && agentsDir != "" {
-		scan = scanWorkspaceAgents(workspace, agentsDir, s.deps.Catalog)
+		var scanNotices []string
+		scan, scanNotices = scanWorkspaceAgents(workspace, agentsDir, s.deps.Catalog, module.Descriptor())
+		for _, notice := range scanNotices {
+			s.deps.Logger.Event(logging.Event{Level: logging.LevelWarn, Kind: "decode", Message: notice})
+		}
 	}
 	harnessOnlyAgents := scan.HarnessOnly
 	scannedAgentKeys := scan.MatchedKeys()
@@ -143,7 +152,7 @@ func (s *service) Update(ctx context.Context, req UpdateRequest) (domain.RunSumm
 		GOOS:     s.deps.GOOS,
 	}); pathErr == nil {
 		orchTargetPath = orchPath
-		orchState = probeDeployedArtifact(workspace, orchTargetPath, module.Descriptor().Frontmatter.ModelKey)
+		orchState = probeDeployedArtifact(workspace, orchTargetPath, module.Descriptor().Frontmatter.ModelKey, domain.ArtifactAgent, module.Descriptor())
 	}
 
 	// When this mode excludes orchestrators from force-inclusion, the orchestrator enters the
@@ -170,7 +179,7 @@ func (s *service) Update(ctx context.Context, req UpdateRequest) (domain.RunSumm
 				GOOS:     s.deps.GOOS,
 			}); pathErr == nil {
 				orchScriptTargetPath = scriptPath
-				orchScriptState = probeDeployedArtifact(workspace, orchScriptTargetPath, module.Descriptor().Frontmatter.ModelKey)
+				orchScriptState = probeDeployedArtifact(workspace, orchScriptTargetPath, module.Descriptor().Frontmatter.ModelKey, domain.ArtifactAgent, module.Descriptor())
 				if orchScriptState.Present {
 					scannedAgentKeys = append(scannedAgentKeys, script.Key)
 				}
@@ -218,9 +227,16 @@ func (s *service) Update(ctx context.Context, req UpdateRequest) (domain.RunSumm
 		probeAgentByKey[a.Key] = a
 	}
 
-	deployedState, err := probeDeployedStateWithIndex(workspace, plannedPaths, module.Descriptor().Frontmatter.ModelKey, seed, deployedAgentIndex, probeAgentByKey, buildParseFailedPaths(scan.Matched))
+	deployedState, err := probeDeployedStateWithIndex(workspace, plannedPaths, module.Descriptor().Frontmatter.ModelKey, seed, deployedAgentIndex, probeAgentByKey, buildParseFailedPaths(scan.Matched), module.Descriptor())
 	if err != nil {
 		return domain.RunSummary{}, err
+	}
+	// Emit decode notices from the probe phase (e.g. EntryMissingInstructions from body-less
+	// Codex agents) through the run log. These complement the index and scan notices above.
+	for _, state := range deployedState {
+		for _, notice := range state.DecodeNotices {
+			s.deps.Logger.Event(logging.Event{Level: logging.LevelWarn, Kind: "decode", Message: notice})
+		}
 	}
 
 	modelSelections := deployedModelSelections(set.Agents, plannedPaths, deployedState)
@@ -424,8 +440,9 @@ func (s *service) Update(ctx context.Context, req UpdateRequest) (domain.RunSumm
 	hookPlans := buildHookPlans(module, set.Hooks, scope)
 
 	workflowBlocks := s.buildWorkflowBlocks(workflowIDs)
-	deployedReader := func(item domain.PlanItem) []byte {
-		return readDeployedFile(workspace, item.TargetPath)
+	desc := module.Descriptor()
+	deployedReader := func(item domain.PlanItem) (DeployedRead, agentformat.Operation, error) {
+		return readDeployedPlanItem(workspace, desc, item)
 	}
 	// Infrastructure agent selection is intentionally omitted from the update flow.
 	// Update re-deploys whatever was already deployed; it does not re-prompt for
@@ -435,7 +452,8 @@ func (s *service) Update(ctx context.Context, req UpdateRequest) (domain.RunSumm
 	// is non-nil, applyInfrastructureRegion parses the deployed file and lifts the
 	// region content directly. This is an InjectionInfrastructure-class managed region
 	// and is never a member of buildDeployedRegionMap/deployedContent.
-	contentFn := s.buildContent(module, agentByKey, allModels, req.CustomTools, nil, workflowBlocks, nil, scope, deployedReader, toolMappingsVersion, protocol, bundle, harnessOnlyPlan)
+	var ownedKeyDiffs []domain.OwnedKeyDifference
+	contentFn := s.buildContent(module, agentByKey, allModels, req.CustomTools, nil, workflowBlocks, nil, scope, deployedReader, toolMappingsVersion, protocol, bundle, harnessOnlyPlan, &ownedKeyDiffs)
 
 	versionStamps := buildVersionStamps(set.Agents, set.Skills, set.Hooks, p.Items, module.Descriptor(), toolMappingsVersion)
 
@@ -489,5 +507,7 @@ func (s *service) Update(ctx context.Context, req UpdateRequest) (domain.RunSumm
 		s.notifyPersistFailure(ctx, err)
 	}
 
-	return s.buildSummary(domain.ModeUpdateWorkspace, harnessRef, workspace, result), nil
+	summary := s.buildSummary(domain.ModeUpdateWorkspace, harnessRef, workspace, result)
+	summary.OwnedKeyDifferences = ownedKeyDiffs
+	return summary, nil
 }

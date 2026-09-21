@@ -42,7 +42,7 @@ func probeSkill(t *testing.T, content []byte) domain.DeployedArtifactState {
 	t.Helper()
 	ws := t.TempDir()
 	writeFile(t, ws, "skill.md", content)
-	return probeDeployedArtifact(ws, "skill.md", "")
+	return probeDeployedArtifact(ws, "skill.md", "", domain.ArtifactAgent, &domain.HarnessDescriptor{})
 }
 
 // sourceSkill builds a domain.Skill with the given version for staleness comparison.

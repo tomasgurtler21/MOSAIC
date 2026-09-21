@@ -8,9 +8,9 @@ import (
 	"os"
 	"sort"
 
-	"mosaic-common/docformat"
 	"mosaic-deploy/internal/domain"
 )
+
 
 // SourceFile is one enumerated transform input, read exactly once. The pre-pass
 // produces these; the per-file loop consumes them instead of re-reading from disk.
@@ -53,13 +53,22 @@ type SourceModelIndex struct {
 //  2. The generic "model" key, when present as a non-empty scalar.
 //  3. Otherwise UnsetSourceModel.
 //
-// Unparseable content yields UnsetSourceModel and no error: a file that cannot be
-// parsed is classified by the existing per-file detection path, not here.
+// content is the raw bytes in the source harness's native format (e.g. TOML for Codex).
+// It is decoded to canonical form through decodeDeployedBytes before frontmatter parsing,
+// so non-Markdown source files are read correctly regardless of format.
+//
+// Unparseable or undecodable content yields UnsetSourceModel and no error: a file that
+// cannot be decoded or parsed is classified by the existing per-file detection path.
 func ReadSourceModel(content []byte, srcDesc domain.HarnessDescriptor) string {
 	if len(content) == 0 {
 		return UnsetSourceModel
 	}
-	doc, err := docformat.Parse(content)
+	// Decode to canonical form. A decode failure yields UnsetSourceModel.
+	dr := decodeDeployedBytes(content, domain.ArtifactAgent, &srcDesc)
+	if dr.DecodeErr != nil || dr.Canonical == nil {
+		return UnsetSourceModel
+	}
+	doc, err := ParseGenericSource(dr.Canonical)
 	if err != nil {
 		return UnsetSourceModel
 	}
@@ -98,7 +107,7 @@ func IndexSourceModels(filePaths []string, srcDesc domain.HarnessDescriptor) Sou
 	hasUnset := false
 
 	for i, path := range filePaths {
-		content, err := os.ReadFile(path)
+		rawContent, err := os.ReadFile(path)
 		if err != nil {
 			files[i] = SourceFile{
 				Path:        path,
@@ -108,10 +117,20 @@ func IndexSourceModels(filePaths []string, srcDesc domain.HarnessDescriptor) Sou
 			}
 			hasUnset = true
 		} else {
-			model := ReadSourceModel(content, srcDesc)
+			// Decode to canonical form. ReadSourceModel also decodes internally, so this is
+			// a second decode pass — acceptable because for Markdown harnesses decode is identity
+			// and for Codex the slight inefficiency is intentional (plan decision, Stage 8).
+			dr := decodeDeployedBytes(rawContent, domain.ArtifactAgent, &srcDesc)
+			var canonical []byte
+			if dr.DecodeErr == nil && dr.Canonical != nil {
+				canonical = dr.Canonical
+			}
+			// ReadSourceModel reads from raw bytes and decodes internally; it is the
+			// authoritative source-model extractor across all harness formats.
+			model := ReadSourceModel(rawContent, srcDesc)
 			files[i] = SourceFile{
 				Path:        path,
-				Content:     content,
+				Content:     canonical, // canonical bytes for the retarget loop
 				ReadErr:     nil,
 				SourceModel: model,
 			}

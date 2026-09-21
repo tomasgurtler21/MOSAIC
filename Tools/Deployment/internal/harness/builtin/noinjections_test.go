@@ -27,9 +27,9 @@ func repoRoot(t *testing.T) string {
 	return abs
 }
 
-// TestNoInjections_EmbeddedDescriptors verifies that none of the four embedded YAML
-// descriptors (claude-code.yaml, opencode.yaml, ghcp-cli.yaml, vscode-ghcp.yaml) contain
-// an injections: key. This confirms the YAML field has been removed from all built-in sources.
+// TestNoInjections_EmbeddedDescriptors verifies that none of the five embedded YAML
+// descriptors (claude-code.yaml, opencode.yaml, ghcp-cli.yaml, vscode-ghcp.yaml, codex.yaml)
+// contain an injections: key. This confirms the YAML field has been removed from all built-in sources.
 func TestNoInjections_EmbeddedDescriptors(t *testing.T) {
 	root := repoRoot(t)
 	descriptors := []struct {
@@ -40,6 +40,7 @@ func TestNoInjections_EmbeddedDescriptors(t *testing.T) {
 		{"opencode", filepath.Join(root, "Tools", "Deployment", "internal", "harness", "builtin", "opencode", "opencode.yaml")},
 		{"ghcp-cli", filepath.Join(root, "Tools", "Deployment", "internal", "harness", "builtin", "ghcpcli", "ghcp-cli.yaml")},
 		{"vscode-ghcp", filepath.Join(root, "Tools", "Deployment", "internal", "harness", "builtin", "vscodeghcp", "vscode-ghcp.yaml")},
+		{"codex", filepath.Join(root, "Tools", "Deployment", "internal", "harness", "builtin", "codex", "codex.yaml")},
 	}
 
 	for _, d := range descriptors {

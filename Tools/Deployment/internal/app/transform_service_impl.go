@@ -15,8 +15,11 @@ import (
 	"sort"
 	"strings"
 
+	"mosaic-deploy/internal/agentformat"
 	"mosaic-deploy/internal/config"
 	"mosaic-deploy/internal/domain"
+	"mosaic-deploy/internal/harness/descriptor"
+	"mosaic-deploy/internal/transform"
 )
 
 // titleForSourceModel returns a user-facing Title for the per-source-model QTransformTargetModel
@@ -208,6 +211,16 @@ func transformHarness(ctx context.Context, s *service, req TransformHarnessReque
 		}
 	}
 
+	// Look up the translator for the target format once before the per-file loop.
+	// A format ID that fails to resolve is a whole-run failure: every file in this
+	// batch would produce the same encode error, and the translator is immutable
+	// across the run.
+	tgtDesc := tgtModule.Descriptor()
+	tr, trErr := agentformat.LookupString(tgtDesc.AgentFormatID)
+	if trErr != nil {
+		return TransformHarnessResult{}, fmt.Errorf("cannot look up translator for target format %q: %w", tgtDesc.AgentFormatID, trErr)
+	}
+
 	// Process each file independently, using the pre-read content from the index.
 	var files []TransformFileOutcome
 	var transformed, skippedMismatch, skippedNotAgent, failed int
@@ -228,13 +241,17 @@ func transformHarness(ctx context.Context, s *service, req TransformHarnessReque
 
 		srcBytes := sf.Content
 
-		// Derive agent key from source filename (strips the source harness extension).
+		// Derive agent key from source filename.
+		// When srcExt is a multi-component extension (e.g. ".src.md") we strip it in full
+		// via TrimSuffix rather than through agentKeyFromFileName, which only strips the
+		// final dotted component. The fallback uses agentKeyFromFileName with the standard
+		// Markdown extension so the ".agent.md" variant is handled correctly.
 		name := filepath.Base(srcPath)
 		var agentKey string
 		if srcExt != "" && strings.HasSuffix(name, srcExt) {
 			agentKey = strings.TrimSuffix(name, srcExt)
 		} else {
-			agentKey = agentKeyFromFileName(name)
+			agentKey = agentKeyFromFileName(name, ".md")
 		}
 
 		// Detect harness match.
@@ -312,13 +329,21 @@ func transformHarness(ctx context.Context, s *service, req TransformHarnessReque
 			destPath = filepath.Join(base, tgtRelPath)
 		}
 
-		// Overwrite protection: check for existing destination. This check runs even in
-		// dry-run mode so that a preview accurately reports what would fail in a real run
-		// (per the doc comment on DryRun: "computes and reports every outcome"). Only the
-		// actual write is suppressed under DryRun, not the existence check.
-		if !req.Overwrite {
-			if _, existErr := os.Stat(destPath); existErr == nil {
-				// Destination exists and overwrite not requested: per-file failure, not whole-run.
+		// Destination existence check and prior-bytes read.
+		//
+		// This check runs even in dry-run mode so that a preview accurately reports what
+		// would fail in a real run. Only the actual write is suppressed under DryRun.
+		//
+		// When the destination exists and Overwrite is true, the destination is read
+		// through the target descriptor's decode funnel to obtain the prior bytes for the
+		// encode call. This threads user-owned keys (held in the carriage container)
+		// forward through the overwrite.
+		var priorRaw []byte
+		var destCanonical []byte
+		var encodeOp agentformat.Operation
+		if _, existErr := os.Stat(destPath); existErr == nil {
+			// Destination file exists.
+			if !req.Overwrite {
 				files = append(files, TransformFileOutcome{
 					SourcePath: srcPath,
 					Status:     StatusFailed,
@@ -327,20 +352,73 @@ func transformHarness(ctx context.Context, s *service, req TransformHarnessReque
 				failed++
 				continue
 			}
+			// Overwrite=true: read the destination for prior bytes.
+			// A read error is a per-file failure; a decode error is tolerated (parallel to
+			// the conflict-overwrite convention: raw bytes are used even when decode failed).
+			destDR := readDeployedArtifact(destPath, domain.ArtifactAgent, tgtDesc)
+			if destDR.ReadErr != nil {
+				files = append(files, TransformFileOutcome{
+					SourcePath: srcPath,
+					Status:     StatusFailed,
+					Reason:     fmt.Sprintf("cannot read destination for prior bytes: %v", destDR.ReadErr),
+				})
+				failed++
+				continue
+			}
+			// Merge the decode report from the destination read (AC15.11).
+			var destDecodeRpt transform.Report
+			mergeDecodeReport(&destDecodeRpt, destDR.Report)
+			for _, g := range destDecodeRpt.Gaps {
+				s.deps.Todo.AddGap(g)
+			}
+			priorRaw = destDR.Raw
+			destCanonical = destDR.Canonical
+			encodeOp = agentformat.OpUpdate
+		} else {
+			// Destination does not exist: this is a create.
+			encodeOp = agentformat.OpCreate
 		}
 
 		// Look up the target model for this file's own source model from the resolved map.
 		fileTargetModel := resolved[sf.SourceModel]
 
+		// Non-recoverable source branch (I15.1/I15.3): when the source harness cannot
+		// recover tool information, render the minimal read-only grant through the target
+		// module and report the capability loss. Normal tool recovery would silently
+		// produce an empty tools list, which is incorrect behaviour.
+		var nonRecoverableGrantFields []domain.FrontmatterField
+		if srcDesc.ToolInfoUnrecoverable {
+			grant, grantErr := descriptor.RenderMinimalToolGrant(tgtModule, agentKey)
+			if grantErr != nil {
+				files = append(files, TransformFileOutcome{
+					SourcePath: srcPath,
+					Status:     StatusFailed,
+					Reason:     fmt.Sprintf("cannot render minimal tool grant for non-recoverable source: %v", grantErr),
+				})
+				failed++
+				continue
+			}
+			nonRecoverableGrantFields = grant.Fields
+			s.deps.Interaction.Notify(ctx, domain.Notice{
+				Level: domain.NoticeWarning,
+				Message: fmt.Sprintf(
+					"agent %q: source harness does not record tool information; "+
+						"a minimal read-only grant was applied to the target",
+					agentKey,
+				),
+			})
+		}
+
 		// Build the retargeted agent bytes (pure core function).
 		retargetIn := RetargetInput{
-			Source:              srcBytes,
-			SourceModule:        srcModule,
-			TargetModule:        tgtModule,
-			Kind:                domain.ArtifactAgent,
-			AgentKey:            agentKey,
-			TargetModel:         fileTargetModel,
-			ToolMappingsVersion: toolMappingsVersion,
+			Source:                    srcBytes,
+			SourceModule:              srcModule,
+			TargetModule:              tgtModule,
+			Kind:                      domain.ArtifactAgent,
+			AgentKey:                  agentKey,
+			TargetModel:               fileTargetModel,
+			ToolMappingsVersion:       toolMappingsVersion,
+			NonRecoverableGrantFields: nonRecoverableGrantFields,
 		}
 		tgtBytes, report, retargetErr := BuildRetargetedAgent(retargetIn)
 		if retargetErr != nil {
@@ -348,6 +426,64 @@ func transformHarness(ctx context.Context, s *service, req TransformHarnessReque
 				SourcePath: srcPath,
 				Status:     StatusFailed,
 				Reason:     retargetErr.Error(),
+			})
+			failed++
+			continue
+		}
+
+		// Strip the carriage container from the retargeted canonical document before
+		// encoding. Any keys held in the container could not travel the format change;
+		// they are reported as StrippedField entries with StripReasonCarriedKey.
+		stripResult, stripErr := agentformat.StripCarriage(tgtBytes)
+		if stripErr != nil {
+			files = append(files, TransformFileOutcome{
+				SourcePath: srcPath,
+				Status:     StatusFailed,
+				Reason:     fmt.Sprintf("cannot strip carriage container from retargeted document: %v", stripErr),
+			})
+			failed++
+			continue
+		}
+		for _, k := range stripResult.CarriedKeys {
+			report.StrippedFields = append(report.StrippedFields, StrippedField{
+				Key:    k,
+				Reason: StripReasonCarriedKey,
+			})
+		}
+
+		// When overwriting an existing destination, the prior destination's value-carried
+		// user keys (held in its mosaic_carriage block) must survive into the new output.
+		// The encoder reads carriage from the canonical document, not from PriorDeployed,
+		// so we copy the prior destination's carriage keys into the stripped canonical
+		// before handing it to the encoder.
+		canonicalForEncode := stripResult.Canonical
+		if encodeOp == agentformat.OpUpdate && len(destCanonical) > 0 {
+			if priorDoc, priorParseErr := ParseGenericSource(destCanonical); priorParseErr == nil {
+				if newDoc, newParseErr := ParseGenericSource(stripResult.Canonical); newParseErr == nil {
+					priorFm := priorDoc.Frontmatter()
+					newFm := newDoc.Frontmatter()
+					for _, ck := range agentformat.CarriageKeys() {
+						if v, ok := priorFm.Get(ck); ok {
+							_ = newFm.Set(ck, v)
+						}
+					}
+					canonicalForEncode = newDoc.Bytes()
+				}
+			}
+		}
+
+		// Encode the (possibly carriage-augmented) canonical document in the target harness's
+		// own format. An encode error fails this artifact; the run continues with other files.
+		encodedBytes, _, encodeErr := tr.Encode(canonicalForEncode, agentformat.ArtifactContext{
+			AgentKey:      agentKey,
+			PriorDeployed: priorRaw,
+			Op:            encodeOp,
+		})
+		if encodeErr != nil {
+			files = append(files, TransformFileOutcome{
+				SourcePath: srcPath,
+				Status:     StatusFailed,
+				Reason:     fmt.Sprintf("cannot encode target document in format %q: %v", tgtDesc.AgentFormatID, encodeErr),
 			})
 			failed++
 			continue
@@ -364,7 +500,7 @@ func transformHarness(ctx context.Context, s *service, req TransformHarnessReque
 				failed++
 				continue
 			}
-			if writeErr := os.WriteFile(destPath, tgtBytes, 0o644); writeErr != nil {
+			if writeErr := os.WriteFile(destPath, encodedBytes, 0o644); writeErr != nil {
 				files = append(files, TransformFileOutcome{
 					SourcePath: srcPath,
 					Status:     StatusFailed,

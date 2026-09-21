@@ -5,7 +5,7 @@ package app
 // Update's agent-set membership.
 //
 // Update uses the workspace scan — not workflow discovery — to determine which deployed
-// agents to staleness-check. Every .md file found in the harness's deployed-agents directory
+// agents to staleness-check. Every file matching the harness's declared agent extension
 // is classified in one pass:
 //
 //   - Matched: the file resolves to a catalog agent (by numeric id first, filename key second).
@@ -24,7 +24,6 @@ import (
 	"sort"
 	"strings"
 
-	"mosaic-common/docformat"
 	"mosaic-deploy/internal/agentfields"
 	"mosaic-deploy/internal/catalog"
 	"mosaic-deploy/internal/domain"
@@ -108,33 +107,53 @@ func (s WorkspaceAgentScan) MatchedKeys() []string {
 //  1. The file's frontmatter `id` scalar (read via agentfields.ReadOrder, prefixed name
 //     preferred over legacy), looked up through catalog.AgentByNumericID. This survives a
 //     rename, so a renamed deployed file still matches its catalog source.
-//  2. The key derived from the file name (trailing ".agent.md" or ".md" removed), looked
-//     up through catalog.Agent. This is the necessary fallback for agents with no numeric
-//     id, notably both orchestrator-role files.
+//  2. The key derived from the file name (harness-declared extension stripped, then
+//     ".agent.md" or ".md" stripped as fallback), looked up through catalog.Agent. This is
+//     the necessary fallback for agents with no numeric id, notably both orchestrator-role
+//     files.
 //
-// An unmatched file is then tested for harness-only eligibility (two-signal check).
-// isOrchestratorFileName gates the harness-only path only — it must not gate the matched
-// path: an orchestrator-role file that resolves via a catalog lookup is reported as Matched.
+// An unmatched file is then tested for harness-only eligibility (two-signal check) using
+// the decoded canonical bytes. isOrchestratorFileName gates the harness-only path only —
+// it must not gate the matched path: an orchestrator-role file that resolves via a catalog
+// lookup is reported as Matched.
 //
-// Tolerance is the contract: a file that cannot be read, cannot be parsed, carries no
-// frontmatter, is not a ".md" file, or is a directory is skipped silently.
+// src is the source harness descriptor. It supplies the declared agent file extension
+// (src.Extensions[domain.ArtifactAgent]) for the file filter and the decoder for
+// producing canonical bytes. A nil or zero-value src is treated as a Markdown harness
+// (extension ".md", identity decode).
+//
+// Tolerance is the contract: a file that cannot be read, cannot be decoded, carries no
+// frontmatter, does not match the declared extension, or is a directory is skipped silently.
 //
 // An empty agentsDir yields an empty scan without touching the workspace root, and an
 // unreadable or absent directory yields an empty scan rather than an error.
 //
 // Determinism: both returned slices are sorted by TargetPath. MatchedKeys is sorted and
 // deduplicated by key.
-func scanWorkspaceAgents(workspace, agentsDir string, c catalog.Catalog) WorkspaceAgentScan {
+// scanWorkspaceAgents performs ONE non-recursive walk of the harness's deployed-agents
+// directory and classifies every file matching the declared extension. The second return
+// value carries any non-fatal decode notices accumulated across all decoded files (via
+// decodeReportNotices), ready for callers to emit through the run log.
+func scanWorkspaceAgents(workspace, agentsDir string, c catalog.Catalog, src *domain.HarnessDescriptor) (WorkspaceAgentScan, []string) {
 	// Guard: an empty agentsDir must yield an empty result without scanning workspace root.
 	if agentsDir == "" {
-		return WorkspaceAgentScan{}
+		return WorkspaceAgentScan{}, nil
+	}
+	var notices []string
+
+	// Determine the file extension to filter and strip. Default to ".md" when undeclared.
+	agentExt := ".md"
+	if src != nil {
+		if ext, ok := src.Extensions[domain.ArtifactAgent]; ok && ext != "" {
+			agentExt = ext
+		}
 	}
 
 	dir := filepath.Join(workspace, agentsDir)
 	entries, err := os.ReadDir(dir)
 	if err != nil {
 		// Directory does not exist or is unreadable — return empty result.
-		return WorkspaceAgentScan{}
+		return WorkspaceAgentScan{}, notices
 	}
 
 	var matched []ScannedAgentMatch
@@ -150,26 +169,51 @@ func scanWorkspaceAgents(workspace, agentsDir string, c catalog.Catalog) Workspa
 
 		name := entry.Name()
 
-		// Only .md files.
-		if !strings.HasSuffix(name, ".md") {
+		// Only files with the declared extension.
+		if !strings.HasSuffix(name, agentExt) {
 			continue
 		}
 
 		// Read file bytes tolerantly — skip silently on error.
 		filePath := filepath.Join(dir, name)
-		data, err := os.ReadFile(filePath)
+		rawData, err := os.ReadFile(filePath)
 		if err != nil {
 			continue
 		}
 
-		// Parse the document. Unparseable bytes trigger a filename-key fallback before skipping.
-		doc, err := docformat.Parse(data)
-		if err != nil {
+		// Derive the agent key from the file name using the generalised agentKeyFromFileName,
+		// which strips the declared extension and its ".agent.<suffix>" variant.
+		fileKey := agentKeyFromFileName(name, agentExt)
+
+		// Decode through the funnel. Undecodable files trigger a filename-key fallback
+		// before skipping, mirroring the parse-failure path for Markdown files.
+		dr := decodeDeployedBytes(rawData, domain.ArtifactAgent, src)
+		// Surface the decode report at the scan boundary so that entries such as
+		// EntryMissingInstructions from body-less Codex agents reach the caller for logging.
+		notices = append(notices, decodeReportNotices(name, dr.Report)...)
+		if dr.DecodeErr != nil || dr.Canonical == nil {
+			// Decode failed — attempt filename-key fallback before skipping.
+			if agent, ok := c.Agent(fileKey); ok {
+				targetPath := filepath.Join(agentsDir, name)
+				matched = append(matched, ScannedAgentMatch{
+					TargetPath:  targetPath,
+					FileName:    name,
+					AgentKey:    agent.Key,
+					NumericID:   "",
+					MatchedBy:   MatchByFileNameKeyParseFailed,
+					ParseFailed: true,
+				})
+			}
+			continue
+		}
+
+		canonical := dr.Canonical
+
+		// Parse frontmatter from canonical bytes. Parse failure triggers filename-key fallback.
+		doc, parseErr := ParseGenericSource(canonical)
+		if parseErr != nil {
 			// Parse failed — attempt filename-key fallback before skipping.
-			// If the filename matches a catalog agent, surface the file as parse-failed
-			// so it can be classified as CONFLICT downstream instead of silently skipped.
-			derivedKey := agentKeyFromFileName(name)
-			if agent, ok := c.Agent(derivedKey); ok {
+			if agent, ok := c.Agent(fileKey); ok {
 				targetPath := filepath.Join(agentsDir, name)
 				matched = append(matched, ScannedAgentMatch{
 					TargetPath:  targetPath,
@@ -191,7 +235,7 @@ func scanWorkspaceAgents(workspace, agentsDir string, c catalog.Catalog) Workspa
 
 		targetPath := filepath.Join(agentsDir, name)
 
-		// Read the numeric ID from frontmatter, accepting both the prefixed and legacy forms.
+		// Read the numeric ID from canonical frontmatter, accepting prefixed and legacy forms.
 		var numericID string
 		for _, key := range agentfields.ReadOrder(idField) {
 			if v, ok := fm.Get(key); ok && v.Kind == domain.KindScalar && v.Scalar != "" {
@@ -216,7 +260,6 @@ func scanWorkspaceAgents(workspace, agentsDir string, c catalog.Catalog) Workspa
 
 		// Catalog matching step 2: try filename key lookup. Fallback for agents with no
 		// numeric id, notably both orchestrator-role files.
-		fileKey := agentKeyFromFileName(name)
 		if agent, ok := c.Agent(fileKey); ok {
 			matched = append(matched, ScannedAgentMatch{
 				TargetPath: targetPath,
@@ -230,12 +273,15 @@ func scanWorkspaceAgents(workspace, agentsDir string, c catalog.Catalog) Workspa
 
 		// Neither catalog lookup succeeded. Check harness-only eligibility.
 		// Orchestrator-named files are excluded from the harness-only path, matching the
-		// existing scanHarnessOnlyAgents contract.
-		if isOrchestratorFileName(name) {
+		// existing scanHarnessOnlyAgents contract. For non-Markdown harnesses, orchestrator
+		// detection uses the catalog-matched path (step 1 and 2 above), so this guard
+		// covers only the rare case where a file's name matches an orchestrator pattern.
+		if isOrchestratorFileName(name, src) {
 			continue
 		}
 
-		verdict := eligibleHarnessOnly(data)
+		// Eligibility check on canonical bytes: the two-signal check works on Markdown form.
+		verdict := eligibleHarnessOnly(canonical)
 		if !verdict.Eligible {
 			// Not eligible as harness-only — leave byte-identical, no plan item.
 			continue
@@ -263,5 +309,5 @@ func scanWorkspaceAgents(workspace, agentsDir string, c catalog.Catalog) Workspa
 	return WorkspaceAgentScan{
 		Matched:     matched,
 		HarnessOnly: harnessOnly,
-	}
+	}, notices
 }

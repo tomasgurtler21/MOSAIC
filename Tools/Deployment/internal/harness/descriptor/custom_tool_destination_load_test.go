@@ -476,7 +476,7 @@ func TestParse_CustomToolDestination_NamesKeyEmpty_ParseFails(t *testing.T) {
 
 // --- T1.4: Regression — existing descriptors load and validate without error ---
 
-// builtinDescriptors lists the four embedded harness descriptor YAML files relative to
+// builtinDescriptors lists the five embedded harness descriptor YAML files relative to
 // the descriptor package directory (Tools/Deployment/internal/harness/descriptor/).
 var builtinDescriptors = []struct {
 	harness string
@@ -486,11 +486,12 @@ var builtinDescriptors = []struct {
 	{"opencode", filepath.Join("..", "builtin", "opencode", "opencode.yaml")},
 	{"ghcp-cli", filepath.Join("..", "builtin", "ghcpcli", "ghcp-cli.yaml")},
 	{"vscode-ghcp", filepath.Join("..", "builtin", "vscodeghcp", "vscode-ghcp.yaml")},
+	{"codex", filepath.Join("..", "builtin", "codex", "codex.yaml")},
 }
 
 // TestLoad_ExistingBuiltinDescriptors_StillLoadWithoutError is a regression guard
 // asserting that adding the custom_tool_destination field to the wire type does not
-// break loading of any of the four built-in harness descriptors.
+// break loading of any of the five built-in harness descriptors.
 func TestLoad_ExistingBuiltinDescriptors_StillLoadWithoutError(t *testing.T) {
 	for _, tc := range builtinDescriptors {
 		tc := tc

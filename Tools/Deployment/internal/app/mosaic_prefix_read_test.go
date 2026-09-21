@@ -19,6 +19,8 @@ import (
 	"os"
 	"path/filepath"
 	"testing"
+
+	"mosaic-deploy/internal/domain"
 )
 
 // ---------------------------------------------------------------------------
@@ -56,7 +58,7 @@ func TestProbeDeployedArtifact_PrefixedTransformVersion_ReadCorrectly(t *testing
 	content := []byte("---\nmosaic_transform_version: \"3.0.0\"\n---\n\nAgent body.\n")
 	writeFile(t, ws, "agent.md", content)
 
-	state := probeDeployedArtifact(ws, "agent.md", "")
+	state := probeDeployedArtifact(ws, "agent.md", "", domain.ArtifactAgent, &domain.HarnessDescriptor{})
 
 	if !state.Present {
 		t.Fatal("expected Present: true for a readable file")
@@ -74,7 +76,7 @@ func TestProbeDeployedArtifact_PrefixedInjectionsVersion_ReadCorrectly(t *testin
 	content := []byte("---\nmosaic_injections_version: \"1.5.0\"\n---\n\nAgent body.\n")
 	writeFile(t, ws, "agent.md", content)
 
-	state := probeDeployedArtifact(ws, "agent.md", "")
+	state := probeDeployedArtifact(ws, "agent.md", "", domain.ArtifactAgent, &domain.HarnessDescriptor{})
 
 	if state.InjectionsVersion != "1.5.0" {
 		t.Errorf("InjectionsVersion = %q, want %q; probeDeployedArtifact must read mosaic_injections_version",
@@ -89,7 +91,7 @@ func TestProbeDeployedArtifact_PrefixedToolMappingsVersion_ReadCorrectly(t *test
 	content := []byte("---\nmosaic_tool_mappings_version: \"hash99\"\n---\n\nAgent body.\n")
 	writeFile(t, ws, "agent.md", content)
 
-	state := probeDeployedArtifact(ws, "agent.md", "")
+	state := probeDeployedArtifact(ws, "agent.md", "", domain.ArtifactAgent, &domain.HarnessDescriptor{})
 
 	if state.ToolMappingsVersion != "hash99" {
 		t.Errorf("ToolMappingsVersion = %q, want %q; probeDeployedArtifact must read mosaic_tool_mappings_version",
@@ -104,7 +106,7 @@ func TestProbeDeployedArtifact_PrefixedBundleVersion_ReadCorrectly(t *testing.T)
 	content := []byte("---\nmosaic_bundle_version: \"b2.0\"\n---\n\nAgent body.\n")
 	writeFile(t, ws, "agent.md", content)
 
-	state := probeDeployedArtifact(ws, "agent.md", "")
+	state := probeDeployedArtifact(ws, "agent.md", "", domain.ArtifactAgent, &domain.HarnessDescriptor{})
 
 	if state.BundleVersion != "b2.0" {
 		t.Errorf("BundleVersion = %q, want %q; probeDeployedArtifact must read mosaic_bundle_version",
@@ -121,7 +123,7 @@ func TestProbeDeployedArtifact_LegacyTransformVersion_StillReadCorrectly(t *test
 	content := []byte("---\ntransform_version: \"2.0.0\"\n---\n\nAgent body.\n")
 	writeFile(t, ws, "agent.md", content)
 
-	state := probeDeployedArtifact(ws, "agent.md", "")
+	state := probeDeployedArtifact(ws, "agent.md", "", domain.ArtifactAgent, &domain.HarnessDescriptor{})
 
 	if state.HarnessVersion != "2.0.0" {
 		t.Errorf("HarnessVersion = %q, want %q; legacy transform_version must still be read for backward compatibility",
@@ -139,7 +141,7 @@ func TestProbeDeployedArtifact_BothPrefixedAndLegacyTransformVersion_PrefixedWin
 	content := []byte("---\nmosaic_transform_version: \"3.0.0\"\ntransform_version: \"2.0.0\"\n---\n\nAgent body.\n")
 	writeFile(t, ws, "agent.md", content)
 
-	state := probeDeployedArtifact(ws, "agent.md", "")
+	state := probeDeployedArtifact(ws, "agent.md", "", domain.ArtifactAgent, &domain.HarnessDescriptor{})
 
 	if state.HarnessVersion != "3.0.0" {
 		t.Errorf("HarnessVersion = %q, want %q; prefixed mosaic_transform_version must win over legacy transform_version",
@@ -168,7 +170,7 @@ func TestProbeDeployedArtifact_AllPrefixedStamps_AllFieldsPopulated(t *testing.T
 		"---\n\nAgent body.\n")
 	writeFile(t, ws, "agent.md", content)
 
-	state := probeDeployedArtifact(ws, "agent.md", "")
+	state := probeDeployedArtifact(ws, "agent.md", "", domain.ArtifactAgent, &domain.HarnessDescriptor{})
 
 	if !state.Present {
 		t.Fatal("expected Present: true")
@@ -289,7 +291,7 @@ func TestBuildDeployedAgentIndex_PrefixedMosaicID_AgentIndexed(t *testing.T) {
 	content := []byte("---\nmosaic_id: \"42\"\nmosaic_transform_version: \"3.0.0\"\n---\n\nBody.\n")
 	writeAgentFile(t, ws, "agents", "my-agent.md", content)
 
-	idx := buildDeployedAgentIndex(ws, "agents")
+	idx, _ := buildDeployedAgentIndex(ws, "agents", &domain.HarnessDescriptor{})
 
 	entries := idx.Lookup("42")
 	if len(entries) == 0 {
@@ -310,7 +312,7 @@ func TestBuildDeployedAgentIndex_LegacyID_AgentStillIndexed(t *testing.T) {
 	content := []byte("---\nid: \"99\"\ntransform_version: \"3.0.0\"\n---\n\nBody.\n")
 	writeAgentFile(t, ws, "agents", "legacy-agent.md", content)
 
-	idx := buildDeployedAgentIndex(ws, "agents")
+	idx, _ := buildDeployedAgentIndex(ws, "agents", &domain.HarnessDescriptor{})
 
 	entries := idx.Lookup("99")
 	if len(entries) == 0 {
@@ -328,7 +330,7 @@ func TestBuildDeployedAgentIndex_PrefixedIDWinsOverLegacy_WhenBothPresent(t *tes
 	content := []byte("---\nmosaic_id: \"100\"\nid: \"200\"\ntransform_version: \"3.0.0\"\n---\n\nBody.\n")
 	writeAgentFile(t, ws, "agents", "dual-id-agent.md", content)
 
-	idx := buildDeployedAgentIndex(ws, "agents")
+	idx, _ := buildDeployedAgentIndex(ws, "agents", &domain.HarnessDescriptor{})
 
 	if len(idx.Lookup("100")) == 0 {
 		t.Error("agent not found under mosaic_id (100); prefixed mosaic_id must win when both forms are present")

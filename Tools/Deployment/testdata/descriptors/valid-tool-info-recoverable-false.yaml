@@ -1,0 +1,7 @@
+# Descriptor fixture: tool_info_recoverable set to false.
+# Used by T5.5 tests to verify the polarity-inversion rule: wire key
+# tool_info_recoverable: false maps to domain field ToolInfoUnrecoverable = true.
+schema_version: "1"
+id: "tool-info-test"
+display_name: "Tool Info Test"
+tool_info_recoverable: false

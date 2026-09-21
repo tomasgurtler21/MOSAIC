@@ -10,6 +10,7 @@ import (
 	"mosaic-deploy/internal/config"
 	"mosaic-deploy/internal/deploy"
 	"mosaic-deploy/internal/domain"
+	"mosaic-deploy/internal/logging"
 	"mosaic-deploy/internal/plan"
 	"mosaic-deploy/internal/todo"
 )
@@ -199,7 +200,11 @@ func (s *service) DeployNew(ctx context.Context, req DeployRequest) (domain.RunS
 	agentsDir := module.Descriptor().Paths.Agents.Project
 	var deployedAgentIndex DeployedAgentIndex
 	if module.Descriptor().Paths.Agents.Supported && agentsDir != "" {
-		deployedAgentIndex = buildDeployedAgentIndex(workspace, agentsDir)
+		var indexNotices []string
+		deployedAgentIndex, indexNotices = buildDeployedAgentIndex(workspace, agentsDir, module.Descriptor())
+		for _, notice := range indexNotices {
+			s.deps.Logger.Event(logging.Event{Level: logging.LevelWarn, Kind: "decode", Message: notice})
+		}
 	}
 
 	// Build the agent-by-key map for id-based probe resolution (covers workflow + utility agents).
@@ -215,9 +220,16 @@ func (s *service) DeployNew(ctx context.Context, req DeployRequest) (domain.RunS
 	if pathErr != nil {
 		return domain.RunSummary{}, pathErr
 	}
-	deployedState, err := probeDeployedStateWithIndex(workspace, plannedPaths, module.Descriptor().Frontmatter.ModelKey, nil, deployedAgentIndex, probeAgentByKey, nil)
+	deployedState, err := probeDeployedStateWithIndex(workspace, plannedPaths, module.Descriptor().Frontmatter.ModelKey, nil, deployedAgentIndex, probeAgentByKey, nil, module.Descriptor())
 	if err != nil {
 		return domain.RunSummary{}, err
+	}
+	// Emit any decode notices collected during probing (e.g. EntryMissingInstructions from
+	// body-less Codex agents) through the run log so they reach the user.
+	for _, state := range deployedState {
+		for _, notice := range state.DecodeNotices {
+			s.deps.Logger.Event(logging.Event{Level: logging.LevelWarn, Kind: "decode", Message: notice})
+		}
 	}
 
 	// Compute the tool-mappings version hash from the loaded config stores so the planner
@@ -297,7 +309,7 @@ func (s *service) DeployNew(ctx context.Context, req DeployRequest) (domain.RunS
 	}
 	workflowBlocks := s.buildWorkflowBlocks(workflowIDs)
 	infraBlocks := s.buildInfrastructureBlocks(infraAgentIDs)
-	contentFn := s.buildContent(module, agentByKey, modelRes.models, customTools, skippedTools, workflowBlocks, infraBlocks, scope, nil, toolMappingsVersion, protocol, bundle, nil)
+	contentFn := s.buildContent(module, agentByKey, modelRes.models, customTools, skippedTools, workflowBlocks, infraBlocks, scope, nil, toolMappingsVersion, protocol, bundle, nil, nil)
 
 	now := s.now()
 	execReq := deploy.ExecRequest{

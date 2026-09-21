@@ -24,6 +24,8 @@ package app
 
 import (
 	"testing"
+
+	"mosaic-deploy/internal/domain"
 )
 
 // ---------------------------------------------------------------------------
@@ -44,7 +46,7 @@ func TestProbeDeployedArtifact_InjectionHarnessRegionWithVersion_HasInjectionReg
 	writeFile(t, ws, "agent.md", content)
 
 	// Act
-	state := probeDeployedArtifact(ws, "agent.md", "")
+	state := probeDeployedArtifact(ws, "agent.md", "", domain.ArtifactAgent, &domain.HarnessDescriptor{})
 
 	// Assert: HasInjectionRegion must be true.
 	if !state.HasInjectionRegion {
@@ -72,7 +74,7 @@ func TestProbeDeployedArtifact_InjectionHarnessRegionNoVersionAttribute_HasInjec
 	writeFile(t, ws, "agent.md", content)
 
 	// Act
-	state := probeDeployedArtifact(ws, "agent.md", "")
+	state := probeDeployedArtifact(ws, "agent.md", "", domain.ArtifactAgent, &domain.HarnessDescriptor{})
 
 	// Assert: HasInjectionRegion must be true even though no version attribute is present.
 	if !state.HasInjectionRegion {
@@ -101,7 +103,7 @@ func TestProbeDeployedArtifact_MultipleInjectionHarnessRegions_HasInjectionRegio
 	writeFile(t, ws, "agent.md", content)
 
 	// Act
-	state := probeDeployedArtifact(ws, "agent.md", "")
+	state := probeDeployedArtifact(ws, "agent.md", "", domain.ArtifactAgent, &domain.HarnessDescriptor{})
 
 	// Assert
 	if !state.HasInjectionRegion {
@@ -129,7 +131,7 @@ func TestProbeDeployedArtifact_NoInjectionHarnessRegion_HasInjectionRegionFalse(
 	writeFile(t, ws, "agent.md", content)
 
 	// Act
-	state := probeDeployedArtifact(ws, "agent.md", "")
+	state := probeDeployedArtifact(ws, "agent.md", "", domain.ArtifactAgent, &domain.HarnessDescriptor{})
 
 	// Assert
 	if state.HasInjectionRegion {
@@ -149,7 +151,7 @@ func TestProbeDeployedArtifact_FileAbsent_HasInjectionRegionFalse(t *testing.T) 
 	ws := t.TempDir()
 
 	// Act
-	state := probeDeployedArtifact(ws, "nonexistent.md", "")
+	state := probeDeployedArtifact(ws, "nonexistent.md", "", domain.ArtifactAgent, &domain.HarnessDescriptor{})
 
 	// Assert
 	if state.Present {

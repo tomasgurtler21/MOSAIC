@@ -292,7 +292,7 @@ func TestProbeDeployedArtifact_ProtocolRegionWithVersionAttribute_ProtocolVersio
 			"</CommunicationProtocol>\n")
 	writeFile(t, ws, "agent.md", content)
 
-	state := probeDeployedArtifact(ws, "agent.md", "")
+	state := probeDeployedArtifact(ws, "agent.md", "", domain.ArtifactAgent, &domain.HarnessDescriptor{})
 
 	if !state.Present {
 		t.Fatal("expected Present: true for a readable file")
@@ -316,7 +316,7 @@ func TestProbeDeployedArtifact_NoProtocolRegion_ProtocolVersionEmpty(t *testing.
 			"<Identity type=\"core\">\nAgent identity.\n</Identity>\n")
 	writeFile(t, ws, "agent.md", content)
 
-	state := probeDeployedArtifact(ws, "agent.md", "")
+	state := probeDeployedArtifact(ws, "agent.md", "", domain.ArtifactAgent, &domain.HarnessDescriptor{})
 
 	if !state.Present {
 		t.Fatal("expected Present: true")
@@ -342,7 +342,7 @@ func TestProbeDeployedArtifact_ProtocolRegionPresentNoVersionAttribute_ProtocolV
 			"</CommunicationProtocol>\n")
 	writeFile(t, ws, "agent.md", content)
 
-	state := probeDeployedArtifact(ws, "agent.md", "")
+	state := probeDeployedArtifact(ws, "agent.md", "", domain.ArtifactAgent, &domain.HarnessDescriptor{})
 
 	if !state.Present {
 		t.Fatal("expected Present: true")
@@ -365,7 +365,7 @@ func TestProbeDeployedArtifact_ProtocolVersionDoesNotAffectOtherFields(t *testin
 			"</CommunicationProtocol>\n")
 	writeFile(t, ws, "agent.md", content)
 
-	state := probeDeployedArtifact(ws, "agent.md", "")
+	state := probeDeployedArtifact(ws, "agent.md", "", domain.ArtifactAgent, &domain.HarnessDescriptor{})
 
 	if state.ProtocolVersion != "1.9" {
 		t.Errorf("state.ProtocolVersion = %q, want %q", state.ProtocolVersion, "1.9")
@@ -387,7 +387,7 @@ func TestProbeDeployedArtifact_ProtocolVersionDoesNotAffectOtherFields(t *testin
 func TestProbeDeployedArtifact_AbsentFile_ProtocolVersionEmpty(t *testing.T) {
 	ws := t.TempDir()
 
-	state := probeDeployedArtifact(ws, "nonexistent.md", "")
+	state := probeDeployedArtifact(ws, "nonexistent.md", "", domain.ArtifactAgent, &domain.HarnessDescriptor{})
 
 	if state.Present {
 		t.Fatal("expected Present: false for absent file")
@@ -413,7 +413,7 @@ func TestProbeDeployedArtifact_ProtocolVersionNotCountedInHasVersionInfo(t *test
 			"</CommunicationProtocol>\n")
 	writeFile(t, ws, "agent.md", content)
 
-	state := probeDeployedArtifact(ws, "agent.md", "")
+	state := probeDeployedArtifact(ws, "agent.md", "", domain.ArtifactAgent, &domain.HarnessDescriptor{})
 
 	if state.ProtocolVersion != "1.9" {
 		// If ProtocolVersion is empty here the test is moot — it means probeDeployedArtifact

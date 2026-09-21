@@ -14,11 +14,12 @@ import (
 	"strconv"
 	"strings"
 
-	"mosaic-common/docformat"
+	"mosaic-deploy/internal/agentformat"
 	"mosaic-deploy/internal/catalog"
 	"mosaic-deploy/internal/catalog/catalogpaths"
 	"mosaic-deploy/internal/domain"
 	"mosaic-deploy/internal/harness/descriptor"
+	"mosaic-deploy/internal/transform"
 )
 
 // promoteHarnessDropSet is the unified result of the harness drop-key derivation and
@@ -220,6 +221,69 @@ func (s *service) resolvePromoteTools(
 	}
 
 	return tools, verbatim
+}
+
+// knownGenericToolVocab is the accepted vocabulary for QPromoteNonRecoverableTools.
+// It covers the minimal read-only grant and the escalating tools so that operators
+// who know their agent's tool requirements can supply them. Names outside this set
+// are filtered out rather than accepted silently, so an unfamiliar name never reaches
+// the promoted file unvetted.
+var knownGenericToolVocab = map[string]bool{
+	"file_read":      true,
+	"file_search":    true,
+	"content_search": true,
+	"file_write":     true,
+	"file_edit":      true,
+	"terminal":       true,
+	"subagent":       true,
+	"bash":           true,
+}
+
+// resolveNonRecoverablePromoteTools asks the user for a comma-separated list of
+// generic tool names when the source harness cannot recover tool information. It
+// filters the answer against knownGenericToolVocab and returns only the accepted
+// names. A blank answer, a non-interactive session, or an unanswered question all
+// return an explicit empty (non-nil) slice plus a NoticeWarning.
+func (s *service) resolveNonRecoverablePromoteTools(ctx context.Context, subject string) []string {
+	q := domain.TextQuestion{
+		Question: domain.Question{
+			ID:        domain.QPromoteNonRecoverableTools,
+			Subject:   subject,
+			Title:     "Source harness does not record tools. Enter comma-separated generic tool names (or leave blank for none):",
+			AllowSkip: true,
+		},
+	}
+	ans, err := s.deps.Interaction.AskText(ctx, q)
+
+	if err != nil || ans.Status != domain.Answered {
+		// Non-interactive or unanswered: empty tools list with a warning.
+		s.deps.Interaction.Notify(ctx, domain.Notice{
+			Level:   domain.NoticeWarning,
+			Message: fmt.Sprintf("agent %q: source harness does not record tool information; tools list left empty", subject),
+		})
+		return []string{}
+	}
+
+	if strings.TrimSpace(ans.Text) == "" {
+		// Blank answer: explicit empty tools list.
+		return []string{}
+	}
+
+	// Parse the comma-separated answer and filter to known vocabulary.
+	parts := strings.Split(ans.Text, ",")
+	var result []string
+	seen := make(map[string]bool)
+	for _, part := range parts {
+		name := strings.TrimSpace(part)
+		if name == "" {
+			continue
+		}
+		if knownGenericToolVocab[name] && !seen[name] {
+			seen[name] = true
+			result = append(result, name)
+		}
+	}
+	return result
 }
 
 // resolvePromoteGenericFields asks for the generic-only frontmatter fields the harness drops
@@ -425,10 +489,31 @@ func (s *service) Promote(ctx context.Context, req PromoteRequest) (PromoteResul
 	}
 	defer module.Close() //nolint:errcheck // close error must not fail an otherwise complete run
 
-	// Read the source file bytes. The source is never modified or deleted by this function.
-	src, err := os.ReadFile(req.FilePath)
-	if err != nil {
-		return PromoteResult{}, fmt.Errorf("reading source file %s: %w", req.FilePath, err)
+	// Read and decode the source file through the funnel. For Markdown harnesses this is an
+	// identity decode; for Codex TOML the file is translated to canonical Markdown form.
+	dr := readDeployedArtifact(req.FilePath, domain.ArtifactAgent, module.Descriptor())
+	if dr.ReadErr != nil {
+		return PromoteResult{}, fmt.Errorf("reading source file %s: %w", req.FilePath, dr.ReadErr)
+	}
+	if dr.DecodeErr != nil {
+		return PromoteResult{}, fmt.Errorf("decoding source file %s: %w", req.FilePath, dr.DecodeErr)
+	}
+	// dr.Present is guaranteed true here: the stat check above already filtered absent files.
+
+	// All subsequent processing uses canonical bytes so that harness-specific syntax
+	// (e.g. Codex TOML stamps) is read in the uniform Markdown frontmatter form.
+	src := dr.Canonical
+
+	// Merge the decode report from the source read (AC15.11). An absent or undecodable
+	// file is already rejected above; here the report is non-empty only on a successful
+	// decode that has informational entries (e.g. EntryMissingInstructions for a
+	// body-less source).
+	{
+		var decodeRpt transform.Report
+		mergeDecodeReport(&decodeRpt, dr.Report)
+		for _, g := range decodeRpt.Gaps {
+			s.deps.Todo.AddGap(g)
+		}
 	}
 
 	// Apply the shared two-signal eligibility rule. Reject with ErrPromoteNotTransformed
@@ -438,9 +523,15 @@ func (s *service) Promote(ctx context.Context, req PromoteRequest) (PromoteResul
 		return PromoteResult{}, fmt.Errorf("%w: %s", ErrPromoteNotTransformed, verdict.Reason)
 	}
 
-	// Derive the agent key from the source filename — the same derivation the catalog uses
-	// so the promoted file is reachable under the key the user expects.
-	key := agentKeyFromFileName(filepath.Base(req.FilePath))
+	// Derive the agent key from the source filename using the generalised
+	// agentKeyFromFileName, which strips the declared extension and its ".agent.<suffix>"
+	// variant. Falls back to ".md" stripping when the descriptor declares no extension.
+	name := filepath.Base(req.FilePath)
+	agentExt := module.Descriptor().Extensions[domain.ArtifactAgent]
+	if agentExt == "" {
+		agentExt = ".md"
+	}
+	key := agentKeyFromFileName(name, agentExt)
 
 	// Inspect the deployed source for harness-side facts (tool entries and key presence set)
 	// before asking any questions. This is a pure parse — no I/O, no questions.
@@ -453,9 +544,10 @@ func (s *service) Promote(ctx context.Context, req PromoteRequest) (PromoteResul
 	// value suppresses the interactive question entirely) or ask through Interaction.
 	category := req.Category
 	if category == "" {
-		category, err = s.askPromoteCategory(ctx, req.FilePath)
-		if err != nil {
-			return PromoteResult{}, err
+		var askErr error
+		category, askErr = s.askPromoteCategory(ctx, req.FilePath)
+		if askErr != nil {
+			return PromoteResult{}, askErr
 		}
 	}
 
@@ -512,7 +604,7 @@ func (s *service) Promote(ctx context.Context, req PromoteRequest) (PromoteResul
 	var strippedFields []StrippedField
 	var divertedResolvedGenericNames []string // generic names recovered from diverted fields
 
-	srcDoc, srcParseErr := docformat.Parse(src)
+	srcDoc, srcParseErr := ParseGenericSource(src)
 	if srcParseErr == nil {
 		srcFm := srcDoc.Frontmatter()
 
@@ -572,9 +664,21 @@ func (s *service) Promote(ctx context.Context, req PromoteRequest) (PromoteResul
 		}
 	}
 
-	// Reverse-map the harness tool entries to the authoritative generic tools list.
-	// resolvePromoteTools returns a non-nil slice (AD-7) so it is always authoritative.
-	resolvedTools, verbatimTools := s.resolvePromoteTools(ctx, module, facts.HarnessTools, req.FilePath)
+	// Reverse-map the harness tool entries to the authoritative generic tools list, or
+	// ask the user when the source harness cannot recover tool information.
+	//
+	// For non-recoverable sources (ToolInfoUnrecoverable=true), the reverse-mapping path
+	// is skipped entirely. Instead the user is asked for a comma-separated list of generic
+	// tool names. Names outside the known generic vocabulary are filtered out. A blank
+	// answer, a non-interactive session, or an unanswered question all yield an explicit
+	// empty tools list plus a warning notice.
+	var resolvedTools []string
+	var verbatimTools []string
+	if module.Descriptor().ToolInfoUnrecoverable {
+		resolvedTools = s.resolveNonRecoverablePromoteTools(ctx, req.FilePath)
+	} else {
+		resolvedTools, verbatimTools = s.resolvePromoteTools(ctx, module, facts.HarnessTools, req.FilePath)
+	}
 
 	// Append diverted-field recoveries to the generic tools list, deduplicating first-seen
 	// against entries already resolved from the main tools key.
@@ -596,19 +700,45 @@ func (s *service) Promote(ctx context.Context, req PromoteRequest) (PromoteResul
 	// This is deterministic for a given catalog state and the test asserts no collision.
 	numericID := nextNumericID(s.deps.Catalog)
 
+	// Strip the carriage container from the canonical source at the format-change
+	// boundary. Any key held in the container cannot travel the format change; each is
+	// reported as a StrippedField with StripReasonCarriedKey so the operator knows which
+	// user-owned keys did not carry forward.
+	//
+	// StripCarriage is pure: it does not modify src, so the source artifact on disk is
+	// not affected. The stripped canonical bytes replace src for the generation call.
+	stripResult, stripErr := agentformat.StripCarriage(src)
+	if stripErr != nil {
+		return PromoteResult{}, fmt.Errorf("stripping carriage container from source: %w", stripErr)
+	}
+	for _, k := range stripResult.CarriedKeys {
+		strippedFields = append(strippedFields, StrippedField{
+			Key:    k,
+			Reason: StripReasonCarriedKey,
+		})
+	}
+	src = stripResult.Canonical
+
+	// For the non-recoverable path an empty resolved tools list must be written as
+	// tools: [] rather than omitting the key. An absent tools key is read as "inherit all"
+	// by some consumers, which is not the intended outcome when the operator explicitly
+	// answered blank or did not interact.
+	writeEmptyToolsList := module.Descriptor().ToolInfoUnrecoverable
+
 	// Generate the generic agent bytes from the harness-only source. The generation core
 	// is pure: src is not modified and no file is written here.
 	genericBytes, err := buildGenericAgent(PromoteInput{
-		Source:          src,
-		NumericID:       numericID,
-		Key:             key,
-		Role:            verdict.Meta.Role,
-		Version:         verdict.Meta.Version,
-		DropKeys:        dropKeys,
-		Tools:           resolvedTools,
-		RecommendedTier: recovered.RecommendedTier,
-		TierRationale:   recovered.TierRationale,
-		RequiredSkills:  recovered.RequiredSkills,
+		Source:              src,
+		NumericID:           numericID,
+		Key:                 key,
+		Role:                verdict.Meta.Role,
+		Version:             verdict.Meta.Version,
+		DropKeys:            dropKeys,
+		Tools:               resolvedTools,
+		WriteEmptyToolsList: writeEmptyToolsList,
+		RecommendedTier:     recovered.RecommendedTier,
+		TierRationale:       recovered.TierRationale,
+		RequiredSkills:      recovered.RequiredSkills,
 	})
 	if err != nil {
 		return PromoteResult{}, err

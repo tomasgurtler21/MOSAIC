@@ -3,8 +3,8 @@ package app
 // deployed_agent_index.go defines the workspace-scan types and the per-agent resolution
 // logic introduced by ID-Based Agent Identification.
 //
-// buildDeployedAgentIndex (I8.2) scans the deployed-agents directory once per run and
-// returns an id-keyed index. resolveDeployedPath (I8.3) uses that index to locate an
+// buildDeployedAgentIndex scans the deployed-agents directory once per run and
+// returns an id-keyed index. resolveDeployedPath uses that index to locate an
 // existing deployed artifact for a given catalog agent.
 
 import (
@@ -14,7 +14,6 @@ import (
 	"path/filepath"
 	"strings"
 
-	"mosaic-common/docformat"
 	"mosaic-deploy/internal/agentfields"
 	"mosaic-deploy/internal/domain"
 )
@@ -46,11 +45,16 @@ func (i DeployedAgentIndex) Lookup(id string) []DeployedAgentEntry {
 }
 
 // buildDeployedAgentIndex walks the workspace's deployed-agent directory (agentsDir, relative
-// to workspace), parses each file's frontmatter, and indexes files by their `id` scalar.
+// to workspace), decodes each file through the funnel, and indexes files by their `id` scalar.
 //
-// Tolerance is the contract: a file that cannot be read, cannot be parsed, carries no
-// frontmatter, or carries no `id` is skipped silently. This is target-finding, not
+// Tolerance is the contract: a file that cannot be read, cannot be decoded, cannot be parsed,
+// carries no frontmatter, or carries no `id` is skipped silently. This is target-finding, not
 // validation — a file that cannot be matched is simply not one of ours.
+//
+// src is the source harness descriptor used to identify the agent file extension
+// (src.Extensions[domain.ArtifactAgent]) and to select the decoder. A nil or zero-value
+// src is treated as a Markdown identity harness. Only files whose names end with the
+// declared extension are indexed; when no extension is declared, only ".md" files are indexed.
 //
 // The walk is non-recursive over the single agents directory. Scope limitation: harness
 // extension directories (additional locations a harness may declare for deployed agents
@@ -59,22 +63,37 @@ func (i DeployedAgentIndex) Lookup(id string) []DeployedAgentEntry {
 //
 // It is called once per run and its result is threaded through the flows so the directory
 // is not re-walked per agent.
-func buildDeployedAgentIndex(workspace, agentsDir string) DeployedAgentIndex {
+// buildDeployedAgentIndex walks the workspace's deployed-agent directory (agentsDir, relative
+// to workspace), decodes each file through the funnel, and indexes files by their `id` scalar.
+// The second return value carries any non-fatal decode notices accumulated across all indexed
+// files (via decodeReportNotices), ready for callers to emit through the run log.
+func buildDeployedAgentIndex(workspace, agentsDir string, src *domain.HarnessDescriptor) (DeployedAgentIndex, []string) {
 	idx := make(DeployedAgentIndex)
+	var notices []string
+
+	// Determine the file extension to filter by. Default to ".md" when the harness declares none.
+	agentExt := ".md"
+	if src != nil {
+		if ext, ok := src.Extensions[domain.ArtifactAgent]; ok && ext != "" {
+			agentExt = ext
+		}
+	}
 
 	dir := filepath.Join(workspace, agentsDir)
 	entries, err := os.ReadDir(dir)
 	if err != nil {
 		// Directory does not exist or is unreadable — return empty index.
-		return idx
+		return idx, notices
 	}
+
+	idField, _ := agentfields.ByGeneric("id")
 
 	for _, entry := range entries {
 		if entry.IsDir() {
 			continue
 		}
 		name := entry.Name()
-		if !strings.HasSuffix(name, ".md") {
+		if !strings.HasSuffix(name, agentExt) {
 			continue
 		}
 
@@ -85,8 +104,19 @@ func buildDeployedAgentIndex(workspace, agentsDir string) DeployedAgentIndex {
 			continue
 		}
 
-		doc, err := docformat.Parse(data)
-		if err != nil {
+		// Decode through the funnel so Codex TOML and other non-Markdown formats are read
+		// in canonical form. A decode failure is treated as unparseable — skip silently.
+		dr := decodeDeployedBytes(data, domain.ArtifactAgent, src)
+		if dr.DecodeErr != nil || dr.Canonical == nil {
+			continue
+		}
+		// Surface the decode report at the index-build boundary so that entries such as
+		// EntryMissingInstructions from body-less Codex agents reach the caller for logging.
+		notices = append(notices, decodeReportNotices(name, dr.Report)...)
+
+		// Parse frontmatter from canonical (Markdown) bytes.
+		doc, parseErr := ParseGenericSource(dr.Canonical)
+		if parseErr != nil {
 			// Unparseable — skip silently.
 			continue
 		}
@@ -97,9 +127,8 @@ func buildDeployedAgentIndex(workspace, agentsDir string) DeployedAgentIndex {
 			continue
 		}
 
-		// Read the numeric ID from the deployed file, accepting both the prefixed (mosaic_-prefixed)
-		// and legacy (unprefixed) forms via agentfields.ReadOrder. The prefixed name is tried first.
-		idField, _ := agentfields.ByGeneric("id")
+		// Read the numeric ID from the decoded frontmatter, accepting both the prefixed
+		// (mosaic_-prefixed) and legacy (unprefixed) forms via agentfields.ReadOrder.
 		var numericID string
 		for _, key := range agentfields.ReadOrder(idField) {
 			if v, ok := fm.Get(key); ok && v.Kind == domain.KindScalar && v.Scalar != "" {
@@ -118,7 +147,7 @@ func buildDeployedAgentIndex(workspace, agentsDir string) DeployedAgentIndex {
 		})
 	}
 
-	return idx
+	return idx, notices
 }
 
 // resolveDeployedPath returns the target path at which to look for an existing deployed

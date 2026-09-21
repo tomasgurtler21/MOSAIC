@@ -11,12 +11,19 @@ package app
 // with transform.ErrSourceDeployedRegionNotEmpty. This routine therefore takes the dedicated-
 // narrow-routine approach: walk the parsed document's regions directly and rewrite only the
 // in-scope deployed regions. transform.ErrSourceDeployedRegionNotEmpty is never returned here.
+//
+// After updating the managed regions, the routine encodes the refreshed canonical bytes
+// back into the harness's own format via the format registry. For Markdown harnesses this
+// is the identity; for non-Markdown harnesses (e.g. Codex TOML) it converts the canonical
+// Markdown form into the harness's on-disk encoding. transform.Apply is still not used
+// here: the harness-only path has no generic source and never calls it.
 
 import (
 	"bytes"
 	"fmt"
 
 	"mosaic-common/docformat"
+	"mosaic-deploy/internal/agentformat"
 	"mosaic-deploy/internal/domain"
 	"mosaic-deploy/internal/transform"
 )
@@ -25,8 +32,23 @@ import (
 // transform.Apply, the routine performs no filesystem, network, clock, or randomness
 // operation; all inputs arrive here.
 type HarnessOnlyRefreshRequest struct {
-	// Deployed is the current file bytes, verbatim. This is the source of truth.
+	// Deployed is the current file bytes in CANONICAL form (decoded, YAML+Markdown).
+	// This is the source of truth for region parsing. For Markdown harnesses Deployed
+	// and DeployedRaw are identical. Nil on create.
 	Deployed []byte
+	// DeployedRaw is the current file bytes exactly as they sit on disk. For Markdown
+	// harnesses DeployedRaw and Deployed are identical. For non-Markdown harnesses (e.g.
+	// Codex TOML) DeployedRaw holds the raw on-disk encoding. Nil on create.
+	DeployedRaw []byte
+	// AgentKey is the agent key derived from the deployed file's stem (via
+	// agentKeyFromFileName). It is supplied by the caller from the refresh plan so the
+	// routine does not recompute it. Required for the encode step: the Codex translator
+	// needs AgentKey to emit the name field.
+	AgentKey string
+	// FormatID is the harness descriptor's AgentFormatID string. It selects the
+	// translator used to encode the refreshed canonical bytes back into the harness's
+	// own format. An empty string resolves to the Markdown identity translator.
+	FormatID string
 	// Scope selects which managed regions are regenerated.
 	Scope RefreshScope
 	// Role selects the protocol variant and the bundle block variant. Taken from the
@@ -75,7 +97,7 @@ type HarnessOnlyRefreshResult struct {
 func refreshHarnessOnly(req HarnessOnlyRefreshRequest) (HarnessOnlyRefreshResult, error) {
 	// Parse the deployed bytes. An unparseable document returns an error; callers reach
 	// this routine only for files the discovery scan already parsed, so this is defensive.
-	doc, err := docformat.Parse(req.Deployed)
+	doc, err := ParseGenericSource(req.Deployed)
 	if err != nil {
 		return HarnessOnlyRefreshResult{}, fmt.Errorf("parse deployed document %q: %w", req.Subject, err)
 	}
@@ -213,8 +235,32 @@ func refreshHarnessOnly(req HarnessOnlyRefreshRequest) (HarnessOnlyRefreshResult
 		})
 	}
 
+	// Encode the refreshed canonical bytes back into the harness's own format.
+	// For Markdown harnesses this is the identity (LookupString("") returns the Markdown
+	// identity translator). For non-Markdown harnesses (e.g. Codex TOML) this converts
+	// the canonical Markdown+YAML form into the harness's on-disk encoding.
+	//
+	// Refresh always operates on an existing file, so Op is OpUpdate. The raw prior bytes
+	// (req.DeployedRaw) supply the preservation channel so user-owned keys survive. Refresh
+	// mode suppresses the deploy-path normalisations (description fallback, name forcing,
+	// sandbox_mode read-only fallback, foreign-key drop) because the harness-only file's
+	// owned keys came from the user, not from MOSAIC.
+	tr, lookupErr := agentformat.LookupString(req.FormatID)
+	if lookupErr != nil {
+		return HarnessOnlyRefreshResult{}, fmt.Errorf("look up translator for %q: %w", req.Subject, lookupErr)
+	}
+	encoded, _, encodeErr := tr.Encode(currentBytes, agentformat.ArtifactContext{
+		AgentKey:      req.AgentKey,
+		PriorDeployed: req.DeployedRaw,
+		Op:            agentformat.OpUpdate,
+		RefreshMode:   true,
+	})
+	if encodeErr != nil {
+		return HarnessOnlyRefreshResult{}, fmt.Errorf("encode refreshed document %q: %w", req.Subject, encodeErr)
+	}
+
 	return HarnessOnlyRefreshResult{
-		Output:   currentBytes,
+		Output:   encoded,
 		Regions:  outcomes,
 		Added:    added,
 		NotAdded: notAdded,
@@ -375,14 +421,3 @@ func insertAt(src []byte, pos int, insert []byte) []byte {
 	return result
 }
 
-// bodyStartPos returns the byte offset in src where the document body begins — immediately
-// after the frontmatter closing "---" delimiter line. When src carries no frontmatter,
-// 0 is returned (the entire document is body).
-func bodyStartPos(src []byte) int {
-	_, body, err := docformat.SplitFrontmatter(src)
-	if err != nil || body == nil {
-		// No frontmatter or parse error: the body starts at the beginning of src.
-		return 0
-	}
-	return len(src) - len(body)
-}

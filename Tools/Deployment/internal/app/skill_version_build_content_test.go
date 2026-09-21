@@ -98,6 +98,7 @@ func invokeBuildContentForSkill(s *service, sourcePath string) ([]byte, error) {
 		domain.ProtocolContent{},
 		domain.BundleContent{},
 		nil,                        // harnessOnly — empty, so not matched
+		nil,                        // ownedKeyDiffSink — not used by skill path
 	)
 	item := domain.PlanItem{
 		Ref:        domain.ArtifactRef{Kind: domain.ArtifactSkill, Key: "lean-tdd"},

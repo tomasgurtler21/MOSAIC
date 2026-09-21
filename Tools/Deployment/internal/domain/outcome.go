@@ -61,6 +61,19 @@ type LogPaths struct {
 	History string
 }
 
+// OwnedKeyDifference names one MOSAIC-owned frontmatter key whose decoded canonical
+// value in the deployed file differs from the value being written in this run. Only
+// populated for artifacts whose origin the plan layer could not confirm. The difference
+// asserts nothing about who changed what; it reports only what was found.
+type OwnedKeyDifference struct {
+	Key             string // the frontmatter key
+	Deployed        string // prior on-disk value (decoded canonical); "" when DeployedPresent is false
+	Incoming        string // value this run writes; "" when IncomingPresent is false
+	Reason          string // human-readable explanation
+	DeployedPresent bool   // false when the key was absent from the deployed file
+	IncomingPresent bool   // false when the key is absent from the incoming form
+}
+
 // RunSummary is the single structure both frontends render and the only value the app returns.
 // It is also the JSON document emitted by cli --output json.
 type RunSummary struct {
@@ -76,4 +89,9 @@ type RunSummary struct {
 	Logs           LogPaths
 	LogDegraded    []string // non-fatal logging failures
 	Outcome        Outcome
+
+	// OwnedKeyDifferences accumulates every owned-key difference emitted during this run.
+	// Non-empty only when one or more artifacts were conflict-classified and had parseable
+	// deployed bytes. Empty on every ordinary run and when all conflicts are resolved by skip.
+	OwnedKeyDifferences []OwnedKeyDifference
 }
