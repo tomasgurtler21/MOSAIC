@@ -1,0 +1,4 @@
+This file occupies the path that would be the MosaicTest directory.
+When InfrastructureAgentKeys tries os.ReadDir on this path, it gets an error
+because this is a regular file, not a directory. The method must return nil
+(not propagate the error).

@@ -28,10 +28,9 @@ modes:
 
 **Execution Groups:**
 
-| Group | Approach |
-|-------|----------|
-| Test | TDD |
-| Implementation | TDD |
+| Approach | Groups |
+|----------|--------|
+| TDD | Test, Implementation |
 
 **EXECUTION Stages:** Loop per stage (stages defined in Plan.md). For each stage, the Test group's rows run first, then the Implementation group's rows, per the TDD approach ordering.
 

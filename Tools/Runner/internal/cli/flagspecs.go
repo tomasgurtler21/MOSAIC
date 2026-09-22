@@ -45,6 +45,11 @@ func RegisterRunFlags(fs *pflag.FlagSet) {
 	fs.String("infra-class", "", "Comma-separated class=agent mappings for non-interactive agent-per-class selection (e.g. checkpoint=checkpoint-manager-git,commit=commit-manager-git)")
 	fs.StringArray("input", nil, "Path to a file or directory to copy into a new run's folder before the first dispatch; repeatable. Not permitted with --run.")
 	fs.String("ghcp-permission-mode", "", "GHCP CLI permission strategy: blanket (--yolo, grants all permissions) or allowlist (per-tool --allow-tool entries from agent frontmatter). Required when --harness=ghcp-cli.")
+	fs.String("infrastructure", "", "Comma-separated infrastructure agent keys (dev test mode only)")
+	fs.Bool("dev-test-mode", false, "Internal: marks this invocation as a dev test subprocess")
+	// dev-test-mode is hidden from user-facing help; MarkHidden returns an error
+	// only if the flag does not exist, so discard it since we just registered it.
+	_ = fs.MarkHidden("dev-test-mode")
 }
 
 // RunFlagSpecs returns the arity of every flag mosaic-run accepts: every flag

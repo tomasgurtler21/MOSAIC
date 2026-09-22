@@ -415,8 +415,8 @@ Infrastructure agents (checkpoint, commit, restore) are dispatched automatically
 | Trigger | Fires When |
 |---------|-----------|
 | `INVOCATION_INTERVAL` | N workflow steps since last dispatch of this agent |
-| `STAGE_END` | Current stage differs from previous workflow step's stage |
-| `PHASE_END` | Current phase differs from previous workflow step's phase |
+| `STAGE_END` | The completed step is the last step of its stage |
+| `PHASE_END` | The completed step is the last step of its phase; for the EXECUTION phase this means the last step of the last stage (phase-wide scope, not per-stage) |
 | `MANUAL` | Never fires automatically; dispatched by explicit instruction only |
 
 **Recording:** Infrastructure steps are recorded in the execution log like any other step, but they do not update `current_state`. The artifact's recorded workflow position always names the last workflow step, ensuring the engine's row-lookup stays correct.

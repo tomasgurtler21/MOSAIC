@@ -2914,10 +2914,14 @@ func TestSession_Start_InfrastructureOverride_EmptyOverrides_Proceeds(t *testing
 //   - Does not fire when global_sequence is below param (vacuous RED).
 //
 //   STAGE_END trigger:
-//   - Fires after the first workflow step of a new stage (retrospective: current
-//     step's Stage != previous workflow step's Stage).
-//   - Does not fire between steps within the same stage (vacuous RED).
-//   - Does not fire on the very first workflow step (no previous step to compare; vacuous RED).
+//   - Fires after the last workflow step of a stage (prospective: the completed
+//     step is the last step of its stage, determined by look-ahead into the
+//     admitted workflow and stage set).
+//   - Fires once at the end of a single-stage workflow (single stage counts as a
+//     complete stage boundary).
+//   - Does not fire after intermediate steps within a stage; fires only at the
+//     last step of each stage.
+//   - Does not fire in non-EXECUTION phases (no stage structure outside EXECUTION).
 //
 //   restore-class exclusion:
 //   - A restore-class agent is never dispatched by automatic trigger evaluation,
@@ -3217,15 +3221,17 @@ func TestSession_Start_TriggerEval_INVOCATION_INTERVAL_HighThreshold_DoesNotFire
 
 // TestSession_Start_TriggerEval_STAGE_END_FiresOnStageTransition verifies that a
 // commit-class infrastructure agent with STAGE_END trigger is dispatched after the
-// first workflow step of a new stage. The STAGE_END rule is retrospective: it fires
-// when the just-completed step's Stage differs from the previous workflow step's Stage.
+// last step of a stage (prospective semantics). STAGE_END fires when the completed
+// step is the last step of its stage, determined by look-ahead into the admitted
+// workflow and stage set -- not by comparing against a previous step.
 //
 // Dispatch sequence with 2 stages (Stage-1: tdd, review; Stage-2: tdd, review):
-//   - implementation-tdd  Stage-1 (first step, no prior step → no STAGE_END)
-//   - implementation-review Stage-1 (same stage → no STAGE_END)
-//   - implementation-tdd  Stage-2 (Stage-2 ≠ Stage-1 → STAGE_END fires → commit-manager-git)
+//   - implementation-tdd  Stage-1 (not the last Stage-1 step → no STAGE_END)
+//   - implementation-review Stage-1 (last Stage-1 step → STAGE_END fires → commit-manager-git)
 //   - commit-manager-git  (infra dispatch, IsInfrastructure=true → no cascade)
-//   - implementation-review Stage-2 (same stage → no STAGE_END)
+//   - implementation-tdd  Stage-2 (not the last Stage-2 step → no STAGE_END)
+//   - implementation-review Stage-2 (last Stage-2 step → STAGE_END fires → commit-manager-git)
+//   - commit-manager-git  (infra dispatch for Stage-2 end)
 func TestSession_Start_TriggerEval_STAGE_END_FiresOnStageTransition(t *testing.T) {
 	ses, f, _, orchPath := newStageEndStagedSession(t)
 
@@ -3235,28 +3241,35 @@ func TestSession_Start_TriggerEval_STAGE_END_FiresOnStageTransition(t *testing.T
 		StatusCode:      domain.StatusSUCCESS,
 		StatusMessage:   "stage 1 tdd done",
 	}})
+	// Last step of Stage 1: STAGE_END fires after this step.
 	f.Queue("implementation-review", harness.ScriptedEntry{Response: &domain.ProtocolResponse{
 		AgentInstanceID: "implementation-review#2",
 		StatusCode:      domain.StatusSUCCESS,
 		StatusMessage:   "stage 1 review done",
 	}})
-	// Stage 2 first step: Stage-2 != Stage-1 → STAGE_END fires.
+	// Infrastructure dispatch triggered by STAGE_END at end of Stage 1.
+	f.Queue("commit-manager-git", harness.ScriptedEntry{Response: &domain.ProtocolResponse{
+		AgentInstanceID: "commit-manager-git#3",
+		StatusCode:      domain.StatusSUCCESS,
+		StatusMessage:   "commit after stage 1",
+	}})
+	// Stage 2 first step: not the last Stage-2 step → no STAGE_END.
 	f.Queue("implementation-tdd", harness.ScriptedEntry{Response: &domain.ProtocolResponse{
-		AgentInstanceID: "implementation-tdd#3",
+		AgentInstanceID: "implementation-tdd#4",
 		StatusCode:      domain.StatusSUCCESS,
 		StatusMessage:   "stage 2 tdd done",
 	}})
-	// Infrastructure dispatch triggered by STAGE_END.
-	f.Queue("commit-manager-git", harness.ScriptedEntry{Response: &domain.ProtocolResponse{
-		AgentInstanceID: "commit-manager-git#4",
-		StatusCode:      domain.StatusSUCCESS,
-		StatusMessage:   "commit done",
-	}})
-	// Stage 2 second step: same stage → no STAGE_END.
+	// Last step of Stage 2: STAGE_END fires after this step.
 	f.Queue("implementation-review", harness.ScriptedEntry{Response: &domain.ProtocolResponse{
 		AgentInstanceID: "implementation-review#5",
 		StatusCode:      domain.StatusSUCCESS,
 		StatusMessage:   "stage 2 review done",
+	}})
+	// Infrastructure dispatch triggered by STAGE_END at end of Stage 2.
+	f.Queue("commit-manager-git", harness.ScriptedEntry{Response: &domain.ProtocolResponse{
+		AgentInstanceID: "commit-manager-git#6",
+		StatusCode:      domain.StatusSUCCESS,
+		StatusMessage:   "commit after stage 2",
 	}})
 
 	cfg := domain.RunConfig{
@@ -3273,41 +3286,49 @@ func TestSession_Start_TriggerEval_STAGE_END_FiresOnStageTransition(t *testing.T
 	requireRunStatus(t, got, err, domain.RunCompleted)
 
 	invs := f.Invocations()
-	if len(invs) != 5 {
-		t.Fatalf("want 5 invocations (tdd1, review1, tdd2, commit, review2), got %d", len(invs))
+	if len(invs) != 6 {
+		t.Fatalf("want 6 invocations (tdd1, review1, commit1, tdd2, review2, commit2), got %d", len(invs))
 	}
 
-	commitIdx := -1
+	// commit-manager-git must appear twice: once after Stage-1's last step and
+	// once after Stage-2's last step.
+	commitIndices := []int{}
 	for i, inv := range invs {
 		if inv.Agent.Identifier == "commit-manager-git" {
-			commitIdx = i
-			break
+			commitIndices = append(commitIndices, i)
 		}
 	}
-	if commitIdx == -1 {
-		t.Fatal("want commit-manager-git dispatched after stage transition, but it was never invoked")
+	if len(commitIndices) != 2 {
+		t.Fatalf("want 2 commit-manager-git dispatches (one per stage end), got %d", len(commitIndices))
 	}
-	// commit-manager-git must follow tdd1, review1, tdd2 (index 3 in 0-based).
-	if commitIdx != 3 {
-		t.Errorf("want commit-manager-git at invocation[3] (after stage transition), got at invocation[%d]", commitIdx)
+	// First commit must follow tdd1, review1 (index 2 in 0-based).
+	if commitIndices[0] != 2 {
+		t.Errorf("want first commit-manager-git at invocation[2] (after Stage-1 last step), got at invocation[%d]", commitIndices[0])
+	}
+	// Second commit must follow tdd2, review2 (index 5 in 0-based).
+	if commitIndices[1] != 5 {
+		t.Errorf("want second commit-manager-git at invocation[5] (after Stage-2 last step), got at invocation[%d]", commitIndices[1])
 	}
 }
 
-// TestSession_Start_TriggerEval_STAGE_END_DoesNotFireWithinSameStage verifies that
-// the STAGE_END trigger does not fire when consecutive workflow steps are in the same stage.
-// Only a change in the Stage field between the current step and the prior workflow step
-// triggers the STAGE_END condition.
+// TestSession_Start_TriggerEval_STAGE_END_FiresAtEndOfSingleStage verifies that a
+// commit-class infrastructure agent with STAGE_END trigger is dispatched exactly
+// once at the end of a single-stage workflow. Under prospective semantics, STAGE_END
+// fires when the completed step is the last step of its stage; a single-stage
+// workflow has exactly one stage boundary at the end of that stage.
 //
-// RED phase: this test passes vacuously because trigger evaluation is not yet implemented.
-// Once implementation is added, a bug that fires STAGE_END within the same stage would
-// produce unexpected commit-manager-git dispatches and cause this test to fail.
-func TestSession_Start_TriggerEval_STAGE_END_DoesNotFireWithinSameStage(t *testing.T) {
-	// Build a staged session with only 1 stage. Within a single stage all steps
-	// have the same Stage value, so STAGE_END can never fire.
+// Dispatch sequence (1 stage: tdd, review):
+//   - implementation-tdd  Stage-1 (not the last Stage-1 step → no STAGE_END)
+//   - implementation-review Stage-1 (last Stage-1 step → STAGE_END fires → commit-manager-git)
+//   - commit-manager-git  (infra dispatch, IsInfrastructure=true → no cascade)
+func TestSession_Start_TriggerEval_STAGE_END_FiresAtEndOfSingleStage(t *testing.T) {
+	// Build a staged session with only 1 stage. STAGE_END must fire once, after the
+	// last step of that single stage.
 	dir := t.TempDir()
 	orchPath := copyOrchestratorFile(t, dir, "stage-end-staged-orch.md")
 	writeAgentFile(t, dir, "implementation-tdd")
 	writeAgentFile(t, dir, "implementation-review")
+	writeAgentFile(t, dir, "commit-manager-git")
 	const singleStagePlan = `# Plan
 
 ## Stages
@@ -3327,15 +3348,23 @@ func TestSession_Start_TriggerEval_STAGE_END_DoesNotFireWithinSameStage(t *testi
 		Interact:  &noopInteraction{},
 	})
 
+	// First step: not the last step of Stage-1, so STAGE_END must not fire yet.
 	f.Queue("implementation-tdd", harness.ScriptedEntry{Response: &domain.ProtocolResponse{
 		AgentInstanceID: "implementation-tdd#1",
 		StatusCode:      domain.StatusSUCCESS,
 		StatusMessage:   "done",
 	}})
+	// Last step of Stage-1: STAGE_END fires after this completes.
 	f.Queue("implementation-review", harness.ScriptedEntry{Response: &domain.ProtocolResponse{
 		AgentInstanceID: "implementation-review#2",
 		StatusCode:      domain.StatusSUCCESS,
 		StatusMessage:   "done",
+	}})
+	// Infrastructure dispatch triggered by STAGE_END at end of the single stage.
+	f.Queue("commit-manager-git", harness.ScriptedEntry{Response: &domain.ProtocolResponse{
+		AgentInstanceID: "commit-manager-git#3",
+		StatusCode:      domain.StatusSUCCESS,
+		StatusMessage:   "commit done",
 	}})
 
 	cfg := domain.RunConfig{
@@ -3351,27 +3380,33 @@ func TestSession_Start_TriggerEval_STAGE_END_DoesNotFireWithinSameStage(t *testi
 
 	requireRunStatus(t, got, err, domain.RunCompleted)
 
-	for _, inv := range f.Invocations() {
-		if inv.Agent.Identifier == "commit-manager-git" {
-			t.Errorf("commit-manager-git dispatched unexpectedly: STAGE_END must not fire when all steps share the same stage")
-		}
+	invs := f.Invocations()
+	if len(invs) != 3 {
+		t.Fatalf("want 3 invocations (tdd, review, commit), got %d: STAGE_END must fire exactly once at the end of the single stage", len(invs))
+	}
+	// commit-manager-git must be the third invocation (after tdd and review).
+	if invs[2].Agent.Identifier != "commit-manager-git" {
+		t.Errorf("want invocation[2] to be commit-manager-git (STAGE_END fired at end of stage), got %q", invs[2].Agent.Identifier)
 	}
 }
 
-// TestSession_Start_TriggerEval_STAGE_END_DoesNotFireOnFirstWorkflowStep verifies
-// that STAGE_END does not fire after the very first workflow step of a run, because
-// there is no previous workflow step to compare the Stage value against.
+// TestSession_Start_TriggerEval_STAGE_END_DoesNotFireBeforeLastStep verifies that
+// STAGE_END does not fire after intermediate steps within a stage -- only after the
+// final step of a stage. In a single-stage workflow with two steps (tdd, review),
+// STAGE_END must not fire after tdd (index 0); it fires only after review (index 1).
 //
-// RED phase: this test passes vacuously because trigger evaluation is not yet
-// implemented. It provides regression protection once implementation is added: a
-// bug that fires STAGE_END without a previous step would cause unexpected dispatches.
-func TestSession_Start_TriggerEval_STAGE_END_DoesNotFireOnFirstWorkflowStep(t *testing.T) {
-	// Use a staged workflow with a single-step stage so the first (and only)
-	// workflow step has no predecessor. STAGE_END must not fire after that step.
+// This is a regression guard for the prospective look-ahead implementation: a bug
+// that fires STAGE_END eagerly (e.g., after every step rather than at the last step)
+// would produce commit-manager-git at index 0 instead of index 2, failing the
+// position assertion.
+func TestSession_Start_TriggerEval_STAGE_END_DoesNotFireBeforeLastStep(t *testing.T) {
+	// Single-stage workflow, 2 steps: tdd then review. STAGE_END must fire only
+	// after the review step (the last step of the stage), not after tdd.
 	dir := t.TempDir()
 	orchPath := copyOrchestratorFile(t, dir, "stage-end-staged-orch.md")
 	writeAgentFile(t, dir, "implementation-tdd")
 	writeAgentFile(t, dir, "implementation-review")
+	writeAgentFile(t, dir, "commit-manager-git")
 	const singleStagePlan = `# Plan
 
 ## Stages
@@ -3391,17 +3426,23 @@ func TestSession_Start_TriggerEval_STAGE_END_DoesNotFireOnFirstWorkflowStep(t *t
 		Interact:  &noopInteraction{},
 	})
 
-	// Only the first workflow step in Stage-1. After this completes, STAGE_END
-	// must not fire because prevWorkflowStep is nil (no prior step).
+	// Intermediate step (not the last step of Stage-1): STAGE_END must not fire.
 	f.Queue("implementation-tdd", harness.ScriptedEntry{Response: &domain.ProtocolResponse{
 		AgentInstanceID: "implementation-tdd#1",
 		StatusCode:      domain.StatusSUCCESS,
 		StatusMessage:   "done",
 	}})
+	// Last step of Stage-1: STAGE_END fires after this step, not before.
 	f.Queue("implementation-review", harness.ScriptedEntry{Response: &domain.ProtocolResponse{
 		AgentInstanceID: "implementation-review#2",
 		StatusCode:      domain.StatusSUCCESS,
 		StatusMessage:   "done",
+	}})
+	// commit-manager-git dispatched only after review (the last stage step).
+	f.Queue("commit-manager-git", harness.ScriptedEntry{Response: &domain.ProtocolResponse{
+		AgentInstanceID: "commit-manager-git#3",
+		StatusCode:      domain.StatusSUCCESS,
+		StatusMessage:   "commit done",
 	}})
 
 	cfg := domain.RunConfig{
@@ -3417,10 +3458,126 @@ func TestSession_Start_TriggerEval_STAGE_END_DoesNotFireOnFirstWorkflowStep(t *t
 
 	requireRunStatus(t, got, err, domain.RunCompleted)
 
-	for _, inv := range f.Invocations() {
+	invs := f.Invocations()
+	if len(invs) != 3 {
+		t.Fatalf("want exactly 3 invocations (tdd, review, commit), got %d", len(invs))
+	}
+	// commit-manager-git must be at index 2, not at index 0 or 1.
+	// If STAGE_END fires after tdd (intermediate step), commit would appear at
+	// index 1, causing this assertion to fail.
+	if invs[2].Agent.Identifier != "commit-manager-git" {
+		t.Errorf("want invocation[2] = commit-manager-git (fires only at last stage step), got %q; STAGE_END must not fire before the last step", invs[2].Agent.Identifier)
+	}
+}
+
+// TestSession_Start_TriggerEval_STAGE_END_FiresOncePerStageInMultiStageWorkflow
+// verifies that STAGE_END fires exactly once per stage in a multi-stage workflow,
+// positioned after the last step of each stage and before the first step of the
+// next stage. This validates the prospective look-ahead semantics across stage
+// boundaries.
+//
+// The workflow has 2 stages (Stage-1: tdd, review; Stage-2: tdd, review).
+// Expected dispatch sequence:
+//   - implementation-tdd  Stage-1 (not last Stage-1 step → no STAGE_END)
+//   - implementation-review Stage-1 (last Stage-1 step → STAGE_END fires)
+//   - commit-manager-git  Stage-1 end (infra dispatch)
+//   - implementation-tdd  Stage-2 (not last Stage-2 step → no STAGE_END)
+//   - implementation-review Stage-2 (last Stage-2 step → STAGE_END fires)
+//   - commit-manager-git  Stage-2 end (infra dispatch)
+//
+// commit-manager-git must fire exactly twice: once at index 2 (after Stage-1's
+// last step) and once at index 5 (after Stage-2's last step).
+func TestSession_Start_TriggerEval_STAGE_END_FiresOncePerStageInMultiStageWorkflow(t *testing.T) {
+	ses, f, _, orchPath := newStageEndStagedSession(t)
+
+	// Stage 1, step 1: not the last step of Stage-1.
+	f.Queue("implementation-tdd", harness.ScriptedEntry{Response: &domain.ProtocolResponse{
+		AgentInstanceID: "implementation-tdd#1",
+		StatusCode:      domain.StatusSUCCESS,
+		StatusMessage:   "stage 1 tdd done",
+	}})
+	// Stage 1, step 2 (last step): STAGE_END fires after this completes.
+	f.Queue("implementation-review", harness.ScriptedEntry{Response: &domain.ProtocolResponse{
+		AgentInstanceID: "implementation-review#2",
+		StatusCode:      domain.StatusSUCCESS,
+		StatusMessage:   "stage 1 review done",
+	}})
+	// Commit triggered by STAGE_END at Stage-1 boundary.
+	f.Queue("commit-manager-git", harness.ScriptedEntry{Response: &domain.ProtocolResponse{
+		AgentInstanceID: "commit-manager-git#3",
+		StatusCode:      domain.StatusSUCCESS,
+		StatusMessage:   "commit stage 1",
+	}})
+	// Stage 2, step 1: not the last step of Stage-2.
+	f.Queue("implementation-tdd", harness.ScriptedEntry{Response: &domain.ProtocolResponse{
+		AgentInstanceID: "implementation-tdd#4",
+		StatusCode:      domain.StatusSUCCESS,
+		StatusMessage:   "stage 2 tdd done",
+	}})
+	// Stage 2, step 2 (last step): STAGE_END fires after this completes.
+	f.Queue("implementation-review", harness.ScriptedEntry{Response: &domain.ProtocolResponse{
+		AgentInstanceID: "implementation-review#5",
+		StatusCode:      domain.StatusSUCCESS,
+		StatusMessage:   "stage 2 review done",
+	}})
+	// Commit triggered by STAGE_END at Stage-2 boundary.
+	f.Queue("commit-manager-git", harness.ScriptedEntry{Response: &domain.ProtocolResponse{
+		AgentInstanceID: "commit-manager-git#6",
+		StatusCode:      domain.StatusSUCCESS,
+		StatusMessage:   "commit stage 2",
+	}})
+
+	cfg := domain.RunConfig{
+		OrchestratorFilePath: orchPath,
+		WorkflowID:           "staged",
+		Task:                 "task",
+		IsNewRun:             true,
+		RunSettings:          domain.RunSettings{Mode: domain.ExecutionModeAuto},
+		RunFolder:            filepath.Dir(orchPath),
+	}
+
+	got, err := ses.Start(context.Background(), cfg)
+
+	requireRunStatus(t, got, err, domain.RunCompleted)
+
+	invs := f.Invocations()
+	if len(invs) != 6 {
+		t.Fatalf("want 6 invocations (tdd1, review1, commit1, tdd2, review2, commit2), got %d", len(invs))
+	}
+
+	// Collect commit dispatch positions.
+	var commitIndices []int
+	for i, inv := range invs {
 		if inv.Agent.Identifier == "commit-manager-git" {
-			t.Errorf("commit-manager-git dispatched after first step: STAGE_END must not fire when prevWorkflowStep is nil (no prior step to compare)")
+			commitIndices = append(commitIndices, i)
 		}
+	}
+
+	// Exactly two commits: one per stage.
+	if len(commitIndices) != 2 {
+		t.Fatalf("want exactly 2 commit-manager-git dispatches (one per stage end), got %d at positions %v",
+			len(commitIndices), commitIndices)
+	}
+
+	// First commit must immediately follow Stage-1's last step (index 2 in 0-based).
+	// If it were at index 0 or 1, STAGE_END fired too early.
+	// If it were at index 3 or later, STAGE_END fired too late (first step of Stage-2).
+	if commitIndices[0] != 2 {
+		t.Errorf("want first commit-manager-git at invocation[2] (after Stage-1 last step, before Stage-2 first step), got invocation[%d]",
+			commitIndices[0])
+	}
+
+	// Second commit must follow Stage-2's last step (index 5 in 0-based).
+	if commitIndices[1] != 5 {
+		t.Errorf("want second commit-manager-git at invocation[5] (after Stage-2 last step), got invocation[%d]",
+			commitIndices[1])
+	}
+
+	// Verify Stage-2's first step (tdd2) follows the first commit without
+	// an extra commit in between.
+	if invs[3].Agent.Identifier != "implementation-tdd" {
+		t.Errorf("want invocation[3] = implementation-tdd (Stage-2 first step after commit), got %q",
+			invs[3].Agent.Identifier)
 	}
 }
 
@@ -3972,6 +4129,11 @@ func newMultiCheckpointSession(t *testing.T) (ses session.Session, f *harness.Fa
 // which declares two review-class infrastructure agents (review-agent-a and
 // review-agent-b, both with INVOCATION_INTERVAL:1 continue).
 // Agent files for agent-a and agent-b are written into the temp dir.
+//
+// Routing is intentionally not wired (nil). Tests that use this helper
+// verify review-class behavior without post-review routing consultation;
+// Stage-2 behavior (consultation when Routing != nil) is covered by
+// session_review_consult_test.go.
 func newReviewClassSession(t *testing.T) (ses session.Session, f *harness.FakeAdapter, store *memStore, orchPath string) {
 	t.Helper()
 	dir := t.TempDir()
@@ -3983,10 +4145,11 @@ func newReviewClassSession(t *testing.T) (ses session.Session, f *harness.FakeAd
 	f = harness.NewFakeAdapter()
 	store = &memStore{}
 	ses = session.New(session.Deps{
-		Harness:   f,
-		Store:     store,
-		Clock:     fixedClock{t: epoch},
-		Interact:  &noopInteraction{},
+		Harness:  f,
+		Store:    store,
+		Clock:    fixedClock{t: epoch},
+		Interact: &noopInteraction{},
+		// Routing: nil -- no post-review consultation; run proceeds without consultant.
 	})
 	return
 }
@@ -4162,11 +4325,12 @@ func TestSession_Start_SingleGatedClassAgent_AutoSelected_RunProceeds(t *testing
 	// checkpoint-agent-orch.md declares one checkpoint-class agent.
 	ses, f, _, orchPath := newCheckpointAgentSession(t)
 
-	// Expected GREEN dispatch: agent-a → checkpoint-manager-git (STAGE_END on
-	// first step does not fire; STAGE_END fires only when stage changes) →
-	// agent-b. With STAGE_END trigger and a linear workflow (no stage change),
-	// the checkpoint agent never fires. That is correct behaviour: the trigger
-	// contract is unrelated to auto-selection.
+	// Expected GREEN dispatch: agent-a → agent-b. The STAGE_END trigger on
+	// checkpoint-manager-git does not fire here because this is a linear (non-staged)
+	// PLANNING workflow -- STAGE_END only applies within EXECUTION phases that have
+	// a stage structure. Without EXECUTION stages, the look-ahead finds no stage
+	// boundary and the checkpoint agent is never dispatched. That is correct
+	// behaviour: the trigger contract is unrelated to auto-selection.
 	f.Queue("agent-a", harness.ScriptedEntry{Response: &domain.ProtocolResponse{
 		AgentInstanceID: "agent-a#1",
 		StatusCode:      domain.StatusSUCCESS,

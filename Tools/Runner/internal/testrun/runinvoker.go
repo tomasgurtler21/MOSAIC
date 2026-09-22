@@ -308,6 +308,9 @@ func (s *SubprocessRunInvoker) Invoke(ctx context.Context, inv RunInvocation) (I
 //	run --workflow <WorkflowID> --mode <Mode> --harness <Harness>
 //	    --new-run --input <FixturePath> --task <Task>
 //	    --pre-consult=<true|false>
+//	    [--infrastructure=<keys>]
+//	    --checkpoints <disabled|enabled>
+//	    --commits <disabled|enabled>
 //	    [--ghcp-permission-mode <GHCPPermissionMode>]
 func buildRunArgs(inv RunInvocation) []string {
 	args := []string{
@@ -323,9 +326,36 @@ func buildRunArgs(inv RunInvocation) []string {
 	if inv.ExecutablePath != "" {
 		args = append(args, "--executable-path", inv.ExecutablePath)
 	}
+
+	// --infrastructure: nil=omit, empty=--infrastructure=, populated=--infrastructure=k1,k2
+	if inv.InfrastructureKeys != nil {
+		args = append(args, "--infrastructure="+strings.Join(inv.InfrastructureKeys, ","))
+	}
+
+	// --checkpoints: empty string defaults to "disabled"
+	checkpoints := inv.Checkpoints
+	if checkpoints == "" {
+		checkpoints = "disabled"
+	}
+	args = append(args, "--checkpoints", checkpoints)
+
+	// --commits: empty string defaults to "disabled"
+	commits := inv.Commits
+	if commits == "" {
+		commits = "disabled"
+	}
+	args = append(args, "--commits", commits)
+
 	if inv.GHCPPermissionMode != "" {
 		args = append(args, "--ghcp-permission-mode", inv.GHCPPermissionMode)
 	}
+
+	// Always emit --dev-test-mode: buildRunArgs is only called by the test
+	// framework's SubprocessRunInvoker, and every test subprocess must accept
+	// --infrastructure. This boolean flag signals to mosaic-run run that the
+	// invocation is from the test framework.
+	args = append(args, "--dev-test-mode")
+
 	return args
 }
 

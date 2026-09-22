@@ -50,15 +50,16 @@ func newDeployer(opts testdeploy.Options) *testdeploy.Deployer {
 
 // minimalDeploy calls Deploy with the smallest valid argument set for a single
 // harness deployment. Tests that care about specific field values call Deploy
-// directly.
+// directly. infrastructureKeys is nil (absent flag semantics).
 func minimalDeploy(d *testdeploy.Deployer) error {
 	return d.Deploy(
 		context.Background(),
-		"/catalog",    // catalogFolder
-		"/mosaic",     // mosaicRoot
-		"/workspace",  // workspace
-		[]string{"auto"},            // harnesses
-		[]string{"smoke-single"},    // workflows
+		"/catalog",           // catalogFolder
+		"/mosaic",            // mosaicRoot
+		"/workspace",         // workspace
+		[]string{"auto"},     // harnesses
+		[]string{"smoke-single"}, // workflows
+		nil,                  // infrastructureKeys: nil = absent flag
 	)
 }
 
@@ -105,7 +106,7 @@ func TestDeploy_CatalogFolder_PassedAsCatalogFolderFlag(t *testing.T) {
 		},
 	})
 
-	_ = d.Deploy(context.Background(), catalogPath, "/mosaic", "/workspace", []string{"auto"}, []string{"smoke-single"})
+	_ = d.Deploy(context.Background(), catalogPath, "/mosaic", "/workspace", []string{"auto"}, []string{"smoke-single"}, nil)
 
 	if !containsFlag(capturedArgs, "--catalog-folder", catalogPath) {
 		t.Errorf("args = %v, want --catalog-folder %s", capturedArgs, catalogPath)
@@ -125,7 +126,7 @@ func TestDeploy_Workspace_PassedAsWorkspaceFlag(t *testing.T) {
 		},
 	})
 
-	_ = d.Deploy(context.Background(), "/catalog", "/mosaic", workspacePath, []string{"auto"}, []string{"smoke-single"})
+	_ = d.Deploy(context.Background(), "/catalog", "/mosaic", workspacePath, []string{"auto"}, []string{"smoke-single"}, nil)
 
 	if !containsFlag(capturedArgs, "--workspace", workspacePath) {
 		t.Errorf("args = %v, want --workspace %s", capturedArgs, workspacePath)
@@ -144,7 +145,7 @@ func TestDeploy_Harness_PassedAsHarnessFlag(t *testing.T) {
 		},
 	})
 
-	_ = d.Deploy(context.Background(), "/catalog", "/mosaic", "/workspace", []string{"claude-code"}, []string{"smoke-single"})
+	_ = d.Deploy(context.Background(), "/catalog", "/mosaic", "/workspace", []string{"claude-code"}, []string{"smoke-single"}, nil)
 
 	if !containsFlag(capturedArgs, "--harness", "claude-code") {
 		t.Errorf("args = %v, want --harness claude-code", capturedArgs)
@@ -166,7 +167,7 @@ func TestDeploy_MosaicRoot_PassedAsMosaicRootFlag(t *testing.T) {
 		},
 	})
 
-	_ = d.Deploy(context.Background(), "/catalog", mosaicRoot, "/workspace", []string{"auto"}, []string{"smoke-single"})
+	_ = d.Deploy(context.Background(), "/catalog", mosaicRoot, "/workspace", []string{"auto"}, []string{"smoke-single"}, nil)
 
 	if !containsFlag(capturedArgs, "--mosaic-root", mosaicRoot) {
 		t.Errorf("args = %v, want --mosaic-root %s when mosaicRoot is non-empty", capturedArgs, mosaicRoot)
@@ -186,7 +187,7 @@ func TestDeploy_MosaicRootEmpty_MosaicRootFlagAbsent(t *testing.T) {
 		},
 	})
 
-	_ = d.Deploy(context.Background(), "/catalog", "", "/workspace", []string{"auto"}, []string{"smoke-single"})
+	_ = d.Deploy(context.Background(), "/catalog", "", "/workspace", []string{"auto"}, []string{"smoke-single"}, nil)
 
 	if len(capturedArgs) == 0 {
 		t.Fatal("Deploy did not invoke CommandRunner; cannot assert argument absence")
@@ -265,7 +266,7 @@ func TestDeploy_WorkflowsFlag_AlwaysEmitted_EvenWhenEmpty(t *testing.T) {
 		},
 	})
 
-	_ = d.Deploy(context.Background(), "/catalog", "/mosaic", "/workspace", []string{"auto"}, []string{})
+	_ = d.Deploy(context.Background(), "/catalog", "/mosaic", "/workspace", []string{"auto"}, []string{}, nil)
 
 	if flagIndex(capturedArgs, "--workflows") < 0 {
 		t.Errorf("args = %v, want --workflows to be present even when the workflows list is empty "+
@@ -287,7 +288,7 @@ func TestDeploy_WorkflowsFlag_PopulatedList_CommaJoinedValues(t *testing.T) {
 		},
 	})
 
-	_ = d.Deploy(context.Background(), "/catalog", "/mosaic", "/workspace", []string{"auto"}, workflows)
+	_ = d.Deploy(context.Background(), "/catalog", "/mosaic", "/workspace", []string{"auto"}, workflows, nil)
 
 	idx := flagIndex(capturedArgs, "--workflows")
 	if idx < 0 || idx+1 >= len(capturedArgs) {
@@ -311,7 +312,7 @@ func TestDeploy_WorkflowsFlag_SingleWorkflow_NoTrailingComma(t *testing.T) {
 		},
 	})
 
-	_ = d.Deploy(context.Background(), "/catalog", "/mosaic", "/workspace", []string{"auto"}, []string{"smoke-single"})
+	_ = d.Deploy(context.Background(), "/catalog", "/mosaic", "/workspace", []string{"auto"}, []string{"smoke-single"}, nil)
 
 	idx := flagIndex(capturedArgs, "--workflows")
 	if idx < 0 || idx+1 >= len(capturedArgs) {
@@ -338,7 +339,7 @@ func TestDeploy_SingleHarness_ExactlyOneInvocation(t *testing.T) {
 		},
 	})
 
-	_ = d.Deploy(context.Background(), "/catalog", "/mosaic", "/workspace", []string{"auto"}, []string{"smoke-single"})
+	_ = d.Deploy(context.Background(), "/catalog", "/mosaic", "/workspace", []string{"auto"}, []string{"smoke-single"}, nil)
 
 	if invocations != 1 {
 		t.Errorf("CommandRunner invoked %d time(s), want exactly 1 for a single harness", invocations)
@@ -360,7 +361,7 @@ func TestDeploy_TwoHarnesses_TwoInvocations(t *testing.T) {
 	})
 
 	_ = d.Deploy(context.Background(), "/catalog", "/mosaic", "/workspace",
-		[]string{"auto", "claude-code"}, []string{"smoke-single"})
+		[]string{"auto", "claude-code"}, []string{"smoke-single"}, nil)
 
 	if invocations != 2 {
 		t.Errorf("CommandRunner invoked %d time(s), want exactly 2 for two harnesses (one per harness)", invocations)
@@ -380,7 +381,7 @@ func TestDeploy_ThreeHarnesses_ThreeInvocations(t *testing.T) {
 	})
 
 	_ = d.Deploy(context.Background(), "/catalog", "/mosaic", "/workspace",
-		[]string{"auto", "claude-code", "ghcp-cli"}, []string{"smoke-single"})
+		[]string{"auto", "claude-code", "ghcp-cli"}, []string{"smoke-single"}, nil)
 
 	if invocations != 3 {
 		t.Errorf("CommandRunner invoked %d time(s), want exactly 3 for three harnesses", invocations)
@@ -407,7 +408,7 @@ func TestDeploy_TwoHarnesses_EachInvocationGetsCorrectHarnessID(t *testing.T) {
 	})
 
 	_ = d.Deploy(context.Background(), "/catalog", "/mosaic", "/workspace",
-		[]string{"auto", "claude-code"}, []string{"smoke-single"})
+		[]string{"auto", "claude-code"}, []string{"smoke-single"}, nil)
 
 	if len(capturedByHarness) != 2 {
 		t.Fatalf("CommandRunner invoked %d time(s), want 2", len(capturedByHarness))
@@ -445,7 +446,7 @@ func TestDeploy_TwoHarnesses_SharedCatalogFolderAcrossInvocations(t *testing.T) 
 	})
 
 	_ = d.Deploy(context.Background(), catalog, "/mosaic", "/workspace",
-		[]string{"auto", "claude-code"}, []string{"smoke-single"})
+		[]string{"auto", "claude-code"}, []string{"smoke-single"}, nil)
 
 	if len(catalogsObserved) != 2 {
 		t.Fatalf("CommandRunner invoked %d time(s), want 2", len(catalogsObserved))
@@ -704,7 +705,7 @@ func TestDeploy_TimeoutExceeded_ReturnsErrTimedOut(t *testing.T) {
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel()
 
-	err := d.Deploy(ctx, "/catalog", "/mosaic", "/workspace", []string{"auto"}, []string{"smoke-single"})
+	err := d.Deploy(ctx, "/catalog", "/mosaic", "/workspace", []string{"auto"}, []string{"smoke-single"}, nil)
 
 	if err == nil {
 		t.Fatal("Deploy returned nil error when the tool timed out, want ErrTimedOut")
@@ -730,7 +731,7 @@ func TestDeploy_CallerContextCancelled_ReturnsError(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
 	cancel() // cancelled immediately before Deploy is called
 
-	err := d.Deploy(ctx, "/catalog", "/mosaic", "/workspace", []string{"auto"}, []string{"smoke-single"})
+	err := d.Deploy(ctx, "/catalog", "/mosaic", "/workspace", []string{"auto"}, []string{"smoke-single"}, nil)
 
 	if err == nil {
 		t.Fatal("Deploy returned nil error when the caller's context was cancelled, want a non-nil error")
@@ -760,7 +761,7 @@ func TestDeploy_MultipleHarnesses_FirstHarnessFailure_StopsEarly(t *testing.T) {
 	})
 
 	err := d.Deploy(context.Background(), "/catalog", "/mosaic", "/workspace",
-		[]string{"auto", "claude-code"}, []string{"smoke-single"})
+		[]string{"auto", "claude-code"}, []string{"smoke-single"}, nil)
 
 	if err == nil {
 		t.Fatal("Deploy returned nil error after first harness failed, want ErrDeployFailed")
@@ -771,6 +772,189 @@ func TestDeploy_MultipleHarnesses_FirstHarnessFailure_StopsEarly(t *testing.T) {
 	if invocations != 1 {
 		t.Errorf("CommandRunner invoked %d time(s), want exactly 1 "+
 			"(deployer must stop on first harness failure, not continue to remaining harnesses)", invocations)
+	}
+}
+
+// =============================================================================
+// Infrastructure flag: nil/empty/populated semantics (T1.3)
+// =============================================================================
+
+// TestDeploy_InfrastructureKeysNil_FlagAbsent asserts that when infrastructureKeys
+// is nil, --infrastructure is NOT present in the emitted args. Nil means "don't
+// know" -- the deploy tool will ask interactively. Emitting --infrastructure ""
+// when keys are nil would suppress the interactive prompt incorrectly.
+func TestDeploy_InfrastructureKeysNil_FlagAbsent(t *testing.T) {
+	var capturedArgs []string
+
+	d := newDeployer(testdeploy.Options{
+		Invoke: func(ctx context.Context, path string, args []string) ([]byte, []byte, int, error) {
+			capturedArgs = append([]string(nil), args...)
+			return nil, nil, exitSuccess, nil
+		},
+	})
+
+	_ = d.Deploy(context.Background(), "/catalog", "/mosaic", "/workspace",
+		[]string{"auto"}, []string{"smoke-single"}, nil)
+
+	if len(capturedArgs) == 0 {
+		t.Fatal("Deploy did not invoke CommandRunner; cannot assert argument absence")
+	}
+	if flagIndex(capturedArgs, "--infrastructure") >= 0 {
+		t.Errorf("args = %v, want --infrastructure to be ABSENT when infrastructureKeys is nil "+
+			"(nil means 'don't know'; omitting the flag lets the deploy tool ask interactively)", capturedArgs)
+	}
+}
+
+// TestDeploy_InfrastructureKeysEmpty_FlagPresentWithEmptyValue asserts that when
+// infrastructureKeys is a non-nil empty slice, --infrastructure "" is emitted.
+// Non-nil empty means "explicitly none" -- the deploy tool deploys no infra agents.
+func TestDeploy_InfrastructureKeysEmpty_FlagPresentWithEmptyValue(t *testing.T) {
+	var capturedArgs []string
+
+	d := newDeployer(testdeploy.Options{
+		Invoke: func(ctx context.Context, path string, args []string) ([]byte, []byte, int, error) {
+			capturedArgs = append([]string(nil), args...)
+			return nil, nil, exitSuccess, nil
+		},
+	})
+
+	_ = d.Deploy(context.Background(), "/catalog", "/mosaic", "/workspace",
+		[]string{"auto"}, []string{"smoke-single"}, []string{})
+
+	idx := flagIndex(capturedArgs, "--infrastructure")
+	if idx < 0 {
+		t.Fatalf("args = %v, want --infrastructure to be PRESENT when infrastructureKeys is non-nil empty "+
+			"(non-nil empty means 'explicitly none'; the flag must be emitted with an empty value)", capturedArgs)
+	}
+	if idx+1 >= len(capturedArgs) {
+		t.Fatalf("args = %v, --infrastructure flag has no following value argument", capturedArgs)
+	}
+	if capturedArgs[idx+1] != "" {
+		t.Errorf("--infrastructure value = %q, want \"\" (empty string) for non-nil empty infrastructureKeys; "+
+			"strings.Join([]string{}, \",\") must produce \"\"",
+			capturedArgs[idx+1])
+	}
+}
+
+// TestDeploy_InfrastructureKeysPopulated_FlagPresentWithCommaJoinedKeys asserts
+// that when infrastructureKeys is a populated slice, --infrastructure key1,key2,key3
+// is emitted with the keys comma-joined in order.
+func TestDeploy_InfrastructureKeysPopulated_FlagPresentWithCommaJoinedKeys(t *testing.T) {
+	var capturedArgs []string
+	infraKeys := []string{"mosaictest-checkpoint", "mosaictest-commit", "mosaictest-review"}
+
+	d := newDeployer(testdeploy.Options{
+		Invoke: func(ctx context.Context, path string, args []string) ([]byte, []byte, int, error) {
+			capturedArgs = append([]string(nil), args...)
+			return nil, nil, exitSuccess, nil
+		},
+	})
+
+	_ = d.Deploy(context.Background(), "/catalog", "/mosaic", "/workspace",
+		[]string{"auto"}, []string{"smoke-single"}, infraKeys)
+
+	idx := flagIndex(capturedArgs, "--infrastructure")
+	if idx < 0 {
+		t.Fatalf("args = %v, want --infrastructure <keys> when infrastructureKeys is populated", capturedArgs)
+	}
+	if idx+1 >= len(capturedArgs) {
+		t.Fatalf("args = %v, --infrastructure flag has no following value argument", capturedArgs)
+	}
+	const want = "mosaictest-checkpoint,mosaictest-commit,mosaictest-review"
+	if capturedArgs[idx+1] != want {
+		t.Errorf("--infrastructure value = %q, want %q (comma-joined, order preserved)",
+			capturedArgs[idx+1], want)
+	}
+}
+
+// TestDeploy_InfrastructureKeysSingleKey_NoTrailingComma asserts that a single
+// infrastructure key produces a plain ID with no comma.
+func TestDeploy_InfrastructureKeysSingleKey_NoTrailingComma(t *testing.T) {
+	var capturedArgs []string
+
+	d := newDeployer(testdeploy.Options{
+		Invoke: func(ctx context.Context, path string, args []string) ([]byte, []byte, int, error) {
+			capturedArgs = append([]string(nil), args...)
+			return nil, nil, exitSuccess, nil
+		},
+	})
+
+	_ = d.Deploy(context.Background(), "/catalog", "/mosaic", "/workspace",
+		[]string{"auto"}, []string{"smoke-single"}, []string{"mosaictest-review"})
+
+	idx := flagIndex(capturedArgs, "--infrastructure")
+	if idx < 0 || idx+1 >= len(capturedArgs) {
+		t.Fatalf("args = %v, want --infrastructure <key>", capturedArgs)
+	}
+	if capturedArgs[idx+1] != "mosaictest-review" {
+		t.Errorf("--infrastructure value = %q, want %q (single key, no comma)",
+			capturedArgs[idx+1], "mosaictest-review")
+	}
+}
+
+// TestDeploy_InfrastructureFlag_EmittedBeforeAutoConfirm asserts that --infrastructure
+// appears BEFORE --auto-confirm in the arg list. The deploy CLI processes flags in
+// registration order; emitting infrastructure before the auto-confirm flag preserves
+// a stable, predictable argument order.
+func TestDeploy_InfrastructureFlag_EmittedBeforeAutoConfirm(t *testing.T) {
+	var capturedArgs []string
+
+	d := newDeployer(testdeploy.Options{
+		Invoke: func(ctx context.Context, path string, args []string) ([]byte, []byte, int, error) {
+			capturedArgs = append([]string(nil), args...)
+			return nil, nil, exitSuccess, nil
+		},
+	})
+
+	_ = d.Deploy(context.Background(), "/catalog", "/mosaic", "/workspace",
+		[]string{"auto"}, []string{"smoke-single"}, []string{"mosaictest-review"})
+
+	infraIdx := flagIndex(capturedArgs, "--infrastructure")
+	confirmIdx := flagIndex(capturedArgs, "--auto-confirm")
+	if infraIdx < 0 {
+		t.Fatal("--infrastructure not present in args")
+	}
+	if confirmIdx < 0 {
+		t.Fatal("--auto-confirm not present in args")
+	}
+	if infraIdx > confirmIdx {
+		t.Errorf("--infrastructure (index %d) appears AFTER --auto-confirm (index %d); "+
+			"--infrastructure must precede --auto-confirm in the arg list",
+			infraIdx, confirmIdx)
+	}
+}
+
+// TestDeploy_InfrastructureKeys_MultiHarness_SharedAcrossInvocations asserts
+// that the same infrastructure keys are passed to every per-harness invocation.
+func TestDeploy_InfrastructureKeys_MultiHarness_SharedAcrossInvocations(t *testing.T) {
+	infraKeys := []string{"mosaictest-checkpoint", "mosaictest-review"}
+	var observedValues []string
+
+	d := newDeployer(testdeploy.Options{
+		Invoke: func(ctx context.Context, path string, args []string) ([]byte, []byte, int, error) {
+			idx := flagIndex(args, "--infrastructure")
+			if idx >= 0 && idx+1 < len(args) {
+				observedValues = append(observedValues, args[idx+1])
+			} else {
+				observedValues = append(observedValues, "<absent>")
+			}
+			return nil, nil, exitSuccess, nil
+		},
+	})
+
+	_ = d.Deploy(context.Background(), "/catalog", "/mosaic", "/workspace",
+		[]string{"auto", "claude-code"}, []string{"smoke-single"}, infraKeys)
+
+	if len(observedValues) != 2 {
+		t.Fatalf("CommandRunner invoked %d time(s), want 2", len(observedValues))
+	}
+	const want = "mosaictest-checkpoint,mosaictest-review"
+	for i, v := range observedValues {
+		if v != want {
+			t.Errorf("invocation %d: --infrastructure value = %q, want %q "+
+				"(same keys for every harness invocation)",
+				i, v, want)
+		}
 	}
 }
 

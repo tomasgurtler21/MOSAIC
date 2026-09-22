@@ -92,9 +92,10 @@ func (f *fakeCatalog) FullSuite() []testcatalog.CatalogEntry     { return nil }
 func (f *fakeCatalog) WorkflowByID(_ string) ([]testcatalog.CatalogEntry, error) {
 	return nil, nil
 }
-func (f *fakeCatalog) WorkflowModes(_ string) ([]string, error) { return nil, nil }
-func (f *fakeCatalog) WorkflowIDs() []string                    { return nil }
-func (f *fakeCatalog) SidecarPath(_, _ string) string           { return "" }
+func (f *fakeCatalog) WorkflowModes(_ string) ([]string, error)  { return nil, nil }
+func (f *fakeCatalog) WorkflowIDs() []string                     { return nil }
+func (f *fakeCatalog) SidecarPath(_, _ string) string            { return "" }
+func (f *fakeCatalog) UnionInfrastructureAgentKeys() []string    { return []string{} }
 
 // ---------------------------------------------------------------------------
 // AC9.2: Test flow invisible without --dev

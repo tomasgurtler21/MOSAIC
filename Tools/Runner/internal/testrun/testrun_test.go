@@ -56,6 +56,13 @@ type fakeCatalog struct {
 	workflowIDs    []string
 	// sidecarPaths maps "workflowID:mode" to the sidecar path to return.
 	sidecarPaths map[string]string
+	// infraKeys is the value returned by InfrastructureAgentKeys (deprecated).
+	// nil means "don't know" (not set); []string{} means "explicitly none".
+	infraKeys []string
+	// unionInfraKeys is the value returned by UnionInfrastructureAgentKeys.
+	// When nil (zero value), UnionInfrastructureAgentKeys returns []string{}
+	// to match the real implementation's non-nil contract.
+	unionInfraKeys []string
 }
 
 func (f *fakeCatalog) Workflows() []testcatalog.CatalogEntry    { return f.fullSuite }
@@ -92,6 +99,16 @@ func (f *fakeCatalog) SidecarPath(workflowID string, mode string) string {
 	return "/catalog/Workflows/MosaicTest/" + workflowID + "-" + mode + ".expected.json"
 }
 
+// UnionInfrastructureAgentKeys returns the union infra keys configured on the
+// fake. When unionInfraKeys is nil (the zero value), returns []string{} to
+// match the real Catalog.UnionInfrastructureAgentKeys() non-nil contract.
+func (f *fakeCatalog) UnionInfrastructureAgentKeys() []string {
+	if f.unionInfraKeys == nil {
+		return []string{}
+	}
+	return f.unionInfraKeys
+}
+
 // fakeDeployer is a DeployerPort fake. It records calls and returns a
 // configured error.
 type fakeDeployer struct {
@@ -101,23 +118,30 @@ type fakeDeployer struct {
 }
 
 type deployCall struct {
-	catalogFolder string
-	mosaicRoot    string
-	workspace     string
-	harnesses     []string
-	workflows     []string
+	catalogFolder     string
+	mosaicRoot        string
+	workspace         string
+	harnesses         []string
+	workflows         []string
+	infrastructureKeys []string
 }
 
 func (f *fakeDeployer) Deploy(ctx context.Context, catalogFolder string,
 	mosaicRoot string, workspace string, harnesses []string,
-	workflows []string) error {
+	workflows []string, infrastructureKeys []string) error {
 	f.callCount++
+	var infraCopy []string
+	if infrastructureKeys != nil {
+		infraCopy = make([]string, len(infrastructureKeys))
+		copy(infraCopy, infrastructureKeys)
+	}
 	f.capturedArgs = append(f.capturedArgs, deployCall{
-		catalogFolder: catalogFolder,
-		mosaicRoot:    mosaicRoot,
-		workspace:     workspace,
-		harnesses:     append([]string(nil), harnesses...),
-		workflows:     append([]string(nil), workflows...),
+		catalogFolder:      catalogFolder,
+		mosaicRoot:         mosaicRoot,
+		workspace:          workspace,
+		harnesses:          append([]string(nil), harnesses...),
+		workflows:          append([]string(nil), workflows...),
+		infrastructureKeys: infraCopy,
 	})
 	return f.err
 }
@@ -2382,4 +2406,343 @@ func TestSummary_ResolvedPaths_FieldAccessible(t *testing.T) {
 	// on TestSummary. If the field is missing or renamed, this test fails to
 	// compile and the stage cannot be considered complete.
 	_ = summary.ResolvedPaths
+}
+
+// =============================================================================
+// CatalogPort.UnionInfrastructureAgentKeys forwarding to DeployerPort
+// =============================================================================
+
+// TestRun_UnionInfrastructureAgentKeys_ForwardedToDeployer verifies that
+// Orchestrator.Run reads UnionInfrastructureAgentKeys() from the catalog and
+// passes the result as the infrastructureKeys argument to Deployer.Deploy.
+//
+// This test is in the TDD RED phase. It compiles and runs, but fails because
+// Orchestrator.Run currently calls InfrastructureAgentKeys() (the old method),
+// not UnionInfrastructureAgentKeys(). The fake returns different values from
+// each method so the mismatch is observable. It will pass once I3.4 updates
+// the deploy call site.
+func TestRun_UnionInfrastructureAgentKeys_ForwardedToDeployer(t *testing.T) {
+	// Arrange: catalog's union keys differ from the old InfrastructureAgentKeys
+	// value so the test can detect which method Orchestrator.Run calls.
+	unionKeys := []string{"mosaictest-checkpoint", "mosaictest-review"}
+	entry := testcatalog.CatalogEntry{
+		WorkflowID:  "smoke-single",
+		Mode:        "auto",
+		FixturePath: "/catalog/Workflows/MosaicTest/Fixtures/smoke-single",
+		AllModes:    []string{"auto"},
+		InSmokeSet:  true,
+	}
+	cat := &fakeCatalog{
+		smokeSet:       []testcatalog.CatalogEntry{entry},
+		workflowIDs:    []string{"smoke-single"},
+		infraKeys:      nil,      // old method: returns nil (the wrong value)
+		unionInfraKeys: unionKeys, // new method: returns the expected value
+	}
+	dep := &fakeDeployer{}
+	inv := &fakeRunInvoker{
+		results: []invokeResult{defaultPassingInvokeResult(0)},
+	}
+	chk := &fakeChecker{}
+	rep := &fakeReporter{}
+
+	o := newOrchestrator(cat, dep, inv, chk, rep)
+	cfg := testrun.TestConfig{
+		Scope:      testrun.ScopeSmoke,
+		Harnesses:  []string{"auto"},
+		MosaicRoot: "/mosaic",
+		Workspace:  "/workspace",
+	}
+
+	// Act
+	_, err := o.Run(context.Background(), cfg)
+	if err != nil {
+		t.Fatalf("Run returned unexpected error: %v", err)
+	}
+
+	// Assert: the deployer must have been called with the union keys.
+	if dep.callCount == 0 {
+		t.Fatal("Deploy was not called")
+	}
+	got := dep.capturedArgs[0].infrastructureKeys
+	if len(got) != len(unionKeys) {
+		t.Fatalf("Deploy infrastructureKeys = %v, want %v; "+
+			"Orchestrator.Run must forward catalog.UnionInfrastructureAgentKeys() to "+
+			"Deployer.Deploy (not the deprecated InfrastructureAgentKeys())",
+			got, unionKeys)
+	}
+	for i, want := range unionKeys {
+		if got[i] != want {
+			t.Errorf("Deploy infrastructureKeys[%d] = %q, want %q", i, got[i], want)
+		}
+	}
+}
+
+// TestRun_UnionInfrastructureAgentKeys_NoWorkflowAgents_NonNilEmptyForwardedToDeployer
+// verifies that when no workflow declares any infrastructure agents,
+// Orchestrator.Run forwards a non-nil empty slice (not nil) to Deployer.Deploy.
+// A non-nil empty slice causes buildDeployArgs to emit --infrastructure ""
+// (deploying zero agents), whereas nil would omit the flag entirely (deploying
+// the default set).
+//
+// This test is in the TDD RED phase. It will fail because Orchestrator.Run
+// currently calls InfrastructureAgentKeys() which returns nil, but the test
+// expects non-nil empty. It will pass once I3.4 updates the call site to use
+// UnionInfrastructureAgentKeys(), which the fake returns as []string{}.
+func TestRun_UnionInfrastructureAgentKeys_NoWorkflowAgents_NonNilEmptyForwardedToDeployer(t *testing.T) {
+	// Arrange: no workflows declare infrastructure agents.
+	// The fake's UnionInfrastructureAgentKeys() returns []string{} (non-nil empty)
+	// when unionInfraKeys is nil (the zero value), matching the real implementation.
+	entry := testcatalog.CatalogEntry{
+		WorkflowID:  "smoke-single",
+		Mode:        "auto",
+		FixturePath: "/catalog/Workflows/MosaicTest/Fixtures/smoke-single",
+		AllModes:    []string{"auto"},
+		InSmokeSet:  true,
+	}
+	cat := &fakeCatalog{
+		smokeSet:       []testcatalog.CatalogEntry{entry},
+		workflowIDs:    []string{"smoke-single"},
+		infraKeys:      nil, // old method returns nil
+		unionInfraKeys: nil, // zero value: UnionInfrastructureAgentKeys() returns []string{}
+	}
+	dep := &fakeDeployer{}
+	inv := &fakeRunInvoker{
+		results: []invokeResult{defaultPassingInvokeResult(0)},
+	}
+	chk := &fakeChecker{}
+	rep := &fakeReporter{}
+
+	o := newOrchestrator(cat, dep, inv, chk, rep)
+	cfg := testrun.TestConfig{
+		Scope:      testrun.ScopeSmoke,
+		Harnesses:  []string{"auto"},
+		MosaicRoot: "/mosaic",
+		Workspace:  "/workspace",
+	}
+
+	// Act
+	_, err := o.Run(context.Background(), cfg)
+	if err != nil {
+		t.Fatalf("Run returned unexpected error: %v", err)
+	}
+
+	// Assert: the deployer must receive a non-nil empty slice, not nil.
+	if dep.callCount == 0 {
+		t.Fatal("Deploy was not called")
+	}
+	got := dep.capturedArgs[0].infrastructureKeys
+	if got == nil {
+		t.Errorf("Deploy infrastructureKeys = nil, want non-nil empty slice; "+
+			"Orchestrator.Run must forward catalog.UnionInfrastructureAgentKeys() "+
+			"which returns []string{} (not nil) when no workflows declare agents. "+
+			"nil would cause buildDeployArgs to omit --infrastructure entirely.")
+	}
+	if len(got) != 0 {
+		t.Errorf("Deploy infrastructureKeys = %v (len %d), want empty slice; "+
+			"no workflows declared any infrastructure agents", got, len(got))
+	}
+}
+
+// =============================================================================
+// Orchestrator.Run: RunInvocation population from CatalogEntry
+// =============================================================================
+
+// TestRun_PopulatesRunInvocation_InfrastructureKeys_FromCatalogEntry verifies
+// that Orchestrator.Run copies CatalogEntry.InfrastructureAgents into
+// RunInvocation.InfrastructureKeys when building each subprocess invocation.
+//
+// TDD RED: fails because Orchestrator.Run does not yet populate InfrastructureKeys.
+func TestRun_PopulatesRunInvocation_InfrastructureKeys_FromCatalogEntry(t *testing.T) {
+	wantKeys := []string{"mosaictest-checkpoint", "mosaictest-review"}
+	entry := testcatalog.CatalogEntry{
+		WorkflowID:           "smoke-single",
+		Mode:                 "auto",
+		FixturePath:          "/catalog/Workflows/MosaicTest/Fixtures/smoke-single",
+		AllModes:             []string{"auto"},
+		InSmokeSet:           true,
+		InfrastructureAgents: wantKeys,
+	}
+	cat := &fakeCatalog{
+		smokeSet:    []testcatalog.CatalogEntry{entry},
+		workflowIDs: []string{"smoke-single"},
+	}
+	dep := &fakeDeployer{}
+	inv := &fakeRunInvoker{
+		results: []invokeResult{defaultPassingInvokeResult(0)},
+	}
+	chk := &fakeChecker{}
+	rep := &fakeReporter{}
+
+	o := newOrchestrator(cat, dep, inv, chk, rep)
+	cfg := testrun.TestConfig{
+		Scope:     testrun.ScopeSmoke,
+		Harnesses: []string{"auto"},
+	}
+
+	_, err := o.Run(context.Background(), cfg)
+	if err != nil {
+		t.Fatalf("Run returned unexpected error: %v", err)
+	}
+
+	if len(inv.calls) == 0 {
+		t.Fatal("RunInvoker was not called")
+	}
+	got := inv.calls[0].InfrastructureKeys
+	if len(got) != len(wantKeys) {
+		t.Fatalf("RunInvocation.InfrastructureKeys = %v, want %v; "+
+			"Orchestrator.Run must set InfrastructureKeys from CatalogEntry.InfrastructureAgents",
+			got, wantKeys)
+	}
+	for i, want := range wantKeys {
+		if got[i] != want {
+			t.Errorf("RunInvocation.InfrastructureKeys[%d] = %q, want %q", i, got[i], want)
+		}
+	}
+}
+
+// TestRun_PopulatesRunInvocation_InfrastructureKeys_NonNilEmpty_WhenNoAgentsDeclared
+// verifies that when a CatalogEntry has InfrastructureAgents == []string{} (the
+// non-nil empty value Stage 2 guarantees for workflows without the frontmatter
+// field), Orchestrator.Run sets RunInvocation.InfrastructureKeys to that same
+// non-nil empty slice.
+//
+// TDD RED: fails because Orchestrator.Run does not yet populate InfrastructureKeys.
+func TestRun_PopulatesRunInvocation_InfrastructureKeys_NonNilEmpty_WhenNoAgentsDeclared(t *testing.T) {
+	entry := testcatalog.CatalogEntry{
+		WorkflowID:           "smoke-single",
+		Mode:                 "auto",
+		FixturePath:          "/catalog/Workflows/MosaicTest/Fixtures/smoke-single",
+		AllModes:             []string{"auto"},
+		InSmokeSet:           true,
+		InfrastructureAgents: []string{}, // non-nil empty: workflow declared no agents
+	}
+	cat := &fakeCatalog{
+		smokeSet:    []testcatalog.CatalogEntry{entry},
+		workflowIDs: []string{"smoke-single"},
+	}
+	dep := &fakeDeployer{}
+	inv := &fakeRunInvoker{
+		results: []invokeResult{defaultPassingInvokeResult(0)},
+	}
+	chk := &fakeChecker{}
+	rep := &fakeReporter{}
+
+	o := newOrchestrator(cat, dep, inv, chk, rep)
+	cfg := testrun.TestConfig{
+		Scope:     testrun.ScopeSmoke,
+		Harnesses: []string{"auto"},
+	}
+
+	_, err := o.Run(context.Background(), cfg)
+	if err != nil {
+		t.Fatalf("Run returned unexpected error: %v", err)
+	}
+
+	if len(inv.calls) == 0 {
+		t.Fatal("RunInvoker was not called")
+	}
+	got := inv.calls[0].InfrastructureKeys
+	if got == nil {
+		t.Errorf("RunInvocation.InfrastructureKeys = nil, want non-nil empty slice; "+
+			"CatalogEntry.InfrastructureAgents is non-nil empty (workflow declared no agents), "+
+			"and Orchestrator.Run must preserve the nil/non-nil distinction: "+
+			"nil means omit --infrastructure; non-nil empty means emit --infrastructure=")
+	}
+	if len(got) != 0 {
+		t.Errorf("RunInvocation.InfrastructureKeys = %v, want empty slice", got)
+	}
+}
+
+// TestRun_PopulatesRunInvocation_Checkpoints_FromCatalogEntry verifies that
+// Orchestrator.Run copies CatalogEntry.Checkpoints into RunInvocation.Checkpoints.
+//
+// TDD RED: fails because Orchestrator.Run does not yet populate Checkpoints.
+func TestRun_PopulatesRunInvocation_Checkpoints_FromCatalogEntry(t *testing.T) {
+	entry := testcatalog.CatalogEntry{
+		WorkflowID:           "smoke-single",
+		Mode:                 "auto",
+		FixturePath:          "/catalog/Workflows/MosaicTest/Fixtures/smoke-single",
+		AllModes:             []string{"auto"},
+		InSmokeSet:           true,
+		InfrastructureAgents: []string{},
+		Checkpoints:          "enabled",
+	}
+	cat := &fakeCatalog{
+		smokeSet:    []testcatalog.CatalogEntry{entry},
+		workflowIDs: []string{"smoke-single"},
+	}
+	dep := &fakeDeployer{}
+	inv := &fakeRunInvoker{
+		results: []invokeResult{defaultPassingInvokeResult(0)},
+	}
+	chk := &fakeChecker{}
+	rep := &fakeReporter{}
+
+	o := newOrchestrator(cat, dep, inv, chk, rep)
+	cfg := testrun.TestConfig{
+		Scope:     testrun.ScopeSmoke,
+		Harnesses: []string{"auto"},
+	}
+
+	_, err := o.Run(context.Background(), cfg)
+	if err != nil {
+		t.Fatalf("Run returned unexpected error: %v", err)
+	}
+
+	if len(inv.calls) == 0 {
+		t.Fatal("RunInvoker was not called")
+	}
+	got := inv.calls[0].Checkpoints
+	if got != "enabled" {
+		t.Errorf("RunInvocation.Checkpoints = %q, want %q; "+
+			"Orchestrator.Run must set Checkpoints from CatalogEntry.Checkpoints",
+			got, "enabled")
+	}
+}
+
+// TestRun_PopulatesRunInvocation_Commits_FromCatalogEntry verifies that
+// Orchestrator.Run copies CatalogEntry.Commits into RunInvocation.Commits.
+//
+// TDD RED: fails because Orchestrator.Run does not yet populate Commits.
+func TestRun_PopulatesRunInvocation_Commits_FromCatalogEntry(t *testing.T) {
+	entry := testcatalog.CatalogEntry{
+		WorkflowID:           "smoke-single",
+		Mode:                 "auto",
+		FixturePath:          "/catalog/Workflows/MosaicTest/Fixtures/smoke-single",
+		AllModes:             []string{"auto"},
+		InSmokeSet:           true,
+		InfrastructureAgents: []string{},
+		Commits:              "enabled",
+	}
+	cat := &fakeCatalog{
+		smokeSet:    []testcatalog.CatalogEntry{entry},
+		workflowIDs: []string{"smoke-single"},
+	}
+	dep := &fakeDeployer{}
+	inv := &fakeRunInvoker{
+		results: []invokeResult{defaultPassingInvokeResult(0)},
+	}
+	chk := &fakeChecker{}
+	rep := &fakeReporter{}
+
+	o := newOrchestrator(cat, dep, inv, chk, rep)
+	cfg := testrun.TestConfig{
+		Scope:     testrun.ScopeSmoke,
+		Harnesses: []string{"auto"},
+	}
+
+	_, err := o.Run(context.Background(), cfg)
+	if err != nil {
+		t.Fatalf("Run returned unexpected error: %v", err)
+	}
+
+	if len(inv.calls) == 0 {
+		t.Fatal("RunInvoker was not called")
+	}
+	got := inv.calls[0].Commits
+	if got != "enabled" {
+		t.Errorf("RunInvocation.Commits = %q, want %q; "+
+			"Orchestrator.Run must set Commits from CatalogEntry.Commits",
+			got, "enabled")
+	}
 }

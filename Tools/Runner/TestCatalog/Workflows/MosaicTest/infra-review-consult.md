@@ -11,6 +11,8 @@ artifacts:
   - MosaicTestScript/review-echo.md
 modes:
   - auto
+infrastructure_agents:
+  - mosaictest-review
 ---
 
 <Workflow type="core" name="infra-review-consult" version="1.0">
@@ -58,7 +60,9 @@ Checkpoint and commit classes produce markers that the Runner extracts mechanica
 
 ## Expected Run
 
-Six dispatches total. The review trigger fires after the 3rd workflow step, followed by a routing consultation where the orchestrator stops.
+Six sidecar dispatches total (what the sidecar records). The review trigger fires after the 3rd workflow step, followed by a routing consultation where the orchestrator stops.
+
+**Important: Execution Log vs sidecar dispatches.** The Runner's Execution Log (inside `Orchestration.md`) records rows only for steps that complete the log-write path. The post-review routing consultation is handled by `consultRoute`, which returns on a stop instruction *before* writing an Execution Log row. Therefore the Execution Log has **5 rows** (Seq 0–4), not 6. The consultation still happens — it is visible as the 6th entry in the sidecar dispatch log — and the STOPPED run outcome is the evidence that it occurred.
 
 | Log `Seq` | `Agent` | Kind | `Phase` | `Status` | `Summary` shows |
 |:---:|---|---|---|---|---|
@@ -67,13 +71,12 @@ Six dispatches total. The review trigger fires after the 3rd workflow step, foll
 | 2 | `mosaictest-scripted#2` | workflow step | PLANNING | SUCCESS | unconditional SUCCESS |
 | 3 | `mosaictest-scripted#3` | workflow step | DESIGN | SUCCESS | unconditional SUCCESS |
 | 4 | `mosaictest-review#4` | infra trigger | -- | SUCCESS | canned review message |
-| 5 | `orchestrator-script#5` | consultation | -- | "" | stop instruction (post-review consultation) |
 
-**Run outcome:** STOPPED. The orchestrator stops the run after receiving the review's observations.
+**Run outcome:** STOPPED (stopped-by-consultant), exit_code 6. The orchestrator stops the run after receiving the review's observations. The stop consultation is the 6th sidecar dispatch but produces no Execution Log row.
 
 **Key observations:**
 - Seq 4 is the review infrastructure dispatch. `INVOCATION_INTERVAL(3)` fires because 3 workflow steps have completed since run start.
-- Seq 5 is the post-review routing consultation. This is the unique review-class behaviour — the Runner consulted the orchestrator with the review's `status_message` as `last_status_message`.
+- After Seq 4, the Runner performs the post-review routing consultation with the orchestrator. This is the unique review-class behaviour — the Runner consulted the orchestrator with the review's `status_message` as `last_status_message`. This consultation is the 6th sidecar dispatch and is confirmed by the STOPPED run outcome, but it does not produce an Execution Log row.
 - The consultation's `last_status_message` field contains the review's canned text: `MosaicTest infrastructure stub / class=review / declared trigger=INVOCATION_INTERVAL(3) / instance=mosaictest-review#4 / nothing inspected / returning SUCCESS`.
 - No orchestrator consultation occurs for the three SUCCESS workflow steps — Auto mode handles those mechanically.
 - The review row is flagged `IsInfrastructure=true` in the log and does not update `current_state`.
@@ -84,7 +87,7 @@ Six dispatches total. The review trigger fires after the 3rd workflow step, foll
 
 | Observation | Where to look |
 |---|---|
-| Run completes with COMPLETE instead of STOPPED | The post-review consultation did not happen — the Runner did not consult the orchestrator after the review agent fired. Check ToolingGaps.md GAP-3. |
+| Run completes with COMPLETE instead of STOPPED | The post-review consultation did not happen — the Runner did not consult the orchestrator after the review agent fired. Check ToolingGaps.md GAP-2. |
 | Only 3 workflow steps in the log, no review row | `INVOCATION_INTERVAL(3)` did not fire — check that the review agent was deployed (ToolingGaps.md GAP-1) and that the trigger evaluator counts workflow step completions correctly |
 | Review row appears but no consultation follows | The Runner dispatched the review agent but did not follow up with a routing consultation — the review-class special handling is missing from `evaluateTriggers` |
 | Consultation appears but the run does not stop | The routing fixture's stop rule did not match — check the selector in MosaicTestRouting.md |

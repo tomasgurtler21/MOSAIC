@@ -135,6 +135,9 @@ func Run(ctx context.Context, args []string, store domain.ArtifactStore, identit
 			if len(inputFlagsRaw) > 0 {
 				inputFlags = inputFlagsRaw
 			}
+			infrastructureFlag, _ := cmd.Flags().GetString("infrastructure")
+			infrastructureChanged := cmd.Flags().Changed("infrastructure")
+			devTestMode, _ := cmd.Flags().GetBool("dev-test-mode")
 
 			// Validate required flags.
 			if workflowID == "" {
@@ -160,6 +163,15 @@ func Run(ctx context.Context, args []string, store domain.ArtifactStore, identit
 			// user believe inputs were seeded when they were not.
 			if len(inputFlags) > 0 && runIDFlag != "" {
 				fmt.Fprintf(errOut, "error: --input and --run are mutually exclusive\n")
+				exitCode = ExitUsage
+				return nil
+			}
+
+			// Dev-mode guard: --infrastructure is only available in dev test mode.
+			// The hidden --dev-test-mode flag is passed automatically by the test
+			// framework's buildRunArgs; production runs never pass it.
+			if infrastructureChanged && !devTestMode {
+				fmt.Fprintf(errOut, "error: --infrastructure is only available in dev test mode\n")
 				exitCode = ExitUsage
 				return nil
 			}
@@ -384,6 +396,26 @@ func Run(ctx context.Context, args []string, store domain.ArtifactStore, identit
 				}
 			}
 
+			// Parse --infrastructure into InfrastructureFilter.
+			// nil/empty/populated semantics: nil when not passed, []string{} when
+			// passed empty, populated slice when comma-separated keys are given.
+			var infrastructureFilter []string
+			if infrastructureChanged {
+				if infrastructureFlag == "" {
+					infrastructureFilter = []string{}
+				} else {
+					tokens := strings.Split(infrastructureFlag, ",")
+					result := make([]string, 0, len(tokens))
+					for _, tok := range tokens {
+						tok = strings.TrimSpace(tok)
+						if tok != "" {
+							result = append(result, tok)
+						}
+					}
+					infrastructureFilter = result
+				}
+			}
+
 			// Auto-discover the orchestrator-script.md path from the harness convention.
 			// For CLI-backed harnesses, this verifies the workspace is deployed for
 			// the selected harness. For non-CLI harnesses (e.g. the "fake" test
@@ -426,6 +458,7 @@ func Run(ctx context.Context, args []string, store domain.ArtifactStore, identit
 				},
 				InfraClassSelections: infraClassSelections,
 				SeedInputs:           inputFlags,
+				InfrastructureFilter: infrastructureFilter,
 			}
 
 			// Start the session and map the outcome to an exit code.

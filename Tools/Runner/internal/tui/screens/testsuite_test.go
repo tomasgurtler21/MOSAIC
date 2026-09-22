@@ -32,11 +32,12 @@ func (f *fakeCatalog) WorkflowModes(id string) ([]string, error) {
 	return modes, nil
 }
 
-func (f *fakeCatalog) Workflows() []testcatalog.CatalogEntry           { return nil }
-func (f *fakeCatalog) SmokeSet() []testcatalog.CatalogEntry            { return nil }
-func (f *fakeCatalog) FullSuite() []testcatalog.CatalogEntry           { return nil }
+func (f *fakeCatalog) Workflows() []testcatalog.CatalogEntry                    { return nil }
+func (f *fakeCatalog) SmokeSet() []testcatalog.CatalogEntry                     { return nil }
+func (f *fakeCatalog) FullSuite() []testcatalog.CatalogEntry                    { return nil }
 func (f *fakeCatalog) WorkflowByID(_ string) ([]testcatalog.CatalogEntry, error) { return nil, nil }
-func (f *fakeCatalog) SidecarPath(_, _ string) string                  { return "" }
+func (f *fakeCatalog) SidecarPath(_, _ string) string                            { return "" }
+func (f *fakeCatalog) UnionInfrastructureAgentKeys() []string                    { return []string{} }
 
 // newFakeCatalog builds a fakeCatalog for testing.
 //   - ids is the ordered list of workflow IDs returned by WorkflowIDs().

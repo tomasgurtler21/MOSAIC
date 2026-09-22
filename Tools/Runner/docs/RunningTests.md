@@ -8,14 +8,17 @@ The `test` subcommand automates the full deploy → seed → run → check cycle
 
 ### Prerequisites
 
-- `mosaic-run.exe` built and available in the test workspace.
-- A deployed test workspace with all three harnesses. The current workspace is `C:\AI\MOSAIC\script runner test`.
-- The MOSAIC repo root (where `Tools/Runner/TestCatalog/` lives).
+- A scratch test workspace directory. Any empty directory works — `--dev test` deploys the
+  catalog into it. Never use the MOSAIC repo itself; runs write `RunnerLogs/` and
+  `Orchestration-*/` trees into the working directory.
+- `mosaic-run.exe` and `mosaic-deploy.exe` built and copied into that workspace. Both are
+  required: `mosaic-run` resolves the deployment binary as its own sibling.
+- The MOSAIC repo root (where `Tools/Runner/TestCatalog/` lives), passed as `--catalog`.
 
 ### Running the Smoke Set
 
 ```bash
-cd "C:/AI/MOSAIC/script runner test"
+cd "<test-workspace>"
 ./mosaic-run.exe --dev test \
   --catalog "C:/AI/MOSAIC/MOSAIC" \
   --suite smoke \
@@ -72,7 +75,8 @@ For workflows that cannot be automated, or for debugging a specific failure, use
 
 ### Prerequisites
 
-- A deployed test workspace with all three harnesses (claude-code, opencode, ghcp-cli). The current workspace is `C:\AI\MOSAIC\script runner test`.
+- A test workspace already deployed for the harnesses under test (claude-code, opencode,
+  ghcp-cli). Deploy it with `mosaic-deploy`, or let a prior `--dev test` run do it.
 - `mosaic-run.exe` in that workspace.
 - Fixture seed paths from `Tools\Runner\TestCatalog\Workflows\MosaicTest\Fixtures\README.md`.
 
@@ -127,7 +131,7 @@ Fixture seed folders live under `Tools\Runner\TestCatalog\Workflows\MosaicTest\F
 ## Example: smoke-single on all three harnesses
 
 ```bash
-cd "C:/AI/MOSAIC/script runner test"
+cd "<test-workspace>"
 FIXTURES="C:/AI/MOSAIC/MOSAIC/Tools/Runner/TestCatalog/Workflows/MosaicTest/Fixtures"
 
 # Claude Code
@@ -161,6 +165,12 @@ Every workflow `.md` file in `Workflows/MosaicTest/` declares two machine-readab
 
 **`pre_consult`** (optional, boolean): Whether the pre-consultation path is exercised for this workflow's test runs. Valid values: `true`, `false`. When the field is absent the default is `true` (pre-consultation enabled). Set to `false` only for workflows where the pre-consultation step is intentionally skipped.
 
+**`infrastructure_agents`** (optional, list of strings): The infrastructure agent keys this workflow requires. The automated test runner reads this field and passes `--infrastructure=<keys>` to the `mosaic-run run` subprocess. When absent, the runner emits `--infrastructure=` (empty) so no infrastructure agents are active. Only workflows that test infrastructure features declare this field.
+
+**`checkpoints`** (optional, string): Whether checkpoint support should be enabled for this workflow's test runs. Valid values: `enabled`, `disabled`. Defaults to `disabled` when absent. The automated runner passes `--checkpoints <value>` accordingly.
+
+**`commits`** (optional, string): Whether commit-class infrastructure dispatch should be enabled for this workflow's test runs. Valid values: `enabled`, `disabled`. Defaults to `disabled` when absent. The automated runner passes `--commits <value>` accordingly.
+
 Example (from `smoke-single.md`):
 
 ```yaml
@@ -171,7 +181,47 @@ smoke_set:
   - auto
 ```
 
-When authoring a new workflow, add both fields to its frontmatter and update this table. Use the mode vocabulary exactly as shown above (lowercase, hyphen-separated).
+Example (from `infra-checkpoint-commit.md`):
+
+```yaml
+modes:
+  - auto
+infrastructure_agents:
+  - mosaictest-checkpoint
+  - mosaictest-commit
+checkpoints: enabled
+commits: enabled
+```
+
+When authoring a new workflow, add the required fields to its frontmatter and update this table. Use the mode vocabulary exactly as shown above (lowercase, hyphen-separated).
+
+## Infrastructure Flag (Manual Runs)
+
+When running an infrastructure workflow manually, pass `--infrastructure` to limit which infrastructure agents are active. This flag is only accepted when `--dev-test-mode` is also present (the automated test runner always emits `--dev-test-mode`).
+
+```
+./mosaic-run.exe run \
+  --workflow infra-checkpoint-commit \
+  --task "Infrastructure test" \
+  --mode auto \
+  --harness claude-code \
+  --new-run \
+  --input "$FIXTURES/infra-checkpoint-commit" \
+  --checkpoints enabled \
+  --commits enabled \
+  --dev-test-mode \
+  --infrastructure=mosaictest-checkpoint,mosaictest-commit
+```
+
+**`--infrastructure` semantics:**
+
+| Form | Meaning |
+|------|---------|
+| Flag absent | All declared infrastructure agents are active (default, backwards-compatible) |
+| `--infrastructure=` (empty value) | No infrastructure agents are active |
+| `--infrastructure=a,b` | Only agents `a` and `b` are active; others are ignored |
+
+The automated test runner always emits `--infrastructure=<keys>` (from the workflow's `infrastructure_agents` frontmatter), so infrastructure is always explicit in test subprocesses. The flag is not available in normal (non-dev-test-mode) runs.
 
 ## Smoke Set
 

@@ -69,6 +69,19 @@ type CatalogEntry struct {
 	// exercised for test runs of this workflow. Defaults to true when
 	// the workflow's frontmatter omits the pre_consult field.
 	PreConsult bool
+
+	// InfrastructureAgents lists the infrastructure agent keys this workflow
+	// declares. Always non-nil: absent frontmatter field produces []string{}.
+	// Consumed by the run invoker to emit --infrastructure= per subprocess.
+	InfrastructureAgents []string
+
+	// Checkpoints is the workflow's checkpoint declaration: "enabled" or
+	// "disabled". Consumed by the run invoker to emit --checkpoints.
+	Checkpoints string
+
+	// Commits is the workflow's commit declaration: "enabled" or "disabled".
+	// Consumed by the run invoker to emit --commits.
+	Commits string
 }
 
 // Catalog is the read-only view of the test catalog's workflow metadata.
@@ -84,11 +97,14 @@ type Catalog struct {
 
 // workflowMeta holds parsed and validated metadata for a single workflow file.
 type workflowMeta struct {
-	id          string
-	modes       []string // sorted alphabetically
-	smokeSet    map[string]bool
-	fixturePath string
-	preConsult  bool // defaults to true; false only when frontmatter declares pre_consult: false
+	id                   string
+	modes                []string // sorted alphabetically
+	smokeSet             map[string]bool
+	fixturePath          string
+	preConsult           bool // defaults to true; false only when frontmatter declares pre_consult: false
+	infrastructureAgents []string
+	checkpoints          string
+	commits              string
 }
 
 // workflowFrontmatter is the YAML structure parsed from a workflow .md file.
@@ -99,7 +115,10 @@ type workflowFrontmatter struct {
 	// PreConsult declares whether the pre-consultation path is exercised
 	// for this workflow's test runs. Pointer type so nil (absent) is
 	// distinguishable from explicit false. Nil defaults to true.
-	PreConsult *bool `yaml:"pre_consult"`
+	PreConsult           *bool    `yaml:"pre_consult"`
+	InfrastructureAgents []string `yaml:"infrastructure_agents"`
+	Checkpoints          string   `yaml:"checkpoints"`
+	Commits              string   `yaml:"commits"`
 }
 
 // Load reads the test catalog rooted at catalogRoot. It scans
@@ -222,12 +241,48 @@ func parseWorkflowFile(filePath string, workflowsDir string) (*workflowMeta, err
 		preConsult = *fm.PreConsult
 	}
 
+	// Validate checkpoints value.
+	if fm.Checkpoints != "" && fm.Checkpoints != "enabled" && fm.Checkpoints != "disabled" {
+		return nil, fmt.Errorf("workflow %q: invalid checkpoints value %q; valid values: disabled, enabled", fm.ID, fm.Checkpoints)
+	}
+	checkpoints := fm.Checkpoints
+	if checkpoints == "" {
+		checkpoints = "disabled"
+	}
+
+	// Validate commits value.
+	if fm.Commits != "" && fm.Commits != "enabled" && fm.Commits != "disabled" {
+		return nil, fmt.Errorf("workflow %q: invalid commits value %q; valid values: disabled, enabled", fm.ID, fm.Commits)
+	}
+	commits := fm.Commits
+	if commits == "" {
+		commits = "disabled"
+	}
+
+	// Validate and normalize infrastructure_agents.
+	// Nil from YAML is normalized to non-nil empty []string{}.
+	infraAgents := make([]string, 0)
+	seen := make(map[string]bool, len(fm.InfrastructureAgents))
+	for _, key := range fm.InfrastructureAgents {
+		if key == "" {
+			return nil, fmt.Errorf("workflow %q: infrastructure_agents contains empty entry", fm.ID)
+		}
+		if seen[key] {
+			return nil, fmt.Errorf("workflow %q: duplicate infrastructure_agents entry %q", fm.ID, key)
+		}
+		seen[key] = true
+		infraAgents = append(infraAgents, key)
+	}
+
 	return &workflowMeta{
-		id:          fm.ID,
-		modes:       modes,
-		smokeSet:    smokeSet,
-		fixturePath: fixturePath,
-		preConsult:  preConsult,
+		id:                   fm.ID,
+		modes:                modes,
+		smokeSet:             smokeSet,
+		fixturePath:          fixturePath,
+		preConsult:           preConsult,
+		infrastructureAgents: infraAgents,
+		checkpoints:          checkpoints,
+		commits:              commits,
 	}, nil
 }
 
@@ -262,13 +317,19 @@ func extractFrontmatter(content string) (*workflowFrontmatter, error) {
 func buildEntry(m *workflowMeta, mode string) CatalogEntry {
 	allModes := make([]string, len(m.modes))
 	copy(allModes, m.modes)
+	// Copy infrastructure_agents into a fresh non-nil slice per entry (non-aliasing guarantee).
+	infraAgents := make([]string, len(m.infrastructureAgents))
+	copy(infraAgents, m.infrastructureAgents)
 	return CatalogEntry{
-		WorkflowID:  m.id,
-		Mode:        mode,
-		FixturePath: m.fixturePath,
-		AllModes:    allModes,
-		InSmokeSet:  m.smokeSet[mode],
-		PreConsult:  m.preConsult,
+		WorkflowID:           m.id,
+		Mode:                 mode,
+		FixturePath:          m.fixturePath,
+		AllModes:             allModes,
+		InSmokeSet:           m.smokeSet[mode],
+		PreConsult:           m.preConsult,
+		InfrastructureAgents: infraAgents,
+		Checkpoints:          m.checkpoints,
+		Commits:              m.commits,
 	}
 }
 
@@ -354,4 +415,24 @@ func (c *Catalog) WorkflowIDs() []string {
 func (c *Catalog) SidecarPath(workflowID string, mode string) string {
 	filename := workflowID + "-" + mode + ".expected.json"
 	return filepath.Join(c.root, "Workflows", "MosaicTest", filename)
+}
+
+// UnionInfrastructureAgentKeys returns the sorted, deduplicated union of
+// infrastructure_agents declared across all workflows in the catalog.
+// Always returns a non-nil slice: when no workflow declares any agents,
+// returns []string{} (non-nil empty). This is critical: nil would cause
+// buildDeployArgs to omit --infrastructure, deploying the default set.
+func (c *Catalog) UnionInfrastructureAgentKeys() []string {
+	seen := make(map[string]bool)
+	for _, m := range c.workflows {
+		for _, key := range m.infrastructureAgents {
+			seen[key] = true
+		}
+	}
+	result := make([]string, 0, len(seen))
+	for key := range seen {
+		result = append(result, key)
+	}
+	sort.Strings(result)
+	return result
 }

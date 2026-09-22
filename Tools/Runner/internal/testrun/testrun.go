@@ -102,6 +102,25 @@ type RunInvocation struct {
 	// pre-consultation. Forwarded as --pre-consult=true or
 	// --pre-consult=false to the mosaic-run run subprocess.
 	PreConsult bool
+
+	// InfrastructureKeys lists infrastructure agent keys for this workflow.
+	// Follows nil/empty/populated semantics matching buildDeployArgs:
+	//   - nil:        omit --infrastructure entirely (backwards-compat)
+	//   - []string{}: emit --infrastructure= (empty value, no agents active)
+	//   - populated:  emit --infrastructure=k1,k2
+	// Populated by Orchestrator.Run from CatalogEntry.InfrastructureAgents.
+	// Since Stage 2 guarantees CatalogEntry.InfrastructureAgents is always
+	// non-nil, InfrastructureKeys is always non-nil in practice.
+	InfrastructureKeys []string
+
+	// Checkpoints is the --checkpoints flag value: "enabled" or "disabled".
+	// When empty, buildRunArgs emits "disabled" (defense-in-depth; Stage 2
+	// guarantees CatalogEntry.Checkpoints is already "disabled" when absent).
+	Checkpoints string
+
+	// Commits is the --commits flag value: "enabled" or "disabled".
+	// When empty, buildRunArgs emits "disabled" (same defense-in-depth note).
+	Commits string
 }
 
 // InvokeResult carries the outcome of a single subprocess invocation.
@@ -245,13 +264,24 @@ type CatalogPort interface {
 	// SidecarPath returns the expected-outcome sidecar path for a
 	// (workflow, mode) pair. The path is under the catalog root (FR-26).
 	SidecarPath(workflowID string, mode string) string
+
+	// UnionInfrastructureAgentKeys returns the sorted, deduplicated union of
+	// infrastructure_agents declared across all workflows in the catalog.
+	// Always returns a non-nil slice: []string{} when no workflow declares any
+	// agents. This is critical: nil would cause buildDeployArgs to omit
+	// --infrastructure, deploying the default set instead of an empty one.
+	UnionInfrastructureAgentKeys() []string
 }
 
 // DeployerPort is the interface the orchestrator uses for deployment.
 type DeployerPort interface {
+	// Deploy deploys the test catalog into the workspace for the given
+	// harnesses. infrastructureKeys follows nil/empty/populated semantics:
+	// nil omits --infrastructure (deploy tool asks interactively), non-nil
+	// empty emits --infrastructure "", populated emits --infrastructure k1,k2,...
 	Deploy(ctx context.Context, catalogFolder string,
 		mosaicRoot string, workspace string, harnesses []string,
-		workflows []string) error
+		workflows []string, infrastructureKeys []string) error
 }
 
 // CheckerPort is the interface the orchestrator uses for result checking.
@@ -350,7 +380,7 @@ func (o *Orchestrator) Run(ctx context.Context, cfg TestConfig) (*TestSummary, e
 	workflowIDs := o.deps.Catalog.WorkflowIDs()
 
 	o.deps.Reporter.OnDeployStart()
-	deployErr := o.deps.Deployer.Deploy(ctx, catFolder, cfg.MosaicRoot, cfg.Workspace, cfg.Harnesses, workflowIDs)
+	deployErr := o.deps.Deployer.Deploy(ctx, catFolder, cfg.MosaicRoot, cfg.Workspace, cfg.Harnesses, workflowIDs, o.deps.Catalog.UnionInfrastructureAgentKeys())
 	o.deps.Reporter.OnDeployDone(deployErr)
 
 	if deployErr != nil {
@@ -394,6 +424,9 @@ func (o *Orchestrator) Run(ctx context.Context, cfg TestConfig) (*TestSummary, e
 				Task:               fmt.Sprintf("Test: %s / %s / %s", entry.WorkflowID, entry.Mode, harness),
 				PreConsult:         entry.PreConsult,
 				ExecutablePath:     cfg.ResolvedPaths[harness],
+				InfrastructureKeys: entry.InfrastructureAgents,
+				Checkpoints:        entry.Checkpoints,
+				Commits:            entry.Commits,
 			}
 
 			invokeResult, invokeErr := o.deps.RunInvoker.Invoke(ctx, inv)

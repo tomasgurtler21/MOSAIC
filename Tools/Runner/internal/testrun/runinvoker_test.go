@@ -2326,3 +2326,390 @@ func TestBuildRunArgs_PreConsult_UsesEqualsFormat(t *testing.T) {
 		}
 	}
 }
+
+// =============================================================================
+// buildRunArgs: --infrastructure flag (nil/empty/populated semantics, = form)
+// =============================================================================
+
+// containsArg reports whether args contains the exact token s.
+func containsArg(args []string, s string) bool {
+	for _, a := range args {
+		if a == s {
+			return true
+		}
+	}
+	return false
+}
+
+// TestBuildRunArgs_Infrastructure_Nil_OmitsFlag verifies that when
+// RunInvocation.InfrastructureKeys is nil, buildRunArgs does NOT include any
+// --infrastructure token in the args slice (backwards-compat: callers that do
+// not set the field behave as before).
+//
+// TDD RED: fails until I3.2 updates buildRunArgs to emit --infrastructure.
+func TestBuildRunArgs_Infrastructure_Nil_OmitsFlag(t *testing.T) {
+	inv := RunInvocation{
+		WorkflowID:         "wf-a",
+		Mode:               "auto",
+		Harness:            "auto",
+		FixturePath:        "/fixtures/wf-a",
+		Task:               "Test: wf-a / auto / auto",
+		InfrastructureKeys: nil, // nil: must omit flag entirely
+	}
+	args := buildRunArgs(inv)
+
+	for _, a := range args {
+		if strings.HasPrefix(a, "--infrastructure") {
+			t.Errorf("InfrastructureKeys=nil: --infrastructure must be omitted; got arg %q in %v",
+				a, args)
+		}
+	}
+}
+
+// TestBuildRunArgs_Infrastructure_NonNilEmpty_EmitsSingleTokenEmptyValue verifies
+// that when InfrastructureKeys is non-nil but empty ([]string{}), buildRunArgs
+// appends the single token "--infrastructure=" (with empty value after the =).
+// This single-token form is required because pflag parses --infrastructure=
+// as Changed()==true with value "", distinguishing it from "flag not passed".
+//
+// TDD RED: fails until I3.2 updates buildRunArgs.
+func TestBuildRunArgs_Infrastructure_NonNilEmpty_EmitsSingleTokenEmptyValue(t *testing.T) {
+	inv := RunInvocation{
+		WorkflowID:         "wf-a",
+		Mode:               "auto",
+		Harness:            "auto",
+		FixturePath:        "/fixtures/wf-a",
+		Task:               "Test: wf-a / auto / auto",
+		InfrastructureKeys: []string{}, // non-nil empty: emit --infrastructure=
+	}
+	args := buildRunArgs(inv)
+
+	if !containsArg(args, "--infrastructure=") {
+		t.Errorf("InfrastructureKeys=[]string{}: want --infrastructure= (single token with empty value) in args %v", args)
+	}
+}
+
+// TestBuildRunArgs_Infrastructure_SingleKey_EmitsSingleTokenWithValue verifies
+// that a single InfrastructureKey is emitted as "--infrastructure=key" (= form).
+//
+// TDD RED: fails until I3.2 updates buildRunArgs.
+func TestBuildRunArgs_Infrastructure_SingleKey_EmitsSingleTokenWithValue(t *testing.T) {
+	inv := RunInvocation{
+		WorkflowID:         "wf-a",
+		Mode:               "auto",
+		Harness:            "auto",
+		FixturePath:        "/fixtures/wf-a",
+		Task:               "Test: wf-a / auto / auto",
+		InfrastructureKeys: []string{"mosaictest-review"},
+	}
+	args := buildRunArgs(inv)
+
+	if !containsArg(args, "--infrastructure=mosaictest-review") {
+		t.Errorf("InfrastructureKeys=[\"mosaictest-review\"]: want --infrastructure=mosaictest-review in args %v", args)
+	}
+}
+
+// TestBuildRunArgs_Infrastructure_MultipleKeys_EmitsCommaJoined verifies that
+// multiple InfrastructureKeys are joined with commas in the single token:
+// "--infrastructure=k1,k2" (not two separate tokens).
+//
+// TDD RED: fails until I3.2 updates buildRunArgs.
+func TestBuildRunArgs_Infrastructure_MultipleKeys_EmitsCommaJoined(t *testing.T) {
+	inv := RunInvocation{
+		WorkflowID:         "wf-a",
+		Mode:               "auto",
+		Harness:            "auto",
+		FixturePath:        "/fixtures/wf-a",
+		Task:               "Test: wf-a / auto / auto",
+		InfrastructureKeys: []string{"mosaictest-checkpoint", "mosaictest-review"},
+	}
+	args := buildRunArgs(inv)
+
+	want := "--infrastructure=mosaictest-checkpoint,mosaictest-review"
+	if !containsArg(args, want) {
+		t.Errorf("InfrastructureKeys=[checkpoint, review]: want %q in args %v", want, args)
+	}
+}
+
+// TestBuildRunArgs_Infrastructure_WorkflowWithoutAgents_EmitsEmptyToken covers
+// the case where a workflow has no infrastructure_agents in its frontmatter.
+// Stage 2 guarantees CatalogEntry.InfrastructureAgents is []string{} (non-nil
+// empty) for such workflows, so Orchestrator.Run sets InfrastructureKeys to
+// that same non-nil empty slice, and buildRunArgs must emit --infrastructure=.
+//
+// TDD RED: fails until I3.2 updates buildRunArgs.
+func TestBuildRunArgs_Infrastructure_WorkflowWithoutAgents_EmitsEmptyToken(t *testing.T) {
+	// InfrastructureKeys is explicitly set to non-nil empty to simulate the
+	// output of Orchestrator.Run for a workflow without infrastructure_agents.
+	inv := RunInvocation{
+		WorkflowID:         "simple-workflow",
+		Mode:               "auto",
+		Harness:            "claude-code",
+		FixturePath:        "/fixtures/simple-workflow",
+		Task:               "Test: simple-workflow / auto / claude-code",
+		InfrastructureKeys: []string{},
+	}
+	args := buildRunArgs(inv)
+
+	// The subprocess must receive --infrastructure= so pflag sets
+	// Changed("infrastructure")==true with value "", activating the empty filter
+	// (no agents active). Without this token the subprocess uses all declared agents.
+	if !containsArg(args, "--infrastructure=") {
+		t.Errorf("workflow without infrastructure_agents (InfrastructureKeys=[]string{}): "+
+			"want --infrastructure= in args %v\n"+
+			"(absence would leave all deployed agents active for this subprocess)", args)
+	}
+}
+
+// =============================================================================
+// buildRunArgs: --checkpoints and --commits flags
+// =============================================================================
+
+// TestBuildRunArgs_Checkpoints_Enabled_EmitsEnabled verifies that when
+// RunInvocation.Checkpoints is "enabled", buildRunArgs emits
+// "--checkpoints" followed by "enabled" as two consecutive tokens.
+//
+// TDD RED: fails until I3.2 updates buildRunArgs.
+func TestBuildRunArgs_Checkpoints_Enabled_EmitsEnabled(t *testing.T) {
+	inv := RunInvocation{
+		WorkflowID:  "wf-a",
+		Mode:        "auto",
+		Harness:     "auto",
+		FixturePath: "/fixtures/wf-a",
+		Task:        "Test: wf-a / auto / auto",
+		Checkpoints: "enabled",
+	}
+	args := buildRunArgs(inv)
+
+	found := false
+	for i, a := range args {
+		if a == "--checkpoints" && i+1 < len(args) && args[i+1] == "enabled" {
+			found = true
+			break
+		}
+	}
+	if !found {
+		t.Errorf("Checkpoints=enabled: want --checkpoints enabled in args %v", args)
+	}
+}
+
+// TestBuildRunArgs_Checkpoints_Disabled_EmitsDisabled verifies that when
+// RunInvocation.Checkpoints is "disabled", buildRunArgs emits
+// "--checkpoints" followed by "disabled".
+//
+// TDD RED: fails until I3.2 updates buildRunArgs.
+func TestBuildRunArgs_Checkpoints_Disabled_EmitsDisabled(t *testing.T) {
+	inv := RunInvocation{
+		WorkflowID:  "wf-a",
+		Mode:        "auto",
+		Harness:     "auto",
+		FixturePath: "/fixtures/wf-a",
+		Task:        "Test: wf-a / auto / auto",
+		Checkpoints: "disabled",
+	}
+	args := buildRunArgs(inv)
+
+	found := false
+	for i, a := range args {
+		if a == "--checkpoints" && i+1 < len(args) && args[i+1] == "disabled" {
+			found = true
+			break
+		}
+	}
+	if !found {
+		t.Errorf("Checkpoints=disabled: want --checkpoints disabled in args %v", args)
+	}
+}
+
+// TestBuildRunArgs_Checkpoints_EmptyString_EmitsDisabled verifies that when
+// RunInvocation.Checkpoints is "" (empty string), buildRunArgs emits
+// "--checkpoints disabled" (empty string maps to "disabled" as defense-in-depth).
+//
+// TDD RED: fails until I3.2 updates buildRunArgs.
+func TestBuildRunArgs_Checkpoints_EmptyString_EmitsDisabled(t *testing.T) {
+	inv := RunInvocation{
+		WorkflowID:  "wf-a",
+		Mode:        "auto",
+		Harness:     "auto",
+		FixturePath: "/fixtures/wf-a",
+		Task:        "Test: wf-a / auto / auto",
+		Checkpoints: "", // empty: must default to "disabled"
+	}
+	args := buildRunArgs(inv)
+
+	found := false
+	for i, a := range args {
+		if a == "--checkpoints" && i+1 < len(args) && args[i+1] == "disabled" {
+			found = true
+			break
+		}
+	}
+	if !found {
+		t.Errorf("Checkpoints=\"\" (empty): want --checkpoints disabled in args %v\n"+
+			"(empty string must map to \"disabled\" to avoid the subprocess rejecting an empty value)",
+			args)
+	}
+}
+
+// TestBuildRunArgs_Commits_Enabled_EmitsEnabled verifies that when
+// RunInvocation.Commits is "enabled", buildRunArgs emits "--commits" followed
+// by "enabled" as two consecutive tokens.
+//
+// TDD RED: fails until I3.2 updates buildRunArgs.
+func TestBuildRunArgs_Commits_Enabled_EmitsEnabled(t *testing.T) {
+	inv := RunInvocation{
+		WorkflowID:  "wf-a",
+		Mode:        "auto",
+		Harness:     "auto",
+		FixturePath: "/fixtures/wf-a",
+		Task:        "Test: wf-a / auto / auto",
+		Commits:     "enabled",
+	}
+	args := buildRunArgs(inv)
+
+	found := false
+	for i, a := range args {
+		if a == "--commits" && i+1 < len(args) && args[i+1] == "enabled" {
+			found = true
+			break
+		}
+	}
+	if !found {
+		t.Errorf("Commits=enabled: want --commits enabled in args %v", args)
+	}
+}
+
+// TestBuildRunArgs_Commits_Disabled_EmitsDisabled verifies that when
+// RunInvocation.Commits is "disabled", buildRunArgs emits "--commits" followed
+// by "disabled".
+//
+// TDD RED: fails until I3.2 updates buildRunArgs.
+func TestBuildRunArgs_Commits_Disabled_EmitsDisabled(t *testing.T) {
+	inv := RunInvocation{
+		WorkflowID:  "wf-a",
+		Mode:        "auto",
+		Harness:     "auto",
+		FixturePath: "/fixtures/wf-a",
+		Task:        "Test: wf-a / auto / auto",
+		Commits:     "disabled",
+	}
+	args := buildRunArgs(inv)
+
+	found := false
+	for i, a := range args {
+		if a == "--commits" && i+1 < len(args) && args[i+1] == "disabled" {
+			found = true
+			break
+		}
+	}
+	if !found {
+		t.Errorf("Commits=disabled: want --commits disabled in args %v", args)
+	}
+}
+
+// TestBuildRunArgs_Commits_EmptyString_EmitsDisabled verifies that when
+// RunInvocation.Commits is "" (empty string), buildRunArgs emits
+// "--commits disabled" (empty string maps to "disabled" as defense-in-depth).
+//
+// TDD RED: fails until I3.2 updates buildRunArgs.
+func TestBuildRunArgs_Commits_EmptyString_EmitsDisabled(t *testing.T) {
+	inv := RunInvocation{
+		WorkflowID:  "wf-a",
+		Mode:        "auto",
+		Harness:     "auto",
+		FixturePath: "/fixtures/wf-a",
+		Task:        "Test: wf-a / auto / auto",
+		Commits:     "", // empty: must default to "disabled"
+	}
+	args := buildRunArgs(inv)
+
+	found := false
+	for i, a := range args {
+		if a == "--commits" && i+1 < len(args) && args[i+1] == "disabled" {
+			found = true
+			break
+		}
+	}
+	if !found {
+		t.Errorf("Commits=\"\" (empty): want --commits disabled in args %v\n"+
+			"(empty string must map to \"disabled\" to avoid the subprocess rejecting an empty value)",
+			args)
+	}
+}
+
+// =============================================================================
+// T5.2: buildRunArgs -- --dev-test-mode emission
+// =============================================================================
+
+// TestBuildRunArgs_DevTestMode_AlwaysPresent verifies that buildRunArgs always
+// emits --dev-test-mode in its output regardless of other RunInvocation fields.
+// This is the subprocess-side signal that --infrastructure is accepted, and
+// must be present in every invocation since buildRunArgs is only called by the
+// test framework's SubprocessRunInvoker.
+//
+// TDD RED: fails until I5.3 adds --dev-test-mode to buildRunArgs.
+func TestBuildRunArgs_DevTestMode_AlwaysPresent(t *testing.T) {
+	inv := RunInvocation{
+		WorkflowID:  "smoke-single",
+		Mode:        "auto",
+		Harness:     "claude-code",
+		FixturePath: "/fixtures/smoke-single",
+		Task:        "Test: smoke-single / auto / claude-code",
+	}
+	args := buildRunArgs(inv)
+
+	if !containsArg(args, "--dev-test-mode") {
+		t.Errorf("buildRunArgs: missing --dev-test-mode in args %v\n"+
+			"(--dev-test-mode must always be emitted; it is the subprocess-side signal "+
+			"that --infrastructure is accepted)", args)
+	}
+}
+
+// TestBuildRunArgs_DevTestMode_PresentWithNilInfrastructureKeys verifies that
+// --dev-test-mode is emitted even when InfrastructureKeys is nil (the workflow
+// declares no infrastructure agents). The flag is always emitted regardless of
+// whether --infrastructure is also emitted.
+//
+// TDD RED: fails until I5.3 adds --dev-test-mode to buildRunArgs.
+func TestBuildRunArgs_DevTestMode_PresentWithNilInfrastructureKeys(t *testing.T) {
+	inv := RunInvocation{
+		WorkflowID:         "wf-a",
+		Mode:               "auto",
+		Harness:            "auto",
+		FixturePath:        "/fixtures/wf-a",
+		Task:               "Test: wf-a / auto / auto",
+		InfrastructureKeys: nil,
+	}
+	args := buildRunArgs(inv)
+
+	if !containsArg(args, "--dev-test-mode") {
+		t.Errorf("buildRunArgs: missing --dev-test-mode when InfrastructureKeys=nil; "+
+			"full args: %v", args)
+	}
+}
+
+// TestBuildRunArgs_DevTestMode_PresentAlongsideInfrastructureKeys verifies that
+// --dev-test-mode is emitted together with --infrastructure=k1 when
+// InfrastructureKeys is populated. Both flags must appear in the output so the
+// subprocess accepts and applies the infrastructure filter.
+//
+// TDD RED: fails until I5.3 adds --dev-test-mode to buildRunArgs.
+func TestBuildRunArgs_DevTestMode_PresentAlongsideInfrastructureKeys(t *testing.T) {
+	inv := RunInvocation{
+		WorkflowID:         "wf-a",
+		Mode:               "auto",
+		Harness:            "auto",
+		FixturePath:        "/fixtures/wf-a",
+		Task:               "Test: wf-a / auto / auto",
+		InfrastructureKeys: []string{"mosaictest-review"},
+	}
+	args := buildRunArgs(inv)
+
+	if !containsArg(args, "--dev-test-mode") {
+		t.Errorf("buildRunArgs: missing --dev-test-mode alongside --infrastructure; "+
+			"full args: %v", args)
+	}
+	if !containsArg(args, "--infrastructure=mosaictest-review") {
+		t.Errorf("buildRunArgs: missing --infrastructure=mosaictest-review in args %v", args)
+	}
+}

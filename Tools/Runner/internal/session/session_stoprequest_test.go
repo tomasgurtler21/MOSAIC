@@ -269,6 +269,9 @@ func TestSession_EvaluateTriggers_StopRequest_BetweenAgents_StopsBeforeSecondDis
 		Store:    store,
 		Clock:    fixedClock{t: epoch},
 		Interact: &noopInteraction{},
+		// Routing: nil -- no post-review consultation expected. This test verifies
+		// the graceful-stop checkpoint between infra agent dispatches, independent
+		// of the Stage-2 review consultation mechanism.
 		// True only once agent-a's step and review-agent-a's trigger dispatch
 		// have both been applied -- modelling a stop confirmed strictly
 		// between two declared infra agents' dispatches within the same

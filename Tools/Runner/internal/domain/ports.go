@@ -331,6 +331,12 @@ const (
 	EventSessionHITLEscalate    = "session.hitl.escalate"
 	EventSessionManualResolve   = "session.manual.resolve"
 
+	// EventSessionFilterUnmatched is emitted when an InfrastructureFilter key
+	// does not match any declared infrastructure agent name. This is informational
+	// (the filter remains permissive for other keys) and provides a diagnostic
+	// signal when a typo results in zero or fewer active agents than expected.
+	EventSessionFilterUnmatched = "session.filter.unmatched"
+
 	// Snapshot event names.
 	EventSnapshotCleanupFailed  = "session.snapshot.cleanup_failed"
 	EventSnapshotRestored       = "session.snapshot.restored"

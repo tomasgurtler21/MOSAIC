@@ -65,15 +65,17 @@ func Run(ctx context.Context, args []string, svc app.Service, out, errOut io.Wri
 	// deploy subcommand
 	// ------------------------------------------------------------------
 	var (
-		deployHarness      string
-		deployWorkspace    string
-		deploySelections   string
-		deployOutput       string
-		deployConflict     string
-		deployWorkflowsStr string
-		deployWorkflowsSet bool
-		deployDryRun       bool
-		deployAutoConfirm  bool
+		deployHarness              string
+		deployWorkspace            string
+		deploySelections           string
+		deployOutput               string
+		deployConflict             string
+		deployWorkflowsStr         string
+		deployWorkflowsSet         bool
+		deployInfrastructureStr    string
+		deployInfrastructureSet    bool
+		deployDryRun               bool
+		deployAutoConfirm          bool
 	)
 
 	deployCmd := &cobra.Command{
@@ -81,10 +83,12 @@ func Run(ctx context.Context, args []string, svc app.Service, out, errOut io.Wri
 		SilenceErrors: true,
 		SilenceUsage:  true,
 		PreRunE: func(cmd *cobra.Command, _ []string) error {
-			// Record whether --workflows was explicitly set, so the nil/non-nil distinction
-			// is preserved in the request: an absent flag yields nil ("not specified"),
-			// an explicitly provided flag (even with an empty value) yields a non-nil slice.
+			// Record whether --workflows and --infrastructure were explicitly set, so the
+			// nil/non-nil distinction is preserved in the request: an absent flag yields nil
+			// ("not specified"), an explicitly provided flag (even with an empty value) yields
+			// a non-nil slice.
 			deployWorkflowsSet = cmd.Flags().Changed("workflows")
+			deployInfrastructureSet = cmd.Flags().Changed("infrastructure")
 			return nil
 		},
 		RunE: func(cmd *cobra.Command, _ []string) error {
@@ -141,6 +145,13 @@ func Run(ctx context.Context, args []string, svc app.Service, out, errOut io.Wri
 				req.WorkflowIDs = splitTrimmedParts(deployWorkflowsStr)
 			}
 
+			// Infrastructure flag: nil when absent ("not specified"), non-nil when explicitly
+			// provided ("explicitly none" for an empty value, or the named ids).
+			// When set, this wins over the selections file's infrastructure_agents: key.
+			if deployInfrastructureSet {
+				req.InfrastructureAgentIDs = splitTrimmedParts(deployInfrastructureStr)
+			}
+
 			summary, svcErr := svc.DeployNew(ctx, req)
 			exitCode = renderOutput(out, errOut, deployOutput, summary, svcErr)
 			return nil
@@ -153,6 +164,7 @@ func Run(ctx context.Context, args []string, svc app.Service, out, errOut io.Wri
 	deployCmd.Flags().StringVar(&deployOutput, "output", "", "Output format (json)")
 	deployCmd.Flags().StringVar(&deployConflict, "conflict", "", "How to handle locally-modified files (skip|overwrite|backup)")
 	deployCmd.Flags().StringVar(&deployWorkflowsStr, "workflows", "", "Comma-separated workflow ids; absent = not specified (nil), empty string = explicitly none")
+	deployCmd.Flags().StringVar(&deployInfrastructureStr, "infrastructure", "", "Comma-separated infrastructure agent ids; absent = ask interactively, empty = explicitly none")
 	deployCmd.Flags().BoolVar(&deployDryRun, "dry-run", false, "Dry run mode; no files are written")
 	deployCmd.Flags().BoolVar(&deployAutoConfirm, "auto-confirm", false, "Auto-confirm the deployment plan without prompting")
 

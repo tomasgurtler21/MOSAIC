@@ -98,7 +98,11 @@ func (e *DeployError) Unwrap() error { return ErrDeployFailed }
 // Deploy deploys the test catalog into the workspace for the given harnesses.
 // It invokes mosaic-deploy deploy once per harness with the flags:
 // --mosaic-root (when non-empty), --catalog-folder, --workspace, --harness,
-// --workflows (always emitted to prevent silent empty deployments), --auto-confirm.
+// --workflows (always emitted to prevent silent empty deployments), --auto-confirm,
+// --infrastructure (when infrastructureKeys is non-nil).
+//
+// infrastructureKeys follows nil/empty/populated semantics: nil omits the flag,
+// non-nil empty emits --infrastructure "", populated emits --infrastructure k1,k2,...
 //
 // Exit 0 -> nil error.
 // Non-zero exit -> *DeployError wrapping ErrDeployFailed.
@@ -108,7 +112,7 @@ func (e *DeployError) Unwrap() error { return ErrDeployFailed }
 // Multi-harness: stops on the first harness error (fail-fast).
 func (d *Deployer) Deploy(ctx context.Context, catalogFolder string,
 	mosaicRoot string, workspace string, harnesses []string,
-	workflows []string) error {
+	workflows []string, infrastructureKeys []string) error {
 
 	invoke := d.opts.Invoke
 	if invoke == nil {
@@ -125,7 +129,7 @@ func (d *Deployer) Deploy(ctx context.Context, catalogFolder string,
 	}
 
 	for _, harness := range harnesses {
-		if err := d.deployOne(ctx, invoke, execPath, catalogFolder, mosaicRoot, workspace, harness, workflows); err != nil {
+		if err := d.deployOne(ctx, invoke, execPath, catalogFolder, mosaicRoot, workspace, harness, workflows, infrastructureKeys); err != nil {
 			return err
 		}
 	}
@@ -134,7 +138,7 @@ func (d *Deployer) Deploy(ctx context.Context, catalogFolder string,
 
 // deployOne performs a single mosaic-deploy invocation for one harness.
 func (d *Deployer) deployOne(ctx context.Context, invoke CommandRunner, execPath string,
-	catalogFolder, mosaicRoot, workspace, harness string, workflows []string) error {
+	catalogFolder, mosaicRoot, workspace, harness string, workflows []string, infrastructureKeys []string) error {
 
 	runCtx := ctx
 	if d.opts.Timeout > 0 {
@@ -143,7 +147,7 @@ func (d *Deployer) deployOne(ctx context.Context, invoke CommandRunner, execPath
 		defer cancel()
 	}
 
-	args := buildDeployArgs(catalogFolder, mosaicRoot, workspace, harness, workflows)
+	args := buildDeployArgs(catalogFolder, mosaicRoot, workspace, harness, workflows, infrastructureKeys)
 	_, stderr, exitCode, invokeErr := invoke(runCtx, execPath, args)
 
 	if invokeErr != nil {
@@ -185,7 +189,12 @@ func (d *Deployer) deployOne(ctx context.Context, invoke CommandRunner, execPath
 // buildDeployArgs constructs the argument list for the deployment tool's deploy
 // subcommand. --workflows is always emitted (even when empty) to prevent a nil
 // selection from resolving silently to an empty deployment.
-func buildDeployArgs(catalogFolder, mosaicRoot, workspace, harness string, workflows []string) []string {
+//
+// infrastructureKeys follows nil/empty/populated semantics:
+//   - nil: --infrastructure flag is omitted (deploy tool asks interactively)
+//   - non-nil empty: --infrastructure "" is emitted (deploy no infra agents)
+//   - populated: --infrastructure k1,k2,k3 is emitted
+func buildDeployArgs(catalogFolder, mosaicRoot, workspace, harness string, workflows []string, infrastructureKeys []string) []string {
 	args := []string{"deploy"}
 
 	// --mosaic-root follows the empty-means-omitted convention: omit when empty,
@@ -203,6 +212,13 @@ func buildDeployArgs(catalogFolder, mosaicRoot, workspace, harness string, workf
 	// an empty deployment that reports success while deploying only the orchestrator.
 	// strings.Join handles nil and empty slices identically, producing "".
 	args = append(args, "--workflows", strings.Join(workflows, ","))
+
+	// --infrastructure flag: nil means omit (deploy tool asks interactively);
+	// non-nil (including empty) means emit --infrastructure with the joined keys.
+	// strings.Join([]string{}, ",") produces "" which is the correct empty-value.
+	if infrastructureKeys != nil {
+		args = append(args, "--infrastructure", strings.Join(infrastructureKeys, ","))
+	}
 
 	// --auto-confirm suppresses the plan-review gate, which fires on every deploy.
 	args = append(args, "--auto-confirm")

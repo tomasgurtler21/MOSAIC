@@ -1,5 +1,5 @@
 {
-  "exit_code": 0,
+  "exit_code": 6,
   "dispatches": [
     { "agent": "orchestrator-script", "expect_status": "" },
     { "agent": "mosaictest-scripted", "expect_status": "SUCCESS" },

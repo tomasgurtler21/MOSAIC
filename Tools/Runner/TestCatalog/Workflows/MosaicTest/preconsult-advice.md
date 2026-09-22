@@ -22,14 +22,14 @@ modes:
 
 | Phase | Subagent | HITL | On Success | On Findings | Input | Output |
 |-------|----------|:----:|------------|-------------|-------|--------|
-| RESEARCH | mosaictest-scripted | FALSE | PLANNING | - | MosaicTestScript/preconsult-blocked.md | MosaicTestMarker.md |
+| RESEARCH | mosaictest-scripted | FALSE | next | - | MosaicTestScript/preconsult-blocked.md | MosaicTestMarker.md |
 | PLANNING | mosaictest-scripted | FALSE | COMPLETE | - | MosaicTestScript/preconsult-echo.md | - |
 
 **Notes:**
 - **Run this workflow in Auto mode.**
 - The routing fixture's `## Pre-Consultation` section carries two advice strings with distinctive markers: `PRECONSULT-ADVICE-MARKER` in `task_description` and `PRECONSULT-CONSTRAINT-MARKER` in `constraints`. The orchestrator-script returns these during the pre-consultation invocation, and the Runner stores them in session state.
 - **Row 1** is marker-gated. First invocation (marker absent): returns `BLOCKED`/`E401` and writes the marker. The `BLOCKED` triggers a deviation; the orchestrator re-dispatches the same agent with its own `task_description` (which does NOT contain the preconsult advice). Second invocation (marker present): returns `SUCCESS` with `{task_description}` echo.
-- **Row 2** is auto-routed by the engine (SUCCESS on row 1 routes to PLANNING). The Runner builds this dispatch itself and appends the pre-consultation strings. The stub echoes `{task_description}`, which should contain the `PRECONSULT-ADVICE-MARKER`.
+- **Row 2** is auto-routed by the engine (SUCCESS on row 1 routes via `next`). The Runner builds this dispatch itself and appends the pre-consultation strings. The stub echoes `{task_description}`, which should contain the `PRECONSULT-ADVICE-MARKER`.
 - The proof is in comparing the `{task_description}` echoes: row 1's second invocation (orchestrator-dispatched) shows the orchestrator's own text, and row 2 (auto-routed) shows the marker.
 - Seed `Fixtures/preconsult-advice` — the whole directory, not anything inside it.
 
@@ -69,7 +69,7 @@ Five Orchestration.md log rows.
 | 3 | `mosaictest-scripted#3` | workflow step | RESEARCH | SUCCESS | marker present, echoes task_description — should NOT contain PRECONSULT-ADVICE-MARKER |
 | 4 | `mosaictest-scripted#4` | workflow step | PLANNING | SUCCESS | echoes task_description — SHOULD contain PRECONSULT-ADVICE-MARKER |
 
-**Run outcome:** COMPLETE. Row 1 SUCCESS routes to PLANNING via On Success; row 2 SUCCESS routes to COMPLETE.
+**Run outcome:** COMPLETE. Row 1 SUCCESS routes via `next`; row 2 SUCCESS routes to COMPLETE.
 
 **The proof (two observations):**
 1. Row 3's `status_message` echoes the orchestrator's task_description. It should contain `MOSAICTEST-PRECONSULT-REDISPATCH` (the orchestrator's own text) and should NOT contain `PRECONSULT-ADVICE-MARKER`.

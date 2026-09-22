@@ -82,9 +82,9 @@ Four rules already apply to the existing stubs and still hold. Two are new, need
 | `mosaictest-scripted` | A normal subagent. Returns whatever protocol response its fixture tells it to. | Exists. E1, E2, E3 all done (§4.1) |
 | `orchestrator-script` | A stub orchestrator. Returns whatever routing instruction its fixture tells it to. | Written (§5) |
 | `orchestrator` | A placeholder, never invoked (§4.2). | Written |
-| `mosaictest-checkpoint` | Checkpoint infrastructure stub. Returns success with a fake checkpoint marker, touches no git. | Exists, but no workflow uses it yet |
-| `mosaictest-commit` | Commit infrastructure stub. Returns success with a fake `[branch:mosaictest-run]` marker, touches no git. Used for both the run-start setup dispatch and subsequent `STAGE_END` trigger dispatches. | **Needed** (§4.3) |
-| `mosaictest-review` | Review infrastructure stub. Returns success with a canned observation message, inspects nothing. | Exists, but no workflow uses it yet |
+| `mosaictest-checkpoint` | Checkpoint infrastructure stub. Returns success with a fake checkpoint marker, touches no git. | Implemented. Used by `infra-checkpoint-commit` |
+| `mosaictest-commit` | Commit infrastructure stub. Returns success with a fake `[branch:mosaictest-run]` marker, touches no git. Used for both the run-start setup dispatch and subsequent `STAGE_END` trigger dispatches. | Implemented. Used by `infra-checkpoint-commit` |
+| `mosaictest-review` | Review infrastructure stub. Returns success with a canned observation message, inspects nothing. | Implemented. Used by `infra-review-consult` |
 
 ### 4.1 Three Additions Needed to `mosaictest-scripted`
 
@@ -247,7 +247,13 @@ smoke_set:
 
 **`pre_consult`** (optional, boolean): Whether the pre-consultation path is exercised for this workflow's test runs. Valid values: `true`, `false`. When the field is absent the default is `true` (pre-consultation enabled). Set to `false` only for workflows where the pre-consultation step is intentionally skipped.
 
-**Authoring rule:** When you add a new workflow, decide which modes it should run under and add the `modes` field. If any (workflow, mode) pair should be part of the Smoke Set, add `smoke_set` listing those modes. Update `RunningTests.md`'s workflow table to match.
+**`infrastructure_agents`** (optional, list of strings): The infrastructure agent keys this workflow requires. Each entry must match an agent key in the test catalog's `Subagents/MosaicTest/` directory (e.g., `mosaictest-review`). When absent, the field defaults to an empty list — the test runner emits `--infrastructure=` (empty) so no infrastructure agents are active for that run. Only workflows that test infrastructure features declare this field. All other workflows omit it entirely.
+
+**`checkpoints`** (optional, string): Whether checkpoint support should be enabled for this workflow's test runs. Valid values: `enabled`, `disabled`. When absent, defaults to `disabled`. Set to `enabled` only for workflows that require a checkpoint-class infrastructure agent (i.e., that declare a checkpoint agent in `infrastructure_agents`).
+
+**`commits`** (optional, string): Whether commit-class infrastructure dispatch should be enabled for this workflow's test runs. Valid values: `enabled`, `disabled`. When absent, defaults to `disabled`. Set to `enabled` only for workflows that require a commit-class infrastructure agent (i.e., that declare a commit agent in `infrastructure_agents`).
+
+**Authoring rule:** When you add a new workflow, decide which modes it should run under and add the `modes` field. If any (workflow, mode) pair should be part of the Smoke Set, add `smoke_set` listing those modes. If the workflow tests infrastructure agents, add `infrastructure_agents` (and `checkpoints`/`commits` as needed). Update `RunningTests.md`'s workflow table to match.
 
 ---
 
@@ -270,7 +276,7 @@ The remaining workflows test Runner modes, routing mechanisms, and edge cases. T
 | `deviation-stop` | Auto | The orchestrator ends the run, and the artifact can still be resumed afterwards | **Implemented** |
 | `hitl-glob-staged` | Orchestrated | HITL approval check with `Stage-*` glob output artifacts; glob expansion resolves to concrete Stage-N paths before approval is read (§7.3) | **Implemented** |
 | `infra-checkpoint-commit` | Auto | Checkpoint trigger (`INVOCATION_INTERVAL`) and commit trigger (`STAGE_END`) both fire; checkpoint marker picked up; commit `[branch:{name}]` marker extracted; no cascading between infrastructure dispatches (§7.6) | **Implemented** |
-| `infra-review-consult` | Auto | Review trigger (`PHASE_END`) fires; review agent returns observations; Runner follows up with an orchestrator routing consultation passing the review's `status_message` as `last_status_message` (§7.7) | **Implemented** |
+| `infra-review-consult` | Auto | Review trigger (`INVOCATION_INTERVAL(3)`) fires; review agent returns observations; Runner follows up with an orchestrator routing consultation passing the review's `status_message` as `last_status_message` (§7.7) | **Implemented** |
 | `preconsult-advice` | Auto | Pre-consultation advice reaches auto-routed dispatches, and does **not** reach orchestrator-written ones | **Implemented** |
 | `staged-multigroup` | Auto | Multi-group staged execution (TDD approach: Test group → Implementation group); exercises `EXECUTION.Test.[StageNumber]` and `EXECUTION.Implementation.[StageNumber]` phase parsing through a real harness (§7.4) | **Implemented** |
 | `hitl-escalate` | Auto | The approval check uses up its re-dispatch and escalates to a deviation. Uses stub enhancements E1 + E3 (§7.8) | **Implemented** |
@@ -315,7 +321,7 @@ This workflow exercises the single-decision principle (Design.md §2.6) through 
 
 ### 7.6 `infra-checkpoint-commit` — Checkpoint and Commit Triggers
 
-A staged Auto-mode workflow (at least 2 stages) with both checkpoint-class and commit-class infrastructure agents declared. Requires `commits: enabled` and `checkpoints: enabled` at run start.
+A staged Auto-mode workflow (at least 2 stages) with both checkpoint-class and commit-class infrastructure agents declared. The workflow frontmatter declares `infrastructure_agents: [mosaictest-checkpoint, mosaictest-commit]`, `checkpoints: enabled`, and `commits: enabled`. The test runner reads these fields and passes `--infrastructure=mosaictest-checkpoint,mosaictest-commit --checkpoints enabled --commits enabled` to the `mosaic-run run` subprocess, so the agents are active and the session's startup checks pass.
 
 **Stubs used:**
 
@@ -337,7 +343,7 @@ A staged Auto-mode workflow (at least 2 stages) with both checkpoint-class and c
 
 ### 7.7 `infra-review-consult` — Review Trigger and Orchestrator Follow-Up
 
-An Auto-mode workflow with a review-class infrastructure agent (`mosaictest-review`) declared. The agent's default trigger is `INVOCATION_INTERVAL(3)` (from its frontmatter), so the workflow must have at least 3 workflow steps to fire it.
+An Auto-mode workflow with a review-class infrastructure agent (`mosaictest-review`) declared. The workflow frontmatter declares `infrastructure_agents: [mosaictest-review]`. The test runner reads this field and passes `--infrastructure=mosaictest-review` to the `mosaic-run run` subprocess, so only the review agent is active. The agent's default trigger is `INVOCATION_INTERVAL(3)` (from its frontmatter), so the workflow must have at least 3 workflow steps to fire it.
 
 **What this proves:** The unique thing about the review class — after the review agent fires, the Runner does a **follow-up routing consultation** with the script-mode orchestrator, passing the review's `status_message` as `last_status_message` (ScriptOrchestratorContract.md §2.1). This is the only infrastructure class that triggers an additional orchestrator invocation.
 

@@ -554,6 +554,45 @@ func (s *sessionImpl) Start(ctx context.Context, config domain.RunConfig) (outco
 		return s.refusal(err.Error()), nil
 	}
 
+	// Step 6b2: Apply InfrastructureFilter to the declared agent set. When the
+	// filter is nil, all declared agents remain active (backwards-compatible).
+	// When non-nil, only agents whose Name appears in the filter set are
+	// retained. An empty filter produces an empty slice, which causes all
+	// downstream checks (validateClassSelections, hasCheckpointClassAgent,
+	// hasCommitClassAgent, commit setup dispatch, evaluateTriggers,
+	// NewInfraAgentSet) to see no agents.
+	if config.InfrastructureFilter != nil {
+		filterSet := make(map[string]bool, len(config.InfrastructureFilter))
+		for _, key := range config.InfrastructureFilter {
+			filterSet[key] = true
+		}
+		// Emit a debug event for each filter key that does not match any
+		// declared agent, providing a diagnostic signal for typos.
+		for _, key := range config.InfrastructureFilter {
+			matched := false
+			for _, agent := range declaredInfraAgents {
+				if agent.Name == key {
+					matched = true
+					break
+				}
+			}
+			if !matched {
+				s.deps.Debug.Log(domain.EventSessionFilterUnmatched,
+					"infrastructure filter key does not match any declared agent",
+					domain.F("key", key),
+				)
+			}
+		}
+		// Retain only agents whose Name is in the filter set.
+		filtered := make([]domain.DeclaredInfraAgent, 0, len(declaredInfraAgents))
+		for _, agent := range declaredInfraAgents {
+			if filterSet[agent.Name] {
+				filtered = append(filtered, agent)
+			}
+		}
+		declaredInfraAgents = filtered
+	}
+
 	// Step 6c: Validate per-class agent selection. When multiple agents of the
 	// same gated class are declared and no selection is provided in RunConfig,
 	// refuse at run start (non-interactive CLI runs must supply --infra-class).
@@ -761,10 +800,10 @@ func (s *sessionImpl) Start(ctx context.Context, config domain.RunConfig) (outco
 	// dispatched step. Passed to engine.Next so that COMPLETED_NEEDS_ACTION
 	// auto-review artifact injection receives the correct input artifact list.
 	var lastOutputArtifacts []string
-	// prevWorkflowStep tracks the most recently completed workflow step for
-	// retrospective STAGE_END / PHASE_END trigger evaluation. Nil until the
-	// first workflow step completes. Updated only for workflow steps, not for
-	// infrastructure agent completions (no-cascades rule).
+	// prevWorkflowStep tracks the most recently completed workflow step.
+	// Nil until the first workflow step completes. Updated only for workflow
+	// steps, not for infrastructure agent completions (no-cascades rule).
+	// Passed through to consultRoute for its trigger evaluation call site.
 	var prevWorkflowStep *domain.CompletedStep
 	// antiLoop tracks consecutive same-agent dispatches for the current step
 	// and enforces the anti-loop guard. rowIndex starts at -1 to signal that
@@ -1179,11 +1218,12 @@ func (s *sessionImpl) Start(ctx context.Context, config domain.RunConfig) (outco
 
 			// Infrastructure-agent trigger evaluation (FR-40).
 			if !completedStep.IsInfrastructure {
-				halt, trigStopped, trigErr := s.evaluateTriggers(
+				halt, trigStopped, reviewConsult, trigErr := s.evaluateTriggers(
 					ctx, &state, &seq, completedStep, prevWorkflowStep,
 					declaredInfraAgents, config,
 					buildActiveAgentsFilter(declaredInfraAgents, config.InfraClassSelections),
 					orchDir,
+					hitlStep.RowIndex, admitted, stages,
 				)
 				if trigErr != nil {
 					if ctx.Err() != nil {
@@ -1202,6 +1242,19 @@ func (s *sessionImpl) Start(ctx context.Context, config domain.RunConfig) (outco
 				onInfrastructureAgentTrigger()
 				if s.deps.OnInfrastructureTrigger != nil {
 					s.deps.OnInfrastructureTrigger()
+				}
+				if reviewConsult != nil && s.deps.Routing != nil {
+					syntheticResp := domain.ProtocolResponse{StatusMessage: reviewConsult.StatusMessage}
+					lastResponse = &syntheticResp
+					done, outcome, consultErr := s.consultRoute(ctx, nil, &state, &seq,
+						&lastResponse, &prevWorkflowStep, &refreshedStages, &stages,
+						table, agents, config, declaredInfraAgents, admitted, &antiLoop)
+					if consultErr != nil {
+						return domain.RunOutcome{Status: domain.RunFailed, Message: consultErr.Error()}, consultErr
+					}
+					if done {
+						return outcome, nil
+					}
 				}
 			}
 
@@ -1953,11 +2006,12 @@ hitlLoop:
 	// Infrastructure-agent trigger evaluation.
 	orchDir := filepath.Dir(config.OrchestratorFilePath)
 	if !completedStep.IsInfrastructure {
-		halt, trigStopped, trigErr := s.evaluateTriggers(
+		halt, trigStopped, reviewConsult, trigErr := s.evaluateTriggers(
 			ctx, state, seq, completedStep, *prevWorkflowStep,
 			declaredInfraAgents, config,
 			buildActiveAgentsFilter(declaredInfraAgents, config.InfraClassSelections),
 			orchDir,
+			dispInstr.RowIndex, admitted, *stages,
 		)
 		if trigErr != nil {
 			if ctx.Err() != nil {
@@ -1976,6 +2030,18 @@ hitlLoop:
 		onInfrastructureAgentTrigger()
 		if s.deps.OnInfrastructureTrigger != nil {
 			s.deps.OnInfrastructureTrigger()
+		}
+		if reviewConsult != nil && s.deps.Routing != nil {
+			syntheticResp := domain.ProtocolResponse{StatusMessage: reviewConsult.StatusMessage}
+			*lastResponse = &syntheticResp
+			done, outcome, consultErr := s.consultRoute(ctx, nil, state, seq, lastResponse, prevWorkflowStep,
+				refreshedStages, stages, table, agents, config, declaredInfraAgents, admitted, antiLoop)
+			if consultErr != nil {
+				return true, domain.RunOutcome{Status: domain.RunFailed, Message: consultErr.Error()}, consultErr
+			}
+			if done {
+				return done, outcome, nil
+			}
 		}
 	}
 
@@ -2198,19 +2264,25 @@ func lastInfraSeqInLog(agentName string, log []domain.ExecutionLogEntry) int {
 }
 
 // infraTriggerFires reports whether the given trigger should fire after the
-// workflow step described by completedStep and prevWorkflowStep.
+// workflow step described by completedStep.
 //
 // currentSeq is the global sequence after the most recent Store.Apply call
 // (including any infra dispatches that have already completed during this
 // evaluation pass). log is the current execution log, used for
 // INVOCATION_INTERVAL interval arithmetic.
+//
+// rowIdx is the routing table row index of the completed step. admitted and
+// stages are the admitted workflow and stage set, used for prospective look-ahead
+// in STAGE_END and PHASE_END evaluation.
 func infraTriggerFires(
 	trigger domain.DeclaredInfraTrigger,
 	currentSeq int,
 	log []domain.ExecutionLogEntry,
 	agentName string,
 	completedStep domain.CompletedStep,
-	prevWorkflowStep *domain.CompletedStep,
+	rowIdx int,
+	admitted domain.AdmittedWorkflow,
+	stages *domain.StageSet,
 ) bool {
 	switch trigger.Trigger {
 	case "INVOCATION_INTERVAL":
@@ -2226,17 +2298,23 @@ func infraTriggerFires(
 		return (currentSeq - lastSeq) >= param
 
 	case "STAGE_END":
-		if prevWorkflowStep == nil {
-			// First workflow step: no prior step to compare against.
+		// Prospective semantics: fires when the completed step is the last
+		// step of its stage (look-ahead), not by comparing against a prior step.
+		// STAGE_END only applies to EXECUTION-phase steps (Stage != "").
+		if completedStep.Stage == "" {
 			return false
 		}
-		return completedStep.Stage != prevWorkflowStep.Stage
+		_, stageNum, ok := domain.ParseStageValue(completedStep.Stage)
+		if !ok || stageNum == 0 {
+			return false
+		}
+		return engine.IsLastRowOfStage(admitted, stages, rowIdx, stageNum)
 
 	case "PHASE_END":
-		if prevWorkflowStep == nil {
-			return false
-		}
-		return completedStep.Phase != prevWorkflowStep.Phase
+		// Prospective semantics: fires when the completed step is the last
+		// step of its phase (look-ahead), not by comparing against a prior step.
+		_, stageNum, _ := domain.ParseStageValue(completedStep.Stage)
+		return engine.IsLastRowOfPhase(admitted, stages, rowIdx, stageNum)
 
 	case "MANUAL":
 		// MANUAL triggers never fire automatically.
@@ -2252,18 +2330,29 @@ func infraTriggerFires(
 // evaluated in declaration order; each agent fires at most once per
 // evaluation even if multiple triggers match.
 //
+// reviewConsultSignal carries the status message from the last successful
+// review-class infrastructure agent in an evaluateTriggers pass. When
+// non-nil, the caller must perform a routing consultation via consultRoute,
+// supplying StatusMessage as last_status_message.
+type reviewConsultSignal struct {
+	StatusMessage string
+}
+
 // Dispatch is performed synchronously: each matching agent's invocation
 // completes (including its Execution Log row via Store.Apply) before the
 // next declared agent's triggers are evaluated.
 //
-// Returns (true, false, nil) when an on_failure=halt agent stops the run.
-// Returns (false, false, non-nil) on unexpected infrastructure errors.
-// Returns (false, true, nil) when a graceful stop is confirmed between two
+// Returns (true, false, nil, nil) when an on_failure=halt agent stops the run.
+// Returns (false, false, nil, non-nil) on unexpected infrastructure errors.
+// Returns (false, true, nil, nil) when a graceful stop is confirmed between two
 // declared agents' dispatches within this evaluation pass; any agent that
 // already fired and dispatched in this pass keeps its already-applied
 // outcome, and no further agent in the pass is dispatched.
-// Returns (false, false, nil) when all evaluations complete without a halt
-// or a confirmed stop.
+// Returns (false, false, non-nil, nil) when all evaluations complete and at
+// least one review-class agent succeeded; the caller performs a routing
+// consultation using the signal's StatusMessage.
+// Returns (false, false, nil, nil) when all evaluations complete without a
+// halt, stop, or successful review.
 func (s *sessionImpl) evaluateTriggers(
 	ctx context.Context,
 	state *domain.ArtifactState,
@@ -2274,7 +2363,11 @@ func (s *sessionImpl) evaluateTriggers(
 	config domain.RunConfig,
 	activeAgents map[string]bool,
 	orchDir string,
-) (haltRun bool, stopRequested bool, err error) {
+	rowIdx int,
+	admitted domain.AdmittedWorkflow,
+	stages *domain.StageSet,
+) (haltRun bool, stopRequested bool, reviewConsult *reviewConsultSignal, err error) {
+	var reviewSignal *reviewConsultSignal
 	for _, agent := range declared {
 		// Restore-class agents are never dispatched by automatic trigger
 		// evaluation; they act only on explicit manual instruction (MANUAL
@@ -2300,7 +2393,7 @@ func (s *sessionImpl) evaluateTriggers(
 		// per evaluation pass even if multiple triggers match.
 		fired := false
 		for _, trigger := range agent.Triggers {
-			if infraTriggerFires(trigger, *seq, state.ExecutionLog, agent.Name, completedStep, prevWorkflowStep) {
+			if infraTriggerFires(trigger, *seq, state.ExecutionLog, agent.Name, completedStep, rowIdx, admitted, stages) {
 				fired = true
 				break
 			}
@@ -2335,14 +2428,14 @@ func (s *sessionImpl) evaluateTriggers(
 				s.deps.Debug.Log(domain.EventSessionStopObserved, "graceful stop observed; not dispatching",
 					domain.F("checkpoint", StopCheckpointInfraDispatch),
 				)
-				return false, true, nil
+				return false, true, nil, nil
 			}
 
 			var invokeErr error
 			response, invokeErr = s.invokeAndLog(ctx, agentRef, req)
 			if invokeErr != nil {
 				if ctx.Err() != nil {
-					return true, false, ctx.Err()
+					return true, false, nil, ctx.Err()
 				}
 				// Harness-level error: treat as non-SUCCESS and apply on_failure policy.
 				response = domain.ProtocolResponse{
@@ -2373,7 +2466,7 @@ func (s *sessionImpl) evaluateTriggers(
 		}
 		newState, applyErr := s.deps.Store.Apply(ctx, *state, infraStep)
 		if applyErr != nil {
-			return false, false, applyErr
+			return false, false, nil, applyErr
 		}
 		*state = newState
 		*seq = infraSeq
@@ -2383,12 +2476,16 @@ func (s *sessionImpl) evaluateTriggers(
 		// exclusively.
 		if response.StatusCode != domain.StatusSUCCESS {
 			if agent.OnFailure == "halt" {
-				return true, false, nil
+				return true, false, nil, nil
 			}
 			// continue policy: record the failure and proceed.
+		} else if agent.Class == "review" {
+			// Accumulate review signal: overwrite on each successful review so
+			// the last successful review's message is used for the consultation.
+			reviewSignal = &reviewConsultSignal{StatusMessage: response.StatusMessage}
 		}
 	}
-	return false, false, nil
+	return false, false, reviewSignal, nil
 }
 
 // validateAndApplyOverrides validates each infrastructure_overrides entry

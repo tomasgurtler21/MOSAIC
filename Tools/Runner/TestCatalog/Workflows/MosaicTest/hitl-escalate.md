@@ -25,7 +25,7 @@ modes:
 
 **Notes:**
 - **Run this workflow in Auto mode.**
-- The script fixture uses stub enhancements E1 (`approval`) and E3 (`hitl_behaviour`), which are not yet implemented in `mosaictest-scripted`. See `ToolingGaps.md` GAP-2. The fixture is forward-looking: once E1 and E3 are implemented, this suite runs without changes.
+- The script fixture uses stub enhancements E1 (`approval`) and E3 (`hitl_behaviour`), both implemented in `mosaictest-scripted`.
 - E3 (`hitl_behaviour: proceed`) causes the stub to process the fixture normally instead of auto-refusing on `human_in_the_loop: true`. Without E3, the stub would return `BLOCKED`/`E503` and the HITL approval path would never be reached.
 - E1 (`approval: false`) causes the stub to write `human_approved: false` in the output artifact. The Runner reads this after `SUCCESS` with HITL=true.
 - Both invocations return `SUCCESS` with `human_approved: false`. The first triggers `HITLRedispatch`; the second triggers `HITLEscalate` (deviation).
