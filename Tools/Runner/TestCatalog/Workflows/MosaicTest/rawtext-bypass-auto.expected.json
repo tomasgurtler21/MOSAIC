@@ -1,0 +1,9 @@
+{
+  "exit_code": 6,
+  "dispatches": [
+    { "agent": "orchestrator-script", "expect_status": "" },
+    { "agent": "mosaictest-wronganswer", "expect_error": true },
+    { "agent": "mosaictest-wronganswer", "expect_error": true },
+    { "agent": "orchestrator-script", "expect_status": "" }
+  ]
+}

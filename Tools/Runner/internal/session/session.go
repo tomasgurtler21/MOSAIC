@@ -261,6 +261,18 @@ type sessionImpl struct {
 	backupState *snapshot.BackupState
 }
 
+// isRawTextHarnessError reports whether err is a raw-text protocol failure:
+// the harness received output from the subprocess but could not extract a
+// valid protocol JSON response. These errors are worth a single direct retry
+// because they are often caused by the model writing a plain-text reply
+// instead of the expected JSON structure, and a retry typically succeeds.
+// Transport-level failures (timeouts, non-zero exits) do not qualify.
+func isRawTextHarnessError(err error) bool {
+	return errors.Is(err, commonharness.ErrProtocolNotExtractable) ||
+		errors.Is(err, commonharness.ErrMalformedJSON) ||
+		errors.Is(err, commonharness.ErrEmptyResponse)
+}
+
 // invokeAndLog wraps s.deps.Harness.Invoke with dispatch logging. It logs the
 // full request immediately before the invocation and the full response (or a
 // harness-level error) immediately after. The response and error are returned
@@ -944,13 +956,30 @@ func (s *sessionImpl) Start(ctx context.Context, config domain.RunConfig) (outco
 					return domain.RunOutcome{Status: domain.RunFailed, Message: err.Error()}, err
 				}
 				seq = state.GlobalSequence
-				done, outcome, outErr := s.consultRoute(ctx, &deviationInfo, &state, &seq,
-					&lastResponse, &prevWorkflowStep, &refreshedStages, &stages,
-					table, agents, config, declaredInfraAgents, admitted, &antiLoop)
-				if done {
-					return outcome, outErr
+				// Raw-text harness error bypass: attempt one direct redispatch
+				// before consulting the orchestrator. If the anti-loop guard
+				// already blocks at this point, skip the bypass and fall through
+				// to consultRoute immediately.
+				bypassed := false
+				if isRawTextHarnessError(invokeErr) && antiLoop.recordDispatch(step.RowIndex, step.Agent.Identifier) {
+					bypassSeq := state.GlobalSequence + 1
+					bypassReq := step.Request
+					bypassReq.AgentInstanceID = fmt.Sprintf("%s#%d", step.Agent.Identifier, bypassSeq)
+					if bypassResp, bypassErr := s.invokeAndLog(ctx, step.Agent, bypassReq); bypassErr == nil {
+						response = bypassResp
+						step.Request = bypassReq
+						bypassed = true
+					}
 				}
-				continue
+				if !bypassed {
+					done, outcome, outErr := s.consultRoute(ctx, &deviationInfo, &state, &seq,
+						&lastResponse, &prevWorkflowStep, &refreshedStages, &stages,
+						table, agents, config, declaredInfraAgents, admitted, &antiLoop)
+					if done {
+						return outcome, outErr
+					}
+					continue
+				}
 			}
 
 			// HITL compliance verification for auto-routed dispatches. The loop
@@ -1093,6 +1122,29 @@ func (s *sessionImpl) Start(ctx context.Context, config domain.RunConfig) (outco
 						s.deps.Debug.Log(domain.EventSessionHarnessError, rdErr.Error(),
 							domain.F("agent", hitlStep.Request.AgentInstanceID),
 						)
+						// Persist a record of the failed HITL-redispatch attempt.
+						// The Store.Apply at the rejection step above records the
+						// HITLRejected attempt; this separate record captures the
+						// harness failure on the redispatch itself, matching the
+						// failed-attempt persistence pattern used at the main
+						// dispatch loop site.
+						rdFailedAttemptStep := domain.CompletedStep{
+							Seq:              state.GlobalSequence + 1,
+							AgentInstance:    hitlStep.Request.AgentInstanceID,
+							Phase:            hitlStep.Phase,
+							Stage:            hitlStep.Stage,
+							Status:           domain.StatusBLOCKED,
+							Summary:          rdErr.Error(),
+							Timestamp:        s.deps.Clock.Now(),
+							Inputs:           formatInputs(hitlStep.Request.InputArtifacts),
+							IsInfrastructure: true,
+						}
+						state, err = s.deps.Store.Apply(ctx, state, rdFailedAttemptStep)
+						if err != nil {
+							s.deps.Debug.Log(domain.EventSessionApplyFailed, err.Error())
+							return domain.RunOutcome{Status: domain.RunFailed, Message: err.Error()}, err
+						}
+						seq = state.GlobalSequence
 						rdDevInfo := domain.DeviationInfo{
 							Kind: domain.DeviationHarnessError,
 							Response: domain.ProtocolResponse{
@@ -1110,13 +1162,31 @@ func (s *sessionImpl) Start(ctx context.Context, config domain.RunConfig) (outco
 							s.deps.Debug.Log(domain.EventSessionDeviationUnresolved, rdMsg)
 							return domain.RunOutcome{Status: domain.RunDeviationUnresolved, Message: rdMsg}, nil
 						}
-						rdDone, rdOutcome, rdOutErr := s.consultRoute(ctx, &rdDevInfo, &state, &seq,
-							&lastResponse, &prevWorkflowStep, &refreshedStages, &stages,
-							table, agents, config, declaredInfraAgents, admitted, &antiLoop)
-						if rdDone {
-							return rdOutcome, rdOutErr
+						// Raw-text harness error bypass: attempt one direct
+						// redispatch inside the HITL-redispatch fallback before
+						// calling consultRoute. Skipped when the anti-loop guard
+						// is already at the limit.
+						rdBypassed := false
+						if isRawTextHarnessError(rdErr) && antiLoop.recordDispatch(hitlStep.RowIndex, hitlStep.Agent.Identifier) {
+							bypassSeq := state.GlobalSequence + 1
+							bypassReq := hitlStep.Request
+							bypassReq.AgentInstanceID = fmt.Sprintf("%s#%d", hitlStep.Agent.Identifier, bypassSeq)
+							if bypassResp, bypassErr := s.invokeAndLog(ctx, hitlStep.Agent, bypassReq); bypassErr == nil {
+								hitlStep.Request = bypassReq
+								hitlAttemptSeq = bypassSeq
+								rdResp = bypassResp
+								rdBypassed = true
+							}
 						}
-						break hitlCheckLoop
+						if !rdBypassed {
+							rdDone, rdOutcome, rdOutErr := s.consultRoute(ctx, &rdDevInfo, &state, &seq,
+								&lastResponse, &prevWorkflowStep, &refreshedStages, &stages,
+								table, agents, config, declaredInfraAgents, admitted, &antiLoop)
+							if rdDone {
+								return rdOutcome, rdOutErr
+							}
+							break hitlCheckLoop
+						}
 					}
 					hitlResponse = rdResp
 					// Loop to re-check HITL with RedispatchUsed=true.
@@ -1781,6 +1851,25 @@ func (s *sessionImpl) consultRoute(
 		s.deps.Debug.Log(domain.EventSessionHarnessError, invokeErr.Error(),
 			domain.F("agent", agentReq.AgentInstanceID),
 		)
+		// Persist a record of the failed dispatch attempt so the execution log
+		// captures every invocation at this site, matching the pattern already
+		// established at the main dispatch loop site.
+		crFailedAttemptStep := domain.CompletedStep{
+			Seq:              state.GlobalSequence + 1,
+			AgentInstance:    agentReq.AgentInstanceID,
+			Phase:            phase,
+			Stage:            effectiveStage,
+			Status:           domain.StatusBLOCKED,
+			Summary:          invokeErr.Error(),
+			Timestamp:        s.deps.Clock.Now(),
+			Inputs:           formatInputs(agentReq.InputArtifacts),
+			IsInfrastructure: true,
+		}
+		crNewState, crApplyErr := s.deps.Store.Apply(ctx, *state, crFailedAttemptStep)
+		if crApplyErr != nil {
+			return true, domain.RunOutcome{Status: domain.RunFailed, Message: crApplyErr.Error()}, crApplyErr
+		}
+		*state = crNewState
 		devInfo := domain.DeviationInfo{
 			Kind: domain.DeviationHarnessError,
 			Response: domain.ProtocolResponse{
@@ -1792,8 +1881,24 @@ func (s *sessionImpl) consultRoute(
 			CurrentPhase:  phase,
 			ArtifactState: *state,
 		}
-		return s.consultRoute(ctx, &devInfo, state, seq, lastResponse, prevWorkflowStep,
-			refreshedStages, stages, table, agents, config, declaredInfraAgents, admitted, antiLoop)
+		// Raw-text harness error bypass: attempt one direct redispatch before
+		// triggering a recursive consultRoute call. Skipped when the anti-loop
+		// guard is already at the limit.
+		crBypassed := false
+		if isRawTextHarnessError(invokeErr) && antiLoop.recordDispatch(dispInstr.RowIndex, agentRef.Identifier) {
+			bypassSeq := state.GlobalSequence + 1
+			bypassReq := agentReq
+			bypassReq.AgentInstanceID = fmt.Sprintf("%s#%d", agentRef.Identifier, bypassSeq)
+			if bypassResp, bypassErr := s.invokeAndLog(ctx, agentRef, bypassReq); bypassErr == nil {
+				response = bypassResp
+				dispSeq = bypassSeq
+				crBypassed = true
+			}
+		}
+		if !crBypassed {
+			return s.consultRoute(ctx, &devInfo, state, seq, lastResponse, prevWorkflowStep,
+				refreshedStages, stages, table, agents, config, declaredInfraAgents, admitted, antiLoop)
+		}
 	}
 
 	// HITL compliance verification. Each rejected attempt is persisted with

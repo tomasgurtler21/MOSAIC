@@ -35,13 +35,14 @@ import (
 	"mosaic-run/internal/tui/screens"
 )
 
-const ToolVersion = "1.0.0"
+const ToolVersion = "1.1.0"
 
 // wantsTUI reports whether mosaic-run should launch the interactive TUI.
 // The TUI is launched when:
-//   (a) --tui is given explicitly, OR
-//   (b) no positional subcommand is present AND both stdin and stdout are
-//       attached to a real terminal (not a pipe, redirect, or CI environment).
+//
+//	(a) --tui is given explicitly, OR
+//	(b) no positional subcommand is present AND both stdin and stdout are
+//	    attached to a real terminal (not a pipe, redirect, or CI environment).
 //
 // This mirrors the deployment tool's wantsTUI pattern to ensure consistent
 // behaviour across mosaic-run and mosaic-deploy.
@@ -295,14 +296,14 @@ func runTUIMode(args []string, devMode bool) {
 	// either value.
 	wiring := buildInteractiveWiring(interactiveWiringInput{
 		ExecutablePath: execPathTUI,
-		ProgramRef:  programRef,
-		Minter:      minter,
-		Identity:    identity,
-		StopSignal:  stopSignal,
-		Debug:       logger,
-		DispatchLog: dispLogger,
-		Clock:       &realClock{},
-		DevMode:     devMode,
+		ProgramRef:     programRef,
+		Minter:         minter,
+		Identity:       identity,
+		StopSignal:     stopSignal,
+		Debug:          logger,
+		DispatchLog:    dispLogger,
+		Clock:          &realClock{},
+		DevMode:        devMode,
 		// The run-id association needs SetRunID on the two concrete loggers,
 		// which are in scope here and not inside the seam.
 		OnRunIDResolved: func(runID string) {
@@ -777,4 +778,3 @@ func formatSelectionRefusal(q runselect.Question) string {
 type realClock struct{}
 
 func (c *realClock) Now() time.Time { return time.Now().UTC() }
-

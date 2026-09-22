@@ -18,6 +18,7 @@ Measuring it requires real end-to-end runs, which requires agents. These are tho
 | 41 | [mosaictest-checkpoint](./mosaictest-checkpoint.md) | 2.1.0 | Infrastructure, `checkpoint` | LOW | Returns SUCCESS with a fake `[checkpoint:{sha}]` marker; performs no git operations |
 | 42 | [mosaictest-review](./mosaictest-review.md) | 2.1.0 | Infrastructure, `review` | LOW | Returns SUCCESS with a self-describing message; inspects nothing |
 | 43 | [mosaictest-commit](./mosaictest-commit.md) | 2.1.0 | Infrastructure, `commit` | LOW | Returns SUCCESS with a fake `[branch:mosaictest-run]` marker; performs no git operations |
+| 44 | [mosaictest-wronganswer](./mosaictest-wronganswer.md) | 1.0.0 | Routed | LOW | Returns raw text with no Communication Protocol knowledge; tests the Runner's raw-text bypass and consultation fallback |
 
 ### The stub orchestrator is not in this folder
 
