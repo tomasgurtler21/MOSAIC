@@ -109,12 +109,24 @@ When the workflow completes, the orchestrator reports a summary and the run fold
 
 You've seen the system work. Now make it work *well* for your specific codebase.
 
-### Fill project injections
+### Add a workflow and fill project injections
 
-Deploy again — this time add the `brownfield-tdd` workflow and the `injections-helper` utility agent:
+Now add the `brownfield-tdd` workflow to your existing deployment. Run the deploy tool and choose **Update workflows** — this rewrites only the orchestrator with your new workflow set, without disturbing agents or injections you've already configured:
 
 ```sh
 .\mosaic-deploy.exe
+# → Select "Update workflows"
+# → Select both kb-generation and brownfield-tdd
+```
+
+If the new workflow requires agents that aren't deployed yet, the tool deploys them automatically in the same run.
+
+Next, add the `injections-helper` utility agent. Run the deploy tool again and choose **Deploy agents**:
+
+```sh
+.\mosaic-deploy.exe
+# → Select "Deploy agents"
+# → Find injections-helper under the Utility Agents category
 ```
 
 After deployment, you'll find a `MOSAIC-DEPLOYMENT-TODO-<timestamp>.md` in your workspace root. This checklist tells you exactly what needs attention — most importantly, **project injection points** to fill.
