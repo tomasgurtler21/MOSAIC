@@ -285,6 +285,8 @@ func TestSession_StopObserved_InfraDispatch_LogsCheckpointIdentifier(t *testing.
 	orchPath := copyOrchestratorFile(t, dir, "review-class-orch.md")
 	writeAgentFile(t, dir, "agent-a")
 	writeAgentFile(t, dir, "agent-b")
+	writeAgentFile(t, dir, "review-agent-a")
+	writeAgentFile(t, dir, "review-agent-b")
 
 	f := harness.NewFakeAdapter()
 	store := &memStore{}
@@ -296,6 +298,9 @@ func TestSession_StopObserved_InfraDispatch_LogsCheckpointIdentifier(t *testing.
 		Clock:    fixedClock{t: epoch},
 		Interact: &noopInteraction{},
 		Debug:    logger,
+		// Routing: nil -- no post-review consultation. This test verifies stop
+		// checkpoint observability during infra dispatch, independent of Stage-2
+		// review consultation behavior.
 		// True only once agent-a's step and review-agent-a's trigger dispatch
 		// have both been applied -- strictly between two declared infra agents'
 		// dispatches within the same trigger-evaluation pass.

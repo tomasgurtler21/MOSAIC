@@ -57,6 +57,14 @@ type RunConfig struct {
 	// false (the default and for normal Retry), the configured consultant handles
 	// all routing decisions from the start.
 	ManualDispatch bool
+
+	// InfrastructureFilter controls which declared infrastructure agents are
+	// active for this run. Follows nil/empty/populated semantics:
+	//   - nil:       not passed; all declared agents active (backwards-compatible)
+	//   - []string{}: passed empty; no agents active
+	//   - populated: only named agents active
+	// Populated by CLI from --infrastructure flag (Stage 5).
+	InfrastructureFilter []string
 }
 
 // RunSettings carries every run-configuration decision that is settled at run

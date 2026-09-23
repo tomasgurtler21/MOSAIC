@@ -35,13 +35,14 @@ import (
 	"mosaic-run/internal/tui/screens"
 )
 
-const ToolVersion = "1.0.0"
+const ToolVersion = "1.1.0"
 
 // wantsTUI reports whether mosaic-run should launch the interactive TUI.
 // The TUI is launched when:
-//   (a) --tui is given explicitly, OR
-//   (b) no positional subcommand is present AND both stdin and stdout are
-//       attached to a real terminal (not a pipe, redirect, or CI environment).
+//
+//	(a) --tui is given explicitly, OR
+//	(b) no positional subcommand is present AND both stdin and stdout are
+//	    attached to a real terminal (not a pipe, redirect, or CI environment).
 //
 // This mirrors the deployment tool's wantsTUI pattern to ensure consistent
 // behaviour across mosaic-run and mosaic-deploy.
@@ -58,8 +59,29 @@ func wantsTUI(args []string) bool {
 func main() {
 	args := os.Args[1:]
 
-	if wantsTUI(args) {
-		runTUIMode(args)
+	// Pre-scan --dev before any other processing. The --dev flag gates the test
+	// subcommand and the TUI test flow. It is an entry-point-only flag (like
+	// --tui): it is consumed here and must be stripped before cobra sees it,
+	// since neither the run nor the test cobra subcommand registers it.
+	devMode := scanBoolFlag(args, "--dev")
+	cobraArgs := stripBoolFlag(args, "--dev")
+
+	if wantsTUI(cobraArgs) {
+		runTUIMode(cobraArgs, devMode)
+		return
+	}
+
+	// When --dev is present and the first positional argument is "test", route to
+	// the test subcommand entry point before any run-specific wiring (run identity
+	// resolution, session construction, etc.). The test subcommand manages its own
+	// dependency construction from its flags.
+	if devMode && firstPositionalArg(cobraArgs) == "test" {
+		testWorkDir, wdErr := os.Getwd()
+		if wdErr != nil {
+			fmt.Fprintf(os.Stderr, "error: getting working directory: %v\n", wdErr)
+			os.Exit(1)
+		}
+		os.Exit(cli.RunTestCommand(context.Background(), cobraArgs, testWorkDir, os.Stdout, os.Stderr))
 		return
 	}
 
@@ -99,7 +121,7 @@ func main() {
 	if timeoutStr == "" {
 		timeoutStr = "30m" // matches the flag default
 	}
-	claudePathStr := scanFlag(args, "--claude-path")
+	execPathStr := scanFlag(args, "--executable-path")
 
 	// Pre-scan the flags that select which consultants are wired before the session
 	// is constructed. These mirror the cobra flag defaults: --mode has no default
@@ -157,7 +179,7 @@ func main() {
 
 	// Build the harness adapter via buildAdapter, passing the process logger
 	// so that invocation I/O is captured in the debug log.
-	h := buildAdapter(harnessStr, claudePathStr, ghcpPermissionMode, invocationTimeout, logger)
+	h := buildAdapter(harnessStr, execPathStr, ghcpPermissionMode, invocationTimeout, logger)
 
 	// Extract the raw-JSON transport if the selected harness adapter implements it.
 	// Production adapters implement both HarnessAdapter and RawInvoker over the same
@@ -196,13 +218,18 @@ func main() {
 
 	// Pass the pre-resolved store and identity so that cli.Run skips its own
 	// resolution step and uses the same run folder that was used to wire the session.
-	os.Exit(cli.Run(context.Background(), args, store, runIdentity, sess, os.Stdout, os.Stderr))
+	// Use cobraArgs (not args) so the entry-point-only --dev flag does not reach cobra.
+	os.Exit(cli.Run(context.Background(), cobraArgs, store, runIdentity, sess, os.Stdout, os.Stderr))
 }
 
 // runTUIMode launches the interactive TUI frontend. All session dependencies are
 // constructed here; the TUI's ProgramRef provides the Interaction port and the
 // TUIDeviationResolver handles deviation resolution through the TUI's deviation screen.
-func runTUIMode(args []string) {
+//
+// devMode enables the test-mode flow in the TUI (DevMode field on tui.Options).
+// When true, a "Run Tests" entry point is visible in the TUI; when false, the
+// test flow is hidden.
+func runTUIMode(args []string, devMode bool) {
 	workDir, err := os.Getwd()
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "error: getting working directory: %v\n", err)
@@ -223,8 +250,8 @@ func runTUIMode(args []string) {
 	dispLogger.SetToolVersion(ToolVersion)
 	defer dispLogger.Close()
 
-	// Pre-scan --claude-path so it is available to the session factory.
-	claudePathTUI := scanFlag(args, "--claude-path")
+	// Pre-scan --executable-path so it is available to the session factory.
+	execPathTUI := scanFlag(args, "--executable-path")
 
 	programRef := tui.NewProgramRef()
 
@@ -268,14 +295,15 @@ func runTUIMode(args []string) {
 	// stop signal reaches both consumers from one source. Nothing below adds to
 	// either value.
 	wiring := buildInteractiveWiring(interactiveWiringInput{
-		ClaudePath:  claudePathTUI,
-		ProgramRef:  programRef,
-		Minter:      minter,
-		Identity:    identity,
-		StopSignal:  stopSignal,
-		Debug:       logger,
-		DispatchLog: dispLogger,
-		Clock:       &realClock{},
+		ExecutablePath: execPathTUI,
+		ProgramRef:     programRef,
+		Minter:         minter,
+		Identity:       identity,
+		StopSignal:     stopSignal,
+		Debug:          logger,
+		DispatchLog:    dispLogger,
+		Clock:          &realClock{},
+		DevMode:        devMode,
 		// The run-id association needs SetRunID on the two concrete loggers,
 		// which are in scope here and not inside the seam.
 		OnRunIDResolved: func(runID string) {
@@ -430,6 +458,51 @@ func resolveRunIdentityForCLI(args []string, workDirs ...string) (*cli.RunIdenti
 	return identity, nil, nil
 }
 
+// stripBoolFlag returns a copy of args with all occurrences of the named
+// boolean flag removed. It handles the bare "--flag" form and the
+// "--flag=true"/"--flag=false" forms. This is used to remove entry-point-only
+// flags (like --dev) before passing args to a cobra command that does not
+// register them.
+func stripBoolFlag(args []string, flag string) []string {
+	prefix := flag + "="
+	result := make([]string, 0, len(args))
+	for _, arg := range args {
+		if arg == flag || strings.HasPrefix(arg, prefix) {
+			continue // drop this token
+		}
+		result = append(result, arg)
+	}
+	return result
+}
+
+// firstPositionalArg returns the first genuine positional argument in args —
+// a token that is neither a flag nor the value of a preceding value-bearing
+// flag — or "" when no positional argument is found. Uses the combined
+// value-bearing flag set (run and test subcommands) via cli.AllValueBearingFlagNames()
+// so that test subcommand values like "--catalog /some/path" are not
+// misidentified as positional arguments.
+func firstPositionalArg(args []string) string {
+	valueBearing := make(map[string]bool)
+	for _, name := range cli.AllValueBearingFlagNames() {
+		valueBearing[name] = true
+	}
+
+	skipNext := false
+	for _, arg := range args {
+		if skipNext {
+			skipNext = false
+			continue
+		}
+		if !strings.HasPrefix(arg, "-") {
+			return arg
+		}
+		if !strings.Contains(arg, "=") && valueBearing[arg] {
+			skipNext = true
+		}
+	}
+	return ""
+}
+
 // scanBoolFlag reports whether a boolean flag (e.g. "--tui") appears anywhere in args.
 func scanBoolFlag(args []string, flag string) bool {
 	for _, arg := range args {
@@ -516,7 +589,9 @@ func hasFlag(args []string, flag string) bool {
 
 // hasPositionalArg reports whether args contains at least one genuine positional
 // argument — a token that is neither a flag nor the value of a preceding
-// value-bearing flag. The value-bearing set comes from cli.ValueBearingFlagNames().
+// value-bearing flag. The value-bearing set comes from cli.AllValueBearingFlagNames(),
+// which covers both the run and test subcommands' flags so that neither
+// subcommand's value arguments are misidentified as positional arguments.
 //
 // Scan rules (left to right):
 //   - A token that starts with "-" and is in the value-bearing set consumes the
@@ -529,7 +604,7 @@ func hasFlag(args []string, flag string) bool {
 //     genuine positional argument.
 func hasPositionalArg(args []string) bool {
 	valueBearing := make(map[string]bool)
-	for _, name := range cli.ValueBearingFlagNames() {
+	for _, name := range cli.AllValueBearingFlagNames() {
 		valueBearing[name] = true
 	}
 
@@ -595,13 +670,12 @@ func newLoggedArtifactStore(path string, logger domain.DebugLogger) domain.Artif
 
 // buildAdapter constructs the HarnessAdapter specified by harnessStr.
 //
-// When harnessStr is "claude-code" or "opencode", the corresponding CLI
-// adapter is created with claudePathStr as the executable path and timeout
-// as the invocation limit. A zero or negative timeout is treated as the
-// default (30 minutes). claudePathStr is named for the Claude Code CLI
-// historically, but it names whichever harness CLI harnessStr selected: the
-// opencode case reuses the same parameter, defaulting to the published
-// "opencode" command name when empty.
+// When harnessStr is "claude-code", "opencode", or "ghcp-cli", the
+// corresponding CLI adapter is created with execPathStr as the executable
+// path and timeout as the invocation limit. A zero or negative timeout is
+// treated as the default (30 minutes). execPathStr is the executable path
+// override supplied via --executable-path; when empty, each harness uses its
+// own per-harness default binary name.
 // For any other value (including "fake" and unknown strings), FakeAdapter is
 // returned. Unknown values are not rejected here; cli.Run validates the
 // --harness flag and surfaces usage errors for unknown values (AC3.8).
@@ -616,14 +690,14 @@ func newLoggedArtifactStore(path string, logger domain.DebugLogger) domain.Artif
 // CLI adapter is constructed with the logger so that invocation I/O is
 // captured in the debug log. When omitted, the adapter uses a no-op logger.
 // The fake adapter ignores the logger in all cases.
-func buildAdapter(harnessStr, claudePathStr, ghcpMode string, timeout time.Duration, loggers ...domain.DebugLogger) domain.HarnessAdapter {
+func buildAdapter(harnessStr, execPathStr, ghcpMode string, timeout time.Duration, loggers ...domain.DebugLogger) domain.HarnessAdapter {
 	var logger domain.DebugLogger = domain.NopDebugLogger{}
 	if len(loggers) > 0 && loggers[0] != nil {
 		logger = loggers[0]
 	}
 	switch harnessStr {
 	case commonharness.HarnessIDClaudeCode:
-		exe := claudePathStr
+		exe := execPathStr
 		if exe == "" {
 			exe = "claude"
 		}
@@ -632,7 +706,7 @@ func buildAdapter(harnessStr, claudePathStr, ghcpMode string, timeout time.Durat
 		}
 		return harness.NewClaudeCodeAdapterWithLogger(exe, timeout, logger)
 	case commonharness.HarnessIDOpenCode:
-		exe := claudePathStr
+		exe := execPathStr
 		if exe == "" {
 			exe = "opencode"
 		}
@@ -641,7 +715,7 @@ func buildAdapter(harnessStr, claudePathStr, ghcpMode string, timeout time.Durat
 		}
 		return harness.NewOpenCodeAdapterWithLogger(exe, timeout, logger)
 	case commonharness.HarnessIDGHCPCLI:
-		exe := claudePathStr
+		exe := execPathStr
 		if exe == "" {
 			exe = "copilot"
 		}
@@ -704,4 +778,3 @@ func formatSelectionRefusal(q runselect.Question) string {
 type realClock struct{}
 
 func (c *realClock) Now() time.Time { return time.Now().UTC() }
-

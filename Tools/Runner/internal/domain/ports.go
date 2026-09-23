@@ -331,8 +331,19 @@ const (
 	EventSessionHITLEscalate    = "session.hitl.escalate"
 	EventSessionManualResolve   = "session.manual.resolve"
 
+	// EventSessionFilterUnmatched is emitted when an InfrastructureFilter key
+	// does not match any declared infrastructure agent name. This is informational
+	// (the filter remains permissive for other keys) and provides a diagnostic
+	// signal when a typo results in zero or fewer active agents than expected.
+	EventSessionFilterUnmatched = "session.filter.unmatched"
+
 	// Snapshot event names.
-	EventSnapshotCleanupFailed = "session.snapshot.cleanup_failed"
+	EventSnapshotCleanupFailed  = "session.snapshot.cleanup_failed"
+	EventSnapshotRestored       = "session.snapshot.restored"
+	EventSnapshotLockAcquired   = "session.snapshot.lock_acquired"
+	EventSnapshotLockReleased   = "session.snapshot.lock_released"
+	EventSnapshotBackupCreated  = "session.snapshot.backup_created"  // Stage 8: creator wrote backup
+	EventSnapshotRecovery       = "session.snapshot.recovery"        // Stage 9: recovery ran at startup
 
 	// Graceful-stop lifecycle event names. Silent in a run where no stop is
 	// requested: nothing here is emitted on a negative poll or an ignored key.
@@ -344,4 +355,17 @@ const (
 	EventTUIStopGateEntered  = "tui.stop.gate.entered"
 	EventTUIStopGateResolved = "tui.stop.gate.resolved"
 	EventTUIStopSignalArmed  = "tui.stop.signal.armed"
+
+	// Test-flow event names (used by SubprocessRunInvoker).
+	// Note: these use .fail/.done/.error suffixes rather than .failed/.ok used
+	// elsewhere. The divergence is acknowledged; changing is an option but not
+	// required. The semantics are clear either way.
+	EventTestrunInvokeStart   = "testrun.invoke.start"
+	EventTestrunInvokeDone    = "testrun.invoke.done"
+	EventTestrunInvokeError   = "testrun.invoke.error"
+	EventTestrunDiscoveryFail = "testrun.discovery.fail"
+
+	// EventTestrunResolvePath is logged once per harness when binary
+	// resolution succeeds at suite startup.
+	EventTestrunResolvePath = "testrun.resolve.path"
 )

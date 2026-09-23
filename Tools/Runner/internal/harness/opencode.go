@@ -8,7 +8,6 @@ package harness
 
 import (
 	"context"
-	"encoding/json"
 	"errors"
 	"fmt"
 	"time"
@@ -155,8 +154,8 @@ func (a *OpenCodeAdapter) Invoke(ctx context.Context, agent domain.AgentReferenc
 		return domain.ProtocolResponse{}, err
 	}
 
-	var protoResp domain.ProtocolResponse
-	if uErr := json.Unmarshal(resp.Protocol, &protoResp); uErr != nil {
+	protoResp, uErr := UnmarshalResponse(resp.Protocol)
+	if uErr != nil {
 		wrapped := fmt.Errorf("%w: response decode failed", ErrMalformedOutput)
 		a.logger.Log(domain.EventHarnessParseFailed, string(resp.Protocol),
 			domain.F("agent", request.AgentInstanceID),

@@ -71,10 +71,28 @@ type SpawnRequest struct {
 	// both fields. This separation guarantees the non-collision constraint:
 	// Runner's new deterministic behavior cannot alter AgentTest's invocations.
 	//
-	// When DerivedTools is nil or empty, BuildArgs falls back to
-	// --permission-mode auto (backward-compatible with callers that do not
-	// populate this field, notably AgentTest's SpawnPlan methods).
+	// When DerivedTools is nil or empty and ToolsDerived is false, BuildArgs
+	// falls back to --permission-mode auto (backward-compatible with callers
+	// that do not populate this field, notably AgentTest's SpawnPlan methods).
+	// When ToolsDerived is true, an empty DerivedTools is intentional and
+	// BuildArgs uses --permission-mode dontAsk with no --allowedTools entries.
 	DerivedTools []string
+
+	// ToolsDerived indicates that the caller performed tool derivation from
+	// the agent's deployed definition. When true, an empty DerivedTools slice
+	// is intentional ("the agent needs no gated tools") rather than a signal
+	// that derivation was skipped.
+	//
+	// When false (the zero value), BuildGHCPCLIArgs and BuildArgs treat an
+	// empty DerivedTools as "derivation not performed" and apply their
+	// respective backward-compatible guards: ErrGHCPCLIAllowlistEmpty for
+	// GHCP CLI partial-allowlist mode, and --permission-mode auto for
+	// Claude Code.
+	//
+	// Callers that derive tools (Runner adapters) set this to true after a
+	// successful ExtractGHCPCLITools or ExtractClaudeCodeTools call.
+	// Callers that do not derive tools (AgentTest) leave it false.
+	ToolsDerived bool
 
 	// GHCPCLIMode selects the permission strategy for the GHCP CLI arg
 	// builder. The zero value (GHCPCLIModeUnresolved) causes

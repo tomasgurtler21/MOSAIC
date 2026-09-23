@@ -68,9 +68,10 @@ const harnessPackage = modulePrefix + "internal/harness"
 // rather than to the whole package, so the general rule still catches any
 // other file that starts constructing adapters directly.
 var harnessSelectionConsumers = map[string]bool{
-	"cli/run.go":           true,
-	"cli/flagspecs.go":     true, // uses FakeHarnessID and FlagValues() for flag registration
-	"tui/screens/setup.go": true,
+	"cli/run.go":                true,
+	"cli/flagspecs.go":          true, // uses FakeHarnessID and FlagValues() for flag registration
+	"tui/screens/setup.go":      true,
+	"tui/screens/testharness.go": true, // uses CLISelections() to populate the test harness multi-select
 }
 
 // rule describes one import-boundary constraint for a single package directory.

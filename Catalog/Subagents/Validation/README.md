@@ -11,8 +11,8 @@ Validation agents are gatekeepers that ensure quality before proceeding to the n
 | ID | Agent | Version | Description |
 |----|-------|---------|-------------|
 | 9 | [requirements-review](./requirements-review.md) | 2.0.1 | Reviews requirements completeness, identifies gaps, ensures sufficient information for planning |
-| 12 | [contracts-review](./contracts-review.md) | 2.1.0 | Reviews contracts and design specifications for correctness and completeness |
-| 11 | [plan-review](./plan-review.md) | 3.1.0 | Reviews implementation plans for feasibility, completeness, and alignment |
+| 12 | [contracts-review](./contracts-review.md) | 4.4.0 | Reviews contracts and design specifications for correctness and completeness |
+| 11 | [plan-review](./plan-review.md) | 5.3.0 | Reviews implementation plans for feasibility, completeness, and alignment |
 | 10 | [system-design-review](./system-design-review.md) | 2.0.1 | Reviews system design for architecture quality and design principles |
 | 14 | [implementation-review](./implementation-review.md) | 2.2.0 | Reviews code quality, design compliance, and code standards |
 | 13 | [tests-review-tdd](./tests-review-tdd.md) | 2.3.0 | Reviews test quality, coverage, and TDD RED phase correctness |

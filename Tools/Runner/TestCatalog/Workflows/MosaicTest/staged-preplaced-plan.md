@@ -11,6 +11,9 @@ artifacts:
   - MosaicTestScript/stage-write.md
   - MosaicTestScript/stage-echo.md
   - Stage-{StageNumber}/MosaicTestStage.md
+modes:
+  - auto
+  - auto-review
 ---
 
 <Workflow type="core" name="staged-preplaced-plan" version="1.0">

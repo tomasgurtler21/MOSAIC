@@ -258,6 +258,8 @@ func TestSession_EvaluateTriggers_StopRequest_BetweenAgents_StopsBeforeSecondDis
 	orchPath := copyOrchestratorFile(t, dir, "review-class-orch.md")
 	writeAgentFile(t, dir, "agent-a")
 	writeAgentFile(t, dir, "agent-b")
+	writeAgentFile(t, dir, "review-agent-a")
+	writeAgentFile(t, dir, "review-agent-b")
 
 	f := harness.NewFakeAdapter()
 	store := &memStore{}
@@ -267,6 +269,9 @@ func TestSession_EvaluateTriggers_StopRequest_BetweenAgents_StopsBeforeSecondDis
 		Store:    store,
 		Clock:    fixedClock{t: epoch},
 		Interact: &noopInteraction{},
+		// Routing: nil -- no post-review consultation expected. This test verifies
+		// the graceful-stop checkpoint between infra agent dispatches, independent
+		// of the Stage-2 review consultation mechanism.
 		// True only once agent-a's step and review-agent-a's trigger dispatch
 		// have both been applied -- modelling a stop confirmed strictly
 		// between two declared infra agents' dispatches within the same

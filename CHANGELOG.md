@@ -1,3 +1,31 @@
+# 0.5.0 (2026-09-23)
+
+## Tools
+
+### Runner v1.1.0
+#### Changes
+- Automated test framework (dev mode): `test` subcommand and TUI test flow for selecting and running orchestration test suites, with test catalog discovery, fixture management, expected-result validation, and multi-mode support (auto, auto-review, orchestrated)
+- Reworked agent snapshot mechanism for OpenCode and GHCP CLI: agents are now transformed in-place with automatic backup and crash recovery, instead of requiring a separate runner directory
+- Less rigid response parsing from LLMs with automatic retry on non-compliant subagent responses (no user consultation needed)
+
+#### Bugfixes
+- Fix delayed infrastructure triggers
+
+### Deploy v1.0.2
+#### Changes
+- New `--infrastructure` flag on `deploy` subcommand for pre-answering infrastructure agent selection in CI/scripted deployments
+
+## Catalog
+- **Planner** (v7.3.0): Reworked stage definition and sizing — stages are now the unit the orchestrator dispatches, with explicit guidance on bounded context, uniform approach, internal coherence, and clean checkpoints. Task sizing reframed as progress checkpoints within execution groups, not session boundaries.
+- **Plan Review** (v5.3.0): New stage sizing assessment section validates that execution groups fit in a single agent session. PARTIALLY_DONE guidance improved for large inputs.
+- **Contracts Designer** (v4.3.0): Now explicitly scoped to comply with the plan rather than silently overriding plan decisions. Tighter boundary between contract specification and implementation detail — private methods, algorithms, and pseudocode excluded to prevent review spirals.
+- **Contracts Review** (v4.4.0): Flags overspecification (implementation detail in contracts) for removal. Aggregates all findings before returning to reduce review-creator round-trips.
+
+## Documentation
+- GettingStarted guide: clarified how to add workflows to an existing deployment (Update workflows mode)
+- Deployment Guide: documented Update workflows, Deploy agents, and Deploy hooks modes; removed stale Utility-infra section
+- Runner Guide: updated snapshot strategy and crash recovery documentation
+
 # 0.4.0 (2026-09-13)
 
 All tools now carry their own version number, displayed in TUI headers and embedded in logs/reports.

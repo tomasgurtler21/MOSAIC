@@ -4,8 +4,8 @@ name: orchestrator-script
 description: Harness conformance test fixture — a stub script-mode orchestrator that returns exactly the routing instruction its fixture specifies for the run's current state
 role: orchestrator
 model: {model-identifier}
-tools: [file_read]
-recommended_tier: LOW
+tools: [file_read, file_edit, file_search, content_search]
+recommended_tier: MEDIUM
 tier_rationale: mechanical state matching against a fixed rule table with no routing judgement to exercise
 required_skills: []
 ---

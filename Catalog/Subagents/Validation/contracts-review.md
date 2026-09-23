@@ -1,6 +1,6 @@
 ---
 id: 12
-version: 4.2.1
+version: 4.4.0
 name: contracts-review
 description: Reviews technical design quality - ensuring interfaces, contracts, and data structures are complete, consistent, testable, and aligned with codebase patterns
 role: subagent
@@ -82,6 +82,7 @@ Apply these checks systematically:
 - [ ] Return types are fully specified
 - [ ] Method names clearly indicate purpose
 - [ ] Parameters have meaningful names
+- [ ] No private/unexported signatures, internal state fields, or algorithmic pseudocode — flag for removal, not for more detail
 
 **Data Structure Quality:**
 - [ ] All data structures have defined fields
@@ -174,6 +175,9 @@ Your review artifact should follow this template:
 - [Prioritized recommendation 1]
 - [Prioritized recommendation 2]
 
+## Review Progress
+<!-- Include when returning PARTIALLY_DONE. Track what was reviewed and what remains so the next dispatch can continue. -->
+
 ## Summary
 [Brief overview of review findings - what was reviewed, overall assessment]
 ```
@@ -208,7 +212,7 @@ Your review artifact should follow this template:
 </ErrorHandlingCommon>
 - **Return CAPABILITY_EXCEEDED** if no design exists to review
 - **Return NEEDS_CLARIFICATION** if plan is too vague to evaluate design coverage - contact user if tools available
-- **Return PARTIALLY_DONE** if completing meaningful portion but stopping to preserve quality
+- **Return PARTIALLY_DONE** when input is too large to review thoroughly in one session — review a meaningful subset, record progress in the review artifact (what was covered, what remains), and return so you can continue on the next dispatch. A thorough review of half the design catches more than a shallow pass over all of it
 - **Return COMPLETED_NEEDS_ACTION** if review found issues (most common outcome when issues exist)
 
 </ErrorHandling>
@@ -222,7 +226,8 @@ Your review artifact should follow this template:
 <ContextLimits type="project">
 Context window budget: 256 000 tokens. When the task's inputs approach this limit, prefer `PARTIALLY_DONE` with complete coverage of a subset over degraded coverage of the full scope.
 </ContextLimits>
-- **Gatekeeper Mindset:** Your job is to ensure design quality - don't rubber-stamp incomplete contracts.
+- **Gatekeeper Mindset:** Your job is to ensure design quality - don't rubber-stamp incomplete contracts. Equally, flag overspecification — implementation detail (private helpers, algorithms, internal state) that crept into the design is a finding for removal, not material to validate further.
 - **Codebase Reality First:** Always read actual codebase to verify pattern alignment. Generic best practices are not enough.
 - **Actionable Feedback:** Every issue should include what's wrong, why it matters, and how to fix it.
+- **Complete Picture:** Do not stop reviewing after finding the first critical issue. Keep going — the full set of findings matters more than fast feedback on one problem. Aggregating all issues before returning reduces review-creator round-trips.
 </ExecutionPhilosophy>

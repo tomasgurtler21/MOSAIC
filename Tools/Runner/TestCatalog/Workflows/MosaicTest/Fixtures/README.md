@@ -17,7 +17,14 @@ Each workflow has exactly one seed root. Seed that directory and nothing else.
 | `deviation-blocked` | **auto** | `C:\AI\MOSAIC\MOSAIC\Tools\Runner\TestCatalog\Workflows\MosaicTest\Fixtures\deviation-blocked` |
 | `deviation-ambiguous` | **auto-review** | `C:\AI\MOSAIC\MOSAIC\Tools\Runner\TestCatalog\Workflows\MosaicTest\Fixtures\deviation-ambiguous` |
 | `deviation-stop` | **auto** | `C:\AI\MOSAIC\MOSAIC\Tools\Runner\TestCatalog\Workflows\MosaicTest\Fixtures\deviation-stop` |
+| `deviation-chain` | **auto** | `C:\AI\MOSAIC\MOSAIC\Tools\Runner\TestCatalog\Workflows\MosaicTest\Fixtures\deviation-chain` |
 | `hitl-glob-staged` | **orchestrated only** | `C:\AI\MOSAIC\MOSAIC\Tools\Runner\TestCatalog\Workflows\MosaicTest\Fixtures\hitl-glob-staged` |
+| `infra-checkpoint-commit` | **auto** | `C:\AI\MOSAIC\MOSAIC\Tools\Runner\TestCatalog\Workflows\MosaicTest\Fixtures\infra-checkpoint-commit` |
+| `infra-review-consult` | **auto** | `C:\AI\MOSAIC\MOSAIC\Tools\Runner\TestCatalog\Workflows\MosaicTest\Fixtures\infra-review-consult` |
+| `staged-multigroup` | **auto** | `C:\AI\MOSAIC\MOSAIC\Tools\Runner\TestCatalog\Workflows\MosaicTest\Fixtures\staged-multigroup` |
+| `hitl-escalate` | **auto** | `C:\AI\MOSAIC\MOSAIC\Tools\Runner\TestCatalog\Workflows\MosaicTest\Fixtures\hitl-escalate` |
+| `preconsult-advice` | **auto** | `C:\AI\MOSAIC\MOSAIC\Tools\Runner\TestCatalog\Workflows\MosaicTest\Fixtures\preconsult-advice` |
+| `rawtext-bypass` | **auto** | `C:\AI\MOSAIC\MOSAIC\Tools\Runner\TestCatalog\Workflows\MosaicTest\Fixtures\rawtext-bypass` |
 
 In the TUI, paste the path at the seed-input screen. On the command line it is `--input <path>`.
 

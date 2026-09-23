@@ -1465,17 +1465,17 @@ func TestTimeoutFlag_InvalidDurationRejectsWithUsageError(t *testing.T) {
 	}
 }
 
-// TestClaudePathFlag_Accepted verifies that --claude-path is accepted with any
+// TestExecutablePathFlag_Accepted verifies that --executable-path is accepted with any
 // non-empty string value and the session is started normally.
-func TestClaudePathFlag_Accepted(t *testing.T) {
+func TestExecutablePathFlag_Accepted(t *testing.T) {
 	sess := &scriptedSession{outcome: domain.RunOutcome{Status: domain.RunCompleted}}
-	args := append(baseHarnessArgs(), "--claude-path", "/usr/local/bin/claude")
+	args := append(baseHarnessArgs(), "--executable-path", "/usr/local/bin/claude")
 	code, _, errOut := runCLIWithStore(t, args, &spyStore{}, sess)
 	if code != cli.ExitSuccess {
 		t.Errorf("exit code = %d, want ExitSuccess (%d); stderr: %q", code, cli.ExitSuccess, errOut)
 	}
 	if !sess.called {
-		t.Error("session.Start was not called when --claude-path is provided")
+		t.Error("session.Start was not called when --executable-path is provided")
 	}
 }
 
@@ -2560,24 +2560,24 @@ func TestRunFlagSpecs_ContainsTUIFlag(t *testing.T) {
 		"it is the entry-point-only flag that RunFlagSpecs must append explicitly")
 }
 
-// TestRunFlagSpecs_ClaudePathIsValueBearing verifies that "--claude-path" appears
+// TestRunFlagSpecs_ExecutablePathIsValueBearing verifies that "--executable-path" appears
 // in RunFlagSpecs with TakesValue: true. This flag is the one directly involved
 // in the mode-detection bug and must be in the value-bearing set so hasPositionalArg
 // skips its value token.
 //
 // RED: RunFlagSpecs currently panics.
-func TestRunFlagSpecs_ClaudePathIsValueBearing(t *testing.T) {
+func TestRunFlagSpecs_ExecutablePathIsValueBearing(t *testing.T) {
 	specs := cli.RunFlagSpecs()
 	for _, s := range specs {
-		if s.Name == "--claude-path" {
+		if s.Name == "--executable-path" {
 			if !s.TakesValue {
-				t.Error("RunFlagSpecs()[--claude-path].TakesValue = false, want true; " +
-					"--claude-path consumes a following argument and must be value-bearing")
+				t.Error("RunFlagSpecs()[--executable-path].TakesValue = false, want true; " +
+					"--executable-path consumes a following argument and must be value-bearing")
 			}
 			return
 		}
 	}
-	t.Error("RunFlagSpecs() does not contain an entry for \"--claude-path\"; " +
+	t.Error("RunFlagSpecs() does not contain an entry for \"--executable-path\"; " +
 		"it is a value-bearing flag and must be declared in the arity map")
 }
 
@@ -2618,7 +2618,7 @@ func TestRunFlagSpecs_KnownArities(t *testing.T) {
 		"--run",
 		"--harness",
 		"--timeout",
-		"--claude-path",
+		"--executable-path",
 		"--infra-class",
 		"--input",
 	}
@@ -2676,7 +2676,7 @@ func TestValueBearingFlagNames_ContainsExpectedFlags(t *testing.T) {
 		"--run",
 		"--harness",
 		"--timeout",
-		"--claude-path",
+		"--executable-path",
 		"--infra-class",
 		"--input",
 		"--ghcp-permission-mode",
@@ -2817,5 +2817,290 @@ func TestRunFlagSpecs_DriftFromActualRegistration(t *testing.T) {
 	if fs.Lookup("tui") != nil {
 		t.Error("\"--tui\" is registered on the run subcommand FlagSet; " +
 			"it must be entry-point-only and absent from the run subcommand registration")
+	}
+}
+
+// ============================================================
+// T5.1: --infrastructure flag and dev-mode guard tests
+// ============================================================
+
+// TestInfrastructureFlag_InRunFlagSpecs verifies that the --infrastructure
+// flag appears in RunFlagSpecs() with TakesValue=true (it is a string flag
+// that consumes the following token when passed in two-token form).
+//
+// TDD RED: fails until I5.1 registers the flag in RegisterRunFlags.
+func TestInfrastructureFlag_InRunFlagSpecs(t *testing.T) {
+	for _, s := range cli.RunFlagSpecs() {
+		if s.Name == "--infrastructure" {
+			if !s.TakesValue {
+				t.Error("RunFlagSpecs()[\"--infrastructure\"].TakesValue = false, want true (string flag)")
+			}
+			return
+		}
+	}
+	t.Error("RunFlagSpecs() does not contain \"--infrastructure\"")
+}
+
+// TestDevTestModeFlag_InRunFlagSpecs_TakesValueFalse verifies that the hidden
+// --dev-test-mode flag appears in RunFlagSpecs() with TakesValue=false (it is
+// a bool flag). RunFlagSpecs uses VisitAll, which visits hidden flags, so
+// --dev-test-mode must appear there even though it is hidden from help.
+//
+// TDD RED: fails until I5.1 registers the flag in RegisterRunFlags.
+func TestDevTestModeFlag_InRunFlagSpecs_TakesValueFalse(t *testing.T) {
+	for _, s := range cli.RunFlagSpecs() {
+		if s.Name == "--dev-test-mode" {
+			if s.TakesValue {
+				t.Error("RunFlagSpecs()[\"--dev-test-mode\"].TakesValue = true, want false (bool flag)")
+			}
+			return
+		}
+	}
+	t.Error("RunFlagSpecs() does not contain \"--dev-test-mode\"; " +
+		"VisitAll visits hidden flags, so --dev-test-mode must appear in RunFlagSpecs")
+}
+
+// TestDevTestModeFlag_NotInAllValueBearingFlagNames verifies that --dev-test-mode
+// does NOT appear in AllValueBearingFlagNames. Including a boolean flag in the
+// value-bearing set would cause the pre-scan to incorrectly skip the following
+// token, misidentifying it as a value.
+//
+// This test is trivially GREEN with the current implementation (the flag is not
+// registered yet) and becomes a regression guard once I5.1 adds it.
+func TestDevTestModeFlag_NotInAllValueBearingFlagNames(t *testing.T) {
+	for _, name := range cli.AllValueBearingFlagNames() {
+		if name == "--dev-test-mode" {
+			t.Error("AllValueBearingFlagNames() contains \"--dev-test-mode\"; " +
+				"boolean flags must not be in the value-bearing set (would cause pre-scan to skip the next token)")
+			return
+		}
+	}
+}
+
+// TestInfrastructureFlag_InAllValueBearingFlagNames verifies that --infrastructure
+// appears in AllValueBearingFlagNames (it is a value-bearing string flag whose
+// value must not be misidentified as a positional argument by the pre-scan).
+//
+// TDD RED: fails until I5.1 registers the flag in RegisterRunFlags.
+func TestInfrastructureFlag_InAllValueBearingFlagNames(t *testing.T) {
+	for _, name := range cli.AllValueBearingFlagNames() {
+		if name == "--infrastructure" {
+			return
+		}
+	}
+	t.Error("AllValueBearingFlagNames() does not contain \"--infrastructure\"; " +
+		"string flags must be in the value-bearing set so the pre-scan skips the following token")
+}
+
+// TestInfrastructureFlag_Omitted_LeavesFilterNil verifies that when
+// --infrastructure is not passed, RunConfig.InfrastructureFilter is nil.
+// nil means "not specified; all declared agents remain active" -- the
+// backwards-compatible default.
+//
+// This test is trivially GREEN today (InfrastructureFilter defaults to nil)
+// and becomes a regression guard once I5.2 parses the flag.
+func TestInfrastructureFlag_Omitted_LeavesFilterNil(t *testing.T) {
+	sess := &scriptedSession{outcome: domain.RunOutcome{Status: domain.RunCompleted}}
+	code, _, errOut := runCLIWithStore(t, []string{
+		"run",
+		"--workflow", "w1",
+		"--task", "do work",
+		"--mode", "auto",
+		"--new-run",
+	}, &spyStore{}, sess)
+
+	if code != cli.ExitSuccess {
+		t.Fatalf("exit code = %d, want ExitSuccess; stderr: %q", code, errOut)
+	}
+	if !sess.called {
+		t.Fatal("session.Start was not called")
+	}
+	if sess.config.InfrastructureFilter != nil {
+		t.Errorf("InfrastructureFilter = %v, want nil when --infrastructure is not passed",
+			sess.config.InfrastructureFilter)
+	}
+}
+
+// TestInfrastructureFlag_WithoutDevTestMode_IsRejected verifies that passing
+// --infrastructure without --dev-test-mode is rejected with ExitUsage. The
+// dev-mode guard ensures --infrastructure cannot be used in production runs.
+//
+// TDD RED: fails until I5.2 implements the dev-mode guard in run.go.
+func TestInfrastructureFlag_WithoutDevTestMode_IsRejected(t *testing.T) {
+	sess := &scriptedSession{}
+	code, _, errOut := runCLI(t, []string{
+		"run",
+		"--workflow", "w1",
+		"--task", "do work",
+		"--mode", "auto",
+		"--new-run",
+		"--infrastructure", "mosaictest-review",
+	}, sess)
+
+	if code != cli.ExitUsage {
+		t.Errorf("exit code = %d, want ExitUsage (%d) when --infrastructure is used without --dev-test-mode",
+			code, cli.ExitUsage)
+	}
+	if !strings.Contains(errOut, "dev test mode") && !strings.Contains(errOut, "dev-test-mode") {
+		t.Errorf("stderr %q does not mention dev test mode", errOut)
+	}
+	if sess.called {
+		t.Error("session.Start must not be called when the dev-mode guard rejects --infrastructure")
+	}
+}
+
+// TestInfrastructureFlag_WithDevTestMode_IsAccepted verifies that passing
+// --infrastructure together with --dev-test-mode passes the dev-mode guard and
+// causes session.Start to be called normally.
+//
+// TDD RED: fails until I5.1 and I5.2 register the flags and implement the guard.
+func TestInfrastructureFlag_WithDevTestMode_IsAccepted(t *testing.T) {
+	sess := &scriptedSession{outcome: domain.RunOutcome{Status: domain.RunCompleted}}
+	code, _, errOut := runCLIWithStore(t, []string{
+		"run",
+		"--workflow", "w1",
+		"--task", "do work",
+		"--mode", "auto",
+		"--new-run",
+		"--infrastructure", "mosaictest-review",
+		"--dev-test-mode",
+	}, &spyStore{}, sess)
+
+	if code != cli.ExitSuccess {
+		t.Errorf("exit code = %d, want ExitSuccess when --infrastructure is used with --dev-test-mode; stderr: %q",
+			code, errOut)
+	}
+	if !sess.called {
+		t.Error("session.Start was not called; --infrastructure with --dev-test-mode must be accepted")
+	}
+}
+
+// TestInfrastructureFlag_ParsedToFilterSlice verifies that --infrastructure k1,k2
+// (comma-separated) populates RunConfig.InfrastructureFilter as ["k1","k2"].
+//
+// TDD RED: fails until I5.2 parses the flag and populates InfrastructureFilter.
+func TestInfrastructureFlag_ParsedToFilterSlice(t *testing.T) {
+	sess := &scriptedSession{outcome: domain.RunOutcome{Status: domain.RunCompleted}}
+	code, _, errOut := runCLIWithStore(t, []string{
+		"run",
+		"--workflow", "w1",
+		"--task", "do work",
+		"--mode", "auto",
+		"--new-run",
+		"--infrastructure", "k1,k2",
+		"--dev-test-mode",
+	}, &spyStore{}, sess)
+
+	if code != cli.ExitSuccess {
+		t.Fatalf("exit code = %d, want ExitSuccess; stderr: %q", code, errOut)
+	}
+	if !sess.called {
+		t.Fatal("session.Start was not called")
+	}
+	filter := sess.config.InfrastructureFilter
+	if len(filter) != 2 || filter[0] != "k1" || filter[1] != "k2" {
+		t.Errorf("InfrastructureFilter = %v, want [\"k1\" \"k2\"] for --infrastructure k1,k2", filter)
+	}
+}
+
+// TestInfrastructureFlag_EmptyValue_ParsedToNonNilEmpty verifies that
+// --infrastructure= (empty value, single-token = form) populates
+// RunConfig.InfrastructureFilter as []string{} (non-nil empty, not nil).
+// nil would mean "all agents active"; non-nil empty means "no agents active".
+//
+// TDD RED: fails until I5.2 parses the flag and populates InfrastructureFilter.
+func TestInfrastructureFlag_EmptyValue_ParsedToNonNilEmpty(t *testing.T) {
+	sess := &scriptedSession{outcome: domain.RunOutcome{Status: domain.RunCompleted}}
+	code, _, errOut := runCLIWithStore(t, []string{
+		"run",
+		"--workflow", "w1",
+		"--task", "do work",
+		"--mode", "auto",
+		"--new-run",
+		"--infrastructure=",
+		"--dev-test-mode",
+	}, &spyStore{}, sess)
+
+	if code != cli.ExitSuccess {
+		t.Fatalf("exit code = %d, want ExitSuccess; stderr: %q", code, errOut)
+	}
+	if !sess.called {
+		t.Fatal("session.Start was not called")
+	}
+	filter := sess.config.InfrastructureFilter
+	if filter == nil {
+		t.Error("InfrastructureFilter = nil, want non-nil empty []string{} for --infrastructure= (empty value); " +
+			"nil means \"all agents active\" which is the opposite of the intended empty allowlist")
+	}
+	if len(filter) != 0 {
+		t.Errorf("InfrastructureFilter = %v (len %d), want empty []string{} for --infrastructure=",
+			filter, len(filter))
+	}
+}
+
+// TestInfrastructureFlag_CommaSplitEdgeCases verifies comma-split edge cases
+// for the --infrastructure flag value. The split-and-trim logic must:
+//   - Drop empty tokens produced by adjacent commas ("a,,b" -> ["a","b"])
+//   - Trim whitespace from each token ("a, b," -> ["a","b"])
+//   - Produce non-nil empty []string{} when all tokens are empty after trimming
+//     ("," and " " -> []string{}, not nil)
+//
+// TDD RED: fails until I5.2 implements the comma-split logic in run.go.
+func TestInfrastructureFlag_CommaSplitEdgeCases(t *testing.T) {
+	cases := []struct {
+		raw       string
+		wantNil   bool
+		wantLen   int
+		wantSlice []string
+	}{
+		{"a,,b", false, 2, []string{"a", "b"}},
+		{"a, b,", false, 2, []string{"a", "b"}},
+		{",", false, 0, []string{}},
+		{" ", false, 0, []string{}},
+	}
+
+	for _, c := range cases {
+		c := c
+		t.Run("raw="+c.raw, func(t *testing.T) {
+			sess := &scriptedSession{outcome: domain.RunOutcome{Status: domain.RunCompleted}}
+			args := []string{
+				"run",
+				"--workflow", "w1",
+				"--task", "do work",
+				"--mode", "auto",
+				"--new-run",
+				"--infrastructure", c.raw,
+				"--dev-test-mode",
+			}
+			code, _, errOut := runCLIWithStore(t, args, &spyStore{}, sess)
+			if code != cli.ExitSuccess {
+				t.Fatalf("exit code = %d, want ExitSuccess; stderr: %q", code, errOut)
+			}
+			if !sess.called {
+				t.Fatal("session.Start was not called")
+			}
+			filter := sess.config.InfrastructureFilter
+			if c.wantNil {
+				if filter != nil {
+					t.Errorf("InfrastructureFilter = %v, want nil", filter)
+				}
+				return
+			}
+			if filter == nil {
+				t.Errorf("InfrastructureFilter = nil, want non-nil %v", c.wantSlice)
+				return
+			}
+			if len(filter) != c.wantLen {
+				t.Errorf("InfrastructureFilter = %v (len %d), want len %d (%v)",
+					filter, len(filter), c.wantLen, c.wantSlice)
+				return
+			}
+			for i, want := range c.wantSlice {
+				if filter[i] != want {
+					t.Errorf("InfrastructureFilter[%d] = %q, want %q (full: %v)",
+						i, filter[i], want, filter)
+				}
+			}
+		})
 	}
 }

@@ -4,6 +4,13 @@ package engine_test
 //
 // Coverage:
 //
+//   "next" keyword routing (handleNonExecutionSuccess):
+//   - On Success = "next" → dispatches next row by index (not by agent-name lookup).
+//   - "next" past the last row → CompleteDecision (same as "COMPLETE").
+//   - "Next" and "NEXT" → same as "next" (case-insensitive).
+//   - "next" into a staged EXECUTION row (HasStagedPhase true) with stage set → full stage/group resolution.
+//   - "next" into a staged EXECUTION row with nil stage set → StopDecision (consistent with named-agent behavior).
+//
 //   Initial dispatch (no prior invocations):
 //   - No log entries and empty CurrentState → dispatches first pre-execution row.
 //   - No log entries, workflow starts with EXECUTION rows → dispatches first EXECUTION row of stage 1.
@@ -4925,6 +4932,219 @@ func TestNext_CreatorArtifactInjection_TemplatedOutput_MatchesResolvedPath(t *te
 	if !found {
 		t.Errorf("templated-output creator injection: want %q in dispatched InputArtifacts %v",
 			"Stage-2/PlanProgress.md", step.Request.InputArtifacts)
+	}
+}
+
+// ===== "next" keyword routing (handleNonExecutionSuccess) =====
+
+// nextKeywordNonExecContent is a two-row non-EXECUTION workflow where both rows
+// carry On Success = "next". The same agent appears in both rows to reflect the
+// motivating scenario (same-agent consecutive rows would loop with name-based
+// routing). Tests derive three behaviors from this fixture:
+//   - row 0 success with "next" → advance to row 1 (DispatchDecision, agent-a).
+//   - row 1 success with "next" → past the last row → CompleteDecision.
+//   - case-insensitive variants (see nextKeywordMixedCaseContent and
+//     nextKeywordUpperCaseContent) advance to row 1 the same way.
+const nextKeywordNonExecContent = `## Next Keyword Non-Exec Workflow
+
+| Phase | Subagent | HITL | On Success | On Findings | Input | Output |
+|-------|----------|:----:|------------|-------------|-------|--------|
+| PLANNING | agent-a | FALSE | next | - | - | out.md |
+| PLANNING | agent-b | FALSE | next | - | - | final.md |
+`
+
+// nextKeywordMixedCaseContent is a two-row non-EXECUTION workflow where row 0
+// carries On Success = "Next" (mixed case) to verify case-insensitive matching.
+const nextKeywordMixedCaseContent = `## Next Keyword Mixed Case Workflow
+
+| Phase | Subagent | HITL | On Success | On Findings | Input | Output |
+|-------|----------|:----:|------------|-------------|-------|--------|
+| PLANNING | agent-a | FALSE | Next | - | - | out.md |
+| PLANNING | agent-b | FALSE | COMPLETE | - | out.md | final.md |
+`
+
+// nextKeywordUpperCaseContent is a two-row non-EXECUTION workflow where row 0
+// carries On Success = "NEXT" (upper case) to verify case-insensitive matching.
+const nextKeywordUpperCaseContent = `## Next Keyword Upper Case Workflow
+
+| Phase | Subagent | HITL | On Success | On Findings | Input | Output |
+|-------|----------|:----:|------------|-------------|-------|--------|
+| PLANNING | agent-a | FALSE | NEXT | - | - | out.md |
+| PLANNING | agent-b | FALSE | COMPLETE | - | out.md | final.md |
+`
+
+// nextIntoExecutionContent is a workflow with a single PLANNING row using
+// On Success = "next" followed by EXECUTION rows. Used to verify that "next"
+// correctly enters the EXECUTION code path when the next row is staged, and that
+// it returns StopDecision when no stage set is available (same behavior as naming
+// an EXECUTION agent with nil stages).
+const nextIntoExecutionContent = `## Next Into Execution Workflow
+
+| Phase | Subagent | HITL | On Success | On Findings | Input | Output |
+|-------|----------|:----:|------------|-------------|-------|--------|
+| PLANNING | planner | FALSE | next | - | - | Plan.md, Stage-*/Plan.md, Stage-*/PlanProgress.md |
+| EXECUTION.[StageNumber] | implementation-tdd | FALSE | implementation-review | - | Stage-{StageNumber}/Plan.md, Stage-{StageNumber}/PlanProgress.md | Stage-{StageNumber}/PlanProgress.md |
+| EXECUTION.[StageNumber] | implementation-review | FALSE | COMPLETE | implementation-tdd | Stage-{StageNumber}/Plan.md, Stage-{StageNumber}/PlanProgress.md | Stage-{StageNumber}/implementation-review.md |
+`
+
+// TestNext_NextKeyword_AdvancesToNextRow verifies that a SUCCESS response from a
+// non-EXECUTION row with On Success = "next" (lowercase) dispatches the
+// immediately following row by index rather than by agent-name lookup.
+func TestNext_NextKeyword_AdvancesToNextRow(t *testing.T) {
+	aw := mustParseAndAdmit(t, nextKeywordNonExecContent, "next-keyword-non-exec", "1.0")
+	agents := makeAgents("agent-a", "agent-b")
+	// State: agent-a (row 0) just completed successfully.
+	state := stateAfter("PLANNING", "", "agent-a#1", domain.StatusSUCCESS, 1)
+
+	dec := engine.Next(engine.NextInput{
+		Workflow:     aw,
+		Stages:       nil, // no EXECUTION rows in this workflow
+		State:        state,
+		LastResponse: successResponse("agent-a#1"),
+		Agents:       agents,
+		Seq:          1,
+		Now:          fixedNow,
+		Mode:         domain.ExecutionModeAutoReview,
+	})
+
+	step := requireDispatch(t, dec)
+	if agentName(step.Request.AgentInstanceID) != "agent-b" {
+		t.Errorf("next keyword: want agent-b (row 1 by index), got %s", step.Request.AgentInstanceID)
+	}
+	if step.RowIndex != 1 {
+		t.Errorf("next keyword: want RowIndex=1 (next row), got %d", step.RowIndex)
+	}
+}
+
+// TestNext_NextKeyword_PastLastRow_ReturnsComplete verifies that a SUCCESS
+// response from the last row in the workflow when On Success = "next" returns
+// CompleteDecision (same as On Success = "COMPLETE").
+func TestNext_NextKeyword_PastLastRow_ReturnsComplete(t *testing.T) {
+	aw := mustParseAndAdmit(t, nextKeywordNonExecContent, "next-keyword-non-exec", "1.0")
+	agents := makeAgents("agent-a", "agent-b")
+	// State: agent-b (row 1, the last row) just completed successfully.
+	state := stateAfter("PLANNING", "", "agent-b#2", domain.StatusSUCCESS, 2)
+
+	dec := engine.Next(engine.NextInput{
+		Workflow:     aw,
+		Stages:       nil,
+		State:        state,
+		LastResponse: successResponse("agent-b#2"),
+		Agents:       agents,
+		Seq:          2,
+		Now:          fixedNow,
+		Mode:         domain.ExecutionModeAutoReview,
+	})
+
+	requireComplete(t, dec)
+}
+
+// TestNext_NextKeyword_MixedCase_AdvancesToNextRow verifies that On Success =
+// "Next" (mixed case) is treated identically to "next" (case-insensitive match).
+func TestNext_NextKeyword_MixedCase_AdvancesToNextRow(t *testing.T) {
+	aw := mustParseAndAdmit(t, nextKeywordMixedCaseContent, "next-keyword-mixed-case", "1.0")
+	agents := makeAgents("agent-a", "agent-b")
+	state := stateAfter("PLANNING", "", "agent-a#1", domain.StatusSUCCESS, 1)
+
+	dec := engine.Next(engine.NextInput{
+		Workflow:     aw,
+		Stages:       nil,
+		State:        state,
+		LastResponse: successResponse("agent-a#1"),
+		Agents:       agents,
+		Seq:          1,
+		Now:          fixedNow,
+		Mode:         domain.ExecutionModeAutoReview,
+	})
+
+	step := requireDispatch(t, dec)
+	if agentName(step.Request.AgentInstanceID) != "agent-b" {
+		t.Errorf("Next (mixed case): want agent-b (next row by index), got %s",
+			step.Request.AgentInstanceID)
+	}
+}
+
+// TestNext_NextKeyword_UpperCase_AdvancesToNextRow verifies that On Success =
+// "NEXT" (upper case) is treated identically to "next" (case-insensitive match).
+func TestNext_NextKeyword_UpperCase_AdvancesToNextRow(t *testing.T) {
+	aw := mustParseAndAdmit(t, nextKeywordUpperCaseContent, "next-keyword-upper-case", "1.0")
+	agents := makeAgents("agent-a", "agent-b")
+	state := stateAfter("PLANNING", "", "agent-a#1", domain.StatusSUCCESS, 1)
+
+	dec := engine.Next(engine.NextInput{
+		Workflow:     aw,
+		Stages:       nil,
+		State:        state,
+		LastResponse: successResponse("agent-a#1"),
+		Agents:       agents,
+		Seq:          1,
+		Now:          fixedNow,
+		Mode:         domain.ExecutionModeAutoReview,
+	})
+
+	step := requireDispatch(t, dec)
+	if agentName(step.Request.AgentInstanceID) != "agent-b" {
+		t.Errorf("NEXT (upper case): want agent-b (next row by index), got %s",
+			step.Request.AgentInstanceID)
+	}
+}
+
+// TestNext_NextKeyword_IntoExecutionRow_TriggersStageResolution verifies that
+// On Success = "next" from a pre-EXECUTION row whose successor is a staged
+// EXECUTION row triggers full stage/group resolution (same dispatch path as
+// naming an EXECUTION agent directly). The dispatched agent must be the first
+// agent of the ordered group for the given stage and approach.
+func TestNext_NextKeyword_IntoExecutionRow_TriggersStageResolution(t *testing.T) {
+	aw := mustParseAndAdmit(t, nextIntoExecutionContent, "next-into-execution", "1.0")
+	stages := singleStageSet("Implementation-Only")
+	agents := makeAgents("planner", "implementation-tdd", "implementation-review")
+	// State: planner (row 0, PLANNING) just completed successfully.
+	state := stateAfter("PLANNING", "", "planner#1", domain.StatusSUCCESS, 1)
+
+	dec := engine.Next(engine.NextInput{
+		Workflow:     aw,
+		Stages:       stages,
+		State:        state,
+		LastResponse: successResponse("planner#1"),
+		Agents:       agents,
+		Seq:          1,
+		Now:          fixedNow,
+		Mode:         domain.ExecutionModeAutoReview,
+	})
+
+	step := requireDispatch(t, dec)
+	if agentName(step.Request.AgentInstanceID) != "implementation-tdd" {
+		t.Errorf("next into EXECUTION: want implementation-tdd (first EXECUTION group row), got %s",
+			step.Request.AgentInstanceID)
+	}
+	if step.Stage == "" {
+		t.Error("next into EXECUTION: want non-empty Stage (stage/group context resolved), got empty")
+	}
+}
+
+// TestNext_NextKeyword_IntoExecutionRow_NilStages_ReturnsStop verifies that
+// On Success = "next" into a staged EXECUTION row with no available stage set
+// returns StopDecision with a non-empty reason. This is consistent with naming
+// an EXECUTION agent directly when stages is nil: both yield StopDecision.
+func TestNext_NextKeyword_IntoExecutionRow_NilStages_ReturnsStop(t *testing.T) {
+	aw := mustParseAndAdmit(t, nextIntoExecutionContent, "next-into-execution", "1.0")
+	agents := makeAgents("planner", "implementation-tdd", "implementation-review")
+	state := stateAfter("PLANNING", "", "planner#1", domain.StatusSUCCESS, 1)
+
+	dec := engine.Next(engine.NextInput{
+		Workflow:     aw,
+		Stages:       nil, // no stage set available
+		State:        state,
+		LastResponse: successResponse("planner#1"),
+		Agents:       agents,
+		Seq:          1,
+		Now:          fixedNow,
+		Mode:         domain.ExecutionModeAutoReview,
+	})
+
+	stop := requireStop(t, dec)
+	if stop.Reason == "" {
+		t.Error("next into EXECUTION with nil stages: want non-empty StopDecision.Reason, got empty")
 	}
 }
 

@@ -24,7 +24,6 @@ package harness
 
 import (
 	"context"
-	"encoding/json"
 	"errors"
 	"fmt"
 	"time"
@@ -171,6 +170,7 @@ func (a *GHCPCLIAdapter) Invoke(ctx context.Context, agent domain.AgentReference
 			return domain.ProtocolResponse{}, fmt.Errorf("extract GHCP CLI tools for %s: %w", agent.Identifier, extractErr)
 		}
 		spawnReq.DerivedTools = tools
+		spawnReq.ToolsDerived = true // signals derivation was performed; empty slice is valid (all ungated tools)
 	}
 
 	resp, err := a.spawner.Spawn(ctx, spawnReq)
@@ -216,8 +216,8 @@ func (a *GHCPCLIAdapter) Invoke(ctx context.Context, agent domain.AgentReference
 		return domain.ProtocolResponse{}, err
 	}
 
-	var protoResp domain.ProtocolResponse
-	if uErr := json.Unmarshal(resp.Protocol, &protoResp); uErr != nil {
+	protoResp, uErr := UnmarshalResponse(resp.Protocol)
+	if uErr != nil {
 		wrapped := fmt.Errorf("%w: response decode failed", ErrMalformedOutput)
 		a.logger.Log(domain.EventHarnessParseFailed, string(resp.Protocol),
 			domain.F("agent", request.AgentInstanceID),
@@ -276,6 +276,7 @@ func (a *GHCPCLIAdapter) InvokeRaw(ctx context.Context, agent domain.AgentRefere
 			return nil, fmt.Errorf("extract GHCP CLI tools for %s: %w", agent.Identifier, extractErr)
 		}
 		spawnReq.DerivedTools = tools
+		spawnReq.ToolsDerived = true // signals derivation was performed; empty slice is valid (all ungated tools)
 	}
 
 	cmd, err := commonharness.ResolveExecutable(a.executablePath)

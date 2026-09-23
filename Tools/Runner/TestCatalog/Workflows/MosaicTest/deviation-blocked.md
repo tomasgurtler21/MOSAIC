@@ -10,6 +10,8 @@ referenced_agents:
 artifacts:
   - MosaicTestScript/deviation-blocked.md
   - MosaicTestMarker.md
+modes:
+  - auto
 ---
 
 <Workflow type="core" name="deviation-blocked" version="1.0">
@@ -52,12 +54,13 @@ The orchestrator could dispatch a different agent or stop. Re-dispatching the sa
 
 ## Expected Run
 
-Three Orchestration.md log rows.
+Four Orchestration.md log rows.
 
 | Log `Seq` | `Agent` | Kind | `Phase` | `Status` | `Summary` shows |
 |:---:|---|---|---|---|---|
+| 0 | `orchestrator-script#pre_consultation#1` | consultation | — | "" | pre-run consultation response |
 | 1 | `mosaictest-scripted#1` | workflow step | RESEARCH | BLOCKED | fixture-declared blocker, E401 |
-| 2 | `orchestrator-script#2` | consultation | — | SUCCESS | dispatch instruction for re-dispatch |
+| 2 | `orchestrator-script#2` | consultation | — | "" | dispatch instruction for re-dispatch |
 | 3 | `mosaictest-scripted#3` | workflow step | RESEARCH | SUCCESS | marker present, returning SUCCESS |
 
 **Run outcome:** COMPLETE. The engine routes `SUCCESS` via `On Success = COMPLETE`.

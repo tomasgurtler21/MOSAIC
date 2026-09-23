@@ -151,6 +151,9 @@ func TestLookupCLIHarness_UnknownIdentityFailsWithoutPanicking(t *testing.T) {
 	if entry.AgentsDir != "" {
 		t.Errorf("want zero-valued AgentsDir for unknown identity, got %q", entry.AgentsDir)
 	}
+	if entry.LoadingMechanism != harness.LoadingMechanismUnset {
+		t.Errorf("want zero-valued LoadingMechanism (%v) for unknown identity, got %v", harness.LoadingMechanismUnset, entry.LoadingMechanism)
+	}
 }
 
 func TestLookupCLIHarness_EmptyIdentityFailsWithoutPanicking(t *testing.T) {
@@ -302,4 +305,130 @@ func TestLookupCLIHarness_GHCPCLIHasExpectedAgentsDir(t *testing.T) {
 	if entry.AgentsDir != want {
 		t.Errorf("want AgentsDir == %q for %q, got %q", want, harness.HarnessIDGHCPCLI, entry.AgentsDir)
 	}
+}
+
+// ---------------------------------------------------------------------------
+// LoadingMechanism field: validity, per-harness values, and zero-value for
+// unknown identities.
+//
+// The LoadingMechanism field records how a harness locates agent definition
+// files. Path-based harnesses (claude-code) copy agents to a snapshot dir
+// and pass a file path. Name-based harnesses (opencode, ghcp-cli) modify
+// agents in-place and pass only the agent name.
+// ---------------------------------------------------------------------------
+
+// TestCLIHarnesses_EveryEntryHasValidLoadingMechanism verifies that every
+// catalog entry carries a non-zero LoadingMechanism. A zero value
+// (LoadingMechanismUnset) means the field was never assigned, which would
+// cause the Runner to refuse the run rather than silently misbehave.
+func TestCLIHarnesses_EveryEntryHasValidLoadingMechanism(t *testing.T) {
+	for _, e := range harness.CLIHarnesses() {
+		if e.LoadingMechanism == harness.LoadingMechanismUnset {
+			t.Errorf("catalog entry %q has LoadingMechanism == LoadingMechanismUnset (zero value): every CLI harness must declare a loading mechanism", e.ID)
+		}
+	}
+}
+
+// TestLookupCLIHarness_ClaudeCodeIsPathBased verifies that the claude-code
+// harness uses path-based agent loading. Claude Code receives a full file
+// path to the agent definition file, so it uses the copy-and-invoke snapshot
+// strategy.
+func TestLookupCLIHarness_ClaudeCodeIsPathBased(t *testing.T) {
+	entry, ok := harness.LookupCLIHarness(harness.HarnessIDClaudeCode)
+	if !ok {
+		t.Fatalf("want %q to be found in the catalog", harness.HarnessIDClaudeCode)
+	}
+	if entry.LoadingMechanism != harness.LoadingMechanismPath {
+		t.Errorf("want LoadingMechanism == LoadingMechanismPath for %q, got %v", harness.HarnessIDClaudeCode, entry.LoadingMechanism)
+	}
+}
+
+// TestLookupCLIHarness_OpenCodeIsNameBased verifies that the opencode
+// harness uses name-based agent loading. OpenCode resolves agents by name
+// from the agents directory, so it uses the backup-and-transform snapshot
+// strategy.
+func TestLookupCLIHarness_OpenCodeIsNameBased(t *testing.T) {
+	entry, ok := harness.LookupCLIHarness(harness.HarnessIDOpenCode)
+	if !ok {
+		t.Fatalf("want %q to be found in the catalog", harness.HarnessIDOpenCode)
+	}
+	if entry.LoadingMechanism != harness.LoadingMechanismName {
+		t.Errorf("want LoadingMechanism == LoadingMechanismName for %q, got %v", harness.HarnessIDOpenCode, entry.LoadingMechanism)
+	}
+}
+
+// TestLookupCLIHarness_GHCPCLIIsNameBased verifies that the ghcp-cli
+// harness uses name-based agent loading. GHCP CLI resolves agents by name
+// from the agents directory, so it uses the backup-and-transform snapshot
+// strategy.
+func TestLookupCLIHarness_GHCPCLIIsNameBased(t *testing.T) {
+	entry, ok := harness.LookupCLIHarness(harness.HarnessIDGHCPCLI)
+	if !ok {
+		t.Fatalf("want %q to be found in the catalog", harness.HarnessIDGHCPCLI)
+	}
+	if entry.LoadingMechanism != harness.LoadingMechanismName {
+		t.Errorf("want LoadingMechanism == LoadingMechanismName for %q, got %v", harness.HarnessIDGHCPCLI, entry.LoadingMechanism)
+	}
+}
+
+// TestLoadingMechanism_PathAndNameAreDistinct verifies that
+// LoadingMechanismPath and LoadingMechanismName have distinct values. If they
+// were equal a harness assigned one would silently behave as the other.
+func TestLoadingMechanism_PathAndNameAreDistinct(t *testing.T) {
+	if harness.LoadingMechanismPath == harness.LoadingMechanismName {
+		t.Errorf("want LoadingMechanismPath != LoadingMechanismName: both have value %v", harness.LoadingMechanismPath)
+	}
+}
+
+// TestLoadingMechanism_UnsetIsZeroValue verifies that LoadingMechanismUnset
+// is the zero value of the LoadingMechanism type. This guarantees that a
+// CLIHarness literal that omits the field (keyed or unkeyed) is always
+// detected as unconfigured rather than silently treated as path-based or
+// name-based.
+func TestLoadingMechanism_UnsetIsZeroValue(t *testing.T) {
+	var m harness.LoadingMechanism
+	if m != harness.LoadingMechanismUnset {
+		t.Errorf("want zero value of LoadingMechanism to be LoadingMechanismUnset, got %v", m)
+	}
+}
+
+// TestLoadingMechanism_StringRepresentations verifies that the String method
+// returns a non-empty, meaningful label for each defined constant and an
+// "unknown" marker for unrecognized values. This ensures log output and
+// error messages are human-readable rather than bare integers.
+func TestLoadingMechanism_StringRepresentations(t *testing.T) {
+	cases := []struct {
+		mechanism harness.LoadingMechanism
+		wantEmpty bool
+	}{
+		{harness.LoadingMechanismUnset, false},
+		{harness.LoadingMechanismPath, false},
+		{harness.LoadingMechanismName, false},
+		{harness.LoadingMechanism(99), false}, // unrecognized value must still produce output
+	}
+	for _, tc := range cases {
+		s := tc.mechanism.String()
+		if s == "" {
+			t.Errorf("LoadingMechanism(%d).String() returned empty string: want a non-empty label", int(tc.mechanism))
+		}
+	}
+	// Unrecognized values should contain the numeric value for diagnostics.
+	unknown := harness.LoadingMechanism(99).String()
+	if !containsSubstring(unknown, "99") {
+		t.Errorf("LoadingMechanism(99).String() = %q: want it to contain the numeric value 99 for diagnostics", unknown)
+	}
+}
+
+// containsSubstring is a local helper used to avoid importing "strings" in the
+// test file solely for this check.
+func containsSubstring(s, sub string) bool {
+	if len(sub) == 0 {
+		return true
+	}
+	for i := 0; i+len(sub) <= len(s); i++ {
+		if s[i:i+len(sub)] == sub {
+			return true
+		}
+	}
+	return false
 }

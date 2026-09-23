@@ -121,14 +121,15 @@ func ResolveExecutable(path string) (Command, error) {
 // <env> block is synthesized and prepended to the stdin payload alongside the
 // prompt content.
 //
-// When req.DerivedTools is non-empty, both invocation kinds use
-// --permission-mode dontAsk and emit one --allowedTools flag per tool name
-// from DerivedTools. This is the deterministic permission path used by the
-// Runner adapter after reading the agent's deployed frontmatter.
-//
-// When req.DerivedTools is nil or empty, both invocation kinds fall back to
-// --permission-mode auto (backward-compatible with callers that do not
-// populate DerivedTools, notably AgentTest's SpawnPlan methods).
+// Permission mode selection:
+//   - When req.DerivedTools is non-empty: --permission-mode dontAsk with
+//     --allowedTools entries. (Unchanged.)
+//   - When req.ToolsDerived is true and req.DerivedTools is empty:
+//     --permission-mode dontAsk with zero --allowedTools entries. The agent
+//     runs in strict mode with no tools permitted.
+//   - When req.ToolsDerived is false and req.DerivedTools is empty:
+//     --permission-mode auto (backward-compatible fallback for callers
+//     that do not populate DerivedTools, notably AgentTest).
 //
 // --dangerously-skip-permissions is never included.
 //
@@ -143,10 +144,11 @@ func ResolveExecutable(path string) (Command, error) {
 func BuildArgs(req SpawnRequest) (args []string, stdin []byte, err error) {
 	stdinContent := req.Prompt
 
-	// Select permission mode. When DerivedTools is non-empty, use deterministic
-	// dontAsk mode; otherwise fall back to auto for backward compatibility.
+	// Select permission mode. When DerivedTools is non-empty or ToolsDerived
+	// is true, use deterministic dontAsk mode; otherwise fall back to auto
+	// for backward compatibility (e.g., AgentTest callers).
 	permMode := "auto"
-	if len(req.DerivedTools) > 0 {
+	if len(req.DerivedTools) > 0 || req.ToolsDerived {
 		permMode = "dontAsk"
 	}
 

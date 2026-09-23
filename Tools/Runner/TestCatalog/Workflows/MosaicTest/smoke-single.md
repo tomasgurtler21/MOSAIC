@@ -9,6 +9,11 @@ referenced_agents:
   - mosaictest-scripted
 artifacts:
   - MosaicTestScript/smoke-success.md
+modes:
+  - auto
+  - auto-review
+smoke_set:
+  - auto
 ---
 
 <Workflow type="core" name="smoke-single" version="1.0">

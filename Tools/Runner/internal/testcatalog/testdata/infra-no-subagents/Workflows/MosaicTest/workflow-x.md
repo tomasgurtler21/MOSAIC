@@ -1,0 +1,10 @@
+---
+version: "1.0"
+name: "Infra Test Workflow"
+id: workflow-x
+modes:
+  - auto
+---
+
+Minimal workflow for infrastructure agent discovery tests.
+No Subagents directory exists under this catalog root.

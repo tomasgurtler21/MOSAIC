@@ -87,15 +87,31 @@ func TransformFile(content []byte, rules []TransformRule) []byte {
 // applyRulesToLine checks the given line against each rule and returns the
 // rewritten line if a match is found. Leading whitespace is preserved. Only
 // the first matching rule is applied per line.
+//
+// CRLF handling: bytes.Split on \n leaves \r at the end of lines from CRLF
+// files. The \r is stripped before matching and re-appended to the replacement
+// so that each line's original line ending is preserved independently.
+// Trailing spaces or tabs before \r do not prevent matching; they are dropped
+// in the replacement (existing LF behavior), but \r is preserved.
 func applyRulesToLine(line []byte, rules []TransformRule) []byte {
 	lineStr := string(line)
 	trimmed := strings.TrimLeft(lineStr, " \t")
 	leading := lineStr[:len(lineStr)-len(trimmed)]
 
+	// Detect and strip trailing \r before matching.
+	hasCR := strings.HasSuffix(trimmed, "\r")
+	if hasCR {
+		trimmed = trimmed[:len(trimmed)-1]
+	}
+
 	for _, rule := range rules {
 		target := rule.Field + ": " + rule.OldValue
 		if strings.TrimRight(trimmed, " \t") == target {
-			return []byte(leading + rule.Field + ": " + rule.NewValue)
+			replacement := leading + rule.Field + ": " + rule.NewValue
+			if hasCR {
+				replacement += "\r"
+			}
+			return []byte(replacement)
 		}
 	}
 	return line

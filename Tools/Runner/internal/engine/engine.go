@@ -520,17 +520,46 @@ func handleNonExecutionSuccess(
 		}}
 	}
 
-	targetAgent := hint.Value
-
-	// Check whether the target agent lives in an EXECUTION row.
-	// If so, we are entering the EXECUTION phase → apply approach-driven ordering
-	// to determine the actual first row to dispatch (ignoring the specific agent
-	// named in On Success, which reflects the default TDD ordering).
+	// "next" is a position-based reserved keyword: advance to currentRowIdx+1
+	// instead of doing agent-name lookup. This fixes the latent same-agent
+	// infinite-loop bug where consecutive rows with the same agent name would
+	// route back to the same row indefinitely.
+	targetAgent := ""
 	targetInExecution := false
-	for _, row := range workflow.Table.Rows {
-		if row.Agent == targetAgent && row.PhaseParsed.IsStaged {
+
+	if strings.EqualFold(hint.Value, "next") {
+		nextIdx := currentRowIdx + 1
+		if nextIdx >= len(workflow.Table.Rows) {
+			// Past the last row: same as "COMPLETE".
+			return domain.EngineDecision{Complete: &domain.CompleteDecision{
+				FinalState: state.CurrentState,
+			}}
+		}
+		if workflow.Table.Rows[nextIdx].PhaseParsed.IsStaged && workflow.HasStagedPhase {
+			// Next row is a staged EXECUTION row: enter the EXECUTION code path.
 			targetInExecution = true
-			break
+		} else {
+			// Next row is a non-EXECUTION row (or staged without HasStagedPhase):
+			// dispatch by index. Pass refreshedStages matching the existing
+			// non-EXECUTION path.
+			step, err := buildDispatchStep(workflow, stages, nextIdx, 0, "", agents, seq, now, refreshedStages)
+			if err != nil {
+				return domain.EngineDecision{Stop: &domain.StopDecision{Reason: err.Error()}}
+			}
+			return domain.EngineDecision{Dispatch: &domain.DispatchDecision{Steps: []domain.DispatchStep{step}}}
+		}
+	} else {
+		targetAgent = hint.Value
+
+		// Check whether the target agent lives in an EXECUTION row.
+		// If so, we are entering the EXECUTION phase → apply approach-driven ordering
+		// to determine the actual first row to dispatch (ignoring the specific agent
+		// named in On Success, which reflects the default TDD ordering).
+		for _, row := range workflow.Table.Rows {
+			if row.Agent == targetAgent && row.PhaseParsed.IsStaged {
+				targetInExecution = true
+				break
+			}
 		}
 	}
 
@@ -1134,11 +1163,86 @@ func countActiveRows(groups []domain.ExecutionGroup) int {
 	return total
 }
 
+// ---- Prospective trigger look-ahead helpers ----
+
+// IsLastRowOfStage reports whether the routing table row at rowIdx is the last
+// row dispatched for stageNum in the admitted workflow.
+//
+// The row is the last in its stage when it equals the final row of the last
+// ordered group for that stage. Returns false when stageNum is 0 or when group
+// ordering cannot be resolved (e.g. an unresolvable approach error).
+func IsLastRowOfStage(
+	workflow domain.AdmittedWorkflow,
+	stages *domain.StageSet,
+	rowIdx int,
+	stageNum domain.StageNumber,
+) bool {
+	if stageNum == 0 {
+		return false
+	}
+	ordGroups, err := orderedGroupsForStage(workflow, stages, stageNum)
+	if err != nil || len(ordGroups) == 0 {
+		return false
+	}
+	lastGroup := ordGroups[len(ordGroups)-1]
+	return rowIdx == lastGroup.EndRow-1
+}
+
+// IsLastRowOfPhase reports whether the routing table row at rowIdx is the last
+// row dispatched for its phase in the admitted workflow.
+//
+// For non-EXECUTION rows (stageNum == 0): the row is the last of its phase
+// when no subsequent routing table row declares the same phase name.
+//
+// For EXECUTION rows (stageNum > 0): the EXECUTION phase spans all stages.
+// The row is the last only when it is the last row of the last group of the
+// last stage — that is, the very last step of the entire EXECUTION phase.
+// A step in any earlier stage is never the last of the EXECUTION phase.
+//
+// Returns false when rowIdx is out of range or when group ordering fails.
+func IsLastRowOfPhase(
+	workflow domain.AdmittedWorkflow,
+	stages *domain.StageSet,
+	rowIdx int,
+	stageNum domain.StageNumber,
+) bool {
+	rows := workflow.Table.Rows
+	if rowIdx < 0 || rowIdx >= len(rows) {
+		return false
+	}
+	row := rows[rowIdx]
+
+	if row.PhaseParsed.IsStaged && stageNum > 0 && stages != nil && stages.Count() > 0 {
+		// EXECUTION PHASE_END fires only at the very last step of the entire
+		// EXECUTION phase: the last row of the last stage's last group.
+		lastEntry := stages.Entries[stages.Count()-1]
+		if stageNum != lastEntry.Number {
+			return false
+		}
+		ordGroups, err := orderedGroupsForStage(workflow, stages, lastEntry.Number)
+		if err != nil || len(ordGroups) == 0 {
+			return false
+		}
+		lastGroup := ordGroups[len(ordGroups)-1]
+		return rowIdx == lastGroup.EndRow-1
+	}
+
+	// Non-EXECUTION rows: last row of its phase when no subsequent row shares
+	// the same phase name.
+	phaseName := row.PhaseParsed.Name
+	for i := rowIdx + 1; i < len(rows); i++ {
+		if rows[i].PhaseParsed.Name == phaseName {
+			return false
+		}
+	}
+	return true
+}
+
 // ---- Hint disambiguation ----
 
 // isUnambiguousHint returns true when the hint column is present, the value is
 // non-empty, and the value contains no spaces or parentheses (making it a
-// plain agent identifier or the keyword "COMPLETE").
+// plain agent identifier or a reserved keyword such as "COMPLETE" or "next").
 func isUnambiguousHint(hint domain.OptionalHint) bool {
 	if !hint.ColumnPresent || hint.Value == "" {
 		return false
