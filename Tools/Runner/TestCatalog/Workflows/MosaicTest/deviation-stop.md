@@ -9,6 +9,8 @@ referenced_agents:
   - mosaictest-scripted
 artifacts:
   - MosaicTestScript/deviation-stop-fail.md
+modes:
+  - auto
 ---
 
 <Workflow type="core" name="deviation-stop" version="1.0">
@@ -51,10 +53,11 @@ This workflow does not test the resume itself — that is a manual procedure doc
 
 ## Expected Run
 
-One Orchestration.md log row. The stop consultation is not logged.
+Two Orchestration.md log rows. The stop consultation is not logged.
 
 | Log `Seq` | `Agent` | Kind | `Phase` | `Status` | `Summary` shows |
 |:---:|---|---|---|---|---|
+| 0 | `orchestrator-script#pre_consultation#1` | consultation | — | "" | pre-run consultation response |
 | 1 | `mosaictest-scripted#1` | workflow step | RESEARCH | BLOCKED | fixture-declared tool unavailable, E501 |
 
 **Run outcome:** stopped by the orchestrator (`RunStoppedByConsultant`), with the fixture's stop reason surfaced in the exit message.

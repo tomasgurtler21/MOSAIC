@@ -9,6 +9,10 @@ referenced_agents:
   - mosaictest-scripted
 artifacts:
   - MosaicTestScript/linear-echo.md
+modes:
+  - orchestrated
+smoke_set:
+  - orchestrated
 ---
 
 <Workflow type="core" name="orchestrated-linear" version="1.0">
@@ -60,11 +64,11 @@ Six Orchestration.md log rows. The stop consultation is NOT logged in Orchestrat
 
 | Log `Seq` | `Agent` | Kind | `Phase` | `Status` | `Summary` shows |
 |:---:|---|---|---|---|---|
-| 1 | `orchestrator-script#1` | consultation | — | SUCCESS | the task description sent for step one |
+| 1 | `orchestrator-script#1` | consultation | — | "" | the task description sent for step one |
 | 2 | `mosaictest-scripted#1` | workflow step | RESEARCH | SUCCESS | step one's task description, echoed back |
-| 3 | `orchestrator-script#3` | consultation | — | SUCCESS | the task description sent for step two |
+| 3 | `orchestrator-script#3` | consultation | — | "" | the task description sent for step two |
 | 4 | `mosaictest-scripted#2` | workflow step | RESEARCH | SUCCESS | step two's task description, echoed back |
-| 5 | `orchestrator-script#5` | consultation | — | SUCCESS | the task description sent for step three |
+| 5 | `orchestrator-script#5` | consultation | — | "" | the task description sent for step three |
 | 6 | `mosaictest-scripted#3` | workflow step | RESEARCH | SUCCESS | step three's task description, echoed back |
 
 **Run outcome:** stopped by the orchestrator (`RunStoppedByConsultant`), with the fixture's stop reason surfaced in the exit message. Not `COMPLETE` — in this mode the orchestrator ends the run, and the table's `On Success` column is never consulted.

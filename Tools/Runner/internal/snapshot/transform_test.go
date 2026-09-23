@@ -200,3 +200,144 @@ func TestTransformFile_EmptyContent_ReturnsEmpty(t *testing.T) {
 		t.Errorf("TransformFile with empty input should return empty, got %d bytes", len(got))
 	}
 }
+
+// ---------------------------------------------------------------------------
+// CRLF line-ending handling
+// ---------------------------------------------------------------------------
+
+// TestTransformFile_CRLF_RuleAppliesAndPreservesEnding verifies that a file
+// whose lines end with \r\n is transformed correctly: the target field is
+// rewritten and the replaced line keeps its \r\n ending.
+func TestTransformFile_CRLF_RuleAppliesAndPreservesEnding(t *testing.T) {
+	input := []byte("---\r\nmode: subagent\r\ntitle: My Agent\r\n---\r\n\r\n# Body\r\n")
+	want := []byte("---\r\nmode: primary\r\ntitle: My Agent\r\n---\r\n\r\n# Body\r\n")
+
+	got := snapshot.TransformFile(input, []snapshot.TransformRule{openCodeRule})
+
+	if !bytes.Equal(got, want) {
+		t.Errorf("TransformFile CRLF output mismatch.\ngot:  %q\nwant: %q", got, want)
+	}
+}
+
+// TestTransformFile_CRLF_NonTargetedLinesPreserveEnding verifies that lines
+// not matched by any rule keep their \r\n ending intact after a transform.
+func TestTransformFile_CRLF_NonTargetedLinesPreserveEnding(t *testing.T) {
+	input := []byte("---\r\nmode: subagent\r\nauthor: someone\r\n---\r\n\r\nBody.\r\n")
+	got := snapshot.TransformFile(input, []snapshot.TransformRule{openCodeRule})
+
+	// The non-targeted line must retain its \r\n ending.
+	if !bytes.Contains(got, []byte("author: someone\r\n")) {
+		t.Errorf("TransformFile altered the line ending of a non-targeted field; got: %q", got)
+	}
+	if !bytes.Contains(got, []byte("mode: primary\r\n")) {
+		t.Errorf("TransformFile did not rewrite the targeted field with preserved \\r\\n; got: %q", got)
+	}
+}
+
+// TestTransformFile_LFvsCRLF_SameLogicalTransform verifies that a CRLF file
+// and an otherwise-identical LF file produce the same logical transformation
+// (same fields changed), and that each output preserves its own line endings.
+func TestTransformFile_LFvsCRLF_SameLogicalTransform(t *testing.T) {
+	lfInput := []byte("---\nmode: subagent\ntitle: Agent\n---\n\n# Body\n")
+	crlfInput := []byte("---\r\nmode: subagent\r\ntitle: Agent\r\n---\r\n\r\n# Body\r\n")
+
+	lfGot := snapshot.TransformFile(lfInput, []snapshot.TransformRule{openCodeRule})
+	crlfGot := snapshot.TransformFile(crlfInput, []snapshot.TransformRule{openCodeRule})
+
+	// LF output must not contain any \r.
+	if bytes.Contains(lfGot, []byte("\r")) {
+		t.Errorf("LF output unexpectedly contains \\r: %q", lfGot)
+	}
+	// CRLF output must still have \r\n on each line.
+	if !bytes.Contains(crlfGot, []byte("mode: primary\r\n")) {
+		t.Errorf("CRLF output missing expected \\r\\n on transformed line: %q", crlfGot)
+	}
+	// Both must have replaced the field.
+	if !bytes.Contains(lfGot, []byte("mode: primary")) {
+		t.Errorf("LF output did not replace the targeted field: %q", lfGot)
+	}
+	if !bytes.Contains(crlfGot, []byte("mode: primary")) {
+		t.Errorf("CRLF output did not replace the targeted field: %q", crlfGot)
+	}
+}
+
+// TestTransformFile_MixedLineEndings_EachPreservedIndependently verifies that
+// within a single file some lines with \r\n and some with \n each retain their
+// own ending after a transform.  The transformed line must keep its original
+// ending (whichever it had), and untouched lines keep theirs.
+func TestTransformFile_MixedLineEndings_EachPreservedIndependently(t *testing.T) {
+	// Frontmatter delimiters use LF; frontmatter fields use CRLF; body uses LF.
+	// "mode: subagent" line has \r\n; "title" line has plain \n.
+	input := []byte("---\nmode: subagent\r\ntitle: Mixed\n---\n\n# Body\n")
+	got := snapshot.TransformFile(input, []snapshot.TransformRule{openCodeRule})
+
+	// Transformed line must keep \r\n.
+	if !bytes.Contains(got, []byte("mode: primary\r\n")) {
+		t.Errorf("mixed endings: transformed line lost \\r\\n ending; got: %q", got)
+	}
+	// Untouched LF line must keep \n (not gain \r).
+	if bytes.Contains(got, []byte("title: Mixed\r\n")) {
+		t.Errorf("mixed endings: LF line gained unexpected \\r; got: %q", got)
+	}
+	if !bytes.Contains(got, []byte("title: Mixed\n")) {
+		t.Errorf("mixed endings: LF line lost its \\n ending; got: %q", got)
+	}
+}
+
+// TestTransformFile_CRLF_NilRules_Unchanged verifies that TransformFile with
+// nil rules leaves CRLF content byte-identical to the input.
+func TestTransformFile_CRLF_NilRules_Unchanged(t *testing.T) {
+	input := []byte("---\r\nmode: subagent\r\n---\r\n\r\nBody.\r\n")
+	got := snapshot.TransformFile(input, nil)
+
+	if !bytes.Equal(got, input) {
+		t.Errorf("TransformFile with nil rules modified CRLF content; got: %q", got)
+	}
+}
+
+// TestTransformFile_CRLF_EmptyRules_Unchanged verifies that TransformFile with
+// an empty rule slice leaves CRLF content byte-identical to the input.
+func TestTransformFile_CRLF_EmptyRules_Unchanged(t *testing.T) {
+	input := []byte("---\r\nmode: subagent\r\n---\r\n\r\nBody.\r\n")
+	got := snapshot.TransformFile(input, []snapshot.TransformRule{})
+
+	if !bytes.Equal(got, input) {
+		t.Errorf("TransformFile with empty rules modified CRLF content; got: %q", got)
+	}
+}
+
+// TestTransformFile_TrailingWhitespaceBeforeCR_MatchesAndPreservesCR verifies
+// that trailing spaces or tabs before \r do not prevent rule matching, that
+// the replacement line drops the trailing spaces (existing behavior), and that
+// the \r\n ending is preserved.
+//
+// Input field line: "mode: subagent  \r\n" (two trailing spaces before \r\n)
+// Expected output:  "mode: primary\r\n"    (trailing spaces dropped, \r preserved)
+func TestTransformFile_TrailingWhitespaceBeforeCR_MatchesAndPreservesCR(t *testing.T) {
+	input := []byte("---\r\nmode: subagent  \r\ntitle: Agent\r\n---\r\n\r\nBody.\r\n")
+	got := snapshot.TransformFile(input, []snapshot.TransformRule{openCodeRule})
+
+	// Must have replaced the field.
+	if !bytes.Contains(got, []byte("mode: primary")) {
+		t.Errorf("trailing whitespace before \\r prevented rule from matching; got: %q", got)
+	}
+	// Replaced line must end with \r\n (CR preserved).
+	if !bytes.Contains(got, []byte("mode: primary\r\n")) {
+		t.Errorf("replaced line lost \\r\\n ending; got: %q", got)
+	}
+	// Trailing spaces must not appear in the output for this line.
+	if bytes.Contains(got, []byte("mode: primary  \r\n")) {
+		t.Errorf("trailing spaces were unexpectedly preserved in output; got: %q", got)
+	}
+}
+
+// TestTransformFile_TrailingTabBeforeCR_MatchesAndPreservesCR is a variant of
+// the trailing-whitespace test using a tab character instead of spaces.
+func TestTransformFile_TrailingTabBeforeCR_MatchesAndPreservesCR(t *testing.T) {
+	input := []byte("---\r\nmode: subagent\t\r\ntitle: Agent\r\n---\r\n\r\nBody.\r\n")
+	got := snapshot.TransformFile(input, []snapshot.TransformRule{openCodeRule})
+
+	if !bytes.Contains(got, []byte("mode: primary\r\n")) {
+		t.Errorf("trailing tab before \\r prevented rule from matching or lost \\r\\n; got: %q", got)
+	}
+}

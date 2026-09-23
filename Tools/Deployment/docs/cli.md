@@ -38,6 +38,8 @@ mosaic-deploy deploy [flags]
 | `--workspace <path>` | string | — | Absolute path to the target workspace |
 | `--scope <project\|user>` | string | `project` | Deployment scope |
 | `--selections <path>` | string | — | Path to a YAML selections file |
+| `--workflows <ids>` | string | — | Comma-separated workflow IDs; absent = use selections file; empty string = explicitly none |
+| `--infrastructure <ids>` | string | — | Comma-separated infrastructure agent IDs; absent = ask interactively; empty string = explicitly none |
 | `--output <json>` | string | — | Machine-readable output format |
 | `--dry-run` | bool | false | Plan without writing any files |
 | `--auto-confirm` | bool | false | Skip plan review and proceed automatically |

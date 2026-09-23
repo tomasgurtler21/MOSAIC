@@ -154,6 +154,7 @@ import (
 	"mosaic-run/internal/domain"
 	"mosaic-run/internal/harness"
 	"mosaic-run/internal/session"
+	"mosaic-run/internal/snapshot"
 )
 
 // ---- test data paths ----
@@ -2698,6 +2699,7 @@ func newIntervalAgentSession(t *testing.T) (ses session.Session, f *harness.Fake
 	orchPath = copyOrchestratorFile(t, dir, "interval-agent-orch.md")
 	writeAgentFile(t, dir, "agent-a")
 	writeAgentFile(t, dir, "agent-b")
+	writeAgentFile(t, dir, "checkpoint-manager-git")
 
 	f = harness.NewFakeAdapter()
 	store = &memStore{}
@@ -2721,6 +2723,7 @@ func newCommitAgentSession(t *testing.T) (ses session.Session, f *harness.FakeAd
 	orchPath = copyOrchestratorFile(t, dir, "commit-agent-orch.md")
 	writeAgentFile(t, dir, "agent-a")
 	writeAgentFile(t, dir, "agent-b")
+	writeAgentFile(t, dir, "commit-manager-git")
 
 	f = harness.NewFakeAdapter()
 	store = &memStore{}
@@ -2911,10 +2914,14 @@ func TestSession_Start_InfrastructureOverride_EmptyOverrides_Proceeds(t *testing
 //   - Does not fire when global_sequence is below param (vacuous RED).
 //
 //   STAGE_END trigger:
-//   - Fires after the first workflow step of a new stage (retrospective: current
-//     step's Stage != previous workflow step's Stage).
-//   - Does not fire between steps within the same stage (vacuous RED).
-//   - Does not fire on the very first workflow step (no previous step to compare; vacuous RED).
+//   - Fires after the last workflow step of a stage (prospective: the completed
+//     step is the last step of its stage, determined by look-ahead into the
+//     admitted workflow and stage set).
+//   - Fires once at the end of a single-stage workflow (single stage counts as a
+//     complete stage boundary).
+//   - Does not fire after intermediate steps within a stage; fires only at the
+//     last step of each stage.
+//   - Does not fire in non-EXECUTION phases (no stage structure outside EXECUTION).
 //
 //   restore-class exclusion:
 //   - A restore-class agent is never dispatched by automatic trigger evaluation,
@@ -2957,6 +2964,7 @@ func newTwoIntervalSession(t *testing.T) (ses session.Session, f *harness.FakeAd
 	orchPath = copyOrchestratorFile(t, dir, "two-interval-orch.md")
 	writeAgentFile(t, dir, "agent-a")
 	writeAgentFile(t, dir, "agent-b")
+	writeAgentFile(t, dir, "checkpoint-manager-git")
 	f = harness.NewFakeAdapter()
 	store = &memStore{}
 	ses = session.New(session.Deps{
@@ -2978,6 +2986,7 @@ func newContinueInfraSession(t *testing.T) (ses session.Session, f *harness.Fake
 	orchPath = copyOrchestratorFile(t, dir, "continue-infra-orch.md")
 	writeAgentFile(t, dir, "agent-a")
 	writeAgentFile(t, dir, "agent-b")
+	writeAgentFile(t, dir, "checkpoint-manager-git")
 	f = harness.NewFakeAdapter()
 	store = &memStore{}
 	ses = session.New(session.Deps{
@@ -3002,6 +3011,8 @@ func newRestoreGitSession(t *testing.T) (ses session.Session, f *harness.FakeAda
 	orchPath = copyOrchestratorFile(t, dir, "restore-git-orch.md")
 	writeAgentFile(t, dir, "agent-a")
 	writeAgentFile(t, dir, "agent-b")
+	writeAgentFile(t, dir, "checkpoint-restore-git")
+	writeAgentFile(t, dir, "checkpoint-manager-git")
 	f = harness.NewFakeAdapter()
 	store = &memStore{}
 	ses = session.New(session.Deps{
@@ -3026,6 +3037,8 @@ func newClassRestoreSession(t *testing.T) (ses session.Session, f *harness.FakeA
 	orchPath = copyOrchestratorFile(t, dir, "class-restore-orch.md")
 	writeAgentFile(t, dir, "agent-a")
 	writeAgentFile(t, dir, "agent-b")
+	writeAgentFile(t, dir, "checkpoint-restore-s3")
+	writeAgentFile(t, dir, "checkpoint-manager-git")
 	f = harness.NewFakeAdapter()
 	store = &memStore{}
 	ses = session.New(session.Deps{
@@ -3047,6 +3060,7 @@ func newStageEndStagedSession(t *testing.T) (ses session.Session, f *harness.Fak
 	orchPath = copyOrchestratorFile(t, dir, "stage-end-staged-orch.md")
 	writeAgentFile(t, dir, "implementation-tdd")
 	writeAgentFile(t, dir, "implementation-review")
+	writeAgentFile(t, dir, "commit-manager-git")
 
 	const planContent = `# Plan
 
@@ -3207,15 +3221,17 @@ func TestSession_Start_TriggerEval_INVOCATION_INTERVAL_HighThreshold_DoesNotFire
 
 // TestSession_Start_TriggerEval_STAGE_END_FiresOnStageTransition verifies that a
 // commit-class infrastructure agent with STAGE_END trigger is dispatched after the
-// first workflow step of a new stage. The STAGE_END rule is retrospective: it fires
-// when the just-completed step's Stage differs from the previous workflow step's Stage.
+// last step of a stage (prospective semantics). STAGE_END fires when the completed
+// step is the last step of its stage, determined by look-ahead into the admitted
+// workflow and stage set -- not by comparing against a previous step.
 //
 // Dispatch sequence with 2 stages (Stage-1: tdd, review; Stage-2: tdd, review):
-//   - implementation-tdd  Stage-1 (first step, no prior step → no STAGE_END)
-//   - implementation-review Stage-1 (same stage → no STAGE_END)
-//   - implementation-tdd  Stage-2 (Stage-2 ≠ Stage-1 → STAGE_END fires → commit-manager-git)
+//   - implementation-tdd  Stage-1 (not the last Stage-1 step → no STAGE_END)
+//   - implementation-review Stage-1 (last Stage-1 step → STAGE_END fires → commit-manager-git)
 //   - commit-manager-git  (infra dispatch, IsInfrastructure=true → no cascade)
-//   - implementation-review Stage-2 (same stage → no STAGE_END)
+//   - implementation-tdd  Stage-2 (not the last Stage-2 step → no STAGE_END)
+//   - implementation-review Stage-2 (last Stage-2 step → STAGE_END fires → commit-manager-git)
+//   - commit-manager-git  (infra dispatch for Stage-2 end)
 func TestSession_Start_TriggerEval_STAGE_END_FiresOnStageTransition(t *testing.T) {
 	ses, f, _, orchPath := newStageEndStagedSession(t)
 
@@ -3225,28 +3241,35 @@ func TestSession_Start_TriggerEval_STAGE_END_FiresOnStageTransition(t *testing.T
 		StatusCode:      domain.StatusSUCCESS,
 		StatusMessage:   "stage 1 tdd done",
 	}})
+	// Last step of Stage 1: STAGE_END fires after this step.
 	f.Queue("implementation-review", harness.ScriptedEntry{Response: &domain.ProtocolResponse{
 		AgentInstanceID: "implementation-review#2",
 		StatusCode:      domain.StatusSUCCESS,
 		StatusMessage:   "stage 1 review done",
 	}})
-	// Stage 2 first step: Stage-2 != Stage-1 → STAGE_END fires.
+	// Infrastructure dispatch triggered by STAGE_END at end of Stage 1.
+	f.Queue("commit-manager-git", harness.ScriptedEntry{Response: &domain.ProtocolResponse{
+		AgentInstanceID: "commit-manager-git#3",
+		StatusCode:      domain.StatusSUCCESS,
+		StatusMessage:   "commit after stage 1",
+	}})
+	// Stage 2 first step: not the last Stage-2 step → no STAGE_END.
 	f.Queue("implementation-tdd", harness.ScriptedEntry{Response: &domain.ProtocolResponse{
-		AgentInstanceID: "implementation-tdd#3",
+		AgentInstanceID: "implementation-tdd#4",
 		StatusCode:      domain.StatusSUCCESS,
 		StatusMessage:   "stage 2 tdd done",
 	}})
-	// Infrastructure dispatch triggered by STAGE_END.
-	f.Queue("commit-manager-git", harness.ScriptedEntry{Response: &domain.ProtocolResponse{
-		AgentInstanceID: "commit-manager-git#4",
-		StatusCode:      domain.StatusSUCCESS,
-		StatusMessage:   "commit done",
-	}})
-	// Stage 2 second step: same stage → no STAGE_END.
+	// Last step of Stage 2: STAGE_END fires after this step.
 	f.Queue("implementation-review", harness.ScriptedEntry{Response: &domain.ProtocolResponse{
 		AgentInstanceID: "implementation-review#5",
 		StatusCode:      domain.StatusSUCCESS,
 		StatusMessage:   "stage 2 review done",
+	}})
+	// Infrastructure dispatch triggered by STAGE_END at end of Stage 2.
+	f.Queue("commit-manager-git", harness.ScriptedEntry{Response: &domain.ProtocolResponse{
+		AgentInstanceID: "commit-manager-git#6",
+		StatusCode:      domain.StatusSUCCESS,
+		StatusMessage:   "commit after stage 2",
 	}})
 
 	cfg := domain.RunConfig{
@@ -3263,41 +3286,49 @@ func TestSession_Start_TriggerEval_STAGE_END_FiresOnStageTransition(t *testing.T
 	requireRunStatus(t, got, err, domain.RunCompleted)
 
 	invs := f.Invocations()
-	if len(invs) != 5 {
-		t.Fatalf("want 5 invocations (tdd1, review1, tdd2, commit, review2), got %d", len(invs))
+	if len(invs) != 6 {
+		t.Fatalf("want 6 invocations (tdd1, review1, commit1, tdd2, review2, commit2), got %d", len(invs))
 	}
 
-	commitIdx := -1
+	// commit-manager-git must appear twice: once after Stage-1's last step and
+	// once after Stage-2's last step.
+	commitIndices := []int{}
 	for i, inv := range invs {
 		if inv.Agent.Identifier == "commit-manager-git" {
-			commitIdx = i
-			break
+			commitIndices = append(commitIndices, i)
 		}
 	}
-	if commitIdx == -1 {
-		t.Fatal("want commit-manager-git dispatched after stage transition, but it was never invoked")
+	if len(commitIndices) != 2 {
+		t.Fatalf("want 2 commit-manager-git dispatches (one per stage end), got %d", len(commitIndices))
 	}
-	// commit-manager-git must follow tdd1, review1, tdd2 (index 3 in 0-based).
-	if commitIdx != 3 {
-		t.Errorf("want commit-manager-git at invocation[3] (after stage transition), got at invocation[%d]", commitIdx)
+	// First commit must follow tdd1, review1 (index 2 in 0-based).
+	if commitIndices[0] != 2 {
+		t.Errorf("want first commit-manager-git at invocation[2] (after Stage-1 last step), got at invocation[%d]", commitIndices[0])
+	}
+	// Second commit must follow tdd2, review2 (index 5 in 0-based).
+	if commitIndices[1] != 5 {
+		t.Errorf("want second commit-manager-git at invocation[5] (after Stage-2 last step), got at invocation[%d]", commitIndices[1])
 	}
 }
 
-// TestSession_Start_TriggerEval_STAGE_END_DoesNotFireWithinSameStage verifies that
-// the STAGE_END trigger does not fire when consecutive workflow steps are in the same stage.
-// Only a change in the Stage field between the current step and the prior workflow step
-// triggers the STAGE_END condition.
+// TestSession_Start_TriggerEval_STAGE_END_FiresAtEndOfSingleStage verifies that a
+// commit-class infrastructure agent with STAGE_END trigger is dispatched exactly
+// once at the end of a single-stage workflow. Under prospective semantics, STAGE_END
+// fires when the completed step is the last step of its stage; a single-stage
+// workflow has exactly one stage boundary at the end of that stage.
 //
-// RED phase: this test passes vacuously because trigger evaluation is not yet implemented.
-// Once implementation is added, a bug that fires STAGE_END within the same stage would
-// produce unexpected commit-manager-git dispatches and cause this test to fail.
-func TestSession_Start_TriggerEval_STAGE_END_DoesNotFireWithinSameStage(t *testing.T) {
-	// Build a staged session with only 1 stage. Within a single stage all steps
-	// have the same Stage value, so STAGE_END can never fire.
+// Dispatch sequence (1 stage: tdd, review):
+//   - implementation-tdd  Stage-1 (not the last Stage-1 step → no STAGE_END)
+//   - implementation-review Stage-1 (last Stage-1 step → STAGE_END fires → commit-manager-git)
+//   - commit-manager-git  (infra dispatch, IsInfrastructure=true → no cascade)
+func TestSession_Start_TriggerEval_STAGE_END_FiresAtEndOfSingleStage(t *testing.T) {
+	// Build a staged session with only 1 stage. STAGE_END must fire once, after the
+	// last step of that single stage.
 	dir := t.TempDir()
 	orchPath := copyOrchestratorFile(t, dir, "stage-end-staged-orch.md")
 	writeAgentFile(t, dir, "implementation-tdd")
 	writeAgentFile(t, dir, "implementation-review")
+	writeAgentFile(t, dir, "commit-manager-git")
 	const singleStagePlan = `# Plan
 
 ## Stages
@@ -3317,15 +3348,23 @@ func TestSession_Start_TriggerEval_STAGE_END_DoesNotFireWithinSameStage(t *testi
 		Interact:  &noopInteraction{},
 	})
 
+	// First step: not the last step of Stage-1, so STAGE_END must not fire yet.
 	f.Queue("implementation-tdd", harness.ScriptedEntry{Response: &domain.ProtocolResponse{
 		AgentInstanceID: "implementation-tdd#1",
 		StatusCode:      domain.StatusSUCCESS,
 		StatusMessage:   "done",
 	}})
+	// Last step of Stage-1: STAGE_END fires after this completes.
 	f.Queue("implementation-review", harness.ScriptedEntry{Response: &domain.ProtocolResponse{
 		AgentInstanceID: "implementation-review#2",
 		StatusCode:      domain.StatusSUCCESS,
 		StatusMessage:   "done",
+	}})
+	// Infrastructure dispatch triggered by STAGE_END at end of the single stage.
+	f.Queue("commit-manager-git", harness.ScriptedEntry{Response: &domain.ProtocolResponse{
+		AgentInstanceID: "commit-manager-git#3",
+		StatusCode:      domain.StatusSUCCESS,
+		StatusMessage:   "commit done",
 	}})
 
 	cfg := domain.RunConfig{
@@ -3341,27 +3380,33 @@ func TestSession_Start_TriggerEval_STAGE_END_DoesNotFireWithinSameStage(t *testi
 
 	requireRunStatus(t, got, err, domain.RunCompleted)
 
-	for _, inv := range f.Invocations() {
-		if inv.Agent.Identifier == "commit-manager-git" {
-			t.Errorf("commit-manager-git dispatched unexpectedly: STAGE_END must not fire when all steps share the same stage")
-		}
+	invs := f.Invocations()
+	if len(invs) != 3 {
+		t.Fatalf("want 3 invocations (tdd, review, commit), got %d: STAGE_END must fire exactly once at the end of the single stage", len(invs))
+	}
+	// commit-manager-git must be the third invocation (after tdd and review).
+	if invs[2].Agent.Identifier != "commit-manager-git" {
+		t.Errorf("want invocation[2] to be commit-manager-git (STAGE_END fired at end of stage), got %q", invs[2].Agent.Identifier)
 	}
 }
 
-// TestSession_Start_TriggerEval_STAGE_END_DoesNotFireOnFirstWorkflowStep verifies
-// that STAGE_END does not fire after the very first workflow step of a run, because
-// there is no previous workflow step to compare the Stage value against.
+// TestSession_Start_TriggerEval_STAGE_END_DoesNotFireBeforeLastStep verifies that
+// STAGE_END does not fire after intermediate steps within a stage -- only after the
+// final step of a stage. In a single-stage workflow with two steps (tdd, review),
+// STAGE_END must not fire after tdd (index 0); it fires only after review (index 1).
 //
-// RED phase: this test passes vacuously because trigger evaluation is not yet
-// implemented. It provides regression protection once implementation is added: a
-// bug that fires STAGE_END without a previous step would cause unexpected dispatches.
-func TestSession_Start_TriggerEval_STAGE_END_DoesNotFireOnFirstWorkflowStep(t *testing.T) {
-	// Use a staged workflow with a single-step stage so the first (and only)
-	// workflow step has no predecessor. STAGE_END must not fire after that step.
+// This is a regression guard for the prospective look-ahead implementation: a bug
+// that fires STAGE_END eagerly (e.g., after every step rather than at the last step)
+// would produce commit-manager-git at index 0 instead of index 2, failing the
+// position assertion.
+func TestSession_Start_TriggerEval_STAGE_END_DoesNotFireBeforeLastStep(t *testing.T) {
+	// Single-stage workflow, 2 steps: tdd then review. STAGE_END must fire only
+	// after the review step (the last step of the stage), not after tdd.
 	dir := t.TempDir()
 	orchPath := copyOrchestratorFile(t, dir, "stage-end-staged-orch.md")
 	writeAgentFile(t, dir, "implementation-tdd")
 	writeAgentFile(t, dir, "implementation-review")
+	writeAgentFile(t, dir, "commit-manager-git")
 	const singleStagePlan = `# Plan
 
 ## Stages
@@ -3381,17 +3426,23 @@ func TestSession_Start_TriggerEval_STAGE_END_DoesNotFireOnFirstWorkflowStep(t *t
 		Interact:  &noopInteraction{},
 	})
 
-	// Only the first workflow step in Stage-1. After this completes, STAGE_END
-	// must not fire because prevWorkflowStep is nil (no prior step).
+	// Intermediate step (not the last step of Stage-1): STAGE_END must not fire.
 	f.Queue("implementation-tdd", harness.ScriptedEntry{Response: &domain.ProtocolResponse{
 		AgentInstanceID: "implementation-tdd#1",
 		StatusCode:      domain.StatusSUCCESS,
 		StatusMessage:   "done",
 	}})
+	// Last step of Stage-1: STAGE_END fires after this step, not before.
 	f.Queue("implementation-review", harness.ScriptedEntry{Response: &domain.ProtocolResponse{
 		AgentInstanceID: "implementation-review#2",
 		StatusCode:      domain.StatusSUCCESS,
 		StatusMessage:   "done",
+	}})
+	// commit-manager-git dispatched only after review (the last stage step).
+	f.Queue("commit-manager-git", harness.ScriptedEntry{Response: &domain.ProtocolResponse{
+		AgentInstanceID: "commit-manager-git#3",
+		StatusCode:      domain.StatusSUCCESS,
+		StatusMessage:   "commit done",
 	}})
 
 	cfg := domain.RunConfig{
@@ -3407,10 +3458,126 @@ func TestSession_Start_TriggerEval_STAGE_END_DoesNotFireOnFirstWorkflowStep(t *t
 
 	requireRunStatus(t, got, err, domain.RunCompleted)
 
-	for _, inv := range f.Invocations() {
+	invs := f.Invocations()
+	if len(invs) != 3 {
+		t.Fatalf("want exactly 3 invocations (tdd, review, commit), got %d", len(invs))
+	}
+	// commit-manager-git must be at index 2, not at index 0 or 1.
+	// If STAGE_END fires after tdd (intermediate step), commit would appear at
+	// index 1, causing this assertion to fail.
+	if invs[2].Agent.Identifier != "commit-manager-git" {
+		t.Errorf("want invocation[2] = commit-manager-git (fires only at last stage step), got %q; STAGE_END must not fire before the last step", invs[2].Agent.Identifier)
+	}
+}
+
+// TestSession_Start_TriggerEval_STAGE_END_FiresOncePerStageInMultiStageWorkflow
+// verifies that STAGE_END fires exactly once per stage in a multi-stage workflow,
+// positioned after the last step of each stage and before the first step of the
+// next stage. This validates the prospective look-ahead semantics across stage
+// boundaries.
+//
+// The workflow has 2 stages (Stage-1: tdd, review; Stage-2: tdd, review).
+// Expected dispatch sequence:
+//   - implementation-tdd  Stage-1 (not last Stage-1 step → no STAGE_END)
+//   - implementation-review Stage-1 (last Stage-1 step → STAGE_END fires)
+//   - commit-manager-git  Stage-1 end (infra dispatch)
+//   - implementation-tdd  Stage-2 (not last Stage-2 step → no STAGE_END)
+//   - implementation-review Stage-2 (last Stage-2 step → STAGE_END fires)
+//   - commit-manager-git  Stage-2 end (infra dispatch)
+//
+// commit-manager-git must fire exactly twice: once at index 2 (after Stage-1's
+// last step) and once at index 5 (after Stage-2's last step).
+func TestSession_Start_TriggerEval_STAGE_END_FiresOncePerStageInMultiStageWorkflow(t *testing.T) {
+	ses, f, _, orchPath := newStageEndStagedSession(t)
+
+	// Stage 1, step 1: not the last step of Stage-1.
+	f.Queue("implementation-tdd", harness.ScriptedEntry{Response: &domain.ProtocolResponse{
+		AgentInstanceID: "implementation-tdd#1",
+		StatusCode:      domain.StatusSUCCESS,
+		StatusMessage:   "stage 1 tdd done",
+	}})
+	// Stage 1, step 2 (last step): STAGE_END fires after this completes.
+	f.Queue("implementation-review", harness.ScriptedEntry{Response: &domain.ProtocolResponse{
+		AgentInstanceID: "implementation-review#2",
+		StatusCode:      domain.StatusSUCCESS,
+		StatusMessage:   "stage 1 review done",
+	}})
+	// Commit triggered by STAGE_END at Stage-1 boundary.
+	f.Queue("commit-manager-git", harness.ScriptedEntry{Response: &domain.ProtocolResponse{
+		AgentInstanceID: "commit-manager-git#3",
+		StatusCode:      domain.StatusSUCCESS,
+		StatusMessage:   "commit stage 1",
+	}})
+	// Stage 2, step 1: not the last step of Stage-2.
+	f.Queue("implementation-tdd", harness.ScriptedEntry{Response: &domain.ProtocolResponse{
+		AgentInstanceID: "implementation-tdd#4",
+		StatusCode:      domain.StatusSUCCESS,
+		StatusMessage:   "stage 2 tdd done",
+	}})
+	// Stage 2, step 2 (last step): STAGE_END fires after this completes.
+	f.Queue("implementation-review", harness.ScriptedEntry{Response: &domain.ProtocolResponse{
+		AgentInstanceID: "implementation-review#5",
+		StatusCode:      domain.StatusSUCCESS,
+		StatusMessage:   "stage 2 review done",
+	}})
+	// Commit triggered by STAGE_END at Stage-2 boundary.
+	f.Queue("commit-manager-git", harness.ScriptedEntry{Response: &domain.ProtocolResponse{
+		AgentInstanceID: "commit-manager-git#6",
+		StatusCode:      domain.StatusSUCCESS,
+		StatusMessage:   "commit stage 2",
+	}})
+
+	cfg := domain.RunConfig{
+		OrchestratorFilePath: orchPath,
+		WorkflowID:           "staged",
+		Task:                 "task",
+		IsNewRun:             true,
+		RunSettings:          domain.RunSettings{Mode: domain.ExecutionModeAuto},
+		RunFolder:            filepath.Dir(orchPath),
+	}
+
+	got, err := ses.Start(context.Background(), cfg)
+
+	requireRunStatus(t, got, err, domain.RunCompleted)
+
+	invs := f.Invocations()
+	if len(invs) != 6 {
+		t.Fatalf("want 6 invocations (tdd1, review1, commit1, tdd2, review2, commit2), got %d", len(invs))
+	}
+
+	// Collect commit dispatch positions.
+	var commitIndices []int
+	for i, inv := range invs {
 		if inv.Agent.Identifier == "commit-manager-git" {
-			t.Errorf("commit-manager-git dispatched after first step: STAGE_END must not fire when prevWorkflowStep is nil (no prior step to compare)")
+			commitIndices = append(commitIndices, i)
 		}
+	}
+
+	// Exactly two commits: one per stage.
+	if len(commitIndices) != 2 {
+		t.Fatalf("want exactly 2 commit-manager-git dispatches (one per stage end), got %d at positions %v",
+			len(commitIndices), commitIndices)
+	}
+
+	// First commit must immediately follow Stage-1's last step (index 2 in 0-based).
+	// If it were at index 0 or 1, STAGE_END fired too early.
+	// If it were at index 3 or later, STAGE_END fired too late (first step of Stage-2).
+	if commitIndices[0] != 2 {
+		t.Errorf("want first commit-manager-git at invocation[2] (after Stage-1 last step, before Stage-2 first step), got invocation[%d]",
+			commitIndices[0])
+	}
+
+	// Second commit must follow Stage-2's last step (index 5 in 0-based).
+	if commitIndices[1] != 5 {
+		t.Errorf("want second commit-manager-git at invocation[5] (after Stage-2 last step), got invocation[%d]",
+			commitIndices[1])
+	}
+
+	// Verify Stage-2's first step (tdd2) follows the first commit without
+	// an extra commit in between.
+	if invs[3].Agent.Identifier != "implementation-tdd" {
+		t.Errorf("want invocation[3] = implementation-tdd (Stage-2 first step after commit), got %q",
+			invs[3].Agent.Identifier)
 	}
 }
 
@@ -3697,6 +3864,7 @@ func TestSession_Start_InfraOnFailureHalt_DoesNotInvokeDeviationResolver(t *test
 	orchPath := copyOrchestratorFile(t, dir, "interval-agent-orch.md")
 	writeAgentFile(t, dir, "agent-a")
 	writeAgentFile(t, dir, "agent-b")
+	writeAgentFile(t, dir, "checkpoint-manager-git")
 
 	f := harness.NewFakeAdapter()
 	store := &memStore{}
@@ -3857,6 +4025,74 @@ func TestSession_Start_CheckpointExtraction_MarkerAbsent_CheckpointColumnEmpty(t
 	}
 }
 
+// TestSession_Start_TriggerEval_InfraAgentDotAgentMdExtension_DispatchesCorrectly
+// verifies that evaluateTriggers resolves infra agent definition files named
+// with the .agent.md compound extension (e.g. checkpoint-manager-git.agent.md)
+// just as it would a .md file. This regression-locks the extension-agnostic
+// behavior introduced by the switch to agentresolve.ResolveOne.
+func TestSession_Start_TriggerEval_InfraAgentDotAgentMdExtension_DispatchesCorrectly(t *testing.T) {
+	dir := t.TempDir()
+	orchPath := copyOrchestratorFile(t, dir, "interval-agent-orch.md")
+	writeAgentFile(t, dir, "agent-a")
+	writeAgentFile(t, dir, "agent-b")
+	// Use .agent.md extension for the infra agent to verify extension-agnostic resolution.
+	agentFilePath := filepath.Join(dir, "checkpoint-manager-git.agent.md")
+	if err := os.WriteFile(agentFilePath, []byte("# Agent: checkpoint-manager-git\n"), 0600); err != nil {
+		t.Fatalf("write checkpoint-manager-git.agent.md: %v", err)
+	}
+
+	f := harness.NewFakeAdapter()
+	store := &memStore{}
+	ses := session.New(session.Deps{
+		Harness:  f,
+		Store:    store,
+		Clock:    fixedClock{t: epoch},
+		Interact: &noopInteraction{},
+	})
+
+	f.Queue("agent-a", harness.ScriptedEntry{Response: &domain.ProtocolResponse{
+		AgentInstanceID: "agent-a#1",
+		StatusCode:      domain.StatusSUCCESS,
+		StatusMessage:   "done",
+	}})
+	f.Queue("checkpoint-manager-git", harness.ScriptedEntry{Response: &domain.ProtocolResponse{
+		AgentInstanceID: "checkpoint-manager-git#2",
+		StatusCode:      domain.StatusSUCCESS,
+		StatusMessage:   "checkpoint taken",
+	}})
+	f.Queue("agent-b", harness.ScriptedEntry{Response: &domain.ProtocolResponse{
+		AgentInstanceID: "agent-b#3",
+		StatusCode:      domain.StatusSUCCESS,
+		StatusMessage:   "done",
+	}})
+	f.Queue("checkpoint-manager-git", harness.ScriptedEntry{Response: &domain.ProtocolResponse{
+		AgentInstanceID: "checkpoint-manager-git#4",
+		StatusCode:      domain.StatusSUCCESS,
+		StatusMessage:   "checkpoint taken",
+	}})
+
+	cfg := baseLinearConfig(orchPath)
+	cfg.Checkpoints = true
+
+	got, err := ses.Start(context.Background(), cfg)
+
+	requireRunStatus(t, got, err, domain.RunCompleted)
+
+	invs := f.Invocations()
+	dispatched := false
+	for _, inv := range invs {
+		if inv.Agent.Identifier == "checkpoint-manager-git" {
+			dispatched = true
+			if !strings.HasSuffix(inv.Agent.DefinitionPath, "checkpoint-manager-git.agent.md") {
+				t.Errorf("want DefinitionPath ending in .agent.md, got %q", inv.Agent.DefinitionPath)
+			}
+		}
+	}
+	if !dispatched {
+		t.Error("want checkpoint-manager-git dispatched (infra trigger fired), but it was not")
+	}
+}
+
 // ===== Run-start agent-per-class selection =====
 //
 // Coverage for T7.1: buildActiveAgentsFilter behaviour surfaced through the
@@ -3876,6 +4112,8 @@ func newMultiCheckpointSession(t *testing.T) (ses session.Session, f *harness.Fa
 	orchPath = copyOrchestratorFile(t, dir, "multi-checkpoint-orch.md")
 	writeAgentFile(t, dir, "agent-a")
 	writeAgentFile(t, dir, "agent-b")
+	writeAgentFile(t, dir, "checkpoint-manager-git")
+	writeAgentFile(t, dir, "checkpoint-manager-alt")
 	f = harness.NewFakeAdapter()
 	store = &memStore{}
 	ses = session.New(session.Deps{
@@ -3891,19 +4129,27 @@ func newMultiCheckpointSession(t *testing.T) (ses session.Session, f *harness.Fa
 // which declares two review-class infrastructure agents (review-agent-a and
 // review-agent-b, both with INVOCATION_INTERVAL:1 continue).
 // Agent files for agent-a and agent-b are written into the temp dir.
+//
+// Routing is intentionally not wired (nil). Tests that use this helper
+// verify review-class behavior without post-review routing consultation;
+// Stage-2 behavior (consultation when Routing != nil) is covered by
+// session_review_consult_test.go.
 func newReviewClassSession(t *testing.T) (ses session.Session, f *harness.FakeAdapter, store *memStore, orchPath string) {
 	t.Helper()
 	dir := t.TempDir()
 	orchPath = copyOrchestratorFile(t, dir, "review-class-orch.md")
 	writeAgentFile(t, dir, "agent-a")
 	writeAgentFile(t, dir, "agent-b")
+	writeAgentFile(t, dir, "review-agent-a")
+	writeAgentFile(t, dir, "review-agent-b")
 	f = harness.NewFakeAdapter()
 	store = &memStore{}
 	ses = session.New(session.Deps{
-		Harness:   f,
-		Store:     store,
-		Clock:     fixedClock{t: epoch},
-		Interact:  &noopInteraction{},
+		Harness:  f,
+		Store:    store,
+		Clock:    fixedClock{t: epoch},
+		Interact: &noopInteraction{},
+		// Routing: nil -- no post-review consultation; run proceeds without consultant.
 	})
 	return
 }
@@ -3919,6 +4165,9 @@ func newMultiClassMixedSession(t *testing.T) (ses session.Session, f *harness.Fa
 	orchPath = copyOrchestratorFile(t, dir, "multi-class-mixed-orch.md")
 	writeAgentFile(t, dir, "agent-a")
 	writeAgentFile(t, dir, "agent-b")
+	writeAgentFile(t, dir, "checkpoint-manager-git")
+	writeAgentFile(t, dir, "checkpoint-manager-alt")
+	writeAgentFile(t, dir, "review-agent")
 	f = harness.NewFakeAdapter()
 	store = &memStore{}
 	ses = session.New(session.Deps{
@@ -3941,6 +4190,10 @@ func newTwoGatedClassesSession(t *testing.T) (ses session.Session, f *harness.Fa
 	orchPath = copyOrchestratorFile(t, dir, "multi-two-gated-classes-orch.md")
 	writeAgentFile(t, dir, "agent-a")
 	writeAgentFile(t, dir, "agent-b")
+	writeAgentFile(t, dir, "checkpoint-manager-git")
+	writeAgentFile(t, dir, "checkpoint-manager-alt")
+	writeAgentFile(t, dir, "commit-manager-git")
+	writeAgentFile(t, dir, "commit-manager-alt")
 	f = harness.NewFakeAdapter()
 	store = &memStore{}
 	ses = session.New(session.Deps{
@@ -4072,11 +4325,12 @@ func TestSession_Start_SingleGatedClassAgent_AutoSelected_RunProceeds(t *testing
 	// checkpoint-agent-orch.md declares one checkpoint-class agent.
 	ses, f, _, orchPath := newCheckpointAgentSession(t)
 
-	// Expected GREEN dispatch: agent-a → checkpoint-manager-git (STAGE_END on
-	// first step does not fire; STAGE_END fires only when stage changes) →
-	// agent-b. With STAGE_END trigger and a linear workflow (no stage change),
-	// the checkpoint agent never fires. That is correct behaviour: the trigger
-	// contract is unrelated to auto-selection.
+	// Expected GREEN dispatch: agent-a → agent-b. The STAGE_END trigger on
+	// checkpoint-manager-git does not fire here because this is a linear (non-staged)
+	// PLANNING workflow -- STAGE_END only applies within EXECUTION phases that have
+	// a stage structure. Without EXECUTION stages, the look-ahead finds no stage
+	// boundary and the checkpoint agent is never dispatched. That is correct
+	// behaviour: the trigger contract is unrelated to auto-selection.
 	f.Queue("agent-a", harness.ScriptedEntry{Response: &domain.ProtocolResponse{
 		AgentInstanceID: "agent-a#1",
 		StatusCode:      domain.StatusSUCCESS,
@@ -5620,6 +5874,71 @@ func TestSession_Start_CommitsDisabled_NoCommitAgentDispatchedAtStart(t *testing
 			t.Errorf("want no commit-manager-git invocation when commits are disabled, got invocation with agent_instance_id=%q",
 				inv.Request.AgentInstanceID)
 		}
+	}
+}
+
+// TestSession_Start_CommitsEnabled_CommitAgentDotAgentMdExtension_SetupSucceeds
+// verifies that doCommitSetupDispatch resolves commit-class agent definition
+// files named with the .agent.md compound extension (e.g.
+// commit-manager-git.agent.md) just as it would a .md file. This
+// regression-locks the extension-agnostic behavior introduced by the switch
+// to agentresolve.ResolveOne in doCommitSetupDispatch.
+func TestSession_Start_CommitsEnabled_CommitAgentDotAgentMdExtension_SetupSucceeds(t *testing.T) {
+	dir := t.TempDir()
+	orchPath := copyOrchestratorFile(t, dir, "commit-agent-orch.md")
+	writeAgentFile(t, dir, "agent-a")
+	writeAgentFile(t, dir, "agent-b")
+	// Use .agent.md extension for the commit agent to verify extension-agnostic resolution.
+	agentFilePath := filepath.Join(dir, "commit-manager-git.agent.md")
+	if err := os.WriteFile(agentFilePath, []byte("# Agent: commit-manager-git\n"), 0600); err != nil {
+		t.Fatalf("write commit-manager-git.agent.md: %v", err)
+	}
+
+	f := harness.NewFakeAdapter()
+	store := &memStore{}
+	ses := session.New(session.Deps{
+		Harness:  f,
+		Store:    store,
+		Clock:    fixedClock{t: epoch},
+		Interact: &noopInteraction{},
+	})
+
+	const wantBranch = "mosaic/run/agent-md-ext-test"
+	f.Queue("commit-manager-git", harness.ScriptedEntry{Response: &domain.ProtocolResponse{
+		AgentInstanceID: "commit-manager-git#1",
+		StatusCode:      domain.StatusSUCCESS,
+		StatusMessage:   "commit setup complete [branch:" + wantBranch + "]",
+	}})
+	f.Queue("agent-a", harness.ScriptedEntry{Response: &domain.ProtocolResponse{
+		AgentInstanceID: "agent-a#2",
+		StatusCode:      domain.StatusSUCCESS,
+		StatusMessage:   "done",
+	}})
+	f.Queue("agent-b", harness.ScriptedEntry{Response: &domain.ProtocolResponse{
+		AgentInstanceID: "agent-b#3",
+		StatusCode:      domain.StatusSUCCESS,
+		StatusMessage:   "done",
+	}})
+
+	cfg := baseCommitConfig(orchPath)
+
+	got, err := ses.Start(context.Background(), cfg)
+
+	requireRunStatus(t, got, err, domain.RunCompleted)
+
+	// Verify commit-manager-git was dispatched from the .agent.md file path.
+	invs := f.Invocations()
+	dispatched := false
+	for _, inv := range invs {
+		if inv.Agent.Identifier == "commit-manager-git" {
+			dispatched = true
+			if !strings.HasSuffix(inv.Agent.DefinitionPath, "commit-manager-git.agent.md") {
+				t.Errorf("want DefinitionPath ending in .agent.md, got %q", inv.Agent.DefinitionPath)
+			}
+		}
+	}
+	if !dispatched {
+		t.Error("want commit-manager-git dispatched (commit setup), but it was not")
 	}
 }
 
@@ -9414,17 +9733,20 @@ func TestSession_Start_CLIHarness_OrchestratorRefPointsIntoSnapshot(t *testing.T
 	}
 }
 
-// TestSession_Start_CLIHarness_SnapshotRetainedOnDeviationUnresolved verifies
-// that when Start returns a non-terminal outcome (RunDeviationUnresolved), the
-// snapshot directory is NOT deleted. Non-terminal outcomes leave the run in a
-// resumable state; deleting the snapshot would remove the agent files needed
-// for a future resume dispatch.
+// TestSession_Start_CLIHarness_SnapshotDeletedOnDeviationUnresolved verifies
+// that when Start returns RunDeviationUnresolved (a terminal outcome under
+// FR-21), the run-scoped copy-and-invoke snapshot directory is deleted.
+//
+// All six RunStatus values are terminal (FR-21). The former "non-terminal
+// outcomes leave the snapshot in place" comment in session.go is superseded.
+// Resume still works because Start re-creates the snapshot on every invocation
+// (see TestSession_Start_CLIHarness_SnapshotRecreatedOnPreExisting).
 //
 // The deviation is produced by having agent-a return PARTIALLY_DONE in the
 // linear workflow (which has no On Findings column), with no routing consultant
 // wired. The engine cannot route automatically, so the session returns
 // RunDeviationUnresolved.
-func TestSession_Start_CLIHarness_SnapshotRetainedOnDeviationUnresolved(t *testing.T) {
+func TestSession_Start_CLIHarness_SnapshotDeletedOnDeviationUnresolved(t *testing.T) {
 	const runID = "testsnap-nonterminal-01"
 	_, orchPath, snapshotDir := writeCLIHarnessDir(t, runID)
 
@@ -9449,7 +9771,7 @@ func TestSession_Start_CLIHarness_SnapshotRetainedOnDeviationUnresolved(t *testi
 	got, err := ses.Start(context.Background(), baseCLIHarnessConfig(orchPath, runID))
 	requireRunStatus(t, got, err, domain.RunDeviationUnresolved)
 
-	// Step 5a must have run and agents must have been dispatched from the
+	// Step 5b must have run and agents must have been dispatched from the
 	// snapshot directory. This confirms the snapshot was actually created.
 	invs := f.Invocations()
 	if len(invs) == 0 {
@@ -9457,19 +9779,19 @@ func TestSession_Start_CLIHarness_SnapshotRetainedOnDeviationUnresolved(t *testi
 	}
 	if !containsSnapshotPathSegment(invs[0].Agent.DefinitionPath, runID) {
 		t.Errorf("agent %q: DefinitionPath %q does not contain snapshot path segment %q; "+
-			"step 5a must run before the first dispatch so that agent files are "+
+			"step 5b must run before the first dispatch so that agent files are "+
 			"resolved from the snapshot directory",
 			invs[0].Agent.Identifier, invs[0].Agent.DefinitionPath, "agents-runner-"+runID)
 	}
 
-	// The snapshot directory must still exist after RunDeviationUnresolved.
-	// Cleanup must NOT run on non-terminal outcomes; the snapshot remains
-	// available for run resumption.
-	if _, statErr := os.Stat(snapshotDir); errors.Is(statErr, os.ErrNotExist) {
-		t.Errorf("snapshot directory %q must NOT be deleted when Start returns "+
-			"RunDeviationUnresolved; non-terminal outcomes leave the run resumable "+
-			"and the snapshot must persist so that agent files are available on resume",
-			snapshotDir)
+	// The snapshot directory must be deleted after RunDeviationUnresolved
+	// (FR-21: all six terminal outcomes trigger copy-and-invoke cleanup).
+	// The stale "non-terminal outcomes leave the snapshot" comment in session.go
+	// is superseded by FR-21.
+	if _, statErr := os.Stat(snapshotDir); !errors.Is(statErr, os.ErrNotExist) {
+		t.Errorf("snapshot directory %q must be deleted when Start returns "+
+			"RunDeviationUnresolved (FR-21: all six terminal outcomes trigger cleanup); "+
+			"stat returned: %v", snapshotDir, statErr)
 	}
 }
 
@@ -9505,6 +9827,1097 @@ func TestSession_Start_NonCLIHarness_SnapshotStepSkipped(t *testing.T) {
 				inv.Agent.Identifier, inv.Agent.DefinitionPath)
 		}
 	}
+}
+
+// ===== Stage 10: Session Integration =====
+//
+// Tests for dual-strategy snapshot selection, FR-3 nil-rules skip, FR-21
+// expanded cleanup (all six terminal outcomes), backup-and-transform lifecycle,
+// and recovery check (ContractsDesign.md step 4b override: runs before
+// ResolveAll, not after).
+//
+// Strategy mapping (ContractsDesign.md Stage 1):
+//   claude-code (LoadingMechanismPath)  -> copy-and-invoke (existing)
+//   opencode    (LoadingMechanismName)  -> backup-and-transform (new)
+//   ghcp-cli    (LoadingMechanismName, nil rules) -> skip (FR-3)
+//   fake / ""   (non-CLI)               -> skip both steps
+
+// ---- Stage 10 helpers ----
+
+// writeOpenCodeAgentFile writes an agent definition file in dir for the given
+// agent ID. The file has YAML frontmatter with mode=subagent so that the
+// opencode backup-and-transform rules can rewrite it to mode=primary in-place.
+// After Cleanup, the file should be restored to mode=subagent.
+func writeOpenCodeAgentFile(t *testing.T, dir, agentID string) {
+	t.Helper()
+	content := "---\nmode: subagent\n---\n# Agent: " + agentID + "\n"
+	if err := os.WriteFile(filepath.Join(dir, agentID+".md"), []byte(content), 0o600); err != nil {
+		t.Fatalf("writeOpenCodeAgentFile(%q): %v", agentID, err)
+	}
+}
+
+// writeOpenCodeHarnessDir creates a temporary working directory for the
+// opencode harness (.opencode/agents/). Returns the working directory, the
+// orchestrator file path, and the expected backup directory path.
+//
+// Agent files are written with mode=subagent frontmatter so that the
+// backup-and-transform rules have a field to transform.
+//
+// Callers must NOT modify the existing writeCLIHarnessDir or
+// baseCLIHarnessConfig helpers; those remain unchanged for claude-code tests.
+func writeOpenCodeHarnessDir(t *testing.T) (workDir, orchPath, backupDir string) {
+	t.Helper()
+	workDir = t.TempDir()
+	agentsDir := filepath.Join(workDir, ".opencode", "agents")
+	if err := os.MkdirAll(agentsDir, 0o755); err != nil {
+		t.Fatalf("writeOpenCodeHarnessDir: create agents dir: %v", err)
+	}
+
+	data, err := os.ReadFile(orchFilePath("linear-orch.md"))
+	if err != nil {
+		t.Fatalf("writeOpenCodeHarnessDir: read linear-orch.md: %v", err)
+	}
+	orchPath = filepath.Join(agentsDir, "orchestrator.md")
+	if err := os.WriteFile(orchPath, data, 0o600); err != nil {
+		t.Fatalf("writeOpenCodeHarnessDir: write orchestrator: %v", err)
+	}
+
+	writeOpenCodeAgentFile(t, agentsDir, "agent-a")
+	writeOpenCodeAgentFile(t, agentsDir, "agent-b")
+
+	// Backup dir is a sibling of the agents dir, following CreateBackupDir:
+	//   filepath.Join(filepath.Dir(agentsDir), BackupDirName)
+	backupDir = filepath.Join(workDir, ".opencode", snapshot.BackupDirName)
+	return
+}
+
+// baseOpenCodeHarnessConfig returns a RunConfig for the linear workflow with
+// the opencode harness identity and an explicit run ID.
+func baseOpenCodeHarnessConfig(orchPath, runID string) domain.RunConfig {
+	return domain.RunConfig{
+		OrchestratorFilePath: orchPath,
+		WorkflowID:           "linear",
+		Task:                 "backup-and-transform integration test",
+		IsNewRun:             true,
+		RunID:                runID,
+		RunSettings:          domain.RunSettings{Mode: domain.ExecutionModeAuto},
+		HarnessID:            "opencode",
+	}
+}
+
+// writeGHCPCLIHarnessDir creates a temporary working directory for the
+// ghcp-cli harness (.github/agents/). Returns the working directory and the
+// orchestrator file path. Agent files have no special frontmatter because
+// TransformationsFor("ghcp-cli") returns nil (FR-3: skip backup-and-transform).
+func writeGHCPCLIHarnessDir(t *testing.T) (workDir, orchPath string) {
+	t.Helper()
+	workDir = t.TempDir()
+	agentsDir := filepath.Join(workDir, ".github", "agents")
+	if err := os.MkdirAll(agentsDir, 0o755); err != nil {
+		t.Fatalf("writeGHCPCLIHarnessDir: create agents dir: %v", err)
+	}
+
+	data, err := os.ReadFile(orchFilePath("linear-orch.md"))
+	if err != nil {
+		t.Fatalf("writeGHCPCLIHarnessDir: read linear-orch.md: %v", err)
+	}
+	orchPath = filepath.Join(agentsDir, "orchestrator.md")
+	if err := os.WriteFile(orchPath, data, 0o600); err != nil {
+		t.Fatalf("writeGHCPCLIHarnessDir: write orchestrator: %v", err)
+	}
+
+	writeAgentFile(t, agentsDir, "agent-a")
+	writeAgentFile(t, agentsDir, "agent-b")
+	return
+}
+
+// baseGHCPCLIHarnessConfig returns a RunConfig for the linear workflow with
+// the ghcp-cli harness identity and an explicit run ID.
+func baseGHCPCLIHarnessConfig(orchPath, runID string) domain.RunConfig {
+	return domain.RunConfig{
+		OrchestratorFilePath: orchPath,
+		WorkflowID:           "linear",
+		Task:                 "ghcp-cli integration test",
+		IsNewRun:             true,
+		RunID:                runID,
+		RunSettings:          domain.RunSettings{Mode: domain.ExecutionModeAuto},
+		HarnessID:            "ghcp-cli",
+	}
+}
+
+// agentContentScanHarness is a test-local domain.HarnessAdapter wrapper that
+// reads the agent definition file from disk before returning the scripted
+// response. This allows tests to verify that backup-and-transform has modified
+// the agent files in-place at dispatch time, without changing FakeAdapter.
+//
+// The wrapper is the "thin test helper" described in Stage 10 design notes for
+// T10.1(b): "use a test-local domain.HarnessAdapter wrapper around FakeAdapter
+// that reads the agent file content from disk during Invoke to confirm the
+// transform is in effect."
+type agentContentScanHarness struct {
+	delegate       *harness.FakeAdapter
+	mu             sync.Mutex
+	scannedContent map[string][]byte // agentID -> file content at invoke time
+}
+
+func (h *agentContentScanHarness) Invoke(ctx context.Context, agent domain.AgentReference, req domain.ProtocolRequest) (domain.ProtocolResponse, error) {
+	if data, readErr := os.ReadFile(agent.DefinitionPath); readErr == nil {
+		h.mu.Lock()
+		if h.scannedContent == nil {
+			h.scannedContent = make(map[string][]byte)
+		}
+		h.scannedContent[agent.Identifier] = data
+		h.mu.Unlock()
+	}
+	return h.delegate.Invoke(ctx, agent, req)
+}
+
+func (h *agentContentScanHarness) contentFor(agentID string) []byte {
+	h.mu.Lock()
+	defer h.mu.Unlock()
+	return h.scannedContent[agentID]
+}
+
+// writeStaleOpenCodeBackupDir creates an orphaned backup directory that
+// simulates a previous opencode run that completed transforms and then
+// crashed before releasing the run lock. The backup directory contains:
+//   - backup copies of agent-a.md and agent-b.md (same content as originals)
+//   - recovery-manifest.json (valid, listing both files)
+//   - .setup-complete (signal that transforms were applied)
+//
+// No .lock-* files are present, so RecoveryCheck will determine no run is
+// active and will safely restore and remove the backup directory.
+func writeStaleOpenCodeBackupDir(t *testing.T, agentsDir, backupDir string) {
+	t.Helper()
+	if err := os.MkdirAll(backupDir, 0o755); err != nil {
+		t.Fatalf("writeStaleOpenCodeBackupDir: mkdir: %v", err)
+	}
+
+	// Copy agent files to backup (same content as originals).
+	for _, name := range []string{"agent-a.md", "agent-b.md"} {
+		data, err := os.ReadFile(filepath.Join(agentsDir, name))
+		if err != nil {
+			t.Fatalf("writeStaleOpenCodeBackupDir: read %s: %v", name, err)
+		}
+		if err := os.WriteFile(filepath.Join(backupDir, name), data, 0o600); err != nil {
+			t.Fatalf("writeStaleOpenCodeBackupDir: write backup %s: %v", name, err)
+		}
+	}
+
+	// Write a valid recovery manifest that lists both backed-up files.
+	manifestJSON := fmt.Sprintf(
+		`{"timestamp":"2026-01-01T00:00:00Z","agents_dir":%q,"files":[`+
+			`{"filename":"agent-a.md","field":"mode","original_value":"subagent"},`+
+			`{"filename":"agent-b.md","field":"mode","original_value":"subagent"}]}`,
+		agentsDir,
+	)
+	if err := os.WriteFile(filepath.Join(backupDir, snapshot.ManifestFileName), []byte(manifestJSON), 0o600); err != nil {
+		t.Fatalf("writeStaleOpenCodeBackupDir: write manifest: %v", err)
+	}
+
+	// Write .setup-complete to indicate transforms were fully applied.
+	if err := os.WriteFile(filepath.Join(backupDir, snapshot.SetupCompleteFileName), []byte(""), 0o600); err != nil {
+		t.Fatalf("writeStaleOpenCodeBackupDir: write .setup-complete: %v", err)
+	}
+}
+
+// writeCorruptOpenCodeBackupDir creates a backup directory with a corrupt
+// manifest (invalid JSON). RecoveryCheck will return a RefusalError when
+// it encounters this, causing the session to refuse the run.
+func writeCorruptOpenCodeBackupDir(t *testing.T, agentsDir, backupDir string) {
+	t.Helper()
+	if err := os.MkdirAll(backupDir, 0o755); err != nil {
+		t.Fatalf("writeCorruptOpenCodeBackupDir: mkdir: %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(backupDir, snapshot.ManifestFileName), []byte("{invalid json}"), 0o600); err != nil {
+		t.Fatalf("writeCorruptOpenCodeBackupDir: write manifest: %v", err)
+	}
+}
+
+// ---- T10.1: Strategy selection ----
+
+// TestSession_Start_CLIHarness_StrategySelection_ClaudeCodeUsesCopyAndInvoke
+// verifies that the claude-code harness (LoadingMechanismPath) uses the
+// copy-and-invoke strategy. Agents are dispatched from a run-scoped snapshot
+// directory, confirming copy-and-invoke is active. No backup directory is
+// created because backup-and-transform is for name-based harnesses only.
+func TestSession_Start_CLIHarness_StrategySelection_ClaudeCodeUsesCopyAndInvoke(t *testing.T) {
+	const runID = "strat-cc-copy-01"
+	workDir, orchPath, snapshotDir := writeCLIHarnessDir(t, runID)
+
+	f := harness.NewFakeAdapter()
+	f.Queue("agent-a", harness.ScriptedEntry{Response: &domain.ProtocolResponse{
+		AgentInstanceID: "agent-a#1",
+		StatusCode:      domain.StatusSUCCESS,
+		StatusMessage:   "done",
+	}})
+	f.Queue("agent-b", harness.ScriptedEntry{Response: &domain.ProtocolResponse{
+		AgentInstanceID: "agent-b#2",
+		StatusCode:      domain.StatusSUCCESS,
+		StatusMessage:   "done",
+	}})
+
+	ses := session.New(session.Deps{
+		Harness:  f,
+		Store:    &memStore{},
+		Clock:    fixedClock{t: epoch},
+		Interact: &noopInteraction{},
+	})
+
+	got, err := ses.Start(context.Background(), baseCLIHarnessConfig(orchPath, runID))
+	requireRunStatus(t, got, err, domain.RunCompleted)
+
+	// Agents must be dispatched from the snapshot dir (copy-and-invoke strategy).
+	invs := f.Invocations()
+	if len(invs) == 0 {
+		t.Fatal("want at least one invocation, got none")
+	}
+	for _, inv := range invs {
+		if !containsSnapshotPathSegment(inv.Agent.DefinitionPath, runID) {
+			t.Errorf("agent %q: DefinitionPath %q does not contain snapshot path segment; "+
+				"claude-code (LoadingMechanismPath) must use copy-and-invoke strategy, "+
+				"dispatching agents from the run-scoped snapshot directory",
+				inv.Agent.Identifier, inv.Agent.DefinitionPath)
+		}
+	}
+
+	// No backup directory must exist for path-based harnesses.
+	expectedBackupDir := filepath.Join(workDir, ".claude", snapshot.BackupDirName)
+	if _, statErr := os.Stat(expectedBackupDir); !errors.Is(statErr, os.ErrNotExist) {
+		t.Errorf("backup dir %q must not be created for claude-code (copy-and-invoke); "+
+			"backup-and-transform is for name-based harnesses only; stat returned: %v",
+			expectedBackupDir, statErr)
+	}
+	_ = snapshotDir // confirmed deleted by snapshot cleanup test; not the focus here
+}
+
+// TestSession_Start_OpenCodeHarness_StrategySelection_UsesBackupAndTransform
+// verifies that the opencode harness (LoadingMechanismName, non-nil rules)
+// uses the backup-and-transform strategy. During dispatch, agent files must
+// be transformed in-place (mode=primary). After the run, originals are
+// restored (mode=subagent) and the backup directory is removed.
+//
+// A test-local agentContentScanHarness wrapper reads the agent file during
+// Invoke to confirm the transform is active at dispatch time.
+func TestSession_Start_OpenCodeHarness_StrategySelection_UsesBackupAndTransform(t *testing.T) {
+	const runID = "strat-oc-bat-01"
+	workDir, orchPath, backupDir := writeOpenCodeHarnessDir(t)
+	agentsDir := filepath.Join(workDir, ".opencode", "agents")
+
+	delegate := harness.NewFakeAdapter()
+	delegate.Queue("agent-a", harness.ScriptedEntry{Response: &domain.ProtocolResponse{
+		AgentInstanceID: "agent-a#1",
+		StatusCode:      domain.StatusSUCCESS,
+		StatusMessage:   "done",
+	}})
+	delegate.Queue("agent-b", harness.ScriptedEntry{Response: &domain.ProtocolResponse{
+		AgentInstanceID: "agent-b#2",
+		StatusCode:      domain.StatusSUCCESS,
+		StatusMessage:   "done",
+	}})
+	scanner := &agentContentScanHarness{delegate: delegate}
+
+	ses := session.New(session.Deps{
+		Harness:  scanner,
+		Store:    &memStore{},
+		Clock:    fixedClock{t: epoch},
+		Interact: &noopInteraction{},
+	})
+
+	got, err := ses.Start(context.Background(), baseOpenCodeHarnessConfig(orchPath, runID))
+	requireRunStatus(t, got, err, domain.RunCompleted)
+
+	// During dispatch, agent-a.md must have been transformed in-place:
+	// mode=subagent -> mode=primary (opencode transform rule).
+	contentDuringRun := scanner.contentFor("agent-a")
+	if len(contentDuringRun) == 0 {
+		t.Fatal("agentContentScanHarness: no content captured for agent-a; did Invoke fire?")
+	}
+	if !strings.Contains(string(contentDuringRun), "primary") {
+		t.Errorf("agent-a.md content at dispatch time: want mode=primary (in-place transform), "+
+			"got %q; backup-and-transform must apply transforms before the first dispatch",
+			string(contentDuringRun))
+	}
+	if strings.Contains(string(contentDuringRun), "subagent") {
+		t.Errorf("agent-a.md content at dispatch time: still contains mode=subagent; "+
+			"the in-place transform must have replaced it with mode=primary before dispatch")
+	}
+
+	// Agents must NOT be dispatched from a snapshot dir (no copy-and-invoke for opencode).
+	for _, inv := range delegate.Invocations() {
+		if strings.Contains(filepath.ToSlash(inv.Agent.DefinitionPath), "agents-runner-") {
+			t.Errorf("agent %q: DefinitionPath %q contains snapshot path segment; "+
+				"opencode uses backup-and-transform (in-place), not copy-and-invoke",
+				inv.Agent.Identifier, inv.Agent.DefinitionPath)
+		}
+	}
+
+	// AC10.12: backup-and-transform must NOT re-resolve orchRef. The orchestrator
+	// file is transformed in-place at its original path, so all dispatched agents
+	// (including the orchestrator) must be resolved from the original agentsDir,
+	// not from any copy. A positive path-prefix check is stronger than the
+	// negative "not snapshot" check above: it also rules out backup-dir paths and
+	// any other stray copies.
+	for _, inv := range delegate.Invocations() {
+		if !strings.HasPrefix(
+			filepath.Clean(inv.Agent.DefinitionPath),
+			filepath.Clean(agentsDir)+string(os.PathSeparator),
+		) {
+			t.Errorf("agent %q: DefinitionPath %q is not under the original agentsDir %q; "+
+				"backup-and-transform must dispatch from original paths without re-binding orchRef",
+				inv.Agent.Identifier, inv.Agent.DefinitionPath, agentsDir)
+		}
+	}
+
+	// After RunCompleted, cleanup must have restored originals and deleted the
+	// backup directory (last-out check: sole run, so restore and clean up).
+	agentAPath := filepath.Join(agentsDir, "agent-a.md")
+	contentAfterRun, readErr := os.ReadFile(agentAPath)
+	if readErr != nil {
+		t.Fatalf("read agent-a.md after run: %v", readErr)
+	}
+	if !strings.Contains(string(contentAfterRun), "subagent") {
+		t.Errorf("agent-a.md after run: want mode=subagent (original restored by Cleanup), "+
+			"got %q; last-out check must restore the original before removing the backup",
+			string(contentAfterRun))
+	}
+
+	if _, statErr := os.Stat(backupDir); !errors.Is(statErr, os.ErrNotExist) {
+		t.Errorf("backup dir %q must be deleted after RunCompleted (last-out cleanup); "+
+			"stat returned: %v", backupDir, statErr)
+	}
+}
+
+// ---- T10.2: FR-3 nil-rules skip ----
+
+// TestSession_Start_GHCPCLIHarness_NilRules_SkipsBackupAndTransform verifies
+// that the ghcp-cli harness (LoadingMechanismName, nil transform rules) skips
+// backup-and-transform entirely (FR-3). Agents are dispatched from the original
+// agents directory without any transformation, and no backup directory is
+// created.
+//
+// TransformationsFor("ghcp-cli") returns nil (no rules). SetupBackupAndTransform
+// with nil rules returns (nil, nil), and the session skips the backup step.
+func TestSession_Start_GHCPCLIHarness_NilRules_SkipsBackupAndTransform(t *testing.T) {
+	const runID = "ghcp-skip-01"
+	workDir, orchPath := writeGHCPCLIHarnessDir(t)
+	agentsDir := filepath.Join(workDir, ".github", "agents")
+
+	// Read original content of agent-a.md before the run to compare later.
+	originalContent, err := os.ReadFile(filepath.Join(agentsDir, "agent-a.md"))
+	if err != nil {
+		t.Fatalf("read agent-a.md before run: %v", err)
+	}
+
+	delegate := harness.NewFakeAdapter()
+	delegate.Queue("agent-a", harness.ScriptedEntry{Response: &domain.ProtocolResponse{
+		AgentInstanceID: "agent-a#1",
+		StatusCode:      domain.StatusSUCCESS,
+		StatusMessage:   "done",
+	}})
+	delegate.Queue("agent-b", harness.ScriptedEntry{Response: &domain.ProtocolResponse{
+		AgentInstanceID: "agent-b#2",
+		StatusCode:      domain.StatusSUCCESS,
+		StatusMessage:   "done",
+	}})
+
+	ses := session.New(session.Deps{
+		Harness:  delegate,
+		Store:    &memStore{},
+		Clock:    fixedClock{t: epoch},
+		Interact: &noopInteraction{},
+	})
+
+	got, err := ses.Start(context.Background(), baseGHCPCLIHarnessConfig(orchPath, runID))
+	requireRunStatus(t, got, err, domain.RunCompleted)
+
+	// Agents must be dispatched from the original agents directory (no snapshot,
+	// no copy-and-invoke, no in-place transform for ghcp-cli).
+	for _, inv := range delegate.Invocations() {
+		if strings.Contains(filepath.ToSlash(inv.Agent.DefinitionPath), "agents-runner-") {
+			t.Errorf("agent %q: DefinitionPath %q contains snapshot path segment; "+
+				"ghcp-cli (nil rules) must skip backup-and-transform entirely and "+
+				"dispatch from the original agents directory",
+				inv.Agent.Identifier, inv.Agent.DefinitionPath)
+		}
+		if strings.Contains(filepath.ToSlash(inv.Agent.DefinitionPath), snapshot.BackupDirName) {
+			t.Errorf("agent %q: DefinitionPath %q references backup directory; "+
+				"ghcp-cli must not use backup-and-transform",
+				inv.Agent.Identifier, inv.Agent.DefinitionPath)
+		}
+	}
+
+	// No backup directory must exist for ghcp-cli (nil rules, FR-3 skip).
+	expectedBackupDir := filepath.Join(workDir, ".github", snapshot.BackupDirName)
+	if _, statErr := os.Stat(expectedBackupDir); !errors.Is(statErr, os.ErrNotExist) {
+		t.Errorf("backup dir %q must not be created for ghcp-cli (nil rules, FR-3 skip); "+
+			"stat returned: %v", expectedBackupDir, statErr)
+	}
+
+	// Agent files must not have been modified (no in-place transforms for ghcp-cli).
+	contentAfterRun, readErr := os.ReadFile(filepath.Join(agentsDir, "agent-a.md"))
+	if readErr != nil {
+		t.Fatalf("read agent-a.md after run: %v", readErr)
+	}
+	if string(contentAfterRun) != string(originalContent) {
+		t.Errorf("agent-a.md was modified during a ghcp-cli run; "+
+			"nil-rules harnesses must not transform agent files")
+	}
+}
+
+// ---- T10.3: FR-21 expanded cleanup (copy-and-invoke, all terminal outcomes) ----
+
+// TestSession_Start_CLIHarness_SnapshotDeletedOnRunFailed verifies that the
+// copy-and-invoke snapshot directory is deleted when the run ends with RunFailed
+// (FR-21: all six terminal outcomes trigger cleanup).
+//
+// RunFailed is triggered by forcing store.Apply to fail on the first call after
+// the snapshot has been created and agent-a has returned SUCCESS.
+func TestSession_Start_CLIHarness_SnapshotDeletedOnRunFailed(t *testing.T) {
+	const runID = "testsnap-cleanup-failed-01"
+	_, orchPath, snapshotDir := writeCLIHarnessDir(t, runID)
+
+	f := harness.NewFakeAdapter()
+	f.Queue("agent-a", harness.ScriptedEntry{Response: &domain.ProtocolResponse{
+		AgentInstanceID: "agent-a#1",
+		StatusCode:      domain.StatusSUCCESS,
+		StatusMessage:   "done",
+	}})
+
+	failStore := &memStore{
+		applyErrOnFirst: true,
+		applyFirstErr:   errors.New("test: forced apply failure to trigger RunFailed"),
+	}
+
+	ses := session.New(session.Deps{
+		Harness:  f,
+		Store:    failStore,
+		Clock:    fixedClock{t: epoch},
+		Interact: &noopInteraction{},
+	})
+
+	got, err := ses.Start(context.Background(), baseCLIHarnessConfig(orchPath, runID))
+	// RunFailed returns a non-nil error; we verify the status directly.
+	if err == nil {
+		t.Error("want non-nil error for RunFailed, got nil")
+	}
+	if got.Status != domain.RunFailed {
+		t.Errorf("want RunFailed, got %q (message: %q)", got.Status, got.Message)
+	}
+
+	// Snapshot must be deleted on RunFailed (FR-21: all terminal outcomes clean up).
+	if _, statErr := os.Stat(snapshotDir); !errors.Is(statErr, os.ErrNotExist) {
+		t.Errorf("snapshot directory %q must be deleted after RunFailed "+
+			"(FR-21: all six terminal outcomes trigger copy-and-invoke cleanup); "+
+			"stat returned: %v", snapshotDir, statErr)
+	}
+}
+
+// TestSession_Start_CLIHarness_SnapshotDeletedOnRunRefused verifies that the
+// copy-and-invoke snapshot directory is deleted when the run is refused after
+// the snapshot was created (FR-21). The refusal is triggered at step 7.5a
+// (mode=unset), which runs after step 5b (snapshot setup).
+func TestSession_Start_CLIHarness_SnapshotDeletedOnRunRefused(t *testing.T) {
+	const runID = "testsnap-cleanup-refused-01"
+	_, orchPath, snapshotDir := writeCLIHarnessDir(t, runID)
+
+	ses := session.New(session.Deps{
+		Harness:  harness.NewFakeAdapter(),
+		Store:    &memStore{},
+		Clock:    fixedClock{t: epoch},
+		Interact: &noopInteraction{},
+	})
+
+	// Override mode to unset: triggers refusal at step 7.5a, which is AFTER
+	// the snapshot is created at step 5b. The deferred cleanup must still run.
+	cfg := baseCLIHarnessConfig(orchPath, runID)
+	cfg.RunSettings.Mode = domain.ExecutionModeUnset
+
+	got, err := ses.Start(context.Background(), cfg)
+	if err != nil {
+		t.Fatalf("want nil error for RunRefused (refusals use nil error), got %v", err)
+	}
+	if got.Status != domain.RunRefused {
+		t.Errorf("want RunRefused, got %q (message: %q)", got.Status, got.Message)
+	}
+
+	// The snapshot was created at step 5b, then the run was refused. FR-21
+	// requires cleanup on all terminal outcomes including RunRefused.
+	if _, statErr := os.Stat(snapshotDir); !errors.Is(statErr, os.ErrNotExist) {
+		t.Errorf("snapshot directory %q must be deleted after RunRefused "+
+			"(FR-21: all six terminal outcomes trigger copy-and-invoke cleanup); "+
+			"stat returned: %v", snapshotDir, statErr)
+	}
+}
+
+// TestSession_Start_CLIHarness_SnapshotDeletedOnRunStoppedByConsultant verifies
+// that the copy-and-invoke snapshot directory is deleted when the routing
+// consultant issues a stop instruction (RunStoppedByConsultant), which is one
+// of the six terminal outcomes covered by FR-21.
+func TestSession_Start_CLIHarness_SnapshotDeletedOnRunStoppedByConsultant(t *testing.T) {
+	const runID = "testsnap-cleanup-consultant-01"
+	_, orchPath, snapshotDir := writeCLIHarnessDir(t, runID)
+
+	consultant := &scriptedRoutingConsultant{}
+	// First dispatch: send agent-a so the run enters the dispatch loop (past step 5b).
+	consultant.queueDispatch("agent-a", "test task", 0)
+	// Second call: stop the run after agent-a returns.
+	consultant.queueStop("FR-21 cleanup test stop")
+
+	f := harness.NewFakeAdapter()
+	f.Queue("agent-a", harness.ScriptedEntry{Response: &domain.ProtocolResponse{
+		AgentInstanceID: "agent-a#1",
+		StatusCode:      domain.StatusSUCCESS,
+		StatusMessage:   "done",
+	}})
+
+	ses := session.New(session.Deps{
+		Harness:  f,
+		Store:    &memStore{},
+		Clock:    fixedClock{t: epoch},
+		Interact: &noopInteraction{},
+		Routing:  consultant,
+	})
+
+	cfg := baseCLIHarnessConfig(orchPath, runID)
+	cfg.RunSettings.Mode = domain.ExecutionModeOrchestrated
+
+	got, err := ses.Start(context.Background(), cfg)
+	if err != nil {
+		t.Fatalf("want nil error, got %v", err)
+	}
+	if got.Status != domain.RunStoppedByConsultant {
+		t.Errorf("want RunStoppedByConsultant, got %q (message: %q)", got.Status, got.Message)
+	}
+
+	// Snapshot must be deleted on RunStoppedByConsultant (FR-21).
+	if _, statErr := os.Stat(snapshotDir); !errors.Is(statErr, os.ErrNotExist) {
+		t.Errorf("snapshot directory %q must be deleted after RunStoppedByConsultant "+
+			"(FR-21: all six terminal outcomes trigger copy-and-invoke cleanup); "+
+			"stat returned: %v", snapshotDir, statErr)
+	}
+}
+
+// ---- T10.4: Backup-and-transform cleanup (all terminal outcomes) ----
+//
+// Each test verifies that after a terminal outcome, BackupState.Cleanup has
+// run: the backup directory is deleted and the original agent files are
+// restored (mode=subagent). For these tests to be meaningful, the backup
+// must actually have been created, so agent files use mode=subagent frontmatter.
+
+// assertBackupCleanedUp is a helper that verifies the backup-and-transform
+// cleanup completed: backup dir deleted and agent-a.md restored to mode=subagent.
+func assertBackupCleanedUp(t *testing.T, agentsDir, backupDir string) {
+	t.Helper()
+
+	if _, statErr := os.Stat(backupDir); !errors.Is(statErr, os.ErrNotExist) {
+		t.Errorf("backup dir %q must be deleted by Cleanup (last-out check); "+
+			"stat returned: %v", backupDir, statErr)
+	}
+
+	agentAContent, readErr := os.ReadFile(filepath.Join(agentsDir, "agent-a.md"))
+	if readErr != nil {
+		t.Fatalf("read agent-a.md after run: %v", readErr)
+	}
+	if !strings.Contains(string(agentAContent), "subagent") {
+		t.Errorf("agent-a.md after run: want mode=subagent (restored by Cleanup), "+
+			"got %q; BackupState.Cleanup must call the last-out check which restores originals",
+			string(agentAContent))
+	}
+}
+
+// TestSession_Start_OpenCodeHarness_BackupCleanupRunsOnRunCompleted verifies
+// that BackupState.Cleanup (last-out check) runs when the run completes
+// successfully: originals are restored and the backup directory is deleted.
+//
+// RED signal: at dispatch time, the ORIGINAL agent file (in the original agents
+// dir, not a snapshot copy) must have mode=primary. This only holds when
+// backup-and-transform applies transforms IN-PLACE. With copy-and-invoke (the
+// current implementation), the original is never touched so it stays mode=subagent.
+func TestSession_Start_OpenCodeHarness_BackupCleanupRunsOnRunCompleted(t *testing.T) {
+	const runID = "oc-cleanup-complete-01"
+	workDir, orchPath, backupDir := writeOpenCodeHarnessDir(t)
+	agentsDir := filepath.Join(workDir, ".opencode", "agents")
+
+	var originalContentAtDispatch []byte
+	f := harness.NewFakeAdapter()
+	f.Queue("agent-a", harness.ScriptedEntry{Response: &domain.ProtocolResponse{
+		AgentInstanceID: "agent-a#1",
+		StatusCode:      domain.StatusSUCCESS,
+		StatusMessage:   "done",
+	}})
+	f.Queue("agent-b", harness.ScriptedEntry{Response: &domain.ProtocolResponse{
+		AgentInstanceID: "agent-b#2",
+		StatusCode:      domain.StatusSUCCESS,
+		StatusMessage:   "done",
+	}})
+	cb := &callbackHarness{
+		delegate: f,
+		onInvoke: func(agentID string) {
+			if agentID == "agent-a" {
+				originalContentAtDispatch, _ = os.ReadFile(filepath.Join(agentsDir, "agent-a.md"))
+			}
+		},
+	}
+
+	ses := session.New(session.Deps{
+		Harness:  cb,
+		Store:    &memStore{},
+		Clock:    fixedClock{t: epoch},
+		Interact: &noopInteraction{},
+	})
+
+	got, err := ses.Start(context.Background(), baseOpenCodeHarnessConfig(orchPath, runID))
+	requireRunStatus(t, got, err, domain.RunCompleted)
+
+	// The ORIGINAL file must have been in mode=primary at dispatch time:
+	// backup-and-transform applies transforms IN-PLACE, so the original agents
+	// dir is modified (not a snapshot copy). With copy-and-invoke, the original
+	// stays mode=subagent and this assertion fails RED.
+	if !strings.Contains(string(originalContentAtDispatch), "primary") {
+		t.Errorf("original agent-a.md at dispatch time: want mode=primary "+
+			"(backup-and-transform applied in-place), got %q; "+
+			"backup-and-transform must modify original agent files, not snapshot copies",
+			string(originalContentAtDispatch))
+	}
+
+	assertBackupCleanedUp(t, agentsDir, backupDir)
+}
+
+// TestSession_Start_OpenCodeHarness_BackupCleanupRunsOnRunStopped verifies
+// that BackupState.Cleanup runs when the context is cancelled mid-run
+// (RunStopped). Originals are restored and the backup directory is deleted.
+func TestSession_Start_OpenCodeHarness_BackupCleanupRunsOnRunStopped(t *testing.T) {
+	const runID = "oc-cleanup-stop-01"
+	workDir, orchPath, backupDir := writeOpenCodeHarnessDir(t)
+	agentsDir := filepath.Join(workDir, ".opencode", "agents")
+
+	var originalContentAtDispatch []byte
+	f := harness.NewFakeAdapter()
+	ctx, cancel := context.WithCancel(context.Background())
+
+	cb := &callbackHarness{
+		delegate: f,
+		onInvoke: func(agentID string) {
+			if agentID == "agent-a" {
+				originalContentAtDispatch, _ = os.ReadFile(filepath.Join(agentsDir, "agent-a.md"))
+				cancel()
+			}
+		},
+	}
+	f.Queue("agent-a", harness.ScriptedEntry{Response: &domain.ProtocolResponse{
+		AgentInstanceID: "agent-a#1",
+		StatusCode:      domain.StatusSUCCESS,
+		StatusMessage:   "done",
+	}})
+
+	ses := session.New(session.Deps{
+		Harness:  cb,
+		Store:    &memStore{},
+		Clock:    fixedClock{t: epoch},
+		Interact: &noopInteraction{},
+	})
+
+	got, err := ses.Start(ctx, baseOpenCodeHarnessConfig(orchPath, runID))
+	requireRunStatus(t, got, err, domain.RunStopped)
+
+	// The ORIGINAL file must have been in mode=primary at dispatch time
+	// (backup-and-transform in-place). RED: copy-and-invoke leaves original mode=subagent.
+	if !strings.Contains(string(originalContentAtDispatch), "primary") {
+		t.Errorf("original agent-a.md at dispatch time: want mode=primary "+
+			"(backup-and-transform applied in-place), got %q; "+
+			"backup-and-transform must modify original agent files, not snapshot copies",
+			string(originalContentAtDispatch))
+	}
+
+	assertBackupCleanedUp(t, agentsDir, backupDir)
+}
+
+// TestSession_Start_OpenCodeHarness_BackupCleanupRunsOnRunDeviationUnresolved
+// verifies that BackupState.Cleanup runs when the run ends with
+// RunDeviationUnresolved. Originals are restored and the backup dir is deleted.
+func TestSession_Start_OpenCodeHarness_BackupCleanupRunsOnRunDeviationUnresolved(t *testing.T) {
+	const runID = "oc-cleanup-deviation-01"
+	workDir, orchPath, backupDir := writeOpenCodeHarnessDir(t)
+	agentsDir := filepath.Join(workDir, ".opencode", "agents")
+
+	var originalContentAtDispatch []byte
+	f := harness.NewFakeAdapter()
+	f.Queue("agent-a", harness.ScriptedEntry{Response: &domain.ProtocolResponse{
+		AgentInstanceID: "agent-a#1",
+		StatusCode:      domain.StatusPARTIALLY_DONE,
+		StatusMessage:   "needs more work",
+	}})
+	cb := &callbackHarness{
+		delegate: f,
+		onInvoke: func(agentID string) {
+			if agentID == "agent-a" {
+				originalContentAtDispatch, _ = os.ReadFile(filepath.Join(agentsDir, "agent-a.md"))
+			}
+		},
+	}
+
+	ses := session.New(session.Deps{
+		Harness:  cb,
+		Store:    &memStore{},
+		Clock:    fixedClock{t: epoch},
+		Interact: &noopInteraction{},
+		// No Routing consultant: deviation becomes RunDeviationUnresolved.
+	})
+
+	got, err := ses.Start(context.Background(), baseOpenCodeHarnessConfig(orchPath, runID))
+	requireRunStatus(t, got, err, domain.RunDeviationUnresolved)
+
+	// The ORIGINAL file must have been in mode=primary at dispatch time.
+	// RED: copy-and-invoke leaves original mode=subagent.
+	if !strings.Contains(string(originalContentAtDispatch), "primary") {
+		t.Errorf("original agent-a.md at dispatch time: want mode=primary "+
+			"(backup-and-transform applied in-place), got %q; "+
+			"backup-and-transform must modify original agent files, not snapshot copies",
+			string(originalContentAtDispatch))
+	}
+
+	assertBackupCleanedUp(t, agentsDir, backupDir)
+}
+
+// TestSession_Start_OpenCodeHarness_BackupCleanupRunsOnRunFailed verifies that
+// BackupState.Cleanup runs when the run ends with RunFailed (store.Apply error).
+// Originals are restored and the backup directory is deleted.
+func TestSession_Start_OpenCodeHarness_BackupCleanupRunsOnRunFailed(t *testing.T) {
+	const runID = "oc-cleanup-failed-01"
+	workDir, orchPath, backupDir := writeOpenCodeHarnessDir(t)
+	agentsDir := filepath.Join(workDir, ".opencode", "agents")
+
+	var originalContentAtDispatch []byte
+	f := harness.NewFakeAdapter()
+	f.Queue("agent-a", harness.ScriptedEntry{Response: &domain.ProtocolResponse{
+		AgentInstanceID: "agent-a#1",
+		StatusCode:      domain.StatusSUCCESS,
+		StatusMessage:   "done",
+	}})
+	cb := &callbackHarness{
+		delegate: f,
+		onInvoke: func(agentID string) {
+			if agentID == "agent-a" {
+				originalContentAtDispatch, _ = os.ReadFile(filepath.Join(agentsDir, "agent-a.md"))
+			}
+		},
+	}
+
+	failStore := &memStore{
+		applyErrOnFirst: true,
+		applyFirstErr:   errors.New("test: forced apply failure"),
+	}
+
+	ses := session.New(session.Deps{
+		Harness:  cb,
+		Store:    failStore,
+		Clock:    fixedClock{t: epoch},
+		Interact: &noopInteraction{},
+	})
+
+	got, _ := ses.Start(context.Background(), baseOpenCodeHarnessConfig(orchPath, runID))
+	// RunFailed returns a non-nil error; verify status directly.
+	if got.Status != domain.RunFailed {
+		t.Errorf("want RunFailed, got %q (message: %q)", got.Status, got.Message)
+	}
+
+	// The ORIGINAL file must have been in mode=primary at dispatch time.
+	// RED: copy-and-invoke leaves original mode=subagent.
+	if !strings.Contains(string(originalContentAtDispatch), "primary") {
+		t.Errorf("original agent-a.md at dispatch time: want mode=primary "+
+			"(backup-and-transform applied in-place), got %q; "+
+			"backup-and-transform must modify original agent files, not snapshot copies",
+			string(originalContentAtDispatch))
+	}
+
+	assertBackupCleanedUp(t, agentsDir, backupDir)
+}
+
+// TestSession_Start_OpenCodeHarness_BackupCleanupRunsOnRunRefused verifies
+// that BackupState.Cleanup runs when the run is refused AFTER
+// SetupBackupAndTransform has succeeded (defer is registered at step 5b).
+//
+// The refusal is triggered at step 7.5a (mode=unset). The deferred cleanup
+// must run even though the run never entered the dispatch loop.
+// This also covers AC10.11 (defer runs for post-setup refusals).
+func TestSession_Start_OpenCodeHarness_BackupCleanupRunsOnRunRefused(t *testing.T) {
+	const runID = "oc-cleanup-refused-01"
+	workDir, orchPath, backupDir := writeOpenCodeHarnessDir(t)
+	agentsDir := filepath.Join(workDir, ".opencode", "agents")
+
+	ses := session.New(session.Deps{
+		Harness:  harness.NewFakeAdapter(),
+		Store:    &memStore{},
+		Clock:    fixedClock{t: epoch},
+		Interact: &noopInteraction{},
+	})
+
+	// mode=unset triggers refusal at step 7.5a (after backup setup at step 5b).
+	cfg := baseOpenCodeHarnessConfig(orchPath, runID)
+	cfg.RunSettings.Mode = domain.ExecutionModeUnset
+
+	got, err := ses.Start(context.Background(), cfg)
+	if err != nil {
+		t.Fatalf("want nil error for RunRefused, got %v", err)
+	}
+	if got.Status != domain.RunRefused {
+		t.Errorf("want RunRefused, got %q (message: %q)", got.Status, got.Message)
+	}
+
+	// The backup was set up at step 5b, then the run was refused at step 7.5a.
+	// The deferred Cleanup must have run, restoring originals and deleting backup.
+	assertBackupCleanedUp(t, agentsDir, backupDir)
+}
+
+// TestSession_Start_OpenCodeHarness_BackupCleanupRunsOnRunStoppedByConsultant
+// verifies that BackupState.Cleanup runs when the routing consultant issues a
+// stop instruction. Originals are restored and the backup directory is deleted.
+func TestSession_Start_OpenCodeHarness_BackupCleanupRunsOnRunStoppedByConsultant(t *testing.T) {
+	const runID = "oc-cleanup-consultant-01"
+	workDir, orchPath, backupDir := writeOpenCodeHarnessDir(t)
+	agentsDir := filepath.Join(workDir, ".opencode", "agents")
+
+	consultant := &scriptedRoutingConsultant{}
+	consultant.queueDispatch("agent-a", "test task", 0)
+	consultant.queueStop("cleanup test stop")
+
+	var originalContentAtDispatch []byte
+	f := harness.NewFakeAdapter()
+	f.Queue("agent-a", harness.ScriptedEntry{Response: &domain.ProtocolResponse{
+		AgentInstanceID: "agent-a#1",
+		StatusCode:      domain.StatusSUCCESS,
+		StatusMessage:   "done",
+	}})
+	cb := &callbackHarness{
+		delegate: f,
+		onInvoke: func(agentID string) {
+			if agentID == "agent-a" {
+				originalContentAtDispatch, _ = os.ReadFile(filepath.Join(agentsDir, "agent-a.md"))
+			}
+		},
+	}
+
+	ses := session.New(session.Deps{
+		Harness:  cb,
+		Store:    &memStore{},
+		Clock:    fixedClock{t: epoch},
+		Interact: &noopInteraction{},
+		Routing:  consultant,
+	})
+
+	cfg := baseOpenCodeHarnessConfig(orchPath, runID)
+	cfg.RunSettings.Mode = domain.ExecutionModeOrchestrated
+
+	got, err := ses.Start(context.Background(), cfg)
+	if err != nil {
+		t.Fatalf("want nil error, got %v", err)
+	}
+	if got.Status != domain.RunStoppedByConsultant {
+		t.Errorf("want RunStoppedByConsultant, got %q (message: %q)", got.Status, got.Message)
+	}
+
+	// The ORIGINAL file must have been in mode=primary at dispatch time.
+	// RED: copy-and-invoke leaves original mode=subagent.
+	if !strings.Contains(string(originalContentAtDispatch), "primary") {
+		t.Errorf("original agent-a.md at dispatch time: want mode=primary "+
+			"(backup-and-transform applied in-place), got %q; "+
+			"backup-and-transform must modify original agent files, not snapshot copies",
+			string(originalContentAtDispatch))
+	}
+
+	assertBackupCleanedUp(t, agentsDir, backupDir)
+}
+
+// TestSession_Start_OpenCodeHarness_BackupCleanupFailureIsNonFatal verifies
+// that a restore error during BackupState.Cleanup is logged as
+// EventSnapshotCleanupFailed and does not change the run outcome (FR-22).
+//
+// The injectable RestoreFunc seam on BackupState (snapshot package) is used to
+// force a restore failure without relying on filesystem tricks (read-only files,
+// locked handles) that are unreliable on Windows. The BackupStateHook in
+// session.Deps receives the BackupState immediately after SetupBackupAndTransform
+// returns, before Cleanup is deferred, so the hook can set RestoreFunc to inject
+// the error.
+//
+// RED signal: Before the implementation routes opencode through backup-and-transform,
+// SetupBackupAndTransform is never called, BackupStateHook is never invoked, no
+// error is injected, and EventSnapshotCleanupFailed is never logged.
+func TestSession_Start_OpenCodeHarness_BackupCleanupFailureIsNonFatal(t *testing.T) {
+	const runID = "oc-cleanup-fail-01"
+	_, orchPath, _ := writeOpenCodeHarnessDir(t)
+
+	logger := &sessionRecordingLogger{}
+
+	f := harness.NewFakeAdapter()
+	f.Queue("agent-a", harness.ScriptedEntry{Response: &domain.ProtocolResponse{
+		AgentInstanceID: "agent-a#1",
+		StatusCode:      domain.StatusSUCCESS,
+		StatusMessage:   "done",
+	}})
+	f.Queue("agent-b", harness.ScriptedEntry{Response: &domain.ProtocolResponse{
+		AgentInstanceID: "agent-b#2",
+		StatusCode:      domain.StatusSUCCESS,
+		StatusMessage:   "done",
+	}})
+
+	ses := session.New(session.Deps{
+		Harness:  f,
+		Store:    &memStore{},
+		Clock:    fixedClock{t: epoch},
+		Interact: &noopInteraction{},
+		Debug:    logger,
+		BackupStateHook: func(bs *snapshot.BackupState) {
+			// Inject a RestoreFunc that always returns an error. This forces
+			// BackupState.Cleanup to fail (FR-22: failure must be non-fatal).
+			bs.RestoreFunc = func(agentsDir, backupDir string) error {
+				return errors.New("injected restore failure for FR-22 test")
+			}
+		},
+	})
+
+	got, err := ses.Start(context.Background(), baseOpenCodeHarnessConfig(orchPath, runID))
+
+	// FR-22: restore failure must not surface as a returned error.
+	if err != nil {
+		t.Fatalf("want nil error (cleanup failure must be non-fatal), got %v", err)
+	}
+	// FR-22: restore failure must not change the run outcome.
+	if got.Status != domain.RunCompleted {
+		t.Errorf("want RunCompleted (cleanup restore failure must not change run outcome), "+
+			"got %q (message: %q)", got.Status, got.Message)
+	}
+	// FR-22: restore failure must be recorded as a debug log event.
+	if !logger.eventLogged(domain.EventSnapshotCleanupFailed) {
+		t.Error("want EventSnapshotCleanupFailed debug event logged when BackupState.Cleanup " +
+			"restore fails, but the event was not found in the debug log; " +
+			"the implementation must log cleanup failures rather than silently ignore or surface them")
+	}
+}
+
+// ---- T10.5: Recovery check ----
+
+// TestSession_Start_OpenCodeHarness_RecoveryCheck_RunsBeforeStrategySelection
+// verifies that RecoveryCheck runs before SetupBackupAndTransform (step 4b
+// ordering: ContractsDesign.md Plan Override for T10.5(a)). An orphaned backup
+// directory (stale from a previous crashed run) is cleaned up by RecoveryCheck,
+// and EventSnapshotRecovery is logged.
+//
+// If RecoveryCheck did NOT run before SetupBackupAndTransform, the joiner path
+// would be taken for the stale backup dir. The joiner would find .setup-complete
+// and acquire a lock, but EventSnapshotRecovery would NOT be logged. The RED
+// assertion checks for the log event.
+func TestSession_Start_OpenCodeHarness_RecoveryCheck_RunsBeforeStrategySelection(t *testing.T) {
+	const runID = "oc-recovery-ordering-01"
+	workDir, orchPath, backupDir := writeOpenCodeHarnessDir(t)
+	agentsDir := filepath.Join(workDir, ".opencode", "agents")
+
+	// Pre-create an orphaned backup dir with a valid manifest and .setup-complete
+	// (simulating a previous run that completed transforms but crashed before
+	// releasing its lock). RecoveryCheck must detect and restore this at startup.
+	writeStaleOpenCodeBackupDir(t, agentsDir, backupDir)
+
+	f := harness.NewFakeAdapter()
+	f.Queue("agent-a", harness.ScriptedEntry{Response: &domain.ProtocolResponse{
+		AgentInstanceID: "agent-a#1",
+		StatusCode:      domain.StatusSUCCESS,
+		StatusMessage:   "done",
+	}})
+	f.Queue("agent-b", harness.ScriptedEntry{Response: &domain.ProtocolResponse{
+		AgentInstanceID: "agent-b#2",
+		StatusCode:      domain.StatusSUCCESS,
+		StatusMessage:   "done",
+	}})
+
+	logger := &sessionRecordingLogger{}
+	ses := session.New(session.Deps{
+		Harness:  f,
+		Store:    &memStore{},
+		Clock:    fixedClock{t: epoch},
+		Interact: &noopInteraction{},
+		Debug:    logger,
+	})
+
+	got, err := ses.Start(context.Background(), baseOpenCodeHarnessConfig(orchPath, runID))
+	requireRunStatus(t, got, err, domain.RunCompleted)
+
+	// RecoveryCheck must have logged EventSnapshotRecovery when it cleaned up
+	// the stale backup and restored originals. If it did not run (wrong ordering),
+	// the event would be absent because the session took the joiner path instead.
+	if !logger.eventLogged(domain.EventSnapshotRecovery) {
+		t.Error("want EventSnapshotRecovery logged (RecoveryCheck ran and restored stale backup), " +
+			"but the event was not found; RecoveryCheck must run before SetupBackupAndTransform " +
+			"(ContractsDesign.md step 4b override)")
+	}
+}
+
+// TestSession_Start_OpenCodeHarness_RecoveryCheck_CorruptManifestRefusesRun
+// verifies that a corrupt recovery manifest causes RecoveryCheck to refuse the
+// run (AC10.8). This also covers T10.4(d): if the run is refused before
+// SetupBackupAndTransform (step 5b), no BackupState is created, so cleanup is
+// a no-op and the session must not crash.
+func TestSession_Start_OpenCodeHarness_RecoveryCheck_CorruptManifestRefusesRun(t *testing.T) {
+	const runID = "oc-recovery-corrupt-01"
+	workDir, orchPath, backupDir := writeOpenCodeHarnessDir(t)
+	agentsDir := filepath.Join(workDir, ".opencode", "agents")
+
+	// Pre-create a backup dir with an unparseable manifest.
+	writeCorruptOpenCodeBackupDir(t, agentsDir, backupDir)
+
+	ses := session.New(session.Deps{
+		Harness:  harness.NewFakeAdapter(),
+		Store:    &memStore{},
+		Clock:    fixedClock{t: epoch},
+		Interact: &noopInteraction{},
+	})
+
+	got, err := ses.Start(context.Background(), baseOpenCodeHarnessConfig(orchPath, runID))
+	// RecoveryCheck returns a RefusalError on corrupt manifest -> RunRefused.
+	if err != nil {
+		t.Fatalf("want nil error for RunRefused (refusals encode in RunOutcome), got %v", err)
+	}
+	if got.Status != domain.RunRefused {
+		t.Errorf("want RunRefused (RecoveryCheck: corrupt manifest), got %q (message: %q)",
+			got.Status, got.Message)
+	}
+	// The session must not crash: no BackupState was created (step 5b never ran).
+	// The corrupt backup dir is left intact for manual inspection.
+}
+
+// TestSession_Start_OpenCodeHarness_RecoveryCheck_NoopWhenNoBackupExists
+// verifies that RecoveryCheck is a no-op when no backup directory exists
+// (normal startup). The run proceeds normally (AC10.7 no-op sub-case).
+func TestSession_Start_OpenCodeHarness_RecoveryCheck_NoopWhenNoBackupExists(t *testing.T) {
+	const runID = "oc-recovery-noop-01"
+	_, orchPath, backupDir := writeOpenCodeHarnessDir(t)
+
+	// Verify the backup dir does NOT exist before the run.
+	if _, statErr := os.Stat(backupDir); !errors.Is(statErr, os.ErrNotExist) {
+		t.Fatalf("pre-condition: backup dir %q must not exist before the run", backupDir)
+	}
+
+	f := harness.NewFakeAdapter()
+	f.Queue("agent-a", harness.ScriptedEntry{Response: &domain.ProtocolResponse{
+		AgentInstanceID: "agent-a#1",
+		StatusCode:      domain.StatusSUCCESS,
+		StatusMessage:   "done",
+	}})
+	f.Queue("agent-b", harness.ScriptedEntry{Response: &domain.ProtocolResponse{
+		AgentInstanceID: "agent-b#2",
+		StatusCode:      domain.StatusSUCCESS,
+		StatusMessage:   "done",
+	}})
+
+	ses := session.New(session.Deps{
+		Harness:  f,
+		Store:    &memStore{},
+		Clock:    fixedClock{t: epoch},
+		Interact: &noopInteraction{},
+	})
+
+	// When no backup dir exists, RecoveryCheck is a no-op and the run proceeds.
+	got, err := ses.Start(context.Background(), baseOpenCodeHarnessConfig(orchPath, runID))
+	requireRunStatus(t, got, err, domain.RunCompleted)
 }
 
 // ===== Anti-loop guard (Stage 2) =====

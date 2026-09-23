@@ -4,7 +4,6 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
-	"strings"
 
 	"mosaic-run/internal/domain"
 )
@@ -46,8 +45,7 @@ func ResolveOrchestrator(path string) (domain.AgentReference, error) {
 	}
 
 	base := filepath.Base(path)
-	ext := filepath.Ext(base)
-	stem := strings.TrimSuffix(base, ext)
+	stem := agentStem(base)
 	if stem == "" {
 		return domain.AgentReference{}, &domain.RefusalError{
 			Component: "agentresolve",

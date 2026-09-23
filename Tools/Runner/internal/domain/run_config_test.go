@@ -393,3 +393,78 @@ func TestMOSAICRunBranchName_PreservesRunIDExactly(t *testing.T) {
 		t.Errorf("MOSAICRunBranchName(%q): want result to start with \"mosaic/run/\", got %q", runID, got)
 	}
 }
+
+// ---- RunConfig.InfrastructureFilter ----
+
+// TestRunConfig_InfrastructureFilter_NilByDefault verifies that a zero-value
+// RunConfig has a nil InfrastructureFilter. nil means "not passed"; all
+// declared infrastructure agents are active (backwards-compatible default).
+func TestRunConfig_InfrastructureFilter_NilByDefault(t *testing.T) {
+	var cfg domain.RunConfig
+	if cfg.InfrastructureFilter != nil {
+		t.Errorf("zero-value RunConfig.InfrastructureFilter = %v, want nil "+
+			"(nil means 'not passed'; all agents active)",
+			cfg.InfrastructureFilter)
+	}
+}
+
+// TestRunConfig_InfrastructureFilter_CanBeSetToNonNilEmpty verifies that
+// InfrastructureFilter can hold a non-nil empty slice, which means "no agents
+// active" (--infrastructure= was passed with an empty value).
+func TestRunConfig_InfrastructureFilter_CanBeSetToNonNilEmpty(t *testing.T) {
+	cfg := domain.RunConfig{
+		InfrastructureFilter: []string{},
+	}
+	if cfg.InfrastructureFilter == nil {
+		t.Error("RunConfig.InfrastructureFilter assigned []string{} should be non-nil; " +
+			"non-nil empty means 'explicitly no agents active'")
+	}
+	if len(cfg.InfrastructureFilter) != 0 {
+		t.Errorf("RunConfig.InfrastructureFilter len = %d, want 0 for non-nil empty assignment",
+			len(cfg.InfrastructureFilter))
+	}
+}
+
+// TestRunConfig_InfrastructureFilter_CanBePopulated verifies that
+// InfrastructureFilter can hold a populated slice, meaning only the named
+// agents are active for this run.
+func TestRunConfig_InfrastructureFilter_CanBePopulated(t *testing.T) {
+	keys := []string{"mosaictest-review", "mosaictest-checkpoint"}
+	cfg := domain.RunConfig{
+		InfrastructureFilter: keys,
+	}
+	if len(cfg.InfrastructureFilter) != len(keys) {
+		t.Fatalf("RunConfig.InfrastructureFilter len = %d, want %d",
+			len(cfg.InfrastructureFilter), len(keys))
+	}
+	for i, want := range keys {
+		if cfg.InfrastructureFilter[i] != want {
+			t.Errorf("InfrastructureFilter[%d] = %q, want %q", i, cfg.InfrastructureFilter[i], want)
+		}
+	}
+}
+
+// TestRunConfig_InfrastructureFilter_NilDistinguishedFromEmpty verifies that
+// the nil/empty distinction is preserved by the field. This semantics drives the
+// --infrastructure flag omission (nil) vs emission with empty value (non-nil empty).
+func TestRunConfig_InfrastructureFilter_NilDistinguishedFromEmpty(t *testing.T) {
+	// nil: flag not passed
+	var nilCfg domain.RunConfig
+	if nilCfg.InfrastructureFilter != nil {
+		t.Errorf("nil RunConfig.InfrastructureFilter should be nil, got %v", nilCfg.InfrastructureFilter)
+	}
+
+	// non-nil empty: flag passed with empty value
+	emptyCfg := domain.RunConfig{InfrastructureFilter: []string{}}
+	if emptyCfg.InfrastructureFilter == nil {
+		t.Error("RunConfig.InfrastructureFilter assigned []string{} must not be nil; " +
+			"nil and non-nil empty have different semantics (omit flag vs emit --infrastructure=)")
+	}
+
+	// The two must not compare equal in the nil sense:
+	// nilCfg.InfrastructureFilter == nil must be true
+	// emptyCfg.InfrastructureFilter == nil must be false
+	if emptyCfg.InfrastructureFilter == nil {
+		t.Error("non-nil empty InfrastructureFilter must not equal nil")
+	}
+}

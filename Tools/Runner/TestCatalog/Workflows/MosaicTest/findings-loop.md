@@ -10,6 +10,12 @@ referenced_agents:
 artifacts:
   - MosaicTestScript/findings-loop.md
   - MosaicTestMarker.md
+modes:
+  - auto
+  - auto-review
+smoke_set:
+  - auto
+  - auto-review
 ---
 
 <Workflow type="core" name="findings-loop" version="1.0">
@@ -61,12 +67,13 @@ In Auto-review mode, the engine's findings auto-route adds the CNA row's output 
 
 ## Expected Run: Auto Mode
 
-Three Orchestration.md log rows. The engine cannot route CNA, so it deviates to the orchestrator.
+Four Orchestration.md log rows. The engine cannot route CNA, so it deviates to the orchestrator.
 
 | Log `Seq` | `Agent` | Kind | `Phase` | `Status` | `Summary` shows |
 |:---:|---|---|---|---|---|
+| 0 | `orchestrator-script#pre_consultation#1` | consultation | — | "" | pre-run consultation response |
 | 1 | `mosaictest-scripted#1` | workflow step | RESEARCH | COMPLETED_NEEDS_ACTION | marker absent, writing marker, returning CNA |
-| 2 | `orchestrator-script#2` | consultation | — | SUCCESS | dispatch instruction for the re-dispatch |
+| 2 | `orchestrator-script#2` | consultation | — | "" | dispatch instruction for the re-dispatch |
 | 3 | `mosaictest-scripted#3` | workflow step | RESEARCH | SUCCESS | marker present, returning SUCCESS |
 
 **Run outcome:** COMPLETE. The engine routes `SUCCESS` via `On Success = COMPLETE`.
@@ -77,10 +84,11 @@ Three Orchestration.md log rows. The engine cannot route CNA, so it deviates to 
 
 ## Expected Run: Auto-review Mode
 
-Two Orchestration.md log rows. The engine routes CNA automatically via `On Findings`.
+Three Orchestration.md log rows. The engine routes CNA automatically via `On Findings`.
 
 | Log `Seq` | `Agent` | Kind | `Phase` | `Status` | `Summary` shows |
 |:---:|---|---|---|---|---|
+| 0 | `orchestrator-script#pre_consultation#1` | consultation | — | "" | pre-run consultation response |
 | 1 | `mosaictest-scripted#1` | workflow step | RESEARCH | COMPLETED_NEEDS_ACTION | marker absent, writing marker, returning CNA |
 | 2 | `mosaictest-scripted#2` | workflow step | RESEARCH | SUCCESS | marker present, returning SUCCESS |
 

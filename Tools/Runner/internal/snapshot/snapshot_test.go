@@ -328,6 +328,35 @@ func TestCreateSnapshot_TargetAlreadyExists_RecreatesSnapshot(t *testing.T) {
 	}
 }
 
+// ---------------------------------------------------------------------------
+// .agent.md copy (existing filter behaviour confirmed by test)
+// ---------------------------------------------------------------------------
+
+// TestCreateSnapshot_CopiesAgentMdFiles confirms that CreateSnapshot copies
+// files with the .agent.md compound extension. Because filepath.Ext returns
+// ".md" for "foo.agent.md", the existing ".md" filter already matches these
+// files. This test documents that the behaviour is correct and guards against
+// regressions if the copy filter is ever changed.
+func TestCreateSnapshot_CopiesAgentMdFiles(t *testing.T) {
+	src := t.TempDir()
+	dst := filepath.Join(t.TempDir(), "snapshot")
+
+	writeFile(t, filepath.Join(src, "foo.agent.md"), []byte("# Foo Agent\n"))
+	// Also include a plain .md file to confirm no regression.
+	writeFile(t, filepath.Join(src, "bar.md"), []byte("# Bar\n"))
+
+	if err := snapshot.CreateSnapshot(src, dst, nil); err != nil {
+		t.Fatalf("CreateSnapshot: %v", err)
+	}
+
+	if _, err := os.Stat(filepath.Join(dst, "foo.agent.md")); err != nil {
+		t.Errorf("expected foo.agent.md to be copied to snapshot: %v", err)
+	}
+	if _, err := os.Stat(filepath.Join(dst, "bar.md")); err != nil {
+		t.Errorf("expected bar.md to be copied to snapshot: %v", err)
+	}
+}
+
 func TestCreateSnapshot_SourceDirNotExist_TargetNotCreated(t *testing.T) {
 	// When source does not exist, CreateSnapshot must not leave a partial
 	// target directory behind.

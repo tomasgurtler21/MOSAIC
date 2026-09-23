@@ -1951,6 +1951,498 @@ func TestOrchestratorConsultant_PreConsult_PreStart_LogsRequest(t *testing.T) {
 	}
 }
 
+// ===== Lenient routing coercion tests =====
+
+// TestConsultRouting_CoercesInputArtifactsFromBareString verifies that when
+// the routing response carries input_artifacts as a bare JSON string (not an
+// array), ConsultRouting coerces it to a single-element []string, returns a
+// non-nil pointer, and does not fail. A non-nil pointer means the value was
+// explicitly supplied — not a fallback to the table row.
+func TestConsultRouting_CoercesInputArtifactsFromBareString(t *testing.T) {
+	table := mustParseTable(t)
+	reply := []byte(`{
+		"action": "dispatch",
+		"agent": "agent-a",
+		"task_description": "do the thing",
+		"input_artifacts": "single-file.md"
+	}`)
+	fake := &fakeRawInvoker{reply: reply}
+	c := makeOrchestratorConsultant(fake, table)
+
+	instr, err := c.ConsultRouting(context.Background(), validRoutingRequest("Orchestration-abc/Orchestration.md"))
+
+	if err != nil {
+		t.Fatalf("want no error when input_artifacts is a bare string (lenient coercion), got %v", err)
+	}
+	if instr.Dispatch == nil {
+		t.Fatal("want Dispatch instruction, got nil")
+	}
+	d := instr.Dispatch
+	if d.InputArtifacts == nil {
+		t.Fatal("want non-nil InputArtifacts pointer for coerced bare string (explicitly supplied, not fallback), got nil")
+	}
+	if len(*d.InputArtifacts) != 1 {
+		t.Fatalf("want single-element InputArtifacts slice, got %d elements: %v", len(*d.InputArtifacts), *d.InputArtifacts)
+	}
+	if (*d.InputArtifacts)[0] != "single-file.md" {
+		t.Errorf("want InputArtifacts[0]=%q, got %q", "single-file.md", (*d.InputArtifacts)[0])
+	}
+}
+
+// TestConsultRouting_CoercesOutputArtifactsFromBareString verifies that when
+// the routing response carries output_artifacts as a bare JSON string (not an
+// array), ConsultRouting coerces it to a single-element []string, returns a
+// non-nil pointer, and does not fail. A non-nil pointer means the value was
+// explicitly supplied — not a fallback to the table row.
+func TestConsultRouting_CoercesOutputArtifactsFromBareString(t *testing.T) {
+	table := mustParseTable(t)
+	reply := []byte(`{
+		"action": "dispatch",
+		"agent": "agent-a",
+		"task_description": "do the thing",
+		"output_artifacts": "result.md"
+	}`)
+	fake := &fakeRawInvoker{reply: reply}
+	c := makeOrchestratorConsultant(fake, table)
+
+	instr, err := c.ConsultRouting(context.Background(), validRoutingRequest("Orchestration-abc/Orchestration.md"))
+
+	if err != nil {
+		t.Fatalf("want no error when output_artifacts is a bare string (lenient coercion), got %v", err)
+	}
+	if instr.Dispatch == nil {
+		t.Fatal("want Dispatch instruction, got nil")
+	}
+	d := instr.Dispatch
+	if d.OutputArtifacts == nil {
+		t.Fatal("want non-nil OutputArtifacts pointer for coerced bare string (explicitly supplied, not fallback), got nil")
+	}
+	if len(*d.OutputArtifacts) != 1 {
+		t.Fatalf("want single-element OutputArtifacts slice, got %d elements: %v", len(*d.OutputArtifacts), *d.OutputArtifacts)
+	}
+	if (*d.OutputArtifacts)[0] != "result.md" {
+		t.Errorf("want OutputArtifacts[0]=%q, got %q", "result.md", (*d.OutputArtifacts)[0])
+	}
+}
+
+// TestConsultRouting_CoercesHITLOverrideFromStringTrue verifies that when the
+// routing response carries hitl_override as the JSON string "true" (not a boolean),
+// ConsultRouting coerces it to bool true, returns a non-nil pointer, and does
+// not fail. A non-nil pointer means the value was explicitly supplied.
+func TestConsultRouting_CoercesHITLOverrideFromStringTrue(t *testing.T) {
+	table := mustParseTable(t)
+	reply := []byte(`{
+		"action": "dispatch",
+		"agent": "agent-a",
+		"task_description": "do the thing",
+		"hitl_override": "true"
+	}`)
+	fake := &fakeRawInvoker{reply: reply}
+	c := makeOrchestratorConsultant(fake, table)
+
+	instr, err := c.ConsultRouting(context.Background(), validRoutingRequest("Orchestration-abc/Orchestration.md"))
+
+	if err != nil {
+		t.Fatalf("want no error when hitl_override is string %q (lenient coercion), got %v", "true", err)
+	}
+	if instr.Dispatch == nil {
+		t.Fatal("want Dispatch instruction, got nil")
+	}
+	d := instr.Dispatch
+	if d.HITLOverride == nil {
+		t.Fatal("want non-nil HITLOverride pointer for coerced string \"true\" (explicitly supplied, not fallback), got nil")
+	}
+	if !*d.HITLOverride {
+		t.Error("want *HITLOverride=true after coercing string \"true\", got false")
+	}
+}
+
+// TestConsultRouting_CoercesHITLOverrideFromStringFalse verifies that when the
+// routing response carries hitl_override as the JSON string "false" (not a
+// boolean), ConsultRouting coerces it to bool false, returns a non-nil pointer,
+// and does not fail. A non-nil pointer means the value was explicitly supplied —
+// false-with-a-non-nil-pointer is distinct from nil (which means "fall back").
+func TestConsultRouting_CoercesHITLOverrideFromStringFalse(t *testing.T) {
+	table := mustParseTable(t)
+	reply := []byte(`{
+		"action": "dispatch",
+		"agent": "agent-a",
+		"task_description": "do the thing",
+		"hitl_override": "false"
+	}`)
+	fake := &fakeRawInvoker{reply: reply}
+	c := makeOrchestratorConsultant(fake, table)
+
+	instr, err := c.ConsultRouting(context.Background(), validRoutingRequest("Orchestration-abc/Orchestration.md"))
+
+	if err != nil {
+		t.Fatalf("want no error when hitl_override is string %q (lenient coercion), got %v", "false", err)
+	}
+	if instr.Dispatch == nil {
+		t.Fatal("want Dispatch instruction, got nil")
+	}
+	d := instr.Dispatch
+	if d.HITLOverride == nil {
+		t.Fatal("want non-nil HITLOverride pointer for coerced string \"false\" (explicitly supplied, not fallback), got nil")
+	}
+	if *d.HITLOverride {
+		t.Error("want *HITLOverride=false after coercing string \"false\", got true")
+	}
+}
+
+// TestConsultRouting_CoercedFieldsAreAllNonNilPointers verifies that when all
+// three coercible fields are supplied as their mismatched-but-coercible types in
+// a single response, all three coerced values carry non-nil pointers. Non-nil
+// means "explicitly supplied" — the coercion must preserve the
+// present-vs-absent distinction used by downstream dispatch logic.
+func TestConsultRouting_CoercedFieldsAreAllNonNilPointers(t *testing.T) {
+	table := mustParseTable(t)
+	reply := []byte(`{
+		"action": "dispatch",
+		"agent": "agent-a",
+		"task_description": "do the thing",
+		"input_artifacts": "in.md",
+		"output_artifacts": "out.md",
+		"hitl_override": "true"
+	}`)
+	fake := &fakeRawInvoker{reply: reply}
+	c := makeOrchestratorConsultant(fake, table)
+
+	instr, err := c.ConsultRouting(context.Background(), validRoutingRequest("Orchestration-abc/Orchestration.md"))
+
+	if err != nil {
+		t.Fatalf("want no error when all three coercible fields are supplied as coercible types, got %v", err)
+	}
+	if instr.Dispatch == nil {
+		t.Fatal("want Dispatch instruction, got nil")
+	}
+	d := instr.Dispatch
+	if d.InputArtifacts == nil {
+		t.Error("want non-nil InputArtifacts pointer after coercion from bare string, got nil")
+	}
+	if d.OutputArtifacts == nil {
+		t.Error("want non-nil OutputArtifacts pointer after coercion from bare string, got nil")
+	}
+	if d.HITLOverride == nil {
+		t.Error("want non-nil HITLOverride pointer after coercion from string \"true\", got nil")
+	}
+}
+
+// TestConsultRouting_UncoercibleValues_FailWithMalformedJSON verifies that values
+// which cannot be unambiguously coerced to the target type — a JSON number where
+// an array is expected, a JSON object where an array is expected, and a
+// non-boolean string where a bool is expected — all produce a *ConsultationError
+// with ConsultFailMalformedJSON. The object was found (ExtractJSONObject succeeded)
+// but the field values are genuinely invalid.
+func TestConsultRouting_UncoercibleValues_FailWithMalformedJSON(t *testing.T) {
+	table := mustParseTable(t)
+
+	cases := []struct {
+		name  string
+		reply []byte
+	}{
+		{
+			name: "input_artifacts as JSON number",
+			reply: []byte(`{
+				"action": "dispatch",
+				"agent": "agent-a",
+				"task_description": "do the thing",
+				"input_artifacts": 42
+			}`),
+		},
+		{
+			name: "input_artifacts as JSON object",
+			reply: []byte(`{
+				"action": "dispatch",
+				"agent": "agent-a",
+				"task_description": "do the thing",
+				"input_artifacts": {"key": "value"}
+			}`),
+		},
+		{
+			name: "output_artifacts as JSON number",
+			reply: []byte(`{
+				"action": "dispatch",
+				"agent": "agent-a",
+				"task_description": "do the thing",
+				"output_artifacts": 99
+			}`),
+		},
+		{
+			name: "output_artifacts as JSON object",
+			reply: []byte(`{
+				"action": "dispatch",
+				"agent": "agent-a",
+				"task_description": "do the thing",
+				"output_artifacts": {"key": "value"}
+			}`),
+		},
+		{
+			name: "hitl_override as non-boolean string",
+			reply: []byte(`{
+				"action": "dispatch",
+				"agent": "agent-a",
+				"task_description": "do the thing",
+				"hitl_override": "yes"
+			}`),
+		},
+		{
+			name: "hitl_override as JSON number",
+			reply: []byte(`{
+				"action": "dispatch",
+				"agent": "agent-a",
+				"task_description": "do the thing",
+				"hitl_override": 1
+			}`),
+		},
+	}
+
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			fake := &fakeRawInvoker{reply: tc.reply}
+			c := makeOrchestratorConsultant(fake, table)
+
+			_, err := c.ConsultRouting(context.Background(), validRoutingRequest("Orchestration-abc/Orchestration.md"))
+
+			assertConsultationError(t, err, domain.ConsultFailMalformedJSON)
+		})
+	}
+}
+
+// ===== Bounded Consultation Retry =====
+
+// ---- sequencedRawInvoker ----
+
+// sequencedReply holds one (reply, error) pair for sequencedRawInvoker.
+type sequencedReply struct {
+	reply []byte
+	err   error
+}
+
+// sequencedRawInvoker is a test double for domain.RawInvoker that returns a
+// pre-configured sequence of (reply, error) pairs, one per InvokeRaw call.
+// After the sequence is exhausted, subsequent calls return an error so tests
+// can detect unexpected extra invocations.
+type sequencedRawInvoker struct {
+	replies []sequencedReply
+	pos     int
+	// sent records the payload from each InvokeRaw call, in call order.
+	sent [][]byte
+}
+
+func (s *sequencedRawInvoker) InvokeRaw(_ context.Context, _ domain.AgentReference, payload []byte) ([]byte, error) {
+	s.sent = append(s.sent, payload)
+	if s.pos >= len(s.replies) {
+		return nil, errors.New("sequencedRawInvoker: reply sequence exhausted")
+	}
+	r := s.replies[s.pos]
+	s.pos++
+	return r.reply, r.err
+}
+
+// malformedSchemaReply returns a sequencedReply whose body is a valid JSON
+// object that ExtractJSONObject locates successfully but
+// unmarshalRoutingResponseLenient rejects because the action field is a JSON
+// array rather than a string. This produces ConsultFailMalformedJSON, which is
+// the only failure class the retry loop retries.
+func malformedSchemaReply() sequencedReply {
+	return sequencedReply{reply: []byte(`{"action": ["not","a","string"]}`)}
+}
+
+// TestConsultRouting_RetrySucceedsOnSecondAttempt_ValidDispatch verifies that
+// when the first attempt produces ConsultFailMalformedJSON, the retry loop makes
+// a second attempt, and a valid dispatch response on the second attempt returns
+// a RoutingInstruction without error.
+func TestConsultRouting_RetrySucceedsOnSecondAttempt_ValidDispatch(t *testing.T) {
+	table := mustParseTable(t)
+	validDispatch := []byte(`{"action":"dispatch","agent":"agent-a","task_description":"do the thing"}`)
+	invoker := &sequencedRawInvoker{replies: []sequencedReply{
+		malformedSchemaReply(),
+		{reply: validDispatch},
+	}}
+	c := makeOrchestratorConsultant(invoker, table)
+
+	instr, err := c.ConsultRouting(context.Background(), validRoutingRequest("Orchestration-abc/Orchestration.md"))
+
+	if err != nil {
+		t.Fatalf("want no error when retry succeeds on second attempt with dispatch, got %v", err)
+	}
+	if instr.Dispatch == nil {
+		t.Fatal("want Dispatch instruction on successful retry, got nil Dispatch")
+	}
+	if instr.Dispatch.Agent != "agent-a" {
+		t.Errorf("want Agent=%q after retry, got %q", "agent-a", instr.Dispatch.Agent)
+	}
+	// Both attempts must have been made: first (malformed) then second (success).
+	if invoker.pos != 2 {
+		t.Errorf("want 2 InvokeRaw calls (1 malformed + 1 success), got %d", invoker.pos)
+	}
+}
+
+// TestConsultRouting_RetrySucceedsOnSecondAttempt_ValidStop verifies that when
+// the first attempt produces ConsultFailMalformedJSON and the second attempt
+// returns a valid stop response, ConsultRouting returns a RoutingInstruction
+// with a non-nil Stop and no error.
+func TestConsultRouting_RetrySucceedsOnSecondAttempt_ValidStop(t *testing.T) {
+	table := mustParseTable(t)
+	wantReason := "orchestrator decided to stop after retry"
+	invoker := &sequencedRawInvoker{replies: []sequencedReply{
+		malformedSchemaReply(),
+		{reply: routingStopReply(wantReason)},
+	}}
+	c := makeOrchestratorConsultant(invoker, table)
+
+	instr, err := c.ConsultRouting(context.Background(), validRoutingRequest("Orchestration-abc/Orchestration.md"))
+
+	if err != nil {
+		t.Fatalf("want no error when retry succeeds with stop response, got %v", err)
+	}
+	if instr.Stop == nil {
+		t.Fatal("want Stop instruction on successful retry, got nil Stop")
+	}
+	if instr.Dispatch != nil {
+		t.Error("want Dispatch=nil for stop response, got non-nil")
+	}
+	if instr.Stop.Reason != wantReason {
+		t.Errorf("want Stop.Reason=%q after retry, got %q", wantReason, instr.Stop.Reason)
+	}
+	// Both attempts must have been made: first (malformed) then second (stop).
+	if invoker.pos != 2 {
+		t.Errorf("want 2 InvokeRaw calls (1 malformed + 1 stop success), got %d", invoker.pos)
+	}
+}
+
+// TestConsultRouting_AllThreeAttemptsMalformed_FailsWithMalformedJSON verifies
+// that after 3 consecutive ConsultFailMalformedJSON results, ConsultRouting
+// returns *ConsultationError with ConsultFailMalformedJSON without making a
+// fourth attempt. The terminal path is identical to a single-attempt failure:
+// ConsultFailMalformedJSON, just reached after exhausting all 3 attempts.
+func TestConsultRouting_AllThreeAttemptsMalformed_FailsWithMalformedJSON(t *testing.T) {
+	table := mustParseTable(t)
+	invoker := &sequencedRawInvoker{replies: []sequencedReply{
+		malformedSchemaReply(),
+		malformedSchemaReply(),
+		malformedSchemaReply(),
+	}}
+	c := makeOrchestratorConsultant(invoker, table)
+
+	_, err := c.ConsultRouting(context.Background(), validRoutingRequest("Orchestration-abc/Orchestration.md"))
+
+	assertConsultationError(t, err, domain.ConsultFailMalformedJSON)
+	// All 3 attempts must have been made before giving up.
+	if invoker.pos != 3 {
+		t.Errorf("want 3 InvokeRaw calls (all 3 malformed attempts exhausted), got %d", invoker.pos)
+	}
+}
+
+// TestConsultRouting_NonMalformedFailureIsNotRetried verifies that failure
+// classes other than ConsultFailMalformedJSON are never retried. For each case
+// the invoker must be called exactly once: the retry loop must not make a
+// second attempt when the failure class is not ConsultFailMalformedJSON.
+func TestConsultRouting_NonMalformedFailureIsNotRetried(t *testing.T) {
+	cases := []struct {
+		name        string
+		replies     []sequencedReply
+		wantFailure domain.ConsultationFailure
+	}{
+		{
+			name:        "transport error (ConsultFailTransport)",
+			replies:     []sequencedReply{{err: errors.New("harness: timeout")}},
+			wantFailure: domain.ConsultFailTransport,
+		},
+		{
+			name:        "no JSON object in reply (ConsultFailNoInstruction)",
+			replies:     []sequencedReply{{reply: []byte("no json object anywhere in this reply")}},
+			wantFailure: domain.ConsultFailNoInstruction,
+		},
+		{
+			name:        "missing required agent field (ConsultFailMissingField)",
+			replies:     []sequencedReply{{reply: []byte(`{"action":"dispatch","task_description":"do the thing"}`)}},
+			wantFailure: domain.ConsultFailMissingField,
+		},
+		{
+			name:        "unknown action value (ConsultFailUnknownAction)",
+			replies:     []sequencedReply{{reply: []byte(`{"action":"proceed"}`)}},
+			wantFailure: domain.ConsultFailUnknownAction,
+		},
+		{
+			name:        "agent not in routing table (ConsultFailUnknownAgent)",
+			replies:     []sequencedReply{{reply: []byte(`{"action":"dispatch","agent":"no-such-agent","task_description":"do the thing"}`)}},
+			wantFailure: domain.ConsultFailUnknownAgent,
+		},
+	}
+
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			table := mustParseTable(t)
+			// Give the invoker exactly one reply. If the implementation incorrectly
+			// retries, the second call will return "sequence exhausted" — but we also
+			// assert pos==1 to catch incorrect retry without relying on that error.
+			invoker := &sequencedRawInvoker{replies: tc.replies}
+			c := makeOrchestratorConsultant(invoker, table)
+
+			_, err := c.ConsultRouting(context.Background(), validRoutingRequest("Orchestration-abc/Orchestration.md"))
+
+			assertConsultationError(t, err, tc.wantFailure)
+			if invoker.pos != 1 {
+				t.Errorf("want exactly 1 InvokeRaw call for failure class %q (no retry expected), got %d", tc.wantFailure, invoker.pos)
+			}
+		})
+	}
+}
+
+// TestConsultRouting_RetryLogsDistinctConsultationIDs verifies that each attempt
+// in a retry sequence produces its own dispatch-log entries with a unique
+// consultationInstanceID. For 2 malformed attempts followed by a successful
+// attempt, the DispatchLogger must record 3 LogRequest calls with 3 distinct
+// AgentInstanceIDs and 2 LogError calls (one per malformed attempt).
+func TestConsultRouting_RetryLogsDistinctConsultationIDs(t *testing.T) {
+	table := mustParseTable(t)
+	validDispatch := []byte(`{"action":"dispatch","agent":"agent-a","task_description":"do the thing"}`)
+	invoker := &sequencedRawInvoker{replies: []sequencedReply{
+		malformedSchemaReply(),
+		malformedSchemaReply(),
+		{reply: validDispatch},
+	}}
+	var events []string
+	logger := &recordingDispatchLogger{events: &events}
+	c := &deviation.OrchestratorConsultant{
+		Invoker:        invoker,
+		Orchestrator:   orchestratorRef(),
+		Table:          table,
+		DispatchLogger: logger,
+	}
+
+	_, err := c.ConsultRouting(context.Background(), validRoutingRequest("Orchestration-abc/Orchestration.md"))
+
+	if err != nil {
+		t.Fatalf("want no error when retry succeeds on third attempt, got %v", err)
+	}
+
+	// Each of the 3 attempts must produce its own LogRequest.
+	if len(logger.requests) != 3 {
+		t.Errorf("want 3 LogRequest calls (one per attempt), got %d", len(logger.requests))
+	}
+
+	// All 3 consultationInstanceIDs must be distinct.
+	seen := make(map[string]int)
+	for i, req := range logger.requests {
+		seen[req.AgentInstanceID] = i
+	}
+	if len(seen) != len(logger.requests) {
+		ids := make([]string, 0, len(logger.requests))
+		for _, req := range logger.requests {
+			ids = append(ids, req.AgentInstanceID)
+		}
+		t.Errorf("want distinct consultationInstanceID per attempt, got duplicate IDs: %v", ids)
+	}
+
+	// The 2 malformed attempts each produce a LogError; the successful attempt does not.
+	if len(logger.errs) != 2 {
+		t.Errorf("want 2 LogError calls (one per malformed attempt), got %d", len(logger.errs))
+	}
+}
+
 // ---- small utilities ----
 
 // Ensure json is imported (used in wireRequest struct tags and assertions above).

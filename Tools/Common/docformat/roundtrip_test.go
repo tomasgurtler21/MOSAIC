@@ -36,7 +36,7 @@ func TestRoundTrip_AllRepositoryMarkdownFiles(t *testing.T) {
 		// Skip directories that will never contain MOSAIC-format files.
 		if d.IsDir() {
 			switch d.Name() {
-			case ".git", "node_modules", "vendor":
+			case ".git", "node_modules", "vendor", "testdata":
 				return filepath.SkipDir
 			}
 		}
@@ -93,41 +93,48 @@ func TestRoundTrip_AllRepositoryMarkdownFiles(t *testing.T) {
 	}
 }
 
-// TestRoundTrip_SpecificReferenceFiles verifies the exact six file shapes called out in the
-// plan as representative of the frontmatter variety in the repository.
-func TestRoundTrip_SpecificReferenceFiles(t *testing.T) {
-	root := repoRoot()
+// roundtripReferenceDir holds local copies of representative catalog files used by
+// TestRoundTrip_SpecificReferenceFiles. Local copies insulate the test from renames,
+// moves, or structural edits to live catalog entries during normal project work.
+const roundtripReferenceDir = "../testdata/roundtrip-reference"
 
-	referenceFiles := []string{
+// TestRoundTrip_SpecificReferenceFiles verifies round-trip fidelity for a small set of
+// representative file shapes: a generic agent, the orchestrator, a workflow file, and a
+// skill file. Each covers a distinct frontmatter variety (unquoted scalars, placeholder
+// values, quoted scalars with special characters, block lists, etc.).
+func TestRoundTrip_SpecificReferenceFiles(t *testing.T) {
+	referenceFiles := []struct {
+		name string
+		desc string
+	}{
 		// Generic agent: unquoted scalars, flow tools list.
-		"Catalog/Subagents/Execution/test-runner.md",
+		{"generic-agent.md", "generic agent with unquoted scalars and flow tools list"},
 		// Orchestrator: tools: {tool-permissions} placeholder.
-		"Catalog/Orchestrator/orchestrator.md",
+		{"orchestrator.md", "orchestrator with tools: {tool-permissions} placeholder"},
 		// Workflow: quoted scalars, block lists, values with * and {}.
-		// Note: Catalog/Workflows/ sits at the catalog root and does not move.
-		"Catalog/Workflows/Build/quick-fix.md",
+		{"quick-fix.md", "workflow file with quoted scalars, block lists, and * / {} values"},
 		// Skill: minimal frontmatter, long unquoted description with commas and parens.
-		"Catalog/Skills/git-read-commands/SKILL.md",
+		{"git-read-commands-skill.md", "skill file with minimal frontmatter and long unquoted description"},
 	}
 
-	for _, rel := range referenceFiles {
-		rel := rel // capture
-		t.Run(rel, func(t *testing.T) {
-			fpath := filepath.Join(root, filepath.FromSlash(rel))
+	for _, rf := range referenceFiles {
+		rf := rf // capture
+		t.Run(rf.name, func(t *testing.T) {
+			fpath := filepath.Join(roundtripReferenceDir, rf.name)
 
 			src, err := os.ReadFile(fpath)
 			if err != nil {
-				t.Fatalf("read reference file %s: %v", rel, err)
+				t.Fatalf("read reference file %s: %v", rf.name, err)
 			}
 
 			doc, err := docformat.Parse(src)
 			if err != nil {
-				t.Fatalf("Parse(%s): %v", rel, err)
+				t.Fatalf("Parse(%s): %v", rf.name, err)
 			}
 
 			got := doc.Bytes()
 			if !bytes.Equal(src, got) {
-				t.Errorf("round-trip failed for %s (original=%d bytes, got=%d bytes)", rel, len(src), len(got))
+				t.Errorf("round-trip failed for %s (original=%d bytes, got=%d bytes)", rf.name, len(src), len(got))
 				reportFirstDifference(t, src, got)
 			}
 		})

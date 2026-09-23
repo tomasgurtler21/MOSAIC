@@ -300,6 +300,121 @@ func TestResolveOrchestrator_InvocationKindDistinguishesOrchestratorFromAgents(t
 	}
 }
 
+// ===== .agent.md recognition in ResolveOrchestrator =====
+
+// TestResolveOrchestrator_AgentMdFile_IdentifierIsBaseStem verifies that a
+// path ending in .agent.md resolves to the base stem identifier, not to the
+// intermediate stem that naive extension stripping would produce.
+func TestResolveOrchestrator_AgentMdFile_IdentifierIsBaseStem(t *testing.T) {
+	dir := t.TempDir()
+	path := writeOrchFile(t, dir, "orchestrator-script.agent.md")
+
+	ref, err := agentresolve.ResolveOrchestrator(path)
+
+	if err != nil {
+		t.Fatalf("ResolveOrchestrator: unexpected error: %v", err)
+	}
+	if ref.Identifier != "orchestrator-script" {
+		t.Errorf("want Identifier %q, got %q", "orchestrator-script", ref.Identifier)
+	}
+}
+
+// TestResolveOrchestrator_AgentMdFile_DefinitionPathMatchesFile verifies that
+// the DefinitionPath for a .agent.md orchestrator file is the absolute path
+// of the supplied file.
+func TestResolveOrchestrator_AgentMdFile_DefinitionPathMatchesFile(t *testing.T) {
+	dir := t.TempDir()
+	path := writeOrchFile(t, dir, "orchestrator-script.agent.md")
+
+	ref, err := agentresolve.ResolveOrchestrator(path)
+
+	if err != nil {
+		t.Fatalf("ResolveOrchestrator: unexpected error: %v", err)
+	}
+	if ref.DefinitionPath != path {
+		t.Errorf("want DefinitionPath %q, got %q", path, ref.DefinitionPath)
+	}
+}
+
+// TestResolveOrchestrator_AgentMdFile_InvocationKindIsOrchestrator verifies
+// that a .agent.md orchestrator file carries InvocationOrchestrator, the same
+// as a .md orchestrator file.
+func TestResolveOrchestrator_AgentMdFile_InvocationKindIsOrchestrator(t *testing.T) {
+	dir := t.TempDir()
+	path := writeOrchFile(t, dir, "orchestrator-script.agent.md")
+
+	ref, err := agentresolve.ResolveOrchestrator(path)
+
+	if err != nil {
+		t.Fatalf("ResolveOrchestrator: unexpected error: %v", err)
+	}
+	if ref.InvocationKind != domain.InvocationOrchestrator {
+		t.Errorf("want InvocationKind %q, got %q",
+			domain.InvocationOrchestrator, ref.InvocationKind)
+	}
+}
+
+// TestResolveOrchestrator_AgentMdCaseInsensitive_IdentifierIsBaseStem verifies
+// that the .AGENT.MD compound extension (uppercase) is recognized
+// case-insensitively and the file resolves to the correct base identifier.
+func TestResolveOrchestrator_AgentMdCaseInsensitive_IdentifierIsBaseStem(t *testing.T) {
+	dir := t.TempDir()
+	path := writeOrchFile(t, dir, "orchestrator-script.AGENT.MD")
+
+	ref, err := agentresolve.ResolveOrchestrator(path)
+
+	if err != nil {
+		t.Fatalf("ResolveOrchestrator: unexpected error: %v", err)
+	}
+	if ref.Identifier != "orchestrator-script" {
+		t.Errorf("want Identifier %q (case-insensitive .AGENT.MD stripped), got %q",
+			"orchestrator-script", ref.Identifier)
+	}
+}
+
+// ===== Separation from dispatchable agents (continued) =====
+
+// ===== Non-.md extension =====
+
+// TestResolveOrchestrator_NonMdExtension_ReturnsRefusalError verifies that a
+// path whose filename has a non-.md extension (e.g. ".txt") produces a
+// *domain.RefusalError. The contract states that files with non-".md" extensions
+// produce a RefusalError via the empty-stem path (agentStem returns "" for
+// ".txt" filenames).
+func TestResolveOrchestrator_NonMdExtension_ReturnsRefusalError(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "orchestrator.txt")
+	if err := os.WriteFile(path, []byte(minimalWorkflowContent), 0600); err != nil {
+		t.Fatalf("write orchestrator.txt: %v", err)
+	}
+
+	_, err := agentresolve.ResolveOrchestrator(path)
+
+	if err == nil {
+		t.Fatal("want RefusalError for a .txt path (non-.md extension), got nil")
+	}
+	asRefusalErrorOrch(t, err)
+}
+
+// TestResolveOrchestrator_NonMdExtension_ComponentIsAgentresolve verifies the
+// RefusalError component for a non-.md extension.
+func TestResolveOrchestrator_NonMdExtension_ComponentIsAgentresolve(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "orchestrator.txt")
+	if err := os.WriteFile(path, []byte(minimalWorkflowContent), 0600); err != nil {
+		t.Fatalf("write orchestrator.txt: %v", err)
+	}
+
+	_, err := agentresolve.ResolveOrchestrator(path)
+
+	re := asRefusalErrorOrch(t, err)
+	if re.Component != "agentresolve" {
+		t.Errorf("want RefusalError.Component %q, got %q", "agentresolve", re.Component)
+	}
+}
+
+// ===== Separation from dispatchable agents (continued) =====
+
 // TestResolveAll_MissingAgentRefusal_UnchangedByOrchestratorResolution
 // verifies that calling ResolveAll for a missing agent returns *domain.RefusalError
 // regardless of whether ResolveOrchestrator has been called. Ordinary agent

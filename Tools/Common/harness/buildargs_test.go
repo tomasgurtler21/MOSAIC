@@ -799,6 +799,112 @@ func TestBuildArgs_EmptyDerivedTools_NoError(t *testing.T) {
 	}
 }
 
+// ---------------------------------------------------------------------------
+// ToolsDerived signal -- empty DerivedTools with derivation flag (T1.4)
+// ---------------------------------------------------------------------------
+
+// TestBuildArgs_ToolsDerivedTrue_EmptyDerivedTools_UsesDontAskMode verifies
+// that when ToolsDerived is true and DerivedTools is empty, BuildArgs emits
+// --permission-mode dontAsk. This is the "all ungated tools" case: derivation
+// ran and produced an empty list, so the agent runs in strict mode with no
+// tools permitted. The ToolsDerived flag distinguishes this from the
+// backward-compatible "derivation not performed" path that uses auto mode.
+func TestBuildArgs_ToolsDerivedTrue_EmptyDerivedTools_UsesDontAskMode(t *testing.T) {
+	args, _, err := harness.BuildArgs(harness.SpawnRequest{
+		Agent:        ordinaryAgent(),
+		Prompt:       "x",
+		OutputFormat: "json",
+		DerivedTools: []string{},
+		ToolsDerived: true,
+	})
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if !containsSequence(args, "--permission-mode", "dontAsk") {
+		t.Errorf("want --permission-mode dontAsk when ToolsDerived=true and DerivedTools is empty, got %v", args)
+	}
+}
+
+// TestBuildArgs_ToolsDerivedTrue_EmptyDerivedTools_DoesNotUseAutoMode verifies
+// that ToolsDerived=true with empty DerivedTools does NOT fall back to
+// --permission-mode auto. The auto fallback is reserved for callers that did
+// not perform derivation (ToolsDerived=false).
+func TestBuildArgs_ToolsDerivedTrue_EmptyDerivedTools_DoesNotUseAutoMode(t *testing.T) {
+	args, _, err := harness.BuildArgs(harness.SpawnRequest{
+		Agent:        ordinaryAgent(),
+		Prompt:       "x",
+		OutputFormat: "json",
+		DerivedTools: []string{},
+		ToolsDerived: true,
+	})
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if containsSequence(args, "--permission-mode", "auto") {
+		t.Errorf("want --permission-mode auto absent when ToolsDerived=true, got %v", args)
+	}
+}
+
+// TestBuildArgs_ToolsDerivedTrue_EmptyDerivedTools_NoAllowedToolsEmitted
+// verifies that when ToolsDerived is true and DerivedTools is empty, no
+// --allowedTools flag is emitted. The agent runs with dontAsk permission mode
+// and zero allowed tools: strict mode with no tools permitted.
+func TestBuildArgs_ToolsDerivedTrue_EmptyDerivedTools_NoAllowedToolsEmitted(t *testing.T) {
+	args, _, err := harness.BuildArgs(harness.SpawnRequest{
+		Agent:        ordinaryAgent(),
+		Prompt:       "x",
+		OutputFormat: "json",
+		DerivedTools: []string{},
+		ToolsDerived: true,
+	})
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if containsArg(args, "--allowedTools") {
+		t.Errorf("want no --allowedTools when ToolsDerived=true with empty DerivedTools, got %v", args)
+	}
+}
+
+// TestBuildArgs_ToolsDerivedTrue_NilDerivedTools_UsesDontAskMode verifies that
+// ToolsDerived=true with a nil DerivedTools also uses dontAsk mode. Both nil
+// and empty slice are treated identically when ToolsDerived is true.
+func TestBuildArgs_ToolsDerivedTrue_NilDerivedTools_UsesDontAskMode(t *testing.T) {
+	args, _, err := harness.BuildArgs(harness.SpawnRequest{
+		Agent:        ordinaryAgent(),
+		Prompt:       "x",
+		OutputFormat: "json",
+		DerivedTools: nil,
+		ToolsDerived: true,
+	})
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if !containsSequence(args, "--permission-mode", "dontAsk") {
+		t.Errorf("want --permission-mode dontAsk when ToolsDerived=true and DerivedTools is nil, got %v", args)
+	}
+}
+
+// TestBuildArgs_ToolsDerivedFalse_EmptyDerivedTools_FallsBackToAutoMode
+// verifies that ToolsDerived=false (the zero value) with empty DerivedTools
+// falls back to --permission-mode auto. This is the backward-compatible path
+// for callers that did not perform tool derivation (notably AgentTest).
+// The zero value of ToolsDerived must preserve all pre-existing behavior.
+func TestBuildArgs_ToolsDerivedFalse_EmptyDerivedTools_FallsBackToAutoMode(t *testing.T) {
+	args, _, err := harness.BuildArgs(harness.SpawnRequest{
+		Agent:        ordinaryAgent(),
+		Prompt:       "x",
+		OutputFormat: "json",
+		DerivedTools: []string{},
+		ToolsDerived: false, // explicit zero value: derivation was not performed
+	})
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if !containsSequence(args, "--permission-mode", "auto") {
+		t.Errorf("want --permission-mode auto fallback when ToolsDerived=false and DerivedTools is empty, got %v", args)
+	}
+}
+
 // TestBuildArgs_AllowedToolsSetDerivedToolsEmpty_NoAllowedToolsEmitted verifies
 // the non-collision constraint: when AllowedTools is populated (AgentTest's
 // field) but DerivedTools is nil, BuildArgs does NOT emit --allowedTools. The

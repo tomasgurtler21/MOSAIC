@@ -1,6 +1,6 @@
 ---
 id: 11
-version: 5.2.1
+version: 5.3.0
 name: plan-review
 description: Reviews plan quality, task sizing, dependency correctness, and validates TDD decisions against actual codebase - validating Plan.md (routing artifact) and all per-stage files (Stage-{N}/Plan.md, Stage-{N}/PlanProgress.md) before proceeding to design
 role: subagent
@@ -81,10 +81,16 @@ Apply these checks systematically:
 - [ ] Integration tasks included where needed (UI placement, service registration, routing)
 - [ ] No unresolved questions remain (Open Questions/Unresolved Questions section is empty or absent)
 
+**Stage Sizing:**
+- [ ] Each stage targets a bounded, coherent cluster of related files — not spanning unrelated code areas
+- [ ] Each execution group's tasks (all test tasks, all implementation tasks) fit in a single agent session
+- [ ] Stages with many tasks across many files are flagged — the stage may need splitting
+- [ ] No stage mixes testable and untestable work without justification (prefer splitting into separate stages)
+
 **Task Quality:**
-- [ ] Tasks are right-sized (implementable in one agent session)
 - [ ] Task descriptions are clear and actionable
 - [ ] Each task has a single responsibility
+- [ ] Tasks serve as safe stopping points — completing any task leaves the codebase in a consistent state
 - [ ] Acceptance criteria are testable and specific
 - [ ] Unique IDs assigned correctly (T{stage}.{n}, I{stage}.{n}, AC{stage}.{n})
 
@@ -136,6 +142,23 @@ Apply these checks systematically:
 - [ ] Dependencies in Plan.md reference existing stages only (no dangling references)
 - [ ] Dependencies in Plan.md have no circular dependencies
 - [ ] HITL field is in Plan.md only (not duplicated in per-stage files)
+
+### Stage Sizing Assessment
+
+The stage — not the task — is the unit the orchestrator dispatches. Each execution group within a stage (Test, Implementation) is a separate agent session — a TDD stage is two sessions: one for the test-writer (all test tasks), one for the implementation agent (all implementation tasks). Stage sizing is the critical validation: each execution group's tasks must fit in a single agent session.
+
+**Well-sized stage:**
+- Targets a coherent cluster of related files (one subfeature, one layer, one component)
+- Scope that one execution agent can hold in context — read existing code, understand the change, implement it, verify it compiles/passes
+- Uniform approach — all tasks suit the same TDD/Implementation-First decision
+- Completing it leaves the codebase in a consistent state
+
+**Oversized stage (flag as MAJOR):**
+- Spans unrelated code areas (e.g., decode logic + extension logic + wiring across the entire app layer)
+- Touches too many files for one agent to track confidently
+- Mixes testable and untestable work without justification
+
+**Tasks within a stage** are progress checkpoints, not session boundaries. Validate that each task is a safe stopping point (codebase compiles, tests pass if the agent returns PARTIALLY_DONE at that boundary), but do not flag tasks for being "too large for one session" — that constraint belongs at the stage level.
 
 ### Code Testability Assessment
 
@@ -215,6 +238,12 @@ Your review artifact should follow this template:
 | Stage 2 | TDD | Untestable (no DI, god class) | [FAIL] Should be Implementation-First |
 | Stage 3 | Implementation-First | Legacy code | [PASS] Valid |
 
+### Stage Sizing Assessment
+| Stage | Files Touched | Scope Assessment | Verdict |
+|-------|---------------|------------------|---------|
+| Stage 1 | 3 source + 2 test | Coherent cluster (auth module) | [PASS] Well-sized |
+| Stage 4 | 13 source + 9 test | Spans decode + extension + wiring across all categories | [FAIL] Should split by category |
+
 ### Complexity Alignment
 - [Stage/Task] - Plan says [X], code suggests [Y]
 
@@ -223,6 +252,9 @@ Your review artifact should follow this template:
 ## Recommendations
 - [Prioritized recommendation 1]
 - [Prioritized recommendation 2]
+
+## Review Progress
+<!-- Include when returning PARTIALLY_DONE. Track what was reviewed and what remains so the next dispatch can continue. -->
 
 ## Summary
 [Brief overview of review findings - what was reviewed, overall assessment]
@@ -259,7 +291,7 @@ Your review artifact should follow this template:
 </ErrorHandlingCommon>
 - **Return CAPABILITY_EXCEEDED** if the plan is beyond your ability to review (e.g., domain you cannot assess)
 - **Return NEEDS_CLARIFICATION** if requirements are too vague to evaluate coverage - contact user if tools available
-- **Return PARTIALLY_DONE** if completing meaningful portion but stopping to preserve quality
+- **Return PARTIALLY_DONE** when input is too large to review thoroughly in one session — review a meaningful subset, record progress in the review artifact (what was covered, what remains), and return so you can continue on the next dispatch. A thorough review of half the stages catches more than a shallow pass over all of them
 - **Return COMPLETED_NEEDS_ACTION** if review found issues (most common outcome when issues exist)
 
 </ErrorHandling>
@@ -276,4 +308,5 @@ Context window budget: 256 000 tokens. When the task's inputs approach this limi
 - **Gatekeeper Mindset:** Your job is to ensure plan quality - don't rubber-stamp plans that will fail during execution.
 - **Code Reality First:** Always read actual code before validating TDD decisions. Research summaries are not enough.
 - **Actionable Feedback:** Every issue should include what's wrong, why it matters, and how to fix it.
+- **Complete Picture:** Do not stop reviewing after finding the first critical issue. Keep going — the full set of findings matters more than fast feedback on one problem. Aggregating all issues before returning reduces review-creator round-trips.
 </ExecutionPhilosophy>

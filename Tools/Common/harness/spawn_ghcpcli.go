@@ -30,10 +30,11 @@ var ErrGHCPCLIEmptyPrompt = errors.New("harness: ghcp-cli requires a non-empty p
 var ErrGHCPCLIModeUnresolved = errors.New("harness: GHCP CLI permission mode not resolved")
 
 // ErrGHCPCLIAllowlistEmpty is returned by BuildGHCPCLIArgs when
-// GHCPCLIMode is GHCPCLIModePartialAllowlist but DerivedTools is nil or
-// empty. Partial Allowlist mode requires at least one --allow-tool entry;
-// without it, the spawned process would have no tool permissions at all.
-var ErrGHCPCLIAllowlistEmpty = errors.New("harness: GHCP CLI partial allowlist mode requires non-empty DerivedTools")
+// GHCPCLIMode is GHCPCLIModePartialAllowlist, DerivedTools is nil or
+// empty, and ToolsDerived is false. This guard protects against callers
+// that did not perform tool derivation. When ToolsDerived is true, an
+// empty DerivedTools slice is valid (all tools are ungated).
+var ErrGHCPCLIAllowlistEmpty = errors.New("harness: GHCP CLI partial allowlist mode requires non-empty DerivedTools or ToolsDerived flag")
 
 // BuildGHCPCLIArgs constructs the CLI arguments for one request against the
 // `copilot -p ... --output-format json` single-shot non-interactive contract.
@@ -45,9 +46,15 @@ var ErrGHCPCLIAllowlistEmpty = errors.New("harness: GHCP CLI partial allowlist m
 //   - GHCPCLIModeBlanket: emits --yolo and --no-ask-user, granting blanket
 //     permission (equivalent to --allow-all-tools --allow-all-paths
 //     --allow-all-urls). req.DerivedTools is ignored.
-//   - GHCPCLIModePartialAllowlist: omits --yolo; emits one --allow-tool entry
-//     per element of req.DerivedTools, then --no-ask-user. req.DerivedTools
-//     must be non-empty or ErrGHCPCLIAllowlistEmpty is returned.
+//   - GHCPCLIModePartialAllowlist:
+//     When req.ToolsDerived is true and req.DerivedTools is empty: emits
+//     --no-ask-user with zero --allow-tool entries and no --yolo. This is
+//     the valid "all ungated tools" case.
+//     When req.ToolsDerived is false and req.DerivedTools is empty: returns
+//     ErrGHCPCLIAllowlistEmpty (backward-compatible guard for callers that
+//     did not perform derivation).
+//     When req.DerivedTools is non-empty: emits --allow-tool entries as
+//     before, regardless of ToolsDerived value.
 //   - GHCPCLIModeUnresolved (zero value): returns ErrGHCPCLIModeUnresolved
 //     before any args are built.
 //
@@ -112,10 +119,11 @@ func BuildGHCPCLIArgs(req SpawnRequest) ([]string, error) {
 		args = append(args, "--yolo", "--no-ask-user")
 	case GHCPCLIModePartialAllowlist:
 		// Partial Allowlist mode: emit one --allow-tool entry per
-		// DerivedTools element, then --no-ask-user. An empty DerivedTools
-		// slice would leave the spawned process with no tool permissions at
-		// all, which is a configuration error.
-		if len(req.DerivedTools) == 0 {
+		// DerivedTools element, then --no-ask-user. When ToolsDerived is
+		// false and DerivedTools is empty, return an error (caller did not
+		// perform derivation). When ToolsDerived is true and DerivedTools is
+		// empty, the agent has only ungated tools -- succeed with no entries.
+		if len(req.DerivedTools) == 0 && !req.ToolsDerived {
 			return nil, ErrGHCPCLIAllowlistEmpty
 		}
 		for _, tool := range req.DerivedTools {

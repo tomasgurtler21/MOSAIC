@@ -151,6 +151,13 @@ type Deps struct {
 	// Optional: nil is normalised in New to a function that always returns
 	// false, so the dispatch loop never nil-checks it.
 	StopRequested func() bool
+
+	// BackupStateHook is an optional function called immediately after
+	// SetupBackupAndTransform returns a non-nil *BackupState, before the
+	// deferred Cleanup is registered. Tests use this to inject RestoreFunc
+	// (an injectable error seam on BackupState) so that Cleanup can be forced
+	// to fail without relying on filesystem tricks. Nil in production.
+	BackupStateHook func(*snapshot.BackupState)
 }
 
 // New creates a new Session with the given port dependencies.
@@ -243,9 +250,27 @@ type sessionImpl struct {
 	// call so that subsequent routing decisions use the configured consultant.
 	manualDispatchPending bool
 	// snapshotDir is the absolute path to the run-scoped agent snapshot
-	// directory created at step 5a. Empty until step 5a succeeds. Used by
-	// cleanup to know what to delete on terminal completion.
+	// directory created by the copy-and-invoke strategy at step 5b. Empty
+	// until step 5b succeeds for path-based harnesses. Used by cleanup to
+	// know what to delete on terminal completion.
 	snapshotDir string
+	// backupState is the handle returned by SetupBackupAndTransform for
+	// name-based harnesses (backup-and-transform strategy). Nil for path-based
+	// harnesses and non-CLI harnesses. Its Cleanup method is registered in a
+	// defer immediately after setup succeeds.
+	backupState *snapshot.BackupState
+}
+
+// isRawTextHarnessError reports whether err is a raw-text protocol failure:
+// the harness received output from the subprocess but could not extract a
+// valid protocol JSON response. These errors are worth a single direct retry
+// because they are often caused by the model writing a plain-text reply
+// instead of the expected JSON structure, and a retry typically succeeds.
+// Transport-level failures (timeouts, non-zero exits) do not qualify.
+func isRawTextHarnessError(err error) bool {
+	return errors.Is(err, commonharness.ErrProtocolNotExtractable) ||
+		errors.Is(err, commonharness.ErrMalformedJSON) ||
+		errors.Is(err, commonharness.ErrEmptyResponse)
 }
 
 // invokeAndLog wraps s.deps.Harness.Invoke with dispatch logging. It logs the
@@ -384,69 +409,127 @@ func (s *sessionImpl) Start(ctx context.Context, config domain.RunConfig) (outco
 		return s.refusal(err.Error()), nil
 	}
 
-	// Step 5: Resolve every agent identifier to a definition file.
+	// orchDir is used by steps 4b and 5 (hoisted here so step 4b can refer to it).
 	orchDir := filepath.Dir(config.OrchestratorFilePath)
+
+	// Step 4b: Recovery check (CLI harnesses only). Runs BEFORE step 5 (ResolveAll)
+	// so that any orphaned backup-and-transform state from a previous crashed run is
+	// restored before agents are resolved. If recovery fails (corrupt manifest),
+	// refuse the run.
+	if commonharness.IsCLIHarness(config.HarnessID) {
+		if rcErr := snapshot.RecoveryCheck(orchDir, s.deps.Debug); rcErr != nil {
+			return s.refusal(rcErr.Error()), nil
+		}
+	}
+
+	// Step 5: Resolve every agent identifier to a definition file.
 	identifiers := uniqueAgentIdentifiers(table)
 	agents, err := agentresolve.ResolveAll(orchDir, identifiers)
 	if err != nil {
 		return s.refusal(err.Error()), nil
 	}
 
-	// Step 5a: Create a run-scoped agent snapshot (CLI harnesses only).
-	// Skip for non-CLI harnesses (e.g. the "fake" test double) which have
-	// no agents directory convention. For CLI harnesses, copy the agents
-	// directory to a sibling snapshot directory, re-resolve all agents against
-	// the snapshot, and re-bind consultants with the snapshot-resolved
-	// orchestrator reference. On failure, refuse the run.
-	if commonharness.IsCLIHarness(config.HarnessID) {
-		// The snapshot directory is a sibling of the agents directory, named
-		// by appending "-runner-{runID}" to the agents directory base name.
-		snapshotDir := filepath.Join(filepath.Dir(orchDir), filepath.Base(orchDir)+"-runner-"+config.RunID)
-		rules := snapshot.TransformationsFor(config.HarnessID)
-		if err := snapshot.CreateSnapshot(orchDir, snapshotDir, rules); err != nil {
-			return s.refusal(err.Error()), nil
-		}
-		s.snapshotDir = snapshotDir
-
-		// Defer cleanup: delete the snapshot directory on terminal completion
-		// (RunCompleted or RunStopped). Non-terminal outcomes leave the snapshot
-		// in place so the run can be resumed with access to the original agent files.
-		// The named return variable 'outcome' is read by the deferred function after
-		// all return statements have set it.
-		defer func() {
-			if s.snapshotDir == "" {
-				return
+	// Step 5b: Snapshot/backup strategy selection (CLI harnesses only).
+	// Non-CLI harnesses (e.g. the "fake" test double) skip this block entirely:
+	// they have no agents directory convention and no snapshot or backup setup.
+	//
+	// For CLI harnesses, the loading mechanism in the catalog entry determines
+	// which strategy to use:
+	//   LoadingMechanismPath (claude-code): copy-and-invoke -- copy the agents
+	//     directory to a sibling snapshot directory, re-resolve all agents against
+	//     the snapshot, and re-bind consultants with the snapshot-resolved
+	//     orchestrator reference.
+	//   LoadingMechanismName (opencode, ghcp-cli): backup-and-transform -- modify
+	//     originals in-place after backing them up. If rules is nil (ghcp-cli),
+	//     skip backup-and-transform entirely and dispatch from the original agents
+	//     directory (FR-3). Does NOT re-resolve agents or re-bind orchRef.
+	//   LoadingMechanismUnset: refuse the run (catalog misconfiguration).
+	if entry, ok := commonharness.LookupCLIHarness(config.HarnessID); ok {
+		switch entry.LoadingMechanism {
+		case commonharness.LoadingMechanismPath:
+			// Copy-and-invoke strategy. The snapshot directory is a sibling of the
+			// agents directory, named by appending "-runner-{runID}" to the agents
+			// directory base name.
+			snapshotDir := filepath.Join(filepath.Dir(orchDir), filepath.Base(orchDir)+"-runner-"+config.RunID)
+			rules := snapshot.TransformationsFor(config.HarnessID)
+			if err := snapshot.CreateSnapshot(orchDir, snapshotDir, rules); err != nil {
+				return s.refusal(err.Error()), nil
 			}
-			if outcome.Status == domain.RunCompleted || outcome.Status == domain.RunStopped {
+			s.snapshotDir = snapshotDir
+
+			// Defer cleanup: delete the snapshot directory on all terminal outcomes
+			// (FR-21: all six RunStatus values are terminal). The named return
+			// variable 'outcome' is read by the deferred function after all return
+			// statements have set it.
+			defer func() {
+				if s.snapshotDir == "" {
+					return
+				}
 				if rmErr := os.RemoveAll(s.snapshotDir); rmErr != nil {
 					s.deps.Debug.Log(domain.EventSnapshotCleanupFailed,
 						fmt.Sprintf("failed to remove snapshot directory %s: %v", s.snapshotDir, rmErr))
 				}
+			}()
+
+			// Re-resolve all agents against the snapshot directory so every dispatch
+			// uses the transformed snapshot copies, not the originals.
+			agents, err = agentresolve.ResolveAll(snapshotDir, identifiers)
+			if err != nil {
+				return s.refusal(err.Error()), nil
 			}
-		}()
 
-		// Re-resolve all agents against the snapshot directory so every dispatch
-		// uses the transformed snapshot copies, not the originals.
-		agents, err = agentresolve.ResolveAll(snapshotDir, identifiers)
-		if err != nil {
-			return s.refusal(err.Error()), nil
+			// Re-resolve the orchestrator against the snapshot directory.
+			snapshotOrchPath := filepath.Join(snapshotDir, filepath.Base(config.OrchestratorFilePath))
+			orchRef, err = agentresolve.ResolveOrchestrator(snapshotOrchPath)
+			if err != nil {
+				return s.refusal(err.Error()), nil
+			}
+			s.orchRef = orchRef
+
+			// Re-bind consultants with the snapshot-resolved orchestrator reference
+			// so consultation dispatches the transformed copy of the orchestrator
+			// script rather than the original.
+			rc = domain.RunContext{Orchestrator: orchRef, Table: table}
+			bindRunContext(s.deps.Routing, rc)
+			bindRunContext(s.deps.Manual, rc)
+			bindRunContext(s.deps.PreConsult, rc)
+
+		case commonharness.LoadingMechanismName:
+			// Backup-and-transform strategy. Originals are modified in-place after
+			// being backed up. If TransformationsFor returns nil (FR-3, e.g. ghcp-cli),
+			// SetupBackupAndTransform returns (nil, nil) and we skip backup entirely,
+			// dispatching from the original agents directory.
+			//
+			// Note: backup-and-transform does NOT re-resolve agents or re-bind orchRef.
+			// The orchestrator file is transformed in-place at its original path, so
+			// the references resolved at step 5 remain valid.
+			rules := snapshot.TransformationsFor(config.HarnessID)
+			bs, bsErr := snapshot.SetupBackupAndTransform(orchDir, config.RunID, rules, s.deps.Debug)
+			if bsErr != nil {
+				return s.refusal(bsErr.Error()), nil
+			}
+			if bs != nil {
+				// Register defer immediately after successful setup so that post-setup
+				// refusals (e.g. step 7.5a mode=unset) still release the backup lock.
+				s.backupState = bs
+				if s.deps.BackupStateHook != nil {
+					s.deps.BackupStateHook(bs)
+				}
+				defer func(localBS *snapshot.BackupState) {
+					if cleanupErr := localBS.Cleanup(); cleanupErr != nil {
+						s.deps.Debug.Log(domain.EventSnapshotCleanupFailed, cleanupErr.Error())
+					}
+				}(bs)
+			}
+			// If bs == nil (nil rules, FR-3): no backup acquired, dispatch from originals.
+
+		default:
+			// LoadingMechanismUnset or unrecognized: catalog misconfiguration.
+			return s.refusal(fmt.Sprintf(
+				"harness %q has unset or unrecognized loading mechanism (%s); catalog misconfiguration",
+				config.HarnessID, entry.LoadingMechanism,
+			)), nil
 		}
-
-		// Re-resolve the orchestrator against the snapshot directory.
-		snapshotOrchPath := filepath.Join(snapshotDir, filepath.Base(config.OrchestratorFilePath))
-		orchRef, err = agentresolve.ResolveOrchestrator(snapshotOrchPath)
-		if err != nil {
-			return s.refusal(err.Error()), nil
-		}
-		s.orchRef = orchRef
-
-		// Re-bind consultants with the snapshot-resolved orchestrator reference
-		// so consultation dispatches the transformed copy of the orchestrator
-		// script rather than the original.
-		rc = domain.RunContext{Orchestrator: orchRef, Table: table}
-		bindRunContext(s.deps.Routing, rc)
-		bindRunContext(s.deps.Manual, rc)
-		bindRunContext(s.deps.PreConsult, rc)
 	}
 
 	// Step 6: Read the stage set from the run folder, if a plan file is
@@ -481,6 +564,45 @@ func (s *sessionImpl) Start(ctx context.Context, config domain.RunConfig) (outco
 	declaredInfraAgents, err := orchfile.EnumerateInfrastructureAgents(config.OrchestratorFilePath)
 	if err != nil {
 		return s.refusal(err.Error()), nil
+	}
+
+	// Step 6b2: Apply InfrastructureFilter to the declared agent set. When the
+	// filter is nil, all declared agents remain active (backwards-compatible).
+	// When non-nil, only agents whose Name appears in the filter set are
+	// retained. An empty filter produces an empty slice, which causes all
+	// downstream checks (validateClassSelections, hasCheckpointClassAgent,
+	// hasCommitClassAgent, commit setup dispatch, evaluateTriggers,
+	// NewInfraAgentSet) to see no agents.
+	if config.InfrastructureFilter != nil {
+		filterSet := make(map[string]bool, len(config.InfrastructureFilter))
+		for _, key := range config.InfrastructureFilter {
+			filterSet[key] = true
+		}
+		// Emit a debug event for each filter key that does not match any
+		// declared agent, providing a diagnostic signal for typos.
+		for _, key := range config.InfrastructureFilter {
+			matched := false
+			for _, agent := range declaredInfraAgents {
+				if agent.Name == key {
+					matched = true
+					break
+				}
+			}
+			if !matched {
+				s.deps.Debug.Log(domain.EventSessionFilterUnmatched,
+					"infrastructure filter key does not match any declared agent",
+					domain.F("key", key),
+				)
+			}
+		}
+		// Retain only agents whose Name is in the filter set.
+		filtered := make([]domain.DeclaredInfraAgent, 0, len(declaredInfraAgents))
+		for _, agent := range declaredInfraAgents {
+			if filterSet[agent.Name] {
+				filtered = append(filtered, agent)
+			}
+		}
+		declaredInfraAgents = filtered
 	}
 
 	// Step 6c: Validate per-class agent selection. When multiple agents of the
@@ -690,10 +812,10 @@ func (s *sessionImpl) Start(ctx context.Context, config domain.RunConfig) (outco
 	// dispatched step. Passed to engine.Next so that COMPLETED_NEEDS_ACTION
 	// auto-review artifact injection receives the correct input artifact list.
 	var lastOutputArtifacts []string
-	// prevWorkflowStep tracks the most recently completed workflow step for
-	// retrospective STAGE_END / PHASE_END trigger evaluation. Nil until the
-	// first workflow step completes. Updated only for workflow steps, not for
-	// infrastructure agent completions (no-cascades rule).
+	// prevWorkflowStep tracks the most recently completed workflow step.
+	// Nil until the first workflow step completes. Updated only for workflow
+	// steps, not for infrastructure agent completions (no-cascades rule).
+	// Passed through to consultRoute for its trigger evaluation call site.
 	var prevWorkflowStep *domain.CompletedStep
 	// antiLoop tracks consecutive same-agent dispatches for the current step
 	// and enforces the anti-loop guard. rowIndex starts at -1 to signal that
@@ -834,13 +956,30 @@ func (s *sessionImpl) Start(ctx context.Context, config domain.RunConfig) (outco
 					return domain.RunOutcome{Status: domain.RunFailed, Message: err.Error()}, err
 				}
 				seq = state.GlobalSequence
-				done, outcome, outErr := s.consultRoute(ctx, &deviationInfo, &state, &seq,
-					&lastResponse, &prevWorkflowStep, &refreshedStages, &stages,
-					table, agents, config, declaredInfraAgents, admitted, &antiLoop)
-				if done {
-					return outcome, outErr
+				// Raw-text harness error bypass: attempt one direct redispatch
+				// before consulting the orchestrator. If the anti-loop guard
+				// already blocks at this point, skip the bypass and fall through
+				// to consultRoute immediately.
+				bypassed := false
+				if isRawTextHarnessError(invokeErr) && antiLoop.recordDispatch(step.RowIndex, step.Agent.Identifier) {
+					bypassSeq := state.GlobalSequence + 1
+					bypassReq := step.Request
+					bypassReq.AgentInstanceID = fmt.Sprintf("%s#%d", step.Agent.Identifier, bypassSeq)
+					if bypassResp, bypassErr := s.invokeAndLog(ctx, step.Agent, bypassReq); bypassErr == nil {
+						response = bypassResp
+						step.Request = bypassReq
+						bypassed = true
+					}
 				}
-				continue
+				if !bypassed {
+					done, outcome, outErr := s.consultRoute(ctx, &deviationInfo, &state, &seq,
+						&lastResponse, &prevWorkflowStep, &refreshedStages, &stages,
+						table, agents, config, declaredInfraAgents, admitted, &antiLoop)
+					if done {
+						return outcome, outErr
+					}
+					continue
+				}
 			}
 
 			// HITL compliance verification for auto-routed dispatches. The loop
@@ -983,6 +1122,29 @@ func (s *sessionImpl) Start(ctx context.Context, config domain.RunConfig) (outco
 						s.deps.Debug.Log(domain.EventSessionHarnessError, rdErr.Error(),
 							domain.F("agent", hitlStep.Request.AgentInstanceID),
 						)
+						// Persist a record of the failed HITL-redispatch attempt.
+						// The Store.Apply at the rejection step above records the
+						// HITLRejected attempt; this separate record captures the
+						// harness failure on the redispatch itself, matching the
+						// failed-attempt persistence pattern used at the main
+						// dispatch loop site.
+						rdFailedAttemptStep := domain.CompletedStep{
+							Seq:              state.GlobalSequence + 1,
+							AgentInstance:    hitlStep.Request.AgentInstanceID,
+							Phase:            hitlStep.Phase,
+							Stage:            hitlStep.Stage,
+							Status:           domain.StatusBLOCKED,
+							Summary:          rdErr.Error(),
+							Timestamp:        s.deps.Clock.Now(),
+							Inputs:           formatInputs(hitlStep.Request.InputArtifacts),
+							IsInfrastructure: true,
+						}
+						state, err = s.deps.Store.Apply(ctx, state, rdFailedAttemptStep)
+						if err != nil {
+							s.deps.Debug.Log(domain.EventSessionApplyFailed, err.Error())
+							return domain.RunOutcome{Status: domain.RunFailed, Message: err.Error()}, err
+						}
+						seq = state.GlobalSequence
 						rdDevInfo := domain.DeviationInfo{
 							Kind: domain.DeviationHarnessError,
 							Response: domain.ProtocolResponse{
@@ -1000,13 +1162,31 @@ func (s *sessionImpl) Start(ctx context.Context, config domain.RunConfig) (outco
 							s.deps.Debug.Log(domain.EventSessionDeviationUnresolved, rdMsg)
 							return domain.RunOutcome{Status: domain.RunDeviationUnresolved, Message: rdMsg}, nil
 						}
-						rdDone, rdOutcome, rdOutErr := s.consultRoute(ctx, &rdDevInfo, &state, &seq,
-							&lastResponse, &prevWorkflowStep, &refreshedStages, &stages,
-							table, agents, config, declaredInfraAgents, admitted, &antiLoop)
-						if rdDone {
-							return rdOutcome, rdOutErr
+						// Raw-text harness error bypass: attempt one direct
+						// redispatch inside the HITL-redispatch fallback before
+						// calling consultRoute. Skipped when the anti-loop guard
+						// is already at the limit.
+						rdBypassed := false
+						if isRawTextHarnessError(rdErr) && antiLoop.recordDispatch(hitlStep.RowIndex, hitlStep.Agent.Identifier) {
+							bypassSeq := state.GlobalSequence + 1
+							bypassReq := hitlStep.Request
+							bypassReq.AgentInstanceID = fmt.Sprintf("%s#%d", hitlStep.Agent.Identifier, bypassSeq)
+							if bypassResp, bypassErr := s.invokeAndLog(ctx, hitlStep.Agent, bypassReq); bypassErr == nil {
+								hitlStep.Request = bypassReq
+								hitlAttemptSeq = bypassSeq
+								rdResp = bypassResp
+								rdBypassed = true
+							}
 						}
-						break hitlCheckLoop
+						if !rdBypassed {
+							rdDone, rdOutcome, rdOutErr := s.consultRoute(ctx, &rdDevInfo, &state, &seq,
+								&lastResponse, &prevWorkflowStep, &refreshedStages, &stages,
+								table, agents, config, declaredInfraAgents, admitted, &antiLoop)
+							if rdDone {
+								return rdOutcome, rdOutErr
+							}
+							break hitlCheckLoop
+						}
 					}
 					hitlResponse = rdResp
 					// Loop to re-check HITL with RedispatchUsed=true.
@@ -1108,11 +1288,12 @@ func (s *sessionImpl) Start(ctx context.Context, config domain.RunConfig) (outco
 
 			// Infrastructure-agent trigger evaluation (FR-40).
 			if !completedStep.IsInfrastructure {
-				halt, trigStopped, trigErr := s.evaluateTriggers(
+				halt, trigStopped, reviewConsult, trigErr := s.evaluateTriggers(
 					ctx, &state, &seq, completedStep, prevWorkflowStep,
 					declaredInfraAgents, config,
 					buildActiveAgentsFilter(declaredInfraAgents, config.InfraClassSelections),
 					orchDir,
+					hitlStep.RowIndex, admitted, stages,
 				)
 				if trigErr != nil {
 					if ctx.Err() != nil {
@@ -1131,6 +1312,19 @@ func (s *sessionImpl) Start(ctx context.Context, config domain.RunConfig) (outco
 				onInfrastructureAgentTrigger()
 				if s.deps.OnInfrastructureTrigger != nil {
 					s.deps.OnInfrastructureTrigger()
+				}
+				if reviewConsult != nil && s.deps.Routing != nil {
+					syntheticResp := domain.ProtocolResponse{StatusMessage: reviewConsult.StatusMessage}
+					lastResponse = &syntheticResp
+					done, outcome, consultErr := s.consultRoute(ctx, nil, &state, &seq,
+						&lastResponse, &prevWorkflowStep, &refreshedStages, &stages,
+						table, agents, config, declaredInfraAgents, admitted, &antiLoop)
+					if consultErr != nil {
+						return domain.RunOutcome{Status: domain.RunFailed, Message: consultErr.Error()}, consultErr
+					}
+					if done {
+						return outcome, nil
+					}
 				}
 			}
 
@@ -1657,6 +1851,25 @@ func (s *sessionImpl) consultRoute(
 		s.deps.Debug.Log(domain.EventSessionHarnessError, invokeErr.Error(),
 			domain.F("agent", agentReq.AgentInstanceID),
 		)
+		// Persist a record of the failed dispatch attempt so the execution log
+		// captures every invocation at this site, matching the pattern already
+		// established at the main dispatch loop site.
+		crFailedAttemptStep := domain.CompletedStep{
+			Seq:              state.GlobalSequence + 1,
+			AgentInstance:    agentReq.AgentInstanceID,
+			Phase:            phase,
+			Stage:            effectiveStage,
+			Status:           domain.StatusBLOCKED,
+			Summary:          invokeErr.Error(),
+			Timestamp:        s.deps.Clock.Now(),
+			Inputs:           formatInputs(agentReq.InputArtifacts),
+			IsInfrastructure: true,
+		}
+		crNewState, crApplyErr := s.deps.Store.Apply(ctx, *state, crFailedAttemptStep)
+		if crApplyErr != nil {
+			return true, domain.RunOutcome{Status: domain.RunFailed, Message: crApplyErr.Error()}, crApplyErr
+		}
+		*state = crNewState
 		devInfo := domain.DeviationInfo{
 			Kind: domain.DeviationHarnessError,
 			Response: domain.ProtocolResponse{
@@ -1668,8 +1881,24 @@ func (s *sessionImpl) consultRoute(
 			CurrentPhase:  phase,
 			ArtifactState: *state,
 		}
-		return s.consultRoute(ctx, &devInfo, state, seq, lastResponse, prevWorkflowStep,
-			refreshedStages, stages, table, agents, config, declaredInfraAgents, admitted, antiLoop)
+		// Raw-text harness error bypass: attempt one direct redispatch before
+		// triggering a recursive consultRoute call. Skipped when the anti-loop
+		// guard is already at the limit.
+		crBypassed := false
+		if isRawTextHarnessError(invokeErr) && antiLoop.recordDispatch(dispInstr.RowIndex, agentRef.Identifier) {
+			bypassSeq := state.GlobalSequence + 1
+			bypassReq := agentReq
+			bypassReq.AgentInstanceID = fmt.Sprintf("%s#%d", agentRef.Identifier, bypassSeq)
+			if bypassResp, bypassErr := s.invokeAndLog(ctx, agentRef, bypassReq); bypassErr == nil {
+				response = bypassResp
+				dispSeq = bypassSeq
+				crBypassed = true
+			}
+		}
+		if !crBypassed {
+			return s.consultRoute(ctx, &devInfo, state, seq, lastResponse, prevWorkflowStep,
+				refreshedStages, stages, table, agents, config, declaredInfraAgents, admitted, antiLoop)
+		}
 	}
 
 	// HITL compliance verification. Each rejected attempt is persisted with
@@ -1882,11 +2111,12 @@ hitlLoop:
 	// Infrastructure-agent trigger evaluation.
 	orchDir := filepath.Dir(config.OrchestratorFilePath)
 	if !completedStep.IsInfrastructure {
-		halt, trigStopped, trigErr := s.evaluateTriggers(
+		halt, trigStopped, reviewConsult, trigErr := s.evaluateTriggers(
 			ctx, state, seq, completedStep, *prevWorkflowStep,
 			declaredInfraAgents, config,
 			buildActiveAgentsFilter(declaredInfraAgents, config.InfraClassSelections),
 			orchDir,
+			dispInstr.RowIndex, admitted, *stages,
 		)
 		if trigErr != nil {
 			if ctx.Err() != nil {
@@ -1905,6 +2135,18 @@ hitlLoop:
 		onInfrastructureAgentTrigger()
 		if s.deps.OnInfrastructureTrigger != nil {
 			s.deps.OnInfrastructureTrigger()
+		}
+		if reviewConsult != nil && s.deps.Routing != nil {
+			syntheticResp := domain.ProtocolResponse{StatusMessage: reviewConsult.StatusMessage}
+			*lastResponse = &syntheticResp
+			done, outcome, consultErr := s.consultRoute(ctx, nil, state, seq, lastResponse, prevWorkflowStep,
+				refreshedStages, stages, table, agents, config, declaredInfraAgents, admitted, antiLoop)
+			if consultErr != nil {
+				return true, domain.RunOutcome{Status: domain.RunFailed, Message: consultErr.Error()}, consultErr
+			}
+			if done {
+				return done, outcome, nil
+			}
 		}
 	}
 
@@ -2059,9 +2301,9 @@ func (s *sessionImpl) doCommitSetupDispatch(
 	if commitAgent == nil {
 		return nil, "commits enabled but no commit-class agent found"
 	}
-	agentRef := domain.AgentReference{
-		Identifier:     commitAgent.Name,
-		DefinitionPath: filepath.Join(orchDir, commitAgent.Name+".md"),
+	agentRef, resolveErr := agentresolve.ResolveOne(orchDir, commitAgent.Name)
+	if resolveErr != nil {
+		return nil, "commit setup: cannot resolve agent definition: " + resolveErr.Error()
 	}
 	req := domain.ProtocolRequest{
 		AgentInstanceID: fmt.Sprintf("%s#1", commitAgent.Name),
@@ -2127,19 +2369,25 @@ func lastInfraSeqInLog(agentName string, log []domain.ExecutionLogEntry) int {
 }
 
 // infraTriggerFires reports whether the given trigger should fire after the
-// workflow step described by completedStep and prevWorkflowStep.
+// workflow step described by completedStep.
 //
 // currentSeq is the global sequence after the most recent Store.Apply call
 // (including any infra dispatches that have already completed during this
 // evaluation pass). log is the current execution log, used for
 // INVOCATION_INTERVAL interval arithmetic.
+//
+// rowIdx is the routing table row index of the completed step. admitted and
+// stages are the admitted workflow and stage set, used for prospective look-ahead
+// in STAGE_END and PHASE_END evaluation.
 func infraTriggerFires(
 	trigger domain.DeclaredInfraTrigger,
 	currentSeq int,
 	log []domain.ExecutionLogEntry,
 	agentName string,
 	completedStep domain.CompletedStep,
-	prevWorkflowStep *domain.CompletedStep,
+	rowIdx int,
+	admitted domain.AdmittedWorkflow,
+	stages *domain.StageSet,
 ) bool {
 	switch trigger.Trigger {
 	case "INVOCATION_INTERVAL":
@@ -2155,17 +2403,23 @@ func infraTriggerFires(
 		return (currentSeq - lastSeq) >= param
 
 	case "STAGE_END":
-		if prevWorkflowStep == nil {
-			// First workflow step: no prior step to compare against.
+		// Prospective semantics: fires when the completed step is the last
+		// step of its stage (look-ahead), not by comparing against a prior step.
+		// STAGE_END only applies to EXECUTION-phase steps (Stage != "").
+		if completedStep.Stage == "" {
 			return false
 		}
-		return completedStep.Stage != prevWorkflowStep.Stage
+		_, stageNum, ok := domain.ParseStageValue(completedStep.Stage)
+		if !ok || stageNum == 0 {
+			return false
+		}
+		return engine.IsLastRowOfStage(admitted, stages, rowIdx, stageNum)
 
 	case "PHASE_END":
-		if prevWorkflowStep == nil {
-			return false
-		}
-		return completedStep.Phase != prevWorkflowStep.Phase
+		// Prospective semantics: fires when the completed step is the last
+		// step of its phase (look-ahead), not by comparing against a prior step.
+		_, stageNum, _ := domain.ParseStageValue(completedStep.Stage)
+		return engine.IsLastRowOfPhase(admitted, stages, rowIdx, stageNum)
 
 	case "MANUAL":
 		// MANUAL triggers never fire automatically.
@@ -2181,18 +2435,29 @@ func infraTriggerFires(
 // evaluated in declaration order; each agent fires at most once per
 // evaluation even if multiple triggers match.
 //
+// reviewConsultSignal carries the status message from the last successful
+// review-class infrastructure agent in an evaluateTriggers pass. When
+// non-nil, the caller must perform a routing consultation via consultRoute,
+// supplying StatusMessage as last_status_message.
+type reviewConsultSignal struct {
+	StatusMessage string
+}
+
 // Dispatch is performed synchronously: each matching agent's invocation
 // completes (including its Execution Log row via Store.Apply) before the
 // next declared agent's triggers are evaluated.
 //
-// Returns (true, false, nil) when an on_failure=halt agent stops the run.
-// Returns (false, false, non-nil) on unexpected infrastructure errors.
-// Returns (false, true, nil) when a graceful stop is confirmed between two
+// Returns (true, false, nil, nil) when an on_failure=halt agent stops the run.
+// Returns (false, false, nil, non-nil) on unexpected infrastructure errors.
+// Returns (false, true, nil, nil) when a graceful stop is confirmed between two
 // declared agents' dispatches within this evaluation pass; any agent that
 // already fired and dispatched in this pass keeps its already-applied
 // outcome, and no further agent in the pass is dispatched.
-// Returns (false, false, nil) when all evaluations complete without a halt
-// or a confirmed stop.
+// Returns (false, false, non-nil, nil) when all evaluations complete and at
+// least one review-class agent succeeded; the caller performs a routing
+// consultation using the signal's StatusMessage.
+// Returns (false, false, nil, nil) when all evaluations complete without a
+// halt, stop, or successful review.
 func (s *sessionImpl) evaluateTriggers(
 	ctx context.Context,
 	state *domain.ArtifactState,
@@ -2203,7 +2468,11 @@ func (s *sessionImpl) evaluateTriggers(
 	config domain.RunConfig,
 	activeAgents map[string]bool,
 	orchDir string,
-) (haltRun bool, stopRequested bool, err error) {
+	rowIdx int,
+	admitted domain.AdmittedWorkflow,
+	stages *domain.StageSet,
+) (haltRun bool, stopRequested bool, reviewConsult *reviewConsultSignal, err error) {
+	var reviewSignal *reviewConsultSignal
 	for _, agent := range declared {
 		// Restore-class agents are never dispatched by automatic trigger
 		// evaluation; they act only on explicit manual instruction (MANUAL
@@ -2229,7 +2498,7 @@ func (s *sessionImpl) evaluateTriggers(
 		// per evaluation pass even if multiple triggers match.
 		fired := false
 		for _, trigger := range agent.Triggers {
-			if infraTriggerFires(trigger, *seq, state.ExecutionLog, agent.Name, completedStep, prevWorkflowStep) {
+			if infraTriggerFires(trigger, *seq, state.ExecutionLog, agent.Name, completedStep, rowIdx, admitted, stages) {
 				fired = true
 				break
 			}
@@ -2240,36 +2509,45 @@ func (s *sessionImpl) evaluateTriggers(
 
 		// Dispatch the infrastructure agent.
 		infraSeq := *seq + 1
-		agentRef := domain.AgentReference{
-			Identifier:     agent.Name,
-			DefinitionPath: filepath.Join(orchDir, agent.Name+".md"),
-		}
 		req := domain.ProtocolRequest{
 			AgentInstanceID: fmt.Sprintf("%s#%d", agent.Name, infraSeq),
 			RunID:           state.RunID,
 			TaskDescription: fmt.Sprintf("infrastructure agent dispatch: %s", agent.Name),
 		}
 
-		// Graceful-stop checkpoint: any earlier agent in this pass that already
-		// fired and dispatched keeps its already-applied outcome; only this
-		// not-yet-dispatched agent (and any later declared agents) are skipped.
-		if s.deps.StopRequested() {
-			s.deps.Debug.Log(domain.EventSessionStopObserved, "graceful stop observed; not dispatching",
-				domain.F("checkpoint", StopCheckpointInfraDispatch),
-			)
-			return false, true, nil
-		}
-
-		response, invokeErr := s.invokeAndLog(ctx, agentRef, req)
-		if invokeErr != nil {
-			if ctx.Err() != nil {
-				return true, false, ctx.Err()
-			}
-			// Harness-level error: treat as non-SUCCESS and apply on_failure policy.
+		agentRef, resolveErr := agentresolve.ResolveOne(orchDir, agent.Name)
+		var response domain.ProtocolResponse
+		if resolveErr != nil {
+			// Cannot locate the agent definition file; treat as non-SUCCESS and
+			// apply the on_failure policy without dispatching.
 			response = domain.ProtocolResponse{
 				AgentInstanceID: req.AgentInstanceID,
 				StatusCode:      domain.StatusBLOCKED,
-				StatusMessage:   invokeErr.Error(),
+				StatusMessage:   resolveErr.Error(),
+			}
+		} else {
+			// Graceful-stop checkpoint: any earlier agent in this pass that already
+			// fired and dispatched keeps its already-applied outcome; only this
+			// not-yet-dispatched agent (and any later declared agents) are skipped.
+			if s.deps.StopRequested() {
+				s.deps.Debug.Log(domain.EventSessionStopObserved, "graceful stop observed; not dispatching",
+					domain.F("checkpoint", StopCheckpointInfraDispatch),
+				)
+				return false, true, nil, nil
+			}
+
+			var invokeErr error
+			response, invokeErr = s.invokeAndLog(ctx, agentRef, req)
+			if invokeErr != nil {
+				if ctx.Err() != nil {
+					return true, false, nil, ctx.Err()
+				}
+				// Harness-level error: treat as non-SUCCESS and apply on_failure policy.
+				response = domain.ProtocolResponse{
+					AgentInstanceID: req.AgentInstanceID,
+					StatusCode:      domain.StatusBLOCKED,
+					StatusMessage:   invokeErr.Error(),
+				}
 			}
 		}
 
@@ -2293,7 +2571,7 @@ func (s *sessionImpl) evaluateTriggers(
 		}
 		newState, applyErr := s.deps.Store.Apply(ctx, *state, infraStep)
 		if applyErr != nil {
-			return false, false, applyErr
+			return false, false, nil, applyErr
 		}
 		*state = newState
 		*seq = infraSeq
@@ -2303,12 +2581,16 @@ func (s *sessionImpl) evaluateTriggers(
 		// exclusively.
 		if response.StatusCode != domain.StatusSUCCESS {
 			if agent.OnFailure == "halt" {
-				return true, false, nil
+				return true, false, nil, nil
 			}
 			// continue policy: record the failure and proceed.
+		} else if agent.Class == "review" {
+			// Accumulate review signal: overwrite on each successful review so
+			// the last successful review's message is used for the consultation.
+			reviewSignal = &reviewConsultSignal{StatusMessage: response.StatusMessage}
 		}
 	}
-	return false, false, nil
+	return false, false, reviewSignal, nil
 }
 
 // validateAndApplyOverrides validates each infrastructure_overrides entry

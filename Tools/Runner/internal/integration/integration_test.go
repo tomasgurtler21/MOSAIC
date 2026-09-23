@@ -2310,6 +2310,7 @@ func TestIntegration_InfrastructureAgent_MidWorkflow_RunsToCorrectEnd(t *testing
 		filepath.Join(sessionTestdataDir, "interval-agent-orch.md"))
 	writeAgentFile(t, dir, "agent-a")
 	writeAgentFile(t, dir, "agent-b")
+	writeAgentFile(t, dir, "checkpoint-manager-git")
 
 	f := harness.NewFakeAdapter()
 	f.Queue("agent-a", harness.ScriptedEntry{Response: &domain.ProtocolResponse{
@@ -2384,6 +2385,7 @@ func TestIntegration_InfrastructureAgent_ResumeAfterCleanStop_NotMisdiagnosedAsI
 		filepath.Join(sessionTestdataDir, "interval-agent-orch.md"))
 	writeAgentFile(t, dir, "agent-a")
 	writeAgentFile(t, dir, "agent-b")
+	writeAgentFile(t, dir, "checkpoint-manager-git")
 
 	// On disk: agent-a completed, then checkpoint-manager-git fired cleanly
 	// afterward. Per the fix, current_state still names agent-a (the last
@@ -2476,6 +2478,7 @@ func TestIntegration_InfrastructureAgent_InterruptedAfterActivity_ResumesCorrect
 		filepath.Join(sessionTestdataDir, "interval-agent-orch.md"))
 	writeAgentFile(t, dir, "agent-a")
 	writeAgentFile(t, dir, "agent-b")
+	writeAgentFile(t, dir, "checkpoint-manager-git")
 
 	// On disk: agent-a completed and is recorded in current_state.
 	// checkpoint-manager-git then fired (does not move current_state). agent-b

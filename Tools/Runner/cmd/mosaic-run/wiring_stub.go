@@ -1,25 +1,45 @@
 package main
 
 import (
+	"context"
 	"errors"
 	"fmt"
 	"os"
+	"os/exec"
 	"path/filepath"
 
 	"mosaic-run/internal/artifact"
+	"mosaic-run/internal/debuglog"
 	"mosaic-run/internal/deviation"
 	"mosaic-run/internal/domain"
 	"mosaic-run/internal/harness"
 	"mosaic-run/internal/session"
+	"mosaic-run/internal/testcatalog"
+	"mosaic-run/internal/testcheck"
+	"mosaic-run/internal/testdeploy"
+	"mosaic-run/internal/testrun"
 	"mosaic-run/internal/tui"
 	"mosaic-run/internal/tui/screens"
 )
 
+// resolveAndAnnounceFn is the package-level seam for harness binary resolution in
+// the TUI factory. Tests override this variable to inject failures without
+// executing real resolution.
+var resolveAndAnnounceFn = testrun.ResolveAndAnnounce
+
+// orchRunFn is the package-level seam for Orchestrator.Run in the TUI factory.
+// Tests override this variable to inject orchestration results (normal-path or
+// error-path) without constructing a real deployer, subprocess invoker, or
+// orchestrator. The default delegates to the concrete Run method unchanged.
+var orchRunFn = func(orch *testrun.Orchestrator, ctx context.Context, cfg testrun.TestConfig) (*testrun.TestSummary, error) {
+	return orch.Run(ctx, cfg)
+}
+
 // interactiveWiringInput carries the process-scoped values runTUIMode hoists
 // and hands to the seam. Everything here is constructed once per process.
 type interactiveWiringInput struct {
-	// ClaudePath is the pre-scanned --claude-path value.
-	ClaudePath string
+	// ExecutablePath is the pre-scanned --executable-path value.
+	ExecutablePath string
 
 	// ProgramRef is the Interaction port, shared by the TUI and the session.
 	ProgramRef *tui.ProgramRef
@@ -60,6 +80,10 @@ type interactiveWiringInput struct {
 	// Nil is permitted (the field is nil-safe in the TUI), so a test may leave
 	// it unset; production must not.
 	OnRunIDResolved func(runID string)
+
+	// DevMode enables the test-mode flow in the TUI. Passed through verbatim to
+	// tui.Options.DevMode. When true, the TUI exposes a "Run Tests" option.
+	DevMode bool
 }
 
 // interactiveWiring is the assembled interactive composition. Both fields are
@@ -98,7 +122,7 @@ func buildInteractiveWiring(in interactiveWiringInput) interactiveWiring {
 		// retrying with a different executable actually takes effect.
 		execPath := cfg.ExecutablePath
 		if execPath == "" {
-			execPath = in.ClaudePath
+			execPath = in.ExecutablePath
 		}
 		h := buildAdapter(cfg.Harness, execPath, cfg.GHCPCLIMode, cfg.Timeout, in.Debug)
 
@@ -153,6 +177,7 @@ func buildInteractiveWiring(in interactiveWiringInput) interactiveWiring {
 			IsNewRun:           in.Identity.IsNewRun,
 			RecordedWorkflowID: domain.WorkflowID(in.Identity.Workflow),
 			InitialRunFolder:   in.Identity.RunFolder,
+			DevMode:            in.DevMode,
 			SessionFactory: func(runFolder string, isNewRun bool, orchFile string, cfg screens.ConfigSelection) session.Session {
 				return session.New(newDeps(runFolder, isNewRun, orchFile, cfg))
 			},
@@ -161,14 +186,99 @@ func buildInteractiveWiring(in interactiveWiringInput) interactiveWiring {
 			ArtifactStoreFactory: func(runFolder string) domain.ArtifactStore {
 				return newLoggedArtifactStore(filepath.Join(runFolder, "Orchestration.md"), in.Debug)
 			},
-			Clock:           in.Clock,
-			OnRunIDResolved: in.OnRunIDResolved,
-			StopSignal:      in.StopSignal,
-			Debug:           in.Debug,
-			ToolVersion:     ToolVersion,
+			Clock:              in.Clock,
+			OnRunIDResolved:    in.OnRunIDResolved,
+			StopSignal:         in.StopSignal,
+			Debug:              in.Debug,
+			ToolVersion:        ToolVersion,
+			TestCatalogLoader:  buildTestCatalogLoader(),
+			TestRunnerFactory:  buildTestRunnerFactory(),
 		},
 		NewDeps: newDeps,
 	}
+}
+
+// buildTestCatalogLoader returns the production catalog loader function: it
+// loads a *testcatalog.Catalog from the given catalog root directory and
+// returns it as a testrun.CatalogPort.
+func buildTestCatalogLoader() func(catalogRoot string) (testrun.CatalogPort, error) {
+	return func(catalogRoot string) (testrun.CatalogPort, error) {
+		return testcatalog.Load(catalogRoot)
+	}
+}
+
+// buildTestRunnerFactory returns the production test runner factory function.
+// It constructs the Orchestrator and all its dependencies (Deployer,
+// SubprocessRunInvoker, checker adapter, debug logger) and runs the test flow.
+func buildTestRunnerFactory() func(ctx context.Context, cfg testrun.TestConfig, reporter testrun.ProgressReporter) (*testrun.TestSummary, error) {
+	return func(ctx context.Context, cfg testrun.TestConfig, reporter testrun.ProgressReporter) (*testrun.TestSummary, error) {
+		catRoot := filepath.Join(cfg.MosaicRoot, "Tools", "Runner", "TestCatalog")
+		cat, err := testcatalog.Load(catRoot)
+		if err != nil {
+			return nil, fmt.Errorf("loading test catalog: %w", err)
+		}
+
+		deployer := testdeploy.New(testdeploy.Options{})
+		logger := debuglog.New(cfg.Workspace)
+
+		// Resolve harness binaries before constructing the orchestrator. On failure,
+		// return (nil, error) so app.go maps it to TestSummary{DeployError: err}.
+		resolvedPaths, resolveErr := resolveAndAnnounceFn(cfg.Harnesses, exec.LookPath, nil, logger)
+		if resolveErr != nil {
+			return nil, resolveErr
+		}
+		cfg.ResolvedPaths = resolvedPaths
+
+		// Notify the TUI of resolved paths via the optional ResolvedPathsReporter
+		// interface. This type assertion is safe: reporters that do not implement
+		// the interface simply skip the notification.
+		if rpr, ok := reporter.(testrun.ResolvedPathsReporter); ok {
+			rpr.OnResolvedPaths(resolvedPaths, testrun.HarnessDisplayOrder(cfg.Harnesses))
+		}
+
+		invoker := testrun.NewSubprocessRunInvoker(testrun.RunInvokerOptions{
+			WorkingDir:  cfg.Workspace,
+			DebugLogger: logger,
+		})
+
+		orch := testrun.NewOrchestrator(testrun.OrchestratorDeps{
+			Catalog:    cat,
+			Deployer:   deployer,
+			RunInvoker: invoker,
+			Checker:    &testCheckerAdapter{},
+			Reporter:   reporter,
+		})
+
+		summary, runErr := orchRunFn(orch, ctx, cfg)
+		// Propagate ResolvedPaths and LogPath onto the summary so the TUI results
+		// screen can display them regardless of how the run ended.
+		if summary != nil {
+			summary.LogPath = logger.Path()
+			summary.ResolvedPaths = cfg.ResolvedPaths
+		} else if runErr != nil {
+			// Factory builds its own fallback when orch.Run returns (nil, error)
+			// after resolution succeeded. This ensures ResolvedPaths survives
+			// on the fallback summary (AC4.11).
+			summary = &testrun.TestSummary{
+				DeployError:   runErr,
+				ResolvedPaths: cfg.ResolvedPaths,
+				LogPath:       logger.Path(),
+			}
+		}
+		return summary, runErr
+	}
+}
+
+// testCheckerAdapter adapts the testcheck package-level functions to the
+// testrun.CheckerPort interface expected by the Orchestrator.
+type testCheckerAdapter struct{}
+
+func (a *testCheckerAdapter) Check(actual testcheck.CheckInput, expected *testcheck.ExpectedOutcome) testcheck.CheckResult {
+	return testcheck.Check(actual, expected)
+}
+
+func (a *testCheckerAdapter) LoadExpected(path string) (*testcheck.ExpectedOutcome, error) {
+	return testcheck.LoadExpected(path)
 }
 
 // buildDeps constructs the session's routing consultant, manual resolver,

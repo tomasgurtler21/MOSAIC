@@ -10,6 +10,8 @@ referenced_agents:
 artifacts:
   - MosaicTestScript/hitl-glob-check.md
   - Stage-*/HITLGlobStage.md
+modes:
+  - orchestrated
 ---
 
 <Workflow type="core" name="hitl-glob-staged" version="1.0">
@@ -63,11 +65,11 @@ Five Orchestration.md log rows.
 
 | Log `Seq` | `Agent` | Kind | `Phase` | `Status` | `Summary` shows |
 |:---:|---|---|---|---|---|
-| 1 | `orchestrator-script#1` | consultation | - | SUCCESS | step-one task description |
+| 1 | `orchestrator-script#1` | consultation | - | "" | step-one task description |
 | 2 | `mosaictest-scripted#1` | workflow step | VALIDATION | SUCCESS | dispatch 1 / hitl=false / stage glob paths ready |
-| 3 | `orchestrator-script#3` | consultation | - | SUCCESS | step-two task description with hitl override |
+| 3 | `orchestrator-script#3` | consultation | - | "" | step-two task description with hitl override |
 | 4 | `mosaictest-scripted#2` | workflow step | VALIDATION | BLOCKED | E503 / human_in_the_loop=true as designed |
-| 5 | `orchestrator-script#5` | consultation | - | SUCCESS | stop reason |
+| 5 | `orchestrator-script#5` | consultation | - | "" | stop reason |
 
 **Run outcome:** `RunStoppedByConsultant`. The orchestrator ends the run after the BLOCKED from dispatch 2.
 

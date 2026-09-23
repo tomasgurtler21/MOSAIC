@@ -322,78 +322,78 @@ func TestHasPositionalArg_SingleDashArgs_AreNotPositional(t *testing.T) {
 // scanFlag
 //
 // scanFlag is the pre-scan helper that extracts flag values from os.Args before
-// cobra parses them. It is used in main() to pick up --claude-path, --harness,
+// cobra parses them. It is used in main() to pick up --executable-path, --harness,
 // --timeout, and --orchestrator-file before the session is constructed.
 //
-// These tests focus on --claude-path propagation (review issue: AC3.4 propagation
+// These tests focus on --executable-path propagation (review issue: AC3.4 propagation
 // was only validated by code inspection, not by a test). They confirm that scanFlag
 // reads the value correctly in both "--flag value" and "--flag=value" forms, which
-// is the entire mechanism by which the user's --claude-path reaches
+// is the entire mechanism by which the user's --executable-path reaches
 // harness.NewClaudeCodeAdapter in main().
 // ---------------------------------------------------------------------------
 
 func TestScanFlag_SpaceSeparated_ReturnsValue(t *testing.T) {
-	// "--claude-path /usr/local/bin/claude" form — most common shell form.
-	got := scanFlag([]string{"run", "--claude-path", "/usr/local/bin/claude"}, "--claude-path")
+	// "--executable-path /usr/local/bin/claude" form — most common shell form.
+	got := scanFlag([]string{"run", "--executable-path", "/usr/local/bin/claude"}, "--executable-path")
 	if got != "/usr/local/bin/claude" {
 		t.Errorf("scanFlag space-separated = %q, want %q", got, "/usr/local/bin/claude")
 	}
 }
 
 func TestScanFlag_EqualsSeparated_ReturnsValue(t *testing.T) {
-	// "--claude-path=/usr/local/bin/claude" form — shell quoting alternative.
-	got := scanFlag([]string{"run", "--claude-path=/usr/local/bin/claude"}, "--claude-path")
+	// "--executable-path=/usr/local/bin/claude" form — shell quoting alternative.
+	got := scanFlag([]string{"run", "--executable-path=/usr/local/bin/claude"}, "--executable-path")
 	if got != "/usr/local/bin/claude" {
 		t.Errorf("scanFlag equals-separated = %q, want %q", got, "/usr/local/bin/claude")
 	}
 }
 
 func TestScanFlag_FlagAbsent_ReturnsEmpty(t *testing.T) {
-	// When --claude-path is omitted, scanFlag returns "". main() then substitutes
-	// the default value "claude", which NewClaudeCodeAdapter receives.
-	got := scanFlag([]string{"run", "--harness", "claude-code"}, "--claude-path")
+	// When --executable-path is omitted, scanFlag returns "". buildAdapter then
+	// substitutes the per-harness default value, which NewClaudeCodeAdapter receives.
+	got := scanFlag([]string{"run", "--harness", "claude-code"}, "--executable-path")
 	if got != "" {
 		t.Errorf("scanFlag absent flag = %q, want empty string", got)
 	}
 }
 
 func TestScanFlag_EmptyArgs_ReturnsEmpty(t *testing.T) {
-	got := scanFlag([]string{}, "--claude-path")
+	got := scanFlag([]string{}, "--executable-path")
 	if got != "" {
 		t.Errorf("scanFlag empty args = %q, want empty string", got)
 	}
 }
 
 func TestScanFlag_FlagWithNoFollowingValue_ReturnsEmpty(t *testing.T) {
-	// "--claude-path" appears as the last arg with no value token — scanFlag
+	// "--executable-path" appears as the last arg with no value token — scanFlag
 	// must not panic and must return "".
-	got := scanFlag([]string{"run", "--claude-path"}, "--claude-path")
+	got := scanFlag([]string{"run", "--executable-path"}, "--executable-path")
 	if got != "" {
 		t.Errorf("scanFlag flag with no value = %q, want empty string", got)
 	}
 }
 
 func TestScanFlag_FlagAmongMixedArgs_ReturnsValue(t *testing.T) {
-	// Verifies scanFlag correctly finds --claude-path among other flags, which
+	// Verifies scanFlag correctly finds --executable-path among other flags, which
 	// mirrors real invocations like: mosaic-run run --harness claude-code
-	// --orchestrator-file orch.md --claude-path /custom/claude --workflow w1 ...
+	// --orchestrator-file orch.md --executable-path /custom/claude --workflow w1 ...
 	args := []string{
 		"run",
 		"--harness", "claude-code",
 		"--orchestrator-file", "orch.md",
-		"--claude-path", "/custom/claude",
+		"--executable-path", "/custom/claude",
 		"--workflow", "w1",
 	}
-	got := scanFlag(args, "--claude-path")
+	got := scanFlag(args, "--executable-path")
 	if got != "/custom/claude" {
 		t.Errorf("scanFlag among mixed args = %q, want %q", got, "/custom/claude")
 	}
 }
 
 func TestScanFlag_PartialPrefixDoesNotMatch(t *testing.T) {
-	// "--claude-pathx" must not match "--claude-path" for the space-separated
+	// "--executable-pathx" must not match "--executable-path" for the space-separated
 	// form. The flag check uses exact equality, not prefix matching.
-	got := scanFlag([]string{"--claude-pathx", "/should-not-match"}, "--claude-path")
+	got := scanFlag([]string{"--executable-pathx", "/should-not-match"}, "--executable-path")
 	if got != "" {
 		t.Errorf("scanFlag partial prefix match = %q, want empty string", got)
 	}
@@ -469,7 +469,7 @@ func TestBuildAdapter_ClaudeCode_ZeroTimeoutDefaultsTo30Min(t *testing.T) {
 }
 
 // TestBuildAdapter_ClaudeCode_DefaultPath verifies that using the default
-// executable path ("claude", the value main() substitutes when --claude-path
+// executable path ("claude", the value buildAdapter substitutes when --executable-path
 // is absent) produces a valid ClaudeCodeAdapter. This closes AC3.4's default
 // propagation gap.
 func TestBuildAdapter_ClaudeCode_DefaultPath(t *testing.T) {
@@ -1973,7 +1973,7 @@ func writeAgentFileForMain(t *testing.T, dir, agentID string) {
 //
 // buildAdapter is the sole owner of per-harness executable defaulting. When
 // the caller supplies "" as the executable override (i.e. the user did not
-// pass --claude-path), each harness must resolve its own default:
+// pass --executable-path), each harness must resolve its own default:
 //
 //   claude-code → "claude"
 //   opencode    → "opencode"
@@ -2083,9 +2083,9 @@ func TestBuildAdapter_OpenCode_NoOverride_DoesNotResolveClaude(t *testing.T) {
 }
 
 // ---------------------------------------------------------------------------
-// T4.2: Explicit --claude-path override applies to every non-fake harness
+// T4.2: Explicit --executable-path override applies to every non-fake harness
 //
-// When the user supplies --claude-path, that value must be passed through as
+// When the user supplies --executable-path, that value must be passed through as
 // the executable path for whichever harness --harness selected, overriding the
 // per-harness default. These tests verify the override takes effect for all
 // three real harnesses.
@@ -2167,9 +2167,9 @@ func TestBuildAdapter_AllRealHarnesses_OverrideWinsOverDefault(t *testing.T) {
 // T4.3: Regression — both CLI and TUI entry-path pre-scans
 //
 // The CLI entry path (runCLIMode) and the TUI entry path (runTUIMode) both
-// pre-scan --claude-path via scanFlag before calling buildAdapter. After the
+// pre-scan --executable-path via scanFlag before calling buildAdapter. After the
 // fix, neither pre-scan may substitute a literal "claude" fallback; an absent
-// --claude-path must arrive at buildAdapter as "" so the per-harness default
+// --executable-path must arrive at buildAdapter as "" so the per-harness default
 // applies.
 //
 // These tests pin the seam between scanFlag and buildAdapter: they simulate
@@ -2177,7 +2177,7 @@ func TestBuildAdapter_AllRealHarnesses_OverrideWinsOverDefault(t *testing.T) {
 // executable. Since both frontends use the same scanFlag helper, a single set
 // of composition tests covers both paths.
 //
-// The cobra --claude-path flag default must also agree: if cobra defaults to
+// The cobra --executable-path flag default must also agree: if cobra defaults to
 // "" and scanFlag returns "" for an absent flag, the two sources agree on
 // "not supplied" meaning empty string. The cobra flag default is changed in
 // I4.3 (run.go); its correctness is pinned here through the composition tests
@@ -2185,67 +2185,63 @@ func TestBuildAdapter_AllRealHarnesses_OverrideWinsOverDefault(t *testing.T) {
 // before buildAdapter.
 // ---------------------------------------------------------------------------
 
-// TestPreScanComposition_GHCPCli_AbsentClaudePath_ResolvesCopilot simulates
-// the post-fix CLI/TUI entry-path composition: scanFlag finds no --claude-path
+// TestPreScanComposition_GHCPCli_AbsentExecPath_ResolvesCopilot simulates
+// the post-fix CLI/TUI entry-path composition: scanFlag finds no --executable-path
 // in args and returns "", which is passed directly to buildAdapter (no fallback
 // injection). The ghcp-cli adapter must resolve to "copilot".
 //
-// Regression: if the pre-scan re-introduces `if claudePath == "" { claudePath
+// Regression: if the pre-scan re-introduces `if execPath == "" { execPath
 // = "claude" }`, then buildAdapter("ghcp-cli", "claude", ...) would return
 // "claude" (overriding the per-harness default), and this test would fail.
-func TestPreScanComposition_GHCPCli_AbsentClaudePath_ResolvesCopilot(t *testing.T) {
+func TestPreScanComposition_GHCPCli_AbsentExecPath_ResolvesCopilot(t *testing.T) {
 	args := []string{"run", "--harness", commonharness.HarnessIDGHCPCLI}
 
 	// Simulate the post-fix entry-path composition: scanFlag returns "" for an
 	// absent flag, which must be passed as-is to buildAdapter (no substitution).
-	claudePath := scanFlag(args, "--claude-path")
-	if claudePath != "" {
+	execPath := scanFlag(args, "--executable-path")
+	if execPath != "" {
 		// scanFlag itself is not the regression risk; the fallback injection is.
 		// Document the invariant explicitly.
-		t.Fatalf("scanFlag returned %q for absent --claude-path; want empty string — "+
-			"scanFlag must not inject a default, only the entry-path fallback code does", claudePath)
+		t.Fatalf("scanFlag returned %q for absent --executable-path; want empty string — "+
+			"scanFlag must not inject a default, only the entry-path fallback code does", execPath)
 	}
 
-	h := buildAdapter(commonharness.HarnessIDGHCPCLI, claudePath, "blanket", 30*time.Minute)
+	h := buildAdapter(commonharness.HarnessIDGHCPCLI, execPath, "blanket", 30*time.Minute)
 	rev := requireExecutableRevealer(t, h)
 
 	if got := rev.ExecutablePath(); got != "copilot" {
-		t.Errorf("CLI/TUI composition: absent --claude-path + buildAdapter(ghcp-cli) ExecutablePath() = %q, want %q; "+
+		t.Errorf("CLI/TUI composition: absent --executable-path + buildAdapter(ghcp-cli) ExecutablePath() = %q, want %q; "+
 			"neither entry path may inject a cross-harness literal before calling buildAdapter",
 			got, "copilot")
 	}
 }
 
-// TestPreScanComposition_OpenCode_AbsentClaudePath_ResolvesOpenCode simulates
+// TestPreScanComposition_OpenCode_AbsentExecPath_ResolvesOpenCode simulates
 // the post-fix entry-path composition for the opencode harness.
-func TestPreScanComposition_OpenCode_AbsentClaudePath_ResolvesOpenCode(t *testing.T) {
+func TestPreScanComposition_OpenCode_AbsentExecPath_ResolvesOpenCode(t *testing.T) {
 	args := []string{"run", "--harness", commonharness.HarnessIDOpenCode}
-	claudePath := scanFlag(args, "--claude-path")
+	execPath := scanFlag(args, "--executable-path")
 
-	h := buildAdapter(commonharness.HarnessIDOpenCode, claudePath, "", 30*time.Minute)
+	h := buildAdapter(commonharness.HarnessIDOpenCode, execPath, "", 30*time.Minute)
 	rev := requireExecutableRevealer(t, h)
 
 	if got := rev.ExecutablePath(); got != "opencode" {
-		t.Errorf("CLI/TUI composition: absent --claude-path + buildAdapter(opencode) ExecutablePath() = %q, want %q",
+		t.Errorf("CLI/TUI composition: absent --executable-path + buildAdapter(opencode) ExecutablePath() = %q, want %q",
 			got, "opencode")
 	}
 }
 
-// TestPreScanComposition_ClaudeCode_AbsentClaudePath_ResolvesDefaultClaude
+// TestPreScanComposition_ClaudeCode_AbsentExecPath_ResolvesDefaultClaude
 // simulates the post-fix entry-path composition for the claude-code harness.
-//
-// RED: once no literal fallback injection exists and buildAdapter gains the
-// "if override == ''" guard for claude-code (I4.1, I4.2, I4.4), this becomes
-// GREEN. Until then it fails because buildAdapter passes "" directly.
-func TestPreScanComposition_ClaudeCode_AbsentClaudePath_ResolvesDefaultClaude(t *testing.T) {
+func TestPreScanComposition_ClaudeCode_AbsentExecPath_ResolvesDefaultClaude(t *testing.T) {
 	args := []string{"run", "--harness", commonharness.HarnessIDClaudeCode}
-	claudePath := scanFlag(args, "--claude-path")
+	execPath := scanFlag(args, "--executable-path")
 
-	h := buildAdapter(commonharness.HarnessIDClaudeCode, claudePath, "", 30*time.Minute)
+	h := buildAdapter(commonharness.HarnessIDClaudeCode, execPath, "", 30*time.Minute)
 	rev := requireExecutableRevealer(t, h)
 
 	if got := rev.ExecutablePath(); got != "claude" {
-		t.Errorf("CLI/TUI composition: absent --claude-path + buildAdapter(claude-code) ExecutablePath() = %q, want %q",
+		t.Errorf("CLI/TUI composition: absent --executable-path + buildAdapter(claude-code) ExecutablePath() = %q, want %q",
 			got, "claude")
 	}
 }
@@ -2256,12 +2252,10 @@ func TestPreScanComposition_ClaudeCode_AbsentClaudePath_ResolvesDefaultClaude(t 
 // This is the table-driven form of the individual composition tests above.
 func TestPreScanComposition_CLIAndTUI_ProduceSameResolution(t *testing.T) {
 	cases := []struct {
-		harnessID   string
-		wantExe     string
+		harnessID string
+		wantExe   string
 	}{
-		// claude-code is intentionally omitted from the "already correct" cases:
-		// its expected behavior (resolving "claude") is RED until I4.4 adds
-		// the empty-string guard. The opencode and ghcp-cli cases are GREEN pins.
+		{commonharness.HarnessIDClaudeCode, "claude"},
 		{commonharness.HarnessIDOpenCode, "opencode"},
 		{commonharness.HarnessIDGHCPCLI, "copilot"},
 	}
@@ -2269,10 +2263,10 @@ func TestPreScanComposition_CLIAndTUI_ProduceSameResolution(t *testing.T) {
 		tc := tc
 		t.Run(tc.harnessID, func(t *testing.T) {
 			args := []string{"run", "--harness", tc.harnessID}
-			claudePath := scanFlag(args, "--claude-path")
+			execPath := scanFlag(args, "--executable-path")
 
-			cliH := buildAdapter(tc.harnessID, claudePath, "", 30*time.Minute)
-			tuiH := buildAdapter(tc.harnessID, claudePath, "", 30*time.Minute)
+			cliH := buildAdapter(tc.harnessID, execPath, "", 30*time.Minute)
+			tuiH := buildAdapter(tc.harnessID, execPath, "", 30*time.Minute)
 
 			cliRev := requireExecutableRevealer(t, cliH)
 			tuiRev := requireExecutableRevealer(t, tuiH)
@@ -2504,7 +2498,7 @@ func TestFR8Rejection_NonGHCPHarness_AbsentMode_NotRejected(t *testing.T) {
 //
 // Value-bearing flags (TakesValue: true) declared in internal/cli/run.go:
 //   --orchestrator-file, --workflow, --task, --mode, --checkpoints, --commits,
-//   --commit-branch, --run, --harness, --timeout, --claude-path, --infra-class,
+//   --commit-branch, --run, --harness, --timeout, --executable-path, --infra-class,
 //   --input
 //
 // Boolean flags (TakesValue: false):
@@ -2524,22 +2518,22 @@ func TestFR8Rejection_NonGHCPHarness_AbsentMode_NotRejected(t *testing.T) {
 // RED: the current hasPositionalArg sees any non-flag token as positional, so
 // it returns true for "/usr/local/bin/claude" even though it is a flag value.
 func TestHasPositionalArg_ValueBearing_SpaceSeparated_ValueNotPositional(t *testing.T) {
-	if hasPositionalArg([]string{"--claude-path", "/usr/local/bin/claude"}) {
-		t.Error("hasPositionalArg([--claude-path /usr/local/bin/claude]) = true, want false; " +
+	if hasPositionalArg([]string{"--executable-path", "/usr/local/bin/claude"}) {
+		t.Error("hasPositionalArg([--executable-path /usr/local/bin/claude]) = true, want false; " +
 			"the value of a value-bearing flag is not a positional argument")
 	}
 }
 
 // TestHasPositionalArg_ValueBearing_WindowsPath_ValueNotPositional verifies
 // the exact scenario from the reported bug: a Windows-style path value
-// (containing backslashes and a colon) following --claude-path must not be
+// (containing backslashes and a colon) following --executable-path must not be
 // treated as a positional argument.
 //
 // RED: the current implementation returns true for the Windows path token.
 func TestHasPositionalArg_ValueBearing_WindowsPath_ValueNotPositional(t *testing.T) {
-	args := []string{"--claude-path", `C:\Users\tgurt\AppData\Roaming\npm\copilot.cmd`}
+	args := []string{"--executable-path", `C:\Users\tgurt\AppData\Roaming\npm\copilot.cmd`}
 	if hasPositionalArg(args) {
-		t.Error(`hasPositionalArg([--claude-path C:\...\copilot.cmd]) = true, want false; ` +
+		t.Error(`hasPositionalArg([--executable-path C:\...\copilot.cmd]) = true, want false; ` +
 			"a Windows-style executable path following a value-bearing flag is a flag value, not a positional argument")
 	}
 }
@@ -2552,8 +2546,8 @@ func TestHasPositionalArg_ValueBearing_WindowsPath_ValueNotPositional(t *testing
 // Currently GREEN: the existing implementation treats this correctly because
 // the whole token starts with "-". Serves as a regression pin.
 func TestHasPositionalArg_ValueBearing_EqualsSeparated_NoValueToken(t *testing.T) {
-	if hasPositionalArg([]string{`--claude-path=C:\Users\tgurt\AppData\Roaming\npm\copilot.cmd`}) {
-		t.Error("hasPositionalArg([--claude-path=...]) = true, want false; " +
+	if hasPositionalArg([]string{`--executable-path=C:\Users\tgurt\AppData\Roaming\npm\copilot.cmd`}) {
+		t.Error("hasPositionalArg([--executable-path=...]) = true, want false; " +
 			"the = form embeds the value in the flag token and must never be counted as positional")
 	}
 }
@@ -2573,8 +2567,8 @@ func TestHasPositionalArg_MultipleValueBearingFlags_SpaceSeparated_NoPositional(
 			[]string{"--harness", "claude-code", "--timeout", "45m"},
 		},
 		{
-			"harness and claude-path",
-			[]string{"--harness", "claude-code", "--claude-path", "/opt/bin/claude"},
+			"harness and executable-path",
+			[]string{"--harness", "claude-code", "--executable-path", "/opt/bin/claude"},
 		},
 		{
 			"workflow and task",
@@ -2584,7 +2578,7 @@ func TestHasPositionalArg_MultipleValueBearingFlags_SpaceSeparated_NoPositional(
 			"full realistic TUI invocation without positional",
 			[]string{
 				"--harness", "claude-code",
-				"--claude-path", `C:\Users\tgurt\AppData\Roaming\npm\claude.cmd`,
+				"--executable-path", `C:\Users\tgurt\AppData\Roaming\npm\claude.cmd`,
 				"--timeout", "30m",
 				"--mode", "auto",
 				"--new-run",
@@ -2615,8 +2609,8 @@ func TestHasPositionalArg_MultipleValueBearingFlags_SpaceSeparated_NoPositional(
 // separated value token as positional, returning different results for the
 // two forms.
 func TestHasPositionalArg_EqualsSeparatedAndSpaceSeparated_ProduceIdenticalResult(t *testing.T) {
-	spaceSep := []string{"--claude-path", "/some/claude"}
-	equalsSep := []string{"--claude-path=/some/claude"}
+	spaceSep := []string{"--executable-path", "/some/claude"}
+	equalsSep := []string{"--executable-path=/some/claude"}
 
 	gotSpace := hasPositionalArg(spaceSep)
 	gotEquals := hasPositionalArg(equalsSep)
@@ -2628,7 +2622,7 @@ func TestHasPositionalArg_EqualsSeparatedAndSpaceSeparated_ProduceIdenticalResul
 			gotSpace, gotEquals)
 	}
 	if gotSpace {
-		t.Error("hasPositionalArg([--claude-path /some/claude]) = true, want false; " +
+		t.Error("hasPositionalArg([--executable-path /some/claude]) = true, want false; " +
 			"the value token of a value-bearing flag is not a positional argument")
 	}
 }
@@ -2698,12 +2692,12 @@ func TestHasPositionalArg_BoolFlagFollowedByValueBearingFlag_NoPositional(t *tes
 // that a genuine positional argument appearing after a value-bearing flag and
 // its value is still detected. The fix must not over-skip.
 //
-// After the fix: "--claude-path /some/claude" skips the path value, but "run"
+// After the fix: "--executable-path /some/claude" skips the path value, but "run"
 // following that pair is a genuine positional and must still be detected (AC5.4).
 func TestHasPositionalArg_GenuinePositionalAfterValueBearingFlag_Detected(t *testing.T) {
-	args := []string{"--claude-path", "/some/claude", "run"}
+	args := []string{"--executable-path", "/some/claude", "run"}
 	if !hasPositionalArg(args) {
-		t.Error("hasPositionalArg([--claude-path /some/claude run]) = false, want true; " +
+		t.Error("hasPositionalArg([--executable-path /some/claude run]) = false, want true; " +
 			"\"run\" is a genuine positional argument and must be detected even after a value-bearing flag pair (AC5.4)")
 	}
 }
@@ -2730,34 +2724,34 @@ func TestHasPositionalArg_FlagOnlyInvocationNoPositional_ReturnsFalse(t *testing
 }
 
 // T5.4 — Regression: executable-path override reaches the TUI rather than
-// producing "error: unknown flag: --claude-path".
+// producing "error: unknown flag: --executable-path".
 
-// TestHasPositionalArg_ClaudePathWithWindowsValue_IsNotPositional is the direct
-// regression pin for the reported failure: passing --claude-path with a
+// TestHasPositionalArg_ExecPathWithWindowsValue_IsNotPositional is the direct
+// regression pin for the reported failure: passing --executable-path with a
 // Windows-style executable path must not be treated as a positional argument.
 // The root cause is that hasPositionalArg counted the path value as positional,
 // silently switching to CLI mode where the root cobra command does not define
-// --claude-path, producing "error: unknown flag: --claude-path".
+// --executable-path, producing "error: unknown flag: --executable-path".
 //
 // RED: the current hasPositionalArg returns true for the Windows path token.
-func TestHasPositionalArg_ClaudePathWithWindowsValue_IsNotPositional(t *testing.T) {
-	args := []string{"--claude-path", `C:\Users\tgurt\AppData\Roaming\npm\copilot.cmd`}
+func TestHasPositionalArg_ExecPathWithWindowsValue_IsNotPositional(t *testing.T) {
+	args := []string{"--executable-path", `C:\Users\tgurt\AppData\Roaming\npm\copilot.cmd`}
 	if hasPositionalArg(args) {
-		t.Error(`hasPositionalArg([--claude-path C:\...\copilot.cmd]) = true, want false; ` +
+		t.Error(`hasPositionalArg([--executable-path C:\...\copilot.cmd]) = true, want false; ` +
 			"this is the regression: the Windows path value is not a positional argument; " +
-			"treating it as one routes the invocation to CLI mode, producing \"unknown flag: --claude-path\" (AC5.6)")
+			"treating it as one routes the invocation to CLI mode, producing \"unknown flag: --executable-path\" (AC5.6)")
 	}
 }
 
-// TestWantsTUI_TUIFlagWithClaudePathOverride_AlwaysChoosesTUI verifies that
+// TestWantsTUI_TUIFlagWithExecPathOverride_AlwaysChoosesTUI verifies that
 // an explicit --tui flag forces TUI mode regardless of other arguments, including
-// a --claude-path value. This test is currently GREEN (--tui is checked before
+// an --executable-path value. This test is currently GREEN (--tui is checked before
 // hasPositionalArg). It serves as a regression pin for the --tui short-circuit.
-func TestWantsTUI_TUIFlagWithClaudePathOverride_AlwaysChoosesTUI(t *testing.T) {
-	args := []string{"--tui", "--claude-path", `C:\Users\tgurt\AppData\Roaming\npm\copilot.cmd`}
+func TestWantsTUI_TUIFlagWithExecPathOverride_AlwaysChoosesTUI(t *testing.T) {
+	args := []string{"--tui", "--executable-path", `C:\Users\tgurt\AppData\Roaming\npm\copilot.cmd`}
 	if !wantsTUI(args) {
-		t.Error("wantsTUI([--tui --claude-path ...]) = false, want true; " +
-			"--tui must force TUI mode regardless of other arguments including a --claude-path value")
+		t.Error("wantsTUI([--tui --executable-path ...]) = false, want true; " +
+			"--tui must force TUI mode regardless of other arguments including an --executable-path value")
 	}
 }
 
@@ -2777,5 +2771,205 @@ func TestWantsTUI_FlagOnlyInvocation_DoesNotShortCircuitToCLI(t *testing.T) {
 		t.Error("hasPositionalArg([--harness claude-code --timeout 30m]) = true; " +
 			"flag values are being counted as positional arguments, " +
 			"causing wantsTUI to falsely short-circuit to CLI mode for any space-separated value-bearing flag")
+	}
+}
+
+// ---------------------------------------------------------------------------
+// --dev flag pre-scan and test subcommand routing
+// ---------------------------------------------------------------------------
+
+// TestScanBoolFlag_DevFlag_Present verifies that scanBoolFlag correctly detects
+// the --dev flag when it is present in args.
+func TestScanBoolFlag_DevFlag_Present(t *testing.T) {
+	args := []string{"--dev", "test", "--catalog", "/some/path"}
+	if !scanBoolFlag(args, "--dev") {
+		t.Error("scanBoolFlag([--dev test --catalog /some/path], --dev) = false, want true")
+	}
+}
+
+// TestScanBoolFlag_DevFlag_Absent verifies that scanBoolFlag returns false
+// when --dev is not present in args.
+func TestScanBoolFlag_DevFlag_Absent(t *testing.T) {
+	args := []string{"test", "--catalog", "/some/path", "--suite", "smoke"}
+	if scanBoolFlag(args, "--dev") {
+		t.Error("scanBoolFlag(args without --dev, --dev) = true, want false")
+	}
+}
+
+// TestStripBoolFlag_RemovesDevFlag verifies that stripBoolFlag removes --dev
+// from args in all its forms.
+func TestStripBoolFlag_RemovesDevFlag(t *testing.T) {
+	cases := []struct {
+		input []string
+		want  []string
+	}{
+		{
+			input: []string{"--dev", "test", "--catalog", "/foo"},
+			want:  []string{"test", "--catalog", "/foo"},
+		},
+		{
+			input: []string{"--dev=true", "test", "--catalog", "/foo"},
+			want:  []string{"test", "--catalog", "/foo"},
+		},
+		{
+			input: []string{"--dev=false", "test"},
+			want:  []string{"test"},
+		},
+		{
+			input: []string{"test", "--catalog", "/foo"},
+			want:  []string{"test", "--catalog", "/foo"},
+		},
+	}
+	for _, tc := range cases {
+		got := stripBoolFlag(tc.input, "--dev")
+		if len(got) != len(tc.want) {
+			t.Errorf("stripBoolFlag(%v) = %v, want %v", tc.input, got, tc.want)
+			continue
+		}
+		for i := range got {
+			if got[i] != tc.want[i] {
+				t.Errorf("stripBoolFlag(%v)[%d] = %q, want %q", tc.input, i, got[i], tc.want[i])
+			}
+		}
+	}
+}
+
+// TestFirstPositionalArg_TestSubcommand verifies that firstPositionalArg
+// correctly identifies "test" as the first positional argument.
+func TestFirstPositionalArg_TestSubcommand(t *testing.T) {
+	args := []string{"test", "--catalog", "/some/path", "--suite", "smoke"}
+	got := firstPositionalArg(args)
+	if got != "test" {
+		t.Errorf("firstPositionalArg([test --catalog /some/path --suite smoke]) = %q, want \"test\"", got)
+	}
+}
+
+// TestFirstPositionalArg_RunSubcommand verifies that firstPositionalArg
+// correctly identifies "run" as the first positional argument.
+func TestFirstPositionalArg_RunSubcommand(t *testing.T) {
+	args := []string{"run", "--workflow", "w1", "--mode", "auto"}
+	got := firstPositionalArg(args)
+	if got != "run" {
+		t.Errorf("firstPositionalArg([run --workflow w1 --mode auto]) = %q, want \"run\"", got)
+	}
+}
+
+// TestFirstPositionalArg_CatalogFlagValueNotMistakenForSubcommand verifies that
+// "--catalog /some/path test ..." does not produce "/some/path" as the first
+// positional arg (which would be wrong: /some/path is a flag value).
+// This is the pre-scan compatibility test for test subcommand flags.
+func TestFirstPositionalArg_CatalogFlagValueNotMistakenForSubcommand(t *testing.T) {
+	// Flags before the subcommand: --catalog value is NOT a positional arg.
+	args := []string{"--catalog", "/some/path", "test", "--suite", "smoke"}
+	got := firstPositionalArg(args)
+	if got == "/some/path" {
+		t.Errorf("firstPositionalArg([--catalog /some/path test --suite smoke]) = %q; "+
+			"--catalog's value must not be treated as a positional argument; "+
+			"AllValueBearingFlagNames() must include --catalog", got)
+	}
+	if got != "test" {
+		t.Errorf("firstPositionalArg([--catalog /some/path test --suite smoke]) = %q, want \"test\"", got)
+	}
+}
+
+// TestFirstPositionalArg_NoSubcommand_ReturnsEmpty verifies that
+// firstPositionalArg returns "" when there is no positional argument.
+func TestFirstPositionalArg_NoSubcommand_ReturnsEmpty(t *testing.T) {
+	args := []string{"--harness", "claude-code", "--timeout", "30m"}
+	got := firstPositionalArg(args)
+	if got != "" {
+		t.Errorf("firstPositionalArg([--harness claude-code --timeout 30m]) = %q, want \"\"", got)
+	}
+}
+
+// TestFirstPositionalArg_SuiteFlagValueNotPositional verifies that --suite's
+// value "smoke" is not treated as a positional argument when --suite appears
+// before the subcommand.
+func TestFirstPositionalArg_SuiteFlagValueNotPositional(t *testing.T) {
+	// Unusual arg ordering: suite flag before subcommand name.
+	args := []string{"--suite", "smoke", "test", "--catalog", "/foo"}
+	got := firstPositionalArg(args)
+	if got == "smoke" {
+		t.Errorf("firstPositionalArg([--suite smoke test --catalog /foo]) = %q; "+
+			"--suite's value must not be treated as a positional argument", got)
+	}
+	if got != "test" {
+		t.Errorf("firstPositionalArg([--suite smoke test --catalog /foo]) = %q, want \"test\"", got)
+	}
+}
+
+// TestHasPositionalArg_TestCatalogFlagValue_NotMistakenForPositional verifies
+// that when --catalog /some/path appears (either before or after the subcommand),
+// the path value is not treated as a positional argument. This guards AC7.4.
+func TestHasPositionalArg_TestCatalogFlagValue_NotMistakenForPositional(t *testing.T) {
+	// Only flags and flag values — no genuine positional arg.
+	args := []string{"--catalog", "/some/path", "--suite", "smoke"}
+	if hasPositionalArg(args) {
+		t.Error("hasPositionalArg([--catalog /some/path --suite smoke]) = true; " +
+			"--catalog's value is being counted as a positional arg; " +
+			"AllValueBearingFlagNames() must include --catalog")
+	}
+}
+
+// ---------------------------------------------------------------------------
+// Routing gate: AC7.3 invariant
+//
+// The test subcommand must be invisible without --dev. main() implements this
+// as: `if devMode && firstPositionalArg(cobraArgs) == "test" { ... }`.
+// Individual helpers (scanBoolFlag, firstPositionalArg) are unit-tested above.
+// These tests verify the ROUTING CONDITION itself as a composite: that the
+// conjunction evaluates to false whenever --dev is absent or explicitly false,
+// even when "test" is the first positional arg. A future change that removes
+// the devMode gate (e.g. registering the test command unconditionally) would
+// break these tests even if all helper tests still pass.
+// ---------------------------------------------------------------------------
+
+// TestRoutingGate_WithoutDevFlag_DoesNotRouteToTestCommand verifies that when
+// --dev is absent from args, the routing condition used in main() evaluates to
+// false. The test subcommand must not be reached regardless of the positional arg.
+func TestRoutingGate_WithoutDevFlag_DoesNotRouteToTestCommand(t *testing.T) {
+	args := []string{"test", "--catalog", "/some/path", "--suite", "smoke"}
+
+	devMode := scanBoolFlag(args, "--dev")
+	firstArg := firstPositionalArg(args)
+
+	// Guard: confirm firstPositionalArg returns "test" so the test is
+	// meaningful — if it returned something else, the false result below
+	// would not exercise the devMode gate.
+	if firstArg != "test" {
+		t.Fatalf("firstPositionalArg = %q, want \"test\"; test setup is invalid", firstArg)
+	}
+
+	// The routing condition: devMode must be false so the gate does not open.
+	if devMode && firstArg == "test" {
+		t.Error("routing condition = true without --dev in args; " +
+			"the test subcommand must be gated on devMode, " +
+			"which must be false when --dev is absent")
+	}
+}
+
+// TestRoutingGate_WithDevEqualsFalse_DoesNotRouteToTestCommand verifies that
+// the explicit --dev=false form also keeps the routing gate closed. This covers
+// the edge case where a user passes --dev=false explicitly, which scanBoolFlag
+// must classify as false (not true). Without this test, a regression in
+// stripBoolFlag or scanBoolFlag for the =false form could silently open the gate.
+func TestRoutingGate_WithDevEqualsFalse_DoesNotRouteToTestCommand(t *testing.T) {
+	// --dev=false is stripped in main() before cobra sees it; simulate
+	// the full pre-scan pipeline: scan first, then strip.
+	rawArgs := []string{"--dev=false", "test", "--catalog", "/foo"}
+
+	devMode := scanBoolFlag(rawArgs, "--dev")
+	cobraArgs := stripBoolFlag(rawArgs, "--dev")
+	firstArg := firstPositionalArg(cobraArgs)
+
+	// Guard: confirm "test" is still identified after stripping --dev=false.
+	if firstArg != "test" {
+		t.Fatalf("firstPositionalArg after strip = %q, want \"test\"; test setup is invalid", firstArg)
+	}
+
+	// The routing condition must be false.
+	if devMode && firstArg == "test" {
+		t.Errorf("routing condition = true with --dev=false; "+
+			"scanBoolFlag([--dev=false ...], --dev) returned %v, want false", devMode)
 	}
 }

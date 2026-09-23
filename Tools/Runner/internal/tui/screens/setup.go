@@ -227,6 +227,47 @@ func (s *HarnessSelectScreen) Resize(width, height int) {
 	s.list.Resize(contentH, width)
 }
 
+// RunTestsChoiceID is the sentinel harness ID placed at the top of the
+// dev-mode harness selection screen to let the user enter the test flow.
+// When the user selects this ID, the app transitions to the test catalog
+// screen instead of the normal run setup flow.
+const RunTestsChoiceID = "run-tests"
+
+// NewHarnessSelectScreenDevMode creates the harness selection screen with an
+// additional "Run Tests" option at the top. It is used in place of
+// NewHarnessSelectScreen when DevMode is enabled.
+func NewHarnessSelectScreenDevMode(width, height int, styles Styles) *HarnessSelectScreen {
+	sels := harness.CLISelections()
+	items := make([]widgets.ListItem, 0, len(sels)+1)
+	items = append(items, widgets.ListItem{
+		ID:    RunTestsChoiceID,
+		Label: "Run Tests (test mode)",
+	})
+	for _, s := range sels {
+		items = append(items, widgets.ListItem{
+			ID:    s.ID,
+			Label: s.Label,
+		})
+	}
+	listStyles := widgets.ListStyles{
+		Normal:   styles.Body,
+		Selected: styles.Selected,
+		Disabled: styles.Muted,
+		Cursor:   "▶",
+	}
+	contentH := height - 6
+	if contentH < 1 {
+		contentH = 1
+	}
+	list := widgets.NewList(items, contentH, width, listStyles)
+	return &HarnessSelectScreen{
+		list:   list,
+		width:  width,
+		height: height,
+		styles: styles,
+	}
+}
+
 // ---------------------------------------------------------------------------
 // WorkflowSelectScreen
 // ---------------------------------------------------------------------------

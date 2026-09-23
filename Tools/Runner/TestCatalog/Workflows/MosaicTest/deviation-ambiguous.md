@@ -10,6 +10,8 @@ referenced_agents:
 artifacts:
   - MosaicTestScript/ambiguous-produce.md
   - MosaicTestAmbiguousReport.md
+modes:
+  - auto-review
 ---
 
 <Workflow type="core" name="deviation-ambiguous" version="1.0">
@@ -50,12 +52,13 @@ Unlike `deviation-blocked`, this workflow's first invocation returns `COMPLETED_
 
 ## Expected Run
 
-Three Orchestration.md log rows. A consultation appears even though the mode is Auto-review — because the hint is ambiguous.
+Four Orchestration.md log rows. A consultation appears even though the mode is Auto-review — because the hint is ambiguous.
 
 | Log `Seq` | `Agent` | Kind | `Phase` | `Status` | `Summary` shows |
 |:---:|---|---|---|---|---|
+| 0 | `orchestrator-script#pre_consultation#1` | consultation | — | "" | pre-run consultation response |
 | 1 | `mosaictest-scripted#1` | workflow step | RESEARCH | COMPLETED_NEEDS_ACTION | findings produced, marker written |
-| 2 | `orchestrator-script#2` | consultation | — | SUCCESS | the re-dispatch task description |
+| 2 | `orchestrator-script#2` | consultation | — | "" | the re-dispatch task description |
 | 3 | `mosaictest-scripted#3` | workflow step | RESEARCH | SUCCESS | marker present, echoed task description |
 
 **Run outcome:** completed normally (`RunCompleted`). The engine routed the recovery dispatch's SUCCESS to COMPLETE via On Success.

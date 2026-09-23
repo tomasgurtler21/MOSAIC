@@ -15,6 +15,7 @@ package deviation
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"sync/atomic"
 
@@ -51,6 +52,159 @@ type wireRoutingResponse struct {
 type wirePreConsultResponse struct {
 	TaskDescription string `json:"task_description"`
 	Constraints     string `json:"constraints"`
+}
+
+// wireRoutingRaw is the intermediate representation used by
+// unmarshalRoutingResponseLenient. The three fields that an LLM may emit with
+// a wrong JSON type (input_artifacts, output_artifacts, hitl_override) are
+// captured as raw bytes so the coercion step can inspect and convert them.
+// All other fields unmarshal directly into their target types.
+type wireRoutingRaw struct {
+	Action          string          `json:"action"`
+	Agent           string          `json:"agent"`
+	TaskDescription string          `json:"task_description"`
+	Constraints     *string         `json:"constraints"`
+	InputArtifacts  json.RawMessage `json:"input_artifacts"`
+	OutputArtifacts json.RawMessage `json:"output_artifacts"`
+	HITLOverride    json.RawMessage `json:"hitl_override"`
+	Reason          string          `json:"reason"`
+}
+
+// unmarshalRoutingResponseLenient decodes the extracted JSON object into a
+// wireRoutingResponse, applying type coercion for three fields where an LLM
+// may produce a type mismatch:
+//   - input_artifacts / output_artifacts: bare JSON string coerced to a
+//     single-element []string; any other non-array value is an error.
+//   - hitl_override: JSON string "true" / "false" coerced to bool; any other
+//     non-boolean value is an error.
+//
+// Absent and null fields in the three special positions remain nil pointers,
+// preserving existing fallback semantics. Genuinely uncoercible values (e.g. a
+// JSON number where an array is expected) return ConsultFailMalformedJSON.
+func unmarshalRoutingResponseLenient(data []byte) (wireRoutingResponse, error) {
+	var raw wireRoutingRaw
+	if err := json.Unmarshal(data, &raw); err != nil {
+		return wireRoutingResponse{}, &domain.ConsultationError{
+			Failure: domain.ConsultFailMalformedJSON,
+			Detail:  fmt.Sprintf("malformed routing response JSON: %v", err),
+			Err:     err,
+		}
+	}
+
+	resp := wireRoutingResponse{
+		Action:          raw.Action,
+		Agent:           raw.Agent,
+		TaskDescription: raw.TaskDescription,
+		Constraints:     raw.Constraints,
+		Reason:          raw.Reason,
+	}
+
+	var err error
+	resp.InputArtifacts, err = coerceStringSliceField("input_artifacts", raw.InputArtifacts)
+	if err != nil {
+		return wireRoutingResponse{}, err
+	}
+	resp.OutputArtifacts, err = coerceStringSliceField("output_artifacts", raw.OutputArtifacts)
+	if err != nil {
+		return wireRoutingResponse{}, err
+	}
+	resp.HITLOverride, err = coerceBoolField("hitl_override", raw.HITLOverride)
+	if err != nil {
+		return wireRoutingResponse{}, err
+	}
+
+	return resp, nil
+}
+
+// coerceStringSliceField parses raw JSON for a *[]string field. Absent/null
+// raw values yield a nil pointer. A JSON array is decoded normally. A JSON
+// string is coerced to a single-element slice. Any other JSON type returns
+// ConsultFailMalformedJSON.
+func coerceStringSliceField(fieldName string, raw json.RawMessage) (*[]string, error) {
+	if len(raw) == 0 || string(raw) == "null" {
+		return nil, nil
+	}
+	// JSON array — standard decode.
+	if raw[0] == '[' {
+		var s []string
+		if err := json.Unmarshal(raw, &s); err != nil {
+			return nil, &domain.ConsultationError{
+				Failure: domain.ConsultFailMalformedJSON,
+				Detail:  fmt.Sprintf("malformed routing response: cannot parse %s as string array: %v", fieldName, err),
+				Err:     err,
+			}
+		}
+		return &s, nil
+	}
+	// JSON string — coerce to single-element slice.
+	if raw[0] == '"' {
+		var s string
+		if err := json.Unmarshal(raw, &s); err != nil {
+			return nil, &domain.ConsultationError{
+				Failure: domain.ConsultFailMalformedJSON,
+				Detail:  fmt.Sprintf("malformed routing response: cannot parse %s as string: %v", fieldName, err),
+				Err:     err,
+			}
+		}
+		result := []string{s}
+		return &result, nil
+	}
+	// Any other JSON type (number, bool, object) cannot be coerced.
+	return nil, &domain.ConsultationError{
+		Failure: domain.ConsultFailMalformedJSON,
+		Detail:  fmt.Sprintf("malformed routing response: %s must be a string array or a bare string, got: %s", fieldName, string(raw)),
+	}
+}
+
+// coerceBoolField parses raw JSON for a *bool field. Absent/null raw values
+// yield a nil pointer. A JSON boolean is decoded normally. The JSON strings
+// "true" and "false" are coerced to the corresponding bool. Any other value
+// returns ConsultFailMalformedJSON.
+func coerceBoolField(fieldName string, raw json.RawMessage) (*bool, error) {
+	if len(raw) == 0 || string(raw) == "null" {
+		return nil, nil
+	}
+	// JSON boolean — standard decode.
+	if string(raw) == "true" || string(raw) == "false" {
+		var b bool
+		if err := json.Unmarshal(raw, &b); err != nil {
+			return nil, &domain.ConsultationError{
+				Failure: domain.ConsultFailMalformedJSON,
+				Detail:  fmt.Sprintf("malformed routing response: cannot parse %s as bool: %v", fieldName, err),
+				Err:     err,
+			}
+		}
+		return &b, nil
+	}
+	// JSON string — coerce only "true" and "false".
+	if raw[0] == '"' {
+		var s string
+		if err := json.Unmarshal(raw, &s); err != nil {
+			return nil, &domain.ConsultationError{
+				Failure: domain.ConsultFailMalformedJSON,
+				Detail:  fmt.Sprintf("malformed routing response: cannot parse %s as string: %v", fieldName, err),
+				Err:     err,
+			}
+		}
+		switch s {
+		case "true":
+			b := true
+			return &b, nil
+		case "false":
+			b := false
+			return &b, nil
+		default:
+			return nil, &domain.ConsultationError{
+				Failure: domain.ConsultFailMalformedJSON,
+				Detail:  fmt.Sprintf("malformed routing response: %s string value must be \"true\" or \"false\", got: %q", fieldName, s),
+			}
+		}
+	}
+	// Any other JSON type (number, object, array) cannot be coerced.
+	return nil, &domain.ConsultationError{
+		Failure: domain.ConsultFailMalformedJSON,
+		Detail:  fmt.Sprintf("malformed routing response: %s must be a bool or a string \"true\"/\"false\", got: %s", fieldName, string(raw)),
+	}
 }
 
 // OrchestratorConsultant implements domain.RoutingConsultant and
@@ -103,101 +257,118 @@ func (c *OrchestratorConsultant) ConsultRouting(ctx context.Context, req domain.
 		}
 	}
 
-	seq := atomic.AddUint64(&c.callSeq, 1)
-	consultationInstanceID := fmt.Sprintf("%s#%s#%d", c.Orchestrator.Identifier, req.Context, seq)
-	if c.DispatchLogger != nil {
-		c.DispatchLogger.LogRequest(domain.ProtocolRequest{
-			AgentInstanceID: consultationInstanceID,
-			TaskDescription: string(payload),
-		})
-	}
+	const maxAttempts = 3
+	var lastErr error
+	for attempt := 0; attempt < maxAttempts; attempt++ {
+		if ctx.Err() != nil {
+			return domain.RoutingInstruction{}, &domain.ConsultationError{
+				Failure: domain.ConsultFailTransport,
+				Detail:  fmt.Sprintf("context cancelled: %v", ctx.Err()),
+				Err:     ctx.Err(),
+			}
+		}
 
-	reply, err := c.Invoker.InvokeRaw(ctx, c.Orchestrator, payload)
-	if err != nil {
+		seq := atomic.AddUint64(&c.callSeq, 1)
+		consultationInstanceID := fmt.Sprintf("%s#%s#%d", c.Orchestrator.Identifier, req.Context, seq)
 		if c.DispatchLogger != nil {
-			c.DispatchLogger.LogError(consultationInstanceID, err.Error())
+			c.DispatchLogger.LogRequest(domain.ProtocolRequest{
+				AgentInstanceID: consultationInstanceID,
+				TaskDescription: string(payload),
+			})
 		}
-		return domain.RoutingInstruction{}, &domain.ConsultationError{
-			Failure: domain.ConsultFailTransport,
-			Detail:  fmt.Sprintf("InvokeRaw failed: %v", err),
-			Err:     err,
-		}
-	}
-	if c.DispatchLogger != nil {
-		c.DispatchLogger.LogResponse(domain.ProtocolResponse{
-			AgentInstanceID: consultationInstanceID,
-			StatusMessage:   string(reply),
-		})
-	}
 
-	extracted, err := ExtractJSONObject(reply)
-	if err != nil {
-		return domain.RoutingInstruction{}, err
-	}
-	var resp wireRoutingResponse
-	if err := json.Unmarshal(extracted, &resp); err != nil {
-		return domain.RoutingInstruction{}, &domain.ConsultationError{
-			Failure: domain.ConsultFailMalformedJSON,
-			Detail:  fmt.Sprintf("malformed routing response JSON: %v", err),
-			Err:     err,
+		reply, err := c.Invoker.InvokeRaw(ctx, c.Orchestrator, payload)
+		if err != nil {
+			if c.DispatchLogger != nil {
+				c.DispatchLogger.LogError(consultationInstanceID, err.Error())
+			}
+			return domain.RoutingInstruction{}, &domain.ConsultationError{
+				Failure: domain.ConsultFailTransport,
+				Detail:  fmt.Sprintf("InvokeRaw failed: %v", err),
+				Err:     err,
+			}
 		}
-	}
+		if c.DispatchLogger != nil {
+			c.DispatchLogger.LogResponse(domain.ProtocolResponse{
+				AgentInstanceID: consultationInstanceID,
+				StatusMessage:   string(reply),
+			})
+		}
 
-	switch resp.Action {
-	case "dispatch":
-		if resp.Agent == "" {
-			return domain.RoutingInstruction{}, &domain.ConsultationError{
-				Failure: domain.ConsultFailMissingField,
-				Detail:  "missing required field: agent",
-			}
+		extracted, extractErr := ExtractJSONObject(reply)
+		if extractErr != nil {
+			return domain.RoutingInstruction{}, extractErr
 		}
-		if resp.TaskDescription == "" {
-			return domain.RoutingInstruction{}, &domain.ConsultationError{
-				Failure: domain.ConsultFailMissingField,
-				Detail:  "missing required field: task_description",
+		resp, parseErr := unmarshalRoutingResponseLenient(extracted)
+		if parseErr != nil {
+			var ce *domain.ConsultationError
+			if errors.As(parseErr, &ce) && ce.Failure == domain.ConsultFailMalformedJSON {
+				if c.DispatchLogger != nil {
+					c.DispatchLogger.LogError(consultationInstanceID, parseErr.Error())
+				}
+				lastErr = parseErr
+				continue
 			}
+			return domain.RoutingInstruction{}, parseErr
 		}
-		rowIndex := -1
-		for _, row := range c.Table.Rows {
-			if row.Agent == resp.Agent {
-				rowIndex = row.Index
-				break
+
+		switch resp.Action {
+		case "dispatch":
+			if resp.Agent == "" {
+				return domain.RoutingInstruction{}, &domain.ConsultationError{
+					Failure: domain.ConsultFailMissingField,
+					Detail:  "missing required field: agent",
+				}
 			}
-		}
-		if rowIndex == -1 {
-			agents := make([]string, 0, len(c.Table.Rows))
+			if resp.TaskDescription == "" {
+				return domain.RoutingInstruction{}, &domain.ConsultationError{
+					Failure: domain.ConsultFailMissingField,
+					Detail:  "missing required field: task_description",
+				}
+			}
+			rowIndex := -1
 			for _, row := range c.Table.Rows {
-				agents = append(agents, row.Agent)
+				if row.Agent == resp.Agent {
+					rowIndex = row.Index
+					break
+				}
 			}
+			if rowIndex == -1 {
+				agents := make([]string, 0, len(c.Table.Rows))
+				for _, row := range c.Table.Rows {
+					agents = append(agents, row.Agent)
+				}
+				return domain.RoutingInstruction{}, &domain.ConsultationError{
+					Failure: domain.ConsultFailUnknownAgent,
+					Detail:  fmt.Sprintf("agent %q not found in routing table; available: %v", resp.Agent, agents),
+					Agents:  agents,
+				}
+			}
+			return domain.RoutingInstruction{
+				Dispatch: &domain.DispatchInstruction{
+					Agent:           resp.Agent,
+					RowIndex:        rowIndex,
+					TaskDescription: resp.TaskDescription,
+					Constraints:     resp.Constraints,
+					InputArtifacts:  resp.InputArtifacts,
+					OutputArtifacts: resp.OutputArtifacts,
+					HITLOverride:    resp.HITLOverride,
+				},
+			}, nil
+
+		case "stop":
+			return domain.RoutingInstruction{
+				Stop: &domain.StopInstruction{Reason: resp.Reason},
+			}, nil
+
+		default:
 			return domain.RoutingInstruction{}, &domain.ConsultationError{
-				Failure: domain.ConsultFailUnknownAgent,
-				Detail:  fmt.Sprintf("agent %q not found in routing table; available: %v", resp.Agent, agents),
-				Agents:  agents,
+				Failure: domain.ConsultFailUnknownAction,
+				Detail:  fmt.Sprintf("unknown action %q (valid: dispatch, stop)", resp.Action),
 			}
-		}
-		return domain.RoutingInstruction{
-			Dispatch: &domain.DispatchInstruction{
-				Agent:           resp.Agent,
-				RowIndex:        rowIndex,
-				TaskDescription: resp.TaskDescription,
-				Constraints:     resp.Constraints,
-				InputArtifacts:  resp.InputArtifacts,
-				OutputArtifacts: resp.OutputArtifacts,
-				HITLOverride:    resp.HITLOverride,
-			},
-		}, nil
-
-	case "stop":
-		return domain.RoutingInstruction{
-			Stop: &domain.StopInstruction{Reason: resp.Reason},
-		}, nil
-
-	default:
-		return domain.RoutingInstruction{}, &domain.ConsultationError{
-			Failure: domain.ConsultFailUnknownAction,
-			Detail:  fmt.Sprintf("unknown action %q (valid: dispatch, stop)", resp.Action),
 		}
 	}
+	return domain.RoutingInstruction{}, lastErr
 }
 
 // PreConsult implements domain.PreConsultant. It invokes the orchestrator with
