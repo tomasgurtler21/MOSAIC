@@ -1,6 +1,6 @@
 # MOSAIC
 
-Multi-agent Orchestration System for AI Collaboration — a platform-agnostic framework for orchestrating specialized AI agents through structured workflows.
+Multi-agent Orchestration System, Agnostic In Configuration — a platform-agnostic framework for orchestrating specialized AI agents through structured workflows.
 
 MOSAIC is a **framework for building multi-agent orchestration systems** — the communication protocol, the three-layer agent composition model, the workflow-as-configuration pattern, and deployment tooling that makes it all work across AI platforms. It ships reference subagents and workflows that demonstrate these principles and give you a working starting point, but the framework is the product — the catalog is how you learn to use it.
 
