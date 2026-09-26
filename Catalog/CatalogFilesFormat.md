@@ -35,7 +35,7 @@ does not apply to them.
 | `version` | semver string | Agent version. Bumped on any change to identity or hand-authored body content. Tiers in `AgentTemplateArchitecture.md` §3.4. Content arriving in a `managed` region never bumps it. |
 | `name` | string | Agent slug (matches file base name). |
 | `description` | string | One-line description shown to users. |
-| `role` | enum | `subagent` or `orchestrator`. Declares what the agent is; selects which canonical text it receives. Not `utility` — utility agents are outside the schema. |
+| `role` | enum | `subagent`, `orchestrator`, `utility`, or `standalone`. Declares what the agent is; the latter two are outside the agent-body schema and bundle. |
 | `model` | string | Model placeholder (`{model-identifier}`) or a concrete model id in a deployed file. |
 | `tools` | flow-list or placeholder | Generic tool vocabulary (`{tool-permissions}` for the orchestrator). |
 
@@ -86,23 +86,17 @@ of truth for the pairing.
 | Deployed field | Generic source field | Written by |
 |----------------|---------------------|------------|
 | `mosaic_id` | `id` | deploy transform (rename of source `id`) |
+| `mosaic_role` | `role` | deploy transform (rename of source `role`) |
+| `mosaic_version` | `version` | deploy transform (rename of source `version`) |
 | `mosaic_bundle_version` | — | deploy transform |
-| `mosaic_transform_version` | — | harness descriptor |
-| `mosaic_injections_version` | — | harness descriptor |
+| `mosaic_harness_version` | — | harness descriptor |
 | `mosaic_tool_mappings_version` | — | harness descriptor |
-| `mosaic_orchestrator_injections_version` | — | harness module (orchestrator only) |
 
-**Legacy names:** Deployed files produced before the `mosaic_` prefix was
-introduced carry the same fields without the prefix (e.g. `bundle_version`,
-`transform_version`). Every read site accepts both forms, preferring the
-prefixed name when both are present. A file carrying only legacy names is not
-spuriously stale; on the next update its fields are migrated to the prefixed
-names with values preserved, and a repeat run reports it unchanged.
-
-> **Not yet read by the tool.** `role` is specified but role is still inferred
-> from the file's path in `domain.AgentRole`, whose enum reads
-> `worker`/`orchestrator`/`utility`. The frontmatter vocabulary is `subagent`;
-> the code should follow or map explicitly at the boundary.
+**Legacy names:** Deployed files produced before the current field layout may
+carry unprefixed names (`bundle_version`, `version`, `role`) or former transform
+and injection-version fields. Read sites accept those migration forms while
+preferring the current prefixed field or managed-region version attribute. The
+next update writes the current form.
 
 ### Deployment metadata fields (added Stage 2)
 
@@ -289,21 +283,20 @@ place user-authored content inside them; it will be overwritten.
 | `ClosingProcedure` | `Identity` | Bundle |
 | `AvailableWorkflows` | `Identity` | Assembled from selected workflows |
 | `InfrastructureAgents` | `Identity` | Assembled from selected declarations |
-| `ProtocolConstraints` | `Constraints` | Bundle |
 | `HarnessConstraints` | `Constraints` | Selected harness module |
 | `ErrorHandlingCommon` | `ErrorHandling` | Bundle |
 | `ExecutionPhilosophyCommon` | `ExecutionPhilosophy` | Bundle |
 
 "Bundle" means `Catalog/DeployedSections.md`.
 
-Nine names, and every one of them names a generator that exists. A name with
+Eight names, and every one of them names a generator that exists. A name with
 nothing to fill it does not belong here — see `AgentTemplateArchitecture.md`
 §2.5.1. `LanguagePatterns` and `CustomConstraints` were listed here until
 2026-08-08 with the source "Deployment configuration", which was never a real
 mechanism; `LanguagePatterns` is now a project-declared injection name and
 `CustomConstraints` no longer exists.
 
-> **Not yet read by the tool.** The five bundle-sourced names above are
+> **Not yet read by the tool.** The four bundle-sourced names above are
 > specified but the deployment tool does not read the bundle. Until it does,
 > those regions have no content source and the agents are unmigrated.
 
@@ -312,7 +305,7 @@ mechanism; `LanguagePatterns` is now a project-declared injection name and
 | Tier | Names | Absence is |
 |------|-------|-----------|
 | Contract | `CommunicationProtocol` | Error |
-| Conduct | `AuthorityHierarchy`, `ClosingProcedure`, `ProtocolConstraints`, `ErrorHandlingCommon`, `ExecutionPhilosophyCommon` | Warning |
+| Conduct | `AuthorityHierarchy`, `ClosingProcedure`, `ErrorHandlingCommon`, `ExecutionPhilosophyCommon` | Warning |
 | Deployment | `HarnessConstraints`, `AvailableWorkflows`, `InfrastructureAgents` | Silent |
 
 A region *present* with no content source for the file's role is always an error.

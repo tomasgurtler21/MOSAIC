@@ -208,8 +208,6 @@ User Request → [Component A] → [Component B] → [Component C] → Response
 <Constraints type="core">
 ## Constraints
 
-<ProtocolConstraints type="managed">
-</ProtocolConstraints>
 - Stay within your defined role - define structure, don't plan tasks or define interfaces
 - Do NOT define method signatures - not your responsibility
 - Do NOT create task breakdowns - not your responsibility

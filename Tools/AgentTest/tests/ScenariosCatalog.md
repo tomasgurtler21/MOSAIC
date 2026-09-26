@@ -24,7 +24,7 @@ Each scenario is one verifiable routing condition. Scenarios are atomic — whet
 |----|----------|----------|--------|
 | S-1 | Reviewer returns COMPLETED_NEEDS_ACTION | Route to On Findings target, not On Success | Tested |
 | S-2 | Agent returns PARTIALLY_DONE | Re-dispatch same agent type (successor invocation), not advance to next row | Tested |
-| S-3 | Agent returns BLOCKED (E101 INPUT_NOT_FOUND) | Tier 1 auto-retry (up to 3 attempts), then Tier 2 alternative strategy | Tested |
+| S-3 | Agent returns BLOCKED (E101 REQUIRED_RESOURCE_NOT_FOUND) | Tier 1 auto-retry (up to 3 attempts), then Tier 2 alternative strategy | Tested |
 | S-4 | Agent returns BLOCKED (E501 TOOL_UNAVAILABLE) | Tier 1 auto-retry (up to 3 attempts), then Tier 2 alternative strategy | Tested |
 | S-5 | Agent returns NEEDS_CLARIFICATION | Provide context or escalate to human, not advance | Tested |
 | S-6 | Agent returns CAPABILITY_EXCEEDED | Try close alternative or escalate to human | Tested |
@@ -174,7 +174,7 @@ Detailed context for each scenario — failure modes observed, setup specifics, 
 
 ### S-3 / S-4: BLOCKED — Tiered Error Handling
 
-**Setup (S-3):** Agent returns BLOCKED with `error_code: E101` (INPUT_NOT_FOUND). E.g. `test-writer-tdd` can't find its input artifact.
+**Setup (S-3):** Agent returns BLOCKED with `error_code: E101` (REQUIRED_RESOURCE_NOT_FOUND). E.g. `test-writer-tdd` can't find its input artifact.
 
 **Setup (S-4):** Agent returns BLOCKED with `error_code: E501` (TOOL_UNAVAILABLE). E.g. build tool or test runner unavailable.
 

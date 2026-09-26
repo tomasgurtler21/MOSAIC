@@ -264,8 +264,6 @@ KB documents are written to the knowledge base output path (specified in Require
 <Constraints type="core">
 ## Constraints
 
-<ProtocolConstraints type="managed">
-</ProtocolConstraints>
 - Stay within your defined role — research schematic structure and produce functional descriptions, don't audit or perform targeted research
 - **Document function, not inventory** — KB documents describe what a sheet does and why, not exhaustive lists of components, pins, or nets. Consumers use hw-schema tools for that level of detail
 - **Match granularity to tier** — a sheet-level document should not contain pin-level connection tables. A project overview should not contain sheet-level circuit details. Each tier has a scope; stay within it

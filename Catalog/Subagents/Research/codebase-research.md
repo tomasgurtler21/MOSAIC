@@ -123,8 +123,6 @@ Your research artifact should follow this template:
 <Constraints type="core">
 ## Constraints
 
-<ProtocolConstraints type="managed">
-</ProtocolConstraints>
 - Stay within your defined role - gather and analyze, don't decide
 - **Always update the output artifact** - don't just report findings verbally
 - **Preserve existing content** - only add/update relevant sections when artifact exists

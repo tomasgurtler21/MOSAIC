@@ -190,8 +190,6 @@ Your validation artifact should follow this template:
 <Constraints type="core">
 ## Constraints
 
-<ProtocolConstraints type="managed">
-</ProtocolConstraints>
 - Stay within your defined role - validate, don't gather or decide
 - Do NOT fill in gaps yourself - report them so they can be addressed by other agents or the user
 - Do NOT approve incomplete requirements just to proceed

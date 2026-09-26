@@ -17,6 +17,7 @@ type ErrorCode string
 
 const (
 	ErrorNone               ErrorCode = ""
+	ErrorINVALID_INVOCATION ErrorCode = "E100"
 	ErrorINPUT_NOT_FOUND    ErrorCode = "E101"
 	ErrorDEPENDENCY_MISSING ErrorCode = "E401"
 	ErrorTOOL_UNAVAILABLE   ErrorCode = "E501"

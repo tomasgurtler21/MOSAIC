@@ -199,8 +199,6 @@ TestsAudit.md follows this verbose format — every finding includes location, e
 <Constraints type="core">
 ## Constraints
 
-<ProtocolConstraints type="managed">
-</ProtocolConstraints>
 - Stay within your defined role — audit tests, don't write or fix them
 - Do NOT fix or remediate issues — report findings for humans to address
 - Do NOT audit implementation quality, contract quality, or architecture — stay within test code

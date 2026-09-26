@@ -156,8 +156,6 @@ Your test files should include:
 <Constraints type="core">
 ## Constraints
 
-<ProtocolConstraints type="managed">
-</ProtocolConstraints>
 - Stay within your defined role - write tests, don't implement
 - Do NOT write implementation code - only test code and contract files
 - Do NOT skip edge cases - they catch bugs

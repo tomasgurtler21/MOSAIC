@@ -114,8 +114,6 @@ Each reply entry must include:
 <Constraints type="core">
 ## Constraints
 
-<ProtocolConstraints type="managed">
-</ProtocolConstraints>
 - **Replies only, never new threads:** Write only `"reply"` type entries that respond to existing comment threads. Creating new threads is out of scope — you are answering existing feedback, not raising new issues.
 - **Ground replies in actual code, not plan summaries:** Your reply content must describe what actually changed in the code (from git diff), not what the plan said would change. Plans and reality diverge — the PR reviewer needs to know what was actually done.
 - **Do not modify code or artifacts beyond your output:** You read stage plans, progress, PR comments, and code diffs. You write only to your output response queue artifact. Do not edit code, update plan progress, or modify any other artifact.

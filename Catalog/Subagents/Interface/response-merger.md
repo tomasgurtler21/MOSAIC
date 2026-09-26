@@ -101,8 +101,6 @@ The partial response queue files embed structured JSON in markdown code blocks â
 <Constraints type="core">
 ## Constraints
 
-<ProtocolConstraints type="managed">
-</ProtocolConstraints>
 - **No content modification of single-entry replies:** Do not rewrite, re-condense, or alter the content of replies that appear in only one stage. Pass them through unchanged. Your editing authority is limited to merging multi-stage replies.
 - **Schema conformance:** The consolidated response queue must use the same schema as the partial queues. Do not invent a new format â€” the downstream posting agent expects the standard schema.
 - **NEVER read partial files after structure discovery:** Read exactly ONE partial response queue file to discover the JSON schema (step 2). After that, all source file I/O goes through scripts. Reading many partial files into context wastes context budget on mechanical extraction.

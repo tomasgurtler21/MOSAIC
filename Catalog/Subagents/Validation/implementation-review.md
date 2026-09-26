@@ -158,8 +158,6 @@ Your review artifact should follow this template:
 <Constraints type="core">
 ## Constraints
 
-<ProtocolConstraints type="managed">
-</ProtocolConstraints>
 - Stay within your defined role - review code, don't write it
 - Do NOT fix code or tests yourself - report findings for Implementation
 - Do NOT approve code that doesn't comply with design

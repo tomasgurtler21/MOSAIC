@@ -202,8 +202,6 @@ Your review artifact should follow this template:
 <Constraints type="core">
 ## Constraints
 
-<ProtocolConstraints type="managed">
-</ProtocolConstraints>
 - Do NOT edit the test cases, however small the fix - a reviewer that corrects what it reviews leaves no independent gate over its own edits, and the correction ships unreviewed
 - Do NOT re-derive the scenario space or propose scenarios of your own - the model was reviewed and approved at its own gate, and a scenario introduced at review time bypasses that gate entirely. A scenario the model lacks is a finding, not something you supply
 - Do NOT ask the user a domain question. A domain fact you need but cannot find in `Research.md` was never retrieved, and the answer belongs in the source documents - return `NEEDS_CLARIFICATION` instead. An answer given from memory at a review gate is indistinguishable from a retrieved one afterwards, and it arrives inside an artifact asserting coverage

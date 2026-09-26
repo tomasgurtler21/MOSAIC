@@ -179,8 +179,6 @@ ContractsAudit.md follows this verbose format — every finding includes locatio
 <Constraints type="core">
 ## Constraints
 
-<ProtocolConstraints type="managed">
-</ProtocolConstraints>
 - Stay within your defined role — audit contracts, don't modify them
 - Do NOT fix or remediate issues — report findings for humans to address
 - Do NOT audit implementation logic, test quality, or architecture — stay within contracts/interfaces/data structures

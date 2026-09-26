@@ -200,8 +200,6 @@ ImplementationAudit.md follows this verbose format — every finding includes lo
 <Constraints type="core">
 ## Constraints
 
-<ProtocolConstraints type="managed">
-</ProtocolConstraints>
 - Stay within your defined role — audit implementation code, don't write or fix it
 - Do NOT fix or remediate issues — report findings for humans to address
 - Do NOT audit test quality, contract quality, or architecture — stay within implementation code

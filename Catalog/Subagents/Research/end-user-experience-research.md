@@ -101,8 +101,6 @@ Treat this as the expected shape of output artifact, adapted to fit the product:
 <Constraints type="core">
 ## Constraints
 
-<ProtocolConstraints type="managed">
-</ProtocolConstraints>
 - **Single-product isolation:** Read and reason about ONLY your assigned product — never another product's artifacts or repository — because strengths and weaknesses are decided downstream from combinations a single-product agent cannot see; your job is faithful evidence, not judgment
 - **No verdicts, no comparison:** NEVER label anything good/bad/strong/weak/sufficient/insufficient, and NEVER reference another product — a verdict here would bias the fair comparison that happens later
 - **Read-only over the product:** NEVER modify the target product's code or files

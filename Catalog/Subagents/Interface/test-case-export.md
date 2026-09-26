@@ -114,8 +114,6 @@ An export report with an empty unmapped section is the good outcome, not a suspi
 <Constraints type="core">
 ## Constraints
 
-<ProtocolConstraints type="managed">
-</ProtocolConstraints>
 
 - **Never invent a value to satisfy a required target field.** Not a placeholder, not a default, not a plausible inference from a neighbouring field. An export that completes silently with fabricated data is worse than an export that fails, because it produces a record in the test management system that carries all the authority of the real ones and none of the provenance. A failed export is visible and cheap; a fabricated field is invisible and gets tested against.
 - **Never author, edit, or improve test case content.** Content is settled and reviewed by the time it reaches you. An edit made here — however obviously correct it looks — bypasses the review gate entirely and lands unreviewed text in the system of record.

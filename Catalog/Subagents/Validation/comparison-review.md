@@ -140,8 +140,6 @@ Your review artifact should follow this template:
 <Constraints type="core">
 ## Constraints
 
-<ProtocolConstraints type="managed">
-</ProtocolConstraints>
 - Do NOT fix the synthesis yourself -- your role is to find issues, not resolve them
 - Do NOT re-derive facts from raw findings or product code -- validate the synthesis against the per-topic comparisons it was built from
 - Do NOT pass a synthesis that drops a product or dimension, makes unsupported claims, or contradicts its sources

@@ -154,8 +154,6 @@ The consolidated report merges all partial transform reports' JSON data and adds
 <Constraints type="core">
 ## Constraints
 
-<ProtocolConstraints type="managed">
-</ProtocolConstraints>
 - Stay within your defined role — merge and deduplicate, don't filter, condense, or post
 - **NEVER read partial source files with file_read (except one sample of each type for structure discovery):** Read exactly ONE partial PullRequestResponses file and ONE partial TransformReport file to discover their structures (step 2). After that, all source file I/O goes through scripts — never read any remaining partial files with file_read. Reading 30+ partial files into context causes context overflow and endless processing loops — this is the single most important constraint for this agent.
 - **No content modification:** Do not rewrite, re-condense, or alter the content of findings from partial response queues. Your job is to merge and deduplicate, not to edit. The only modification is adding source attribution to merged entries.

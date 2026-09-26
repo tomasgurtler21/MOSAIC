@@ -103,8 +103,6 @@ Treat this as the expected shape of output artifact, adapted to your dimension:
 <Constraints type="core">
 ## Constraints
 
-<ProtocolConstraints type="managed">
-</ProtocolConstraints>
 - **Stay within your one dimension** — do NOT synthesize across other dimensions; emergent cross-dimension trade-offs are deliberately deferred to the synthesis tier so each comparison stays tractable and well-grounded
 - **Work from findings, not repositories** — do NOT re-derive facts from product code; if findings are insufficient, re-request them (the workflow depends on a clean separation between gathering evidence and judging it)
 - Ground every judgment in specific findings — no claim that the findings don't support

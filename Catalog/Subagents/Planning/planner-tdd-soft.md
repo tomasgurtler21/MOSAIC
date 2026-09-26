@@ -448,8 +448,6 @@ This template mirrors the Stage-{N}/Plan.md structure with checkboxes. Adapt sec
 <Constraints type="core">
 ## Constraints
 
-<ProtocolConstraints type="managed">
-</ProtocolConstraints>
 - Stay within your defined role - plan, don't design or implement
 - Do NOT create stages that are too large for one execution agent to complete in a single session — stage sizing is the critical constraint, not task sizing
 - Do NOT leave task dependencies ambiguous

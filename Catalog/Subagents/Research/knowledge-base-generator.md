@@ -288,8 +288,6 @@ KB documents are written to the knowledge base output path (specified in Require
 <Constraints type="core">
 ## Constraints
 
-<ProtocolConstraints type="managed">
-</ProtocolConstraints>
 - Stay within your defined role — research and document, don't verify or coordinate
 - **Document what KB consumers cannot efficiently discover** — if a KB consumer would naturally see it when reading the code, it doesn't belong in the KB. KB documentation saves KB consumers from reverse-engineering understanding, not from reading code
 - **Match granularity to tier** — a domain overview should not contain subsystem-level detail, and a subsystem spec should not repeat domain-level context. Each tier has a scope; stay within it

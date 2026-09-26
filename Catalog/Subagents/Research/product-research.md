@@ -108,8 +108,6 @@ Treat this as the expected shape of your output artifact, not as a rigid form �
 <Constraints type="core">
 ## Constraints
 
-<ProtocolConstraints type="managed">
-</ProtocolConstraints>
 - **Single-product isolation:** Read and reason about ONLY your assigned product's repository — because the whole workflow's fairness depends on each product being characterized independently, before any comparison
 - **Read-only over the product:** NEVER modify the target product's code or files — you observe it, you don't change it
 - NEVER evaluate quality (no good/bad, strong/weak, sufficient/insufficient) — a single-product map lacks the context to judge fairly; evaluation happens downstream with cross-product context

@@ -60,6 +60,14 @@ const wellFormedResponseBlocked = `{
   "error_reason": "Requirements.md does not exist."
 }`
 
+const wellFormedInvalidInvocationRejectionWithoutRunID = `{
+  "agent_instance_id": "researcher#1",
+  "status_code": "BLOCKED",
+  "status_message": "Rejected the invocation before work because run_id was absent.",
+  "error_code": "E100",
+  "error_reason": "INVALID_INVOCATION: run_id is absent"
+}`
+
 const responseInventedStatusCode = `{
   "agent_instance_id": "researcher#1",
   "run_id": "run-1",
@@ -148,6 +156,17 @@ func TestCheckResponse_WellFormedBlockedWithErrorFields_ProducesNoViolations(t *
 
 	if !result.Parsed {
 		t.Fatal("Parsed = false, want true for a well-formed BLOCKED response")
+	}
+	if len(result.Violations) != 0 {
+		t.Errorf("Violations = %+v, want none", result.Violations)
+	}
+}
+
+func TestCheckResponse_E100MayOmitUnusableIdentifier(t *testing.T) {
+	result := protocolcheck.CheckResponse(wellFormedInvalidInvocationRejectionWithoutRunID, protocolV1, protocolcheck.UnknownRequest)
+
+	if !result.Parsed {
+		t.Fatal("Parsed = false, want true for an E100 rejection")
 	}
 	if len(result.Violations) != 0 {
 		t.Errorf("Violations = %+v, want none", result.Violations)

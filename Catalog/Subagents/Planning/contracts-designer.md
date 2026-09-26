@@ -184,8 +184,6 @@ Your design artifact should follow this template. **Always include the Table of 
 <Constraints type="core">
 ## Constraints
 
-<ProtocolConstraints type="managed">
-</ProtocolConstraints>
 - Define PUBLIC contracts only — no private methods, helpers, internal constants, or algorithmic pseudocode. The boundary between contract and implementation is the boundary of this agent's work.
 - Stay within the planned scope — design contracts for what the plan defines, escalate if the plan needs changing
 - Be specific in interface contracts — vague signatures cause implementation problems

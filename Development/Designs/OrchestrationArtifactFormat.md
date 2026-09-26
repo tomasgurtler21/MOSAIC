@@ -1,9 +1,9 @@
 # Orchestration Artifact Format
 
 > **Status:** Approved
-> **Version:** 2.2
+> **Version:** 2.3
 > **Created:** 2026-07-28
-> **Last Updated:** 2026-08-14
+> **Last Updated:** 2026-09-26
 > **Scope:** The schema of `Orchestration.md` — the blackboard artifact an orchestrator (human-driven LLM or a future deterministic script) reads and writes to track execution state for one workflow run. Defines its sections, their mutability rules, and the format each section uses.
 
 ---
@@ -277,7 +277,7 @@ On start (or restart), an orchestrator resuming an existing `Orchestration.md`:
 1. Parses the frontmatter — `current_state` gives phase, stage, last status, last agent, error code directly.
 2. Cross-checks against the last **workflow** row of the Execution Log — that is, the last row whose agent is a workflow participant, skipping any trailing infrastructure rows (§8). These must agree; if `current_state` and the last workflow row disagree, the Execution Log row is authoritative (§5) — `current_state` is re-derived from it, not the other way around. A trailing infrastructure row after the last workflow row is not a disagreement and is not treated as an interruption: it is exactly what §8 already declares does not move `current_state`.
 3. Validates `global_sequence` against the highest `Seq` in the Execution Log (workflow or infrastructure); if the frontmatter value is behind, it's corrected to `max(Seq) + 1`.
-4. Determines the next action from `last_status` alone — the same status-to-action mapping already governing every other routing decision in this system (`SUCCESS` → continue, `COMPLETED_NEEDS_ACTION` → route to fix target, `PARTIALLY_DONE` → route to successor, `NEEDS_CLARIFICATION` → await input, `CAPABILITY_EXCEEDED` → escalate, `BLOCKED` → resolve by error code). No previous status means a fresh start at the beginning of the first phase.
+4. Interprets `last_status` against the workflow table: `SUCCESS` follows the success route; `COMPLETED_NEEDS_ACTION` follows the configured action route; `PARTIALLY_DONE` continues the same workflow assignment; `NEEDS_CLARIFICATION` awaits input; `CAPABILITY_EXCEEDED` escalates without agent substitution; and `BLOCKED` resolves by error code. A status reports the prior invocation's outcome and never names a target by itself. No previous status means a fresh start at the beginning of the first phase.
 
 This is the entire recovery procedure — no dedicated resume section is consulted, per §3's decision to drop it. Anything a resuming orchestrator would need beyond phase/stage/status/sequence is either derivable from the workflow's own routing table (out of scope here, §1) or, if it's a one-off deviation worth remembering, already sitting in Workflow Notes as free-form context.
 

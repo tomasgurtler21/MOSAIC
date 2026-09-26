@@ -34,6 +34,7 @@ var validStatusCodes = map[string]bool{
 // BLOCKED responses. An error_code outside this set is
 // ViolationInventedErrorCode.
 var validErrorCodes = map[string]bool{
+	"E100": true,
 	"E101": true,
 	"E401": true,
 	"E501": true,
@@ -83,9 +84,14 @@ func CheckResponse(raw string, v Version, req ResponseContext) Result {
 	if !bare {
 		violations = append(violations, Violation{Class: ViolationNotBareMessage})
 	}
-	violations = append(violations, missingRequiredFieldViolations(fields, requiredResponseFields)...)
-
 	statusCode := stringField(fields, "status_code")
+	errorCode := stringField(fields, "error_code")
+	requiredFields := requiredResponseFields
+	if statusCode == "BLOCKED" && errorCode == "E100" {
+		requiredFields = []string{"status_code", "status_message"}
+	}
+	violations = append(violations, missingRequiredFieldViolations(fields, requiredFields)...)
+
 	if statusCode != "" && !validStatusCodes[statusCode] {
 		violations = append(violations, Violation{Class: ViolationInventedStatusCode, Field: "status_code", Detail: statusCode})
 	}
@@ -101,7 +107,6 @@ func CheckResponse(raw string, v Version, req ResponseContext) Result {
 		violations = append(violations, Violation{Class: ViolationMissingErrorFieldsOnBlocked})
 	}
 	if hasErrorCode {
-		errorCode := stringField(fields, "error_code")
 		if !validErrorCodes[errorCode] {
 			violations = append(violations, Violation{Class: ViolationInventedErrorCode, Field: "error_code", Detail: errorCode})
 		}

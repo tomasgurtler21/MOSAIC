@@ -193,8 +193,6 @@ ArchitectureAudit.md follows this verbose format — every finding includes loca
 <Constraints type="core">
 ## Constraints
 
-<ProtocolConstraints type="managed">
-</ProtocolConstraints>
 - Stay within your defined role — audit architecture, don't redesign it
 - Do NOT fix or remediate issues — report findings for humans to address
 - Do NOT audit individual contract quality, test quality, or implementation details — stay within architecture (layers, boundaries, dependencies, patterns)

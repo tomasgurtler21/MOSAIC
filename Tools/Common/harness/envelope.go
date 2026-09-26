@@ -33,12 +33,13 @@ type cliEnvelopeObject struct {
 }
 
 // protocolFields is the minimal shape used to recognise a Communication
-// Protocol response object without decoding its full vocabulary: presence of
-// both fields is what distinguishes a protocol response from any other JSON
-// object that might appear in CLI output.
+// Protocol response object without decoding its full vocabulary. Ordinary
+// responses carry agent_instance_id and status_code. An E100 rejection may
+// lack agent_instance_id because the invalid invocation supplied none.
 type protocolFields struct {
 	AgentInstanceID string `json:"agent_instance_id"`
 	StatusCode      string `json:"status_code"`
+	ErrorCode       string `json:"error_code"`
 }
 
 // ParseClaudeCodeEnvelope extracts the assistant text from the CLI's JSON
@@ -111,8 +112,9 @@ func ParseClaudeCodeEnvelope(data []byte) (string, error) {
 //
 // It first attempts a direct unmarshal of the full (trimmed) text as the
 // fast path for clean responses where the text IS the protocol JSON. If that
-// fails, it scans for an embedded JSON object recognisable as a protocol
-// response by the presence of both "agent_instance_id" and "status_code".
+// fails, it scans for an embedded JSON object recognisable as an ordinary
+// protocol response by agent_instance_id plus status_code, or as an invalid-
+// invocation rejection by BLOCKED plus E100.
 func ExtractProtocolJSON(text string) ([]byte, error) {
 	trimmed := strings.TrimSpace(text)
 	if looksLikeProtocolJSON(trimmed) {
@@ -144,5 +146,6 @@ func looksLikeProtocolJSON(candidate string) bool {
 	if err := json.Unmarshal([]byte(candidate), &f); err != nil {
 		return false
 	}
-	return f.AgentInstanceID != "" && f.StatusCode != ""
+	return (f.AgentInstanceID != "" && f.StatusCode != "") ||
+		(f.StatusCode == "BLOCKED" && f.ErrorCode == "E100")
 }

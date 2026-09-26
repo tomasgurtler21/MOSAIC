@@ -23,7 +23,7 @@ The block's text is in the bundle and nowhere else. This document is its reasoni
 
 ## 1. What the block does
 
-Every subagent task ends the same way, whatever the work was: if the human-in-the-loop flag is set, present the finished output for review; then return the protocol response and nothing else. The block states both, positioned so they read as the continuation of the agent's own numbered Process list.
+Every subagent task ends the same way, whatever the work was: if the human-in-the-loop flag is set, execute the Communication Protocol's output review gate; then return the response that protocol requires. The block supplies only the nearby trigger and sequence. The protocol owns every gate mechanic, completion condition, failure outcome, and response-format rule.
 
 ## 2. Why it sits where it does
 
@@ -43,45 +43,39 @@ The orchestration contract requires the agent's **complete output** — orchestr
 
 This is a candidate root cause for the observed failure of subagents ignoring HITL. It is also precisely the population a `human_approved` stamp cannot detect, because those agents produce no artifact to stamp.
 
-The block states the complete-output obligation and then states the no-artifacts case explicitly, by name, rather than leaving it as an inference from "complete". The population that got this wrong is the population that would have to draw that inference.
+The protocol procedure states the complete-output obligation and covers project-file-only output explicitly rather than leaving it as an inference from "complete". The closing block makes completion of that procedure a final work step. The population that got this wrong is the population that would otherwise have to draw the inference.
 
-## 4. The three refinements the block adds
+## 4. What the authoritative procedure guarantees
 
-Beyond correcting the scope of "output", the block closes three gaps the old step left open. Each was a way an agent could believe it had discharged the gate without a human having reviewed anything.
+The Communication Protocol's Human-in-the-Loop procedure closes the gaps the old step left open. Each was a way an agent could believe it had discharged the gate without a human having reviewed anything. The closing block points to that procedure without restating any of these rules.
 
-**The gate re-arms.** If the user asks for changes, the agent makes them and presents again. The gate closes only when the user asks for nothing further. Without this, a single presentation discharges the obligation regardless of what the user said.
+**The gate re-arms.** If the user asks for changes, the agent makes them and sends a new review request. The gate closes only when the user approves the latest request with no further changes. Without this, the first review request would discharge the obligation regardless of what the user said.
 
 **Earlier questions do not count.** An agent that consulted the user mid-task about an approach has not run the gate. This is a review of finished output, not a conversation. The observed failure mode — agents contacting the user mid-task and then returning without a review — is exactly this substitution.
 
 **No channel to the user is `BLOCKED`, not permission to proceed.** Error code `E503`. An agent that cannot reach the user has not been excused from the gate; it has hit an environmental block, and the orchestrator is the party that can do something about it.
 
-**Presentation means tool calls, not prose.** The agent's response is consumed by the orchestrator, not the user. An agent that "presents" by writing a summary or a question in its response has not reached the user — it has broken the JSON contract and produced a response the orchestrator cannot parse. This is the most common mechanical failure of the gate, distinct from the scope and re-arming failures above: those are agents that skip the gate or discharge it incorrectly, while this is an agent that believes it is discharging the gate and is instead talking to the wrong audience. The fix names the mechanism explicitly — "use your user interaction tools to present" — and states the consequence: prose in the response reaches the orchestrator, not the user.
+**The review request uses tool calls, not response prose.** The agent's response is consumed by the orchestrator, not the user. Writing the inventory or approval question in that response has not reached the user — it has broken the JSON contract and produced a response the orchestrator cannot parse. This is the most common mechanical failure of the gate, which is why the authoritative protocol states the channel explicitly rather than relying on the nearby trigger to imply it.
+
+**Complete means an inventory, not a reproduction.** The user needs to know every path that changed and what materially changed there; they do not need every file pasted into the interaction channel. The protocol therefore requires every created, updated, or deleted path to remain visible with its action and a brief purpose-oriented summary. Related files may share a description so the review request scales from one review artifact to a plan containing tens of artifacts without an arbitrary line or word limit. Full contents and diffs remain available when the user asks for them.
+
+**The stamp brackets the review.** `human_approved: false` is present before the first review request and returns on every artifact content write. The metadata-only flip to `true` happens only after the user approves the exact state described by the latest request. Keeping these transitions in the authoritative procedure prevents stale approval from surviving requested changes.
 
 ## 5. Why the second step is stated at all
 
-"Return the protocol response, and nothing else" restates a rule the contract already carries as a key rule and that `ProtocolConstraints` carries as a bullet. That is three statements of one thing, and the general rule is that a third copy is the copy that drifts.
-
-It survives because it is not really a third copy of the rule — it is the terminator of the sequence. A closing procedure whose last numbered step is the HITL gate reads as though the task ends at the gate. Naming the return as the final step is what makes the sequence complete, and it costs one sentence.
-
-Note also that all three statements are now single-sourced, so they cannot drift accidentally — only by someone editing one and not another. See §7.
+The second step names no envelope fields or formatting rules. It exists only as the terminator of the local sequence: a closing procedure whose last numbered step is the HITL gate reads as though the task ends at the gate. Pointing to the response the protocol requires completes the sequence without creating another statement of that response.
 
 ## 6. Why this is not part of the contract's deployed region
 
-The contract states the obligation: what the gate is, when it applies, what counts as output. This block states the *procedure* — where in the agent's flow it happens, what to do when the user asks for changes, what to do when there is no user.
+The contract states the obligation and the procedure: what the gate is, what the review request contains, which channel it uses, how requested changes re-arm it, what state permits return, how the stamp transitions, and what happens when no user channel exists. This block states only where in the agent's flow the procedure runs and what follows it.
 
 Membership follows the bundle's decidable test (`DeployedSectionsBundle.md` §2): an orchestrator and a subagent carrying different versions of this block still interoperate. The messages parse, the stamps apply, routing is unaffected. The agent's review behaviour would be worse, which is a quality problem and not a wire disagreement.
 
-## 7. Open — the duplication with the contract
+## 7. One procedure, one nearby trigger
 
-The HITL obligation is now stated twice in every subagent file: once inside `<CommunicationProtocol type="managed">`, once here. Both are single-sourced, so accidental drift is impossible; deliberate drift, by someone editing one and not the other, is not.
+The detailed HITL procedure is stated once, inside `<CommunicationProtocol type="managed">`. Repeating its channel, inventory format, change loop, completion state, failure outcome, or stamp sequence here would create two editable statements of the same boundary behaviour.
 
-Three ways to resolve it, none yet chosen:
-
-1. **Trim the contract's subagent-side obligation** and let this block own the gate where the agent acts on it. The contract would keep the orchestrator-side statement — what the flag means, who sets it — and drop the agent-facing procedure.
-2. **Trim this block to a pointer** at the contract region. Rejected on sight: it recreates the exact defect in §3, where the near instruction was the one the agent followed and the far one went unread.
-3. **Accept the duplication** and treat divergence as a review matter, on the grounds that this is the one obligation where redundancy is worth paying for.
-
-Option 2 is out. Between 1 and 3, the argument for 3 is that this gate is the one agents are observed to skip, and repetition is spent where compliance is weakest. The argument for 1 is that "one fact, one authority" is a principle the rest of the schema holds to without exception.
+A bare omission would fail for the opposite reason: the agent reaches the end of its Process list and sees no local instruction to run the gate. The block therefore supplies a pointer at the action boundary and sequences the protocol response after it. Everything needed to execute either operation lives in the named protocol section.
 
 ---
 
@@ -89,6 +83,7 @@ Option 2 is out. Between 1 and 3, the argument for 3 is that this gate is the on
 
 | Bundle version | Date | Change |
 |----------------|------|--------|
+| 2.0.0 | 2026-09-26 | The detailed HITL procedure and protocol response rules are defined once in the Communication Protocol. The closing block retains only the final-action trigger and sequence, with no copied channel, completion, stamp, error-code, or response-format semantics. |
 | 1.3.0 | 2026-08-27 | Agent self-identification during HITL. When multiple agents or runs present output concurrently, the user cannot tell whose work they are approving. Step 1 now requires the agent to state its `agent_instance_id` and `run_id` at the start of any HITL presentation. |
 | 1.1.0 | 2026-08-25 | Explicit tool-use requirement for HITL presentation. Agents were "presenting" by writing prose in their response, which goes to the orchestrator and breaks the JSON contract. Step 1 now opens with "Use your user interaction tools to present" and a new bullet states the consequence: the response is consumed by the orchestrator, not the user. §4 extended with the failure-mode rationale. |
 | 1.0.0 | 2026-08-05 | Initial text. Replaces the Process-list HITL step carried by 28/42 subagents, corrected from "output artifacts" to complete output, with the no-artifacts case, gate re-arming, the earlier-questions rule, and the `E503` case all stated explicitly. Canonical text matches none of the forty-two source files: the majority wording was the defective one. |

@@ -107,8 +107,6 @@ In revision mode, preserve test cases the findings do not concern. Rewriting con
 <Constraints type="core">
 ## Constraints
 
-<ProtocolConstraints type="managed">
-</ProtocolConstraints>
 - **Do NOT extend, reinterpret or "improve" the scenario model while writing.** The scenario model has already passed a review gate that examined its coverage argument. A scenario introduced here bypasses that gate, so it enters the test set with no coverage argument behind it and nothing recorded about why it exists.
 - **Do NOT drop a scenario silently.** A scenario absent from the test cases with no finding naming it is invisible: the test case artifact records only what was written, so an unrealised scenario leaves no trace anyone can audit.
 - **Do NOT invent vocabulary terms.** A phrase you coin reads exactly like a defined one, so nobody downstream can tell that a term left the controlled vocabulary. Where the vocabulary cannot express a condition, that is a finding.

@@ -90,7 +90,7 @@ The three review agents keep the tool despite sitting on `FALSE` rows here. They
 
 **Deployment is opt-in.** This workflow reaches a workspace only if named in that deployment's `selections.yaml`, and the same holds for each agent.
 
-**Known tooling gap at time of writing.** The seven agents are written to `AgentTemplateArchitecture.md` v1.3. The validator accepts that schema — `vocabulary.go` carries the seven-slot `CanonicalOrder` and all five conduct regions in `CanonicalDeployed`. But no bundle assembly is wired into the deployment tool, so `ClosingProcedure`, `AuthorityHierarchy`, `ProtocolConstraints`, `ErrorHandlingCommon` and `ExecutionPhilosophyCommon` will deploy **empty**. Per §2.4.1 that is the Conduct tier: the agents still speak the contract and still run, without artifact-access imperatives, the retry rule, or the authority ranking. This affects every agent written to the current schema, not only these.
+**Known tooling gap at time of writing (resolved).** The seven agents were written to `AgentTemplateArchitecture.md` v1.3. The deployment tool now handles bundle assembly, so conduct regions (`ClosingProcedure`, `AuthorityHierarchy`, `ErrorHandlingCommon`, `ExecutionPhilosophyCommon`) deploy with content. `ProtocolConstraints` was removed from the system in v2.3 — its protocol-restatement bullets were redundant with the Communication Protocol's Key Rules.
 
 ---
 

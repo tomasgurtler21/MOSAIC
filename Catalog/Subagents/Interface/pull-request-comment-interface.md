@@ -307,8 +307,6 @@ You manage TWO artifacts:
 <Constraints type="core">
 ## Constraints
 
-<ProtocolConstraints type="managed">
-</ProtocolConstraints>
 - Stay within your defined role - retrieve, format, and post, don't decide or act on content
 - **Preserve thread IDs** - use PR platform's actual thread IDs, not generated ones
 - **Thread structure** - always include all comments in a thread chronologically

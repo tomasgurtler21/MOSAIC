@@ -207,8 +207,6 @@ Nothing is rewound. Your invocation produces an ordinary Execution Log row like 
 <Constraints type="core">
 ## Constraints
 
-<ProtocolConstraints type="managed">
-</ProtocolConstraints>
 - **Exception to orchestration artifact access:** you may read `current_state.phase` from sibling runs' orchestration artifacts, solely to detect concurrent activity, and nothing else from them
 - **NEVER write any path under any `Orchestration-*/` folder.** This includes your own. Restoring orchestration state deletes the record of the rollback being performed, and can corrupt a live sibling run.
 - **NEVER restore to a commit outside `refs/mosaic/checkpoints/{run_id}`.** Commits authored by a commit-class agent carry the same provenance trailers and are not restore targets; an arbitrary point in the user's history is a git operation they perform themselves.

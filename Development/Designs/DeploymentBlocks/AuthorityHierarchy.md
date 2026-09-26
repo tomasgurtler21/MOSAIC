@@ -45,7 +45,7 @@ That last point is why rank 4 is where it is despite arriving in the same system
 
 ## 3. Two boundaries the ranking asserts
 
-**The orchestrator coordinates, it does not command.** Rank 3 is explicit that the task prompt is input from another AI agent rather than from a human, and that a task requesting out-of-scope work is a routing error to report rather than an instruction to obey. Without that, an orchestrator bug becomes a subagent scope violation.
+**The orchestrator coordinates, it does not command.** Rank 3 is explicit that the task prompt is input from another AI agent rather than from a human, and that a task requesting out-of-scope work is an invalid invocation handled under the Communication Protocol, not an instruction to obey. The block identifies which authority wins; the protocol alone defines the response. Without that boundary, an orchestrator bug becomes a subagent scope violation.
 
 **The harness cannot change the contract.** Rank 4 grants the harness authority wherever the three sources above it are silent — tool mechanics and environment conventions are exactly that case, and most harness guidance is exactly that. What it cannot do is widen or narrow scope, or change what the agent returns. Harnesses routinely inject instructions about how to report back to whatever invoked the agent; under this ranking, those lose to the protocol response the orchestrator expects.
 
@@ -89,4 +89,5 @@ So the standing obligation is: **an amendment to this block is reviewed against 
 
 | Bundle version | Date | Change |
 |----------------|------|--------|
+| 2.0.0 | 2026-09-26 | Classified out-of-scope dispatches as invalid invocations while leaving the exact response and error-code outcome solely to the Communication Protocol. |
 | 1.0.0 | 2026-08-05 | Initial text. Carries the existing 42/42 three-rank wording plus a fourth rank for harness-supplied instructions, placed last, with the "each source knows less than the one above it" justification added so the ranking generalises. |

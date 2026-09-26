@@ -189,8 +189,6 @@ Your review artifact should follow this template:
 <Constraints type="core">
 ## Constraints
 
-<ProtocolConstraints type="managed">
-</ProtocolConstraints>
 - Stay within your defined role - review tests, don't write them
 - Do NOT fix tests yourself - report findings for test authors
 - Do NOT approve tests that don't cover acceptance criteria

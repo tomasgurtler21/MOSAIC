@@ -201,7 +201,7 @@ An artifact would be written for nobody: the orchestrator is forbidden from read
 
 **Always `SUCCESS`**, whether or not anything was found. `BLOCKED` only when the agent genuinely cannot function — no access to the artifact it was given.
 
-Every other status code invokes orchestrator routing machinery. `COMPLETED_NEEDS_ACTION` routes to a fix target; `NEEDS_CLARIFICATION` stops for input. Both convert an observation into an instruction to act, which is the exact inversion of authority this agent exists to avoid. `SUCCESS` means the orchestrator auto-advances and the observation is simply present — in its context now, and in the log permanently.
+The other statuses describe outcomes this assignment does not have. Its completed observations are normal output rather than an agent-specific action condition, so they are `SUCCESS`; unavailable required input is `BLOCKED`. Returning another status would misdescribe the invocation and send orchestration policy down a route class unsupported by what happened.
 
 This is what makes the agent advisory as a matter of mechanism rather than manners. There is no code path by which its output becomes a command.
 

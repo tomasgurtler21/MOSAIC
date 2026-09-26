@@ -1,7 +1,7 @@
 ---
 id: agent-template-architecture
 type: specification
-version: "2.2"
+version: "2.3"
 name: "Agent Template Architecture"
 description: "The structure of a MOSAIC agent file: frontmatter schema, the four region kinds and their ownership, canonical document order, the per-role region matrix, and what each section must contain."
 author: MOSAIC
@@ -79,7 +79,7 @@ An agent file has two parts: a YAML frontmatter block (§3) and a body composed 
 | Tag | Written by | On deploy | On update |
 |--------|-----------|-----------|-----------|
 | `<Name type="core">` … `</Name>` | MOSAIC source authors | Carried from source byte-identically | Carried from source byte-identically |
-| `<Name type="managed">` … `</Name>` | The deployment tool | Body generated from a canonical source | Regenerated wholesale; prior content discarded |
+| `<Name type="managed">` … `</Name>` | The deployment tool | Body generated from a canonical source | Canonical content regenerated; nested project/custom regions preserved |
 | `<Name type="project">` … `</Name>` | MOSAIC source authors | Carried from source; if non-empty, content is default (§2.1.1) | Preserved byte-identically |
 | `<Name type="custom">` … `</Name>` | Project authors | N/A — never in source | Content preserved byte-identically; placed at end of its resolved parent section (§6.4) |
 
@@ -87,7 +87,7 @@ An agent file has two parts: a YAML frontmatter block (§3) and a body composed 
 
 Four consequences follow and are worth stating outright:
 
-**Never author content inside a managed region.** It is discarded on the next update without warning. In a source file these regions are always empty; the deployed file is the only place they have content.
+**Never author unmarked text inside a managed region.** The tool-owned canonical content is regenerated on update. User-owned content belongs in a nested project or custom region, which the tool preserves. In a source file the managed region's own content is empty; it may contain a declared project region.
 
 **A user-owned region (project or custom) may be nested inside a managed region.** The tool preserves nested user-owned regions when regenerating the managed parent — it writes the new canonical text around them. This is the natural placement for project extensions of deployed content (e.g. custom error handling inside `ErrorHandlingCommon`), and it gives the extension an anchor that survives schema reorder.
 
@@ -184,7 +184,7 @@ A file's top-level boundaries appear in this order. Every entry is a core region
 | 5 | `ErrorHandling` | core | subagent, orchestrator |
 | 6 | `ExecutionPhilosophy` | core | subagent, orchestrator |
 
-Six slots. There is no separate provenance slot: the artifact provenance stamp is part of the orchestration contract and ships inside slot 2. §16 records the transitional state, since the files have not been migrated yet.
+Six slots. There is no separate provenance slot: the artifact provenance stamp is part of the orchestration contract and ships inside slot 2.
 
 **The rule is "not out of order", not "exactly these six".** A file's top-level boundaries must form a *subsequence* of the list above. Concretely:
 
@@ -206,7 +206,6 @@ Six slots. There is no separate provenance slot: the artifact provenance stamp i
 | `<CommunicationProtocol type="managed">` | Required | Required |
 | `Capabilities` core region | Required | Required |
 | `Constraints` core region | Required | Required |
-| `<ProtocolConstraints type="managed">` | Required | Absent (§8) |
 | `<HarnessConstraints type="managed">` | Required | Required |
 | `ErrorHandling` core region | Required | Required |
 | `<ErrorHandlingCommon type="managed">` | Required | Absent (§8) |
@@ -222,7 +221,7 @@ A region present with no canonical block matching the file's role **is** an erro
 | Tier | Regions | Absence is | Because |
 |------|---------|-----------|---------|
 | **Contract** | `CommunicationProtocol` | **Error** | The agent receives no message shape, no status vocabulary, no HITL gate. It cannot produce a response the orchestrator can parse. This is interop, not style. |
-| **Conduct** | `ClosingProcedure`, `AuthorityHierarchy`, `ProtocolConstraints`, `ErrorHandlingCommon`, `ExecutionPhilosophyCommon` | **Warning** | The agent still speaks the contract and still works. It works *worse*: no artifact-access imperatives, no retry rule, no ranking when the harness contradicts MOSAIC. Degradation an author should be told about and may knowingly accept. |
+| **Conduct** | `ClosingProcedure`, `AuthorityHierarchy`, `ErrorHandlingCommon`, `ExecutionPhilosophyCommon` | **Warning** | The agent still speaks the contract and still works. It works *worse*: no retry rule, no ranking when the harness contradicts MOSAIC. Degradation an author should be told about and may knowingly accept. |
 | **Deployment** | `HarnessConstraints`, `AvailableWorkflows`, `InfrastructureAgents` | **Silent** | Content comes from a deployment's own selections. Most deployments select nothing for most of them, so absence is the ordinary case and flagging it is noise. |
 
 The tiers are about the *agent's* absence, not the block's. A bundle block with no matching region in a given agent remains normal (`DeployedSectionsBundle.md` §4).
@@ -238,14 +237,13 @@ Every managed-region name, its required parent, and where its content comes from
 | `ClosingProcedure` | `Identity` | Bundle | `DeploymentBlocks/ClosingProcedure.md` |
 | `AvailableWorkflows` | `Identity` | Assembled from selected workflow files | Workflow schema |
 | `InfrastructureAgents` | `Identity` | Assembled from selected infrastructure declarations | `InfrastructureAgentConcept.md` |
-| `ProtocolConstraints` | `Constraints` | Bundle | `DeploymentBlocks/ProtocolConstraints.md` |
 | `HarnessConstraints` | `Constraints` | The selected harness module | Harness module |
 | `ErrorHandlingCommon` | `ErrorHandling` | Bundle | `DeploymentBlocks/ErrorHandlingCommon.md` |
 | `ExecutionPhilosophyCommon` | `ExecutionPhilosophy` | Bundle | `DeploymentBlocks/ExecutionPhilosophyCommon.md` |
 
-Nine names. Three sources, and the distinction matters:
+Eight names. Three sources, and the distinction matters:
 
-- **Bundle** — `Catalog/DeployedSections.md`, the five blocks whose text is identical across every agent of a role and which are not contracts. Governed by `DeployedSectionsBundle.md`.
+- **Bundle** — `Catalog/DeployedSections.md`, the four blocks whose text is identical across every agent of a role and which are not contracts. Governed by `DeployedSectionsBundle.md`.
 - **Contract source** — `CommunicationProtocol.md` ships its own text. It is a contract, so it is deliberately not in the bundle and carries its own version.
 - **Assembled** — no canonical text exists; the content is built from a deployment's own selections. `AvailableWorkflows` and `InfrastructureAgents` are assembled from what the deployment selected; `HarnessConstraints` comes from the one harness module in play.
 
@@ -285,7 +283,7 @@ Two groups. Identity fields describe the agent; deployment fields tell the deplo
 
 **"Source only"** means the field is required in source files under `Catalog/` and is consumed by the deployment tool during transformation (for model selection, skill shipping, etc.), but is stripped from deployed output by every harness descriptor's `drop` list. It does not appear in deployed agent files. The three source-only fields — `recommended_tier`, `tier_rationale`, `required_skills` — serve the deployment pipeline, not the agent at runtime.
 
-A deployed file additionally carries `bundle_version`, written by the tool. It is not a source field; see `DeployedSectionsBundle.md` §3.2.
+A deployed file additionally carries `mosaic_bundle_version`, written by the tool from the bundle source's `bundle_version`. It is not a source field; see `DeployedSectionsBundle.md` §3.2.
 
 Key order in source is `id`, `version`, `name`, `description`, `role`, then the deployment group. The tool respects source order for keys it does not rewrite; the order matters for round-trip fidelity and for a human scanning a directory of files, not for parsing.
 
@@ -387,7 +385,7 @@ The order is not arbitrary: the closing procedure continues the Process list and
 
 Top-level managed region `<CommunicationProtocol type="managed">`, slot 2. Empty in source. Content is the role-matched block from `CommunicationProtocol.md`, which is the whole orchestration contract: message shape, status and error vocabularies, the HITL gate, and the artifact provenance stamp.
 
-Nothing is authored here, and no project injection sits inside it — the region is regenerated wholesale, so anything nested would be destroyed on the next deploy (§2.1). A project needing to extend the protocol uses `<ProtocolExtension type="custom">` as a top-level sibling of this region; §6.2.1 covers what belongs there and what does not.
+No project injection is declared here. A project needing to extend protocol mechanics uses `<ProtocolExtension type="custom">` as a top-level sibling of this region, keeping project transport guidance distinct from the canonical contract; §6.2.1 covers what belongs there and what does not.
 
 ### 4.3 Capabilities
 
@@ -424,12 +422,10 @@ Capabilities is the least constrained section by design. It is where an agent's 
 
 **Purpose:** what the agent must not do, and why.
 
-**Managed first:** `<ProtocolConstraints type="managed">`, at the top of the section.
-
-**Author writes** the agent's own constraints after it. Two rules:
+**Author writes** the agent's own constraints. Two rules:
 
 - **Every constraint carries its justification.** "Do NOT make assumptions about technology choices — document options instead, because downstream agents need unbiased options to evaluate against broader context." A bare prohibition invites a model to find the edge of it; a prohibition with a reason gives it grounds to generalise correctly to a case the rule did not anticipate.
-- **Do not restate the contract.** Artifact access, status code discipline, and JSON response discipline are already stated twice above — once in the contract region, once in `ProtocolConstraints`. A third copy in the agent's own list is the copy that drifts.
+- **Do not restate the contract.** Artifact access, status code discipline, and JSON response discipline already have canonical instructions above. Another copy in the agent's own list is the copy that drifts.
 
 **Managed last:** `<HarnessConstraints type="managed">`.
 
@@ -444,13 +440,14 @@ Capabilities is the least constrained section by design. It is where an agent's 
 ```markdown
 - **Return CAPABILITY_EXCEEDED** if {what exceeding capability looks like for this agent}
 - **Return NEEDS_CLARIFICATION** if {what ambiguity looks like for this agent}
-- **Return COMPLETED_NEEDS_ACTION** if {what a finding looks like for this agent, or state
-  that this agent rarely returns it}
+- **Return COMPLETED_NEEDS_ACTION** if {which completed outcomes require action for this agent,
+  or state that this agent rarely returns it}
 - **Return SUCCESS** when {what complete means for this agent}
-- **Return PARTIALLY_DONE** if {what a deliberate stop looks like for this agent}
+- **Return PARTIALLY_DONE** if {what incomplete but continuable work looks like for this agent,
+  including unresolved acceptance criteria}
 ```
 
-A mapping that could be pasted into any agent unchanged is a mapping that has not been written. Its usefulness is entirely in the specificity — `COMPLETED_NEEDS_ACTION` is the expected outcome for a review agent and a rare one for a research agent, and only this section can say so.
+A mapping that could be pasted into any agent unchanged is a mapping that has not been written. Its usefulness is entirely in the specificity: only this section can define which completed outcomes require action for this assignment. It must not derive status from workflow position, anticipated downstream work, or unfinished work outside the agent's scope.
 
 An agent may add a subsection where one distinction is repeatedly got wrong in practice, as several do for `NEEDS_CLARIFICATION` versus `BLOCKED`.
 
@@ -499,7 +496,7 @@ Two roles live in the catalog but are not governed by this schema's structure ru
 
 **What the tool does not do:**
 
-- No bundle deployment. No managed regions are filled, no `bundle_version` is stamped. If a utility agent happens to carry a managed region, the tool leaves it as-is.
+- No bundle deployment. No managed regions are filled, no `mosaic_bundle_version` is stamped. If a utility agent happens to carry a managed region, the tool leaves it as-is.
 - No structural validation. No check for canonical section order, required regions, or role-matrix compliance. These agents are not promised to conform, so checking for conformance is noise.
 - No missing-region reporting. A utility agent with three sections instead of seven is not degraded — it is a three-section agent.
 
@@ -538,7 +535,7 @@ Most are carried by MOSAIC's own sources, declared empty so a project can see th
 | `SeverityDefinitions` | `Capabilities` | What each severity means in this project (validation agents) |
 | `ContextLimits` | `ExecutionPhilosophy` | Context window thresholds and guidance |
 
-"Usual parent" is where the region belongs when the agent is otherwise conventional, and where MOSAIC's own agents put it. Placing one elsewhere is an author's call, not a validation failure. The single hard rule about placement is §6.5's: never inside a managed region.
+"Usual parent" is where the region belongs when the agent is otherwise conventional, and where MOSAIC's own agents put it. Placing one elsewhere, including inside a managed region, is an author's call rather than a validation failure; §6.5 defines preservation and guidance.
 
 #### 6.2.2 Stability Obligations
 
@@ -550,7 +547,7 @@ Two development disciplines protect deployed agents from avoidable rework when t
 
 #### 6.2.1 Protocol Extension
 
-`ProtocolExtension` is not a catalogued injection name. A project needing to extend the protocol uses `<ProtocolExtension type="custom">` as a top-level sibling of `<CommunicationProtocol type="managed">` — never inside it, since the contract region is regenerated wholesale and would take the extension with it. Because custom regions are project-invented, no source declaration is needed; the project adds the region directly to their deployed files.
+`ProtocolExtension` is not a catalogued injection name. A project needing to extend the protocol uses `<ProtocolExtension type="custom">` as a top-level sibling of `<CommunicationProtocol type="managed">`. The sibling placement keeps project transport mechanics visibly separate from the canonical contract; it is not required for preservation, since the tool also preserves user-owned regions nested inside managed regions. Because custom regions are project-invented, no source declaration is needed; the project adds the region directly to their deployed files.
 
 The use case is unchanged: a deployment can have real business extending the protocol without altering it. A project whose subagents run behind network endpoints while the orchestrator runs locally needs to say *how a message is delivered*; nothing in the contract covers transport, and that project's alternative is forking the contract, which is strictly worse for everyone.
 
@@ -590,7 +587,7 @@ The tool does not need to distinguish "parked" from "always at end of file". On 
 
 One is enforced. The rest are guidance, and marked as such.
 
-**Nesting inside managed regions is permitted.** Project and custom regions may be nested inside a managed region. The tool preserves them when regenerating the managed parent — it writes the new canonical content and keeps nested user-owned regions intact. This replaces the former rule 13 ban, which existed because the tool previously destroyed nested content on regeneration.
+**Nesting inside managed regions is permitted.** Project and custom regions may be nested inside a managed region. The tool preserves them when regenerating the managed parent — it writes the new canonical content first, then re-emits the nested user-owned regions in preserved order and with preserved bytes. This replaces the former rule 13 ban, which existed because the tool previously destroyed nested content on regeneration.
 
 **Guidance:**
 
@@ -605,17 +602,18 @@ One is enforced. The rest are guidance, and marked as such.
 
 ## 7. The Canonical Blocks
 
-Five fragments of shared body text are deployed into every subagent. Their text lives in `Catalog/DeployedSections.md` and nowhere else; their reasoning lives one document per block.
+Four fragments of shared body text are deployed into every subagent. Their text lives in `Catalog/DeployedSections.md` and nowhere else; their reasoning lives one document per block.
 
 | Block | Fills region | Parent section | Reasoning |
 |-------|--------------|----------------|-----------|
 | `AuthorityHierarchy:Subagent` | `<AuthorityHierarchy type="managed">` | `Identity` | `DeploymentBlocks/AuthorityHierarchy.md` |
 | `ClosingProcedure:Subagent` | `<ClosingProcedure type="managed">` | `Identity` | `DeploymentBlocks/ClosingProcedure.md` |
-| `ProtocolConstraints:Subagent` | `<ProtocolConstraints type="managed">` | `Constraints` | `DeploymentBlocks/ProtocolConstraints.md` |
 | `ErrorHandlingCommon:Subagent` | `<ErrorHandlingCommon type="managed">` | `ErrorHandling` | `DeploymentBlocks/ErrorHandlingCommon.md` |
 | `ExecutionPhilosophyCommon:Subagent` | `<ExecutionPhilosophyCommon type="managed">` | `ExecutionPhilosophy` | `DeploymentBlocks/ExecutionPhilosophyCommon.md` |
 
-All five are `applies_to: subagent`; §8 says why the orchestrator carries none. Membership, versioning, and deployment mechanics are in `DeployedSectionsBundle.md`. The measurement that identified these five, and the decision that produced them, is `Development/Analysis/AgentBodyDrift.md`.
+All four are `applies_to: subagent`; §8 says why the orchestrator carries none. Membership, versioning, and deployment mechanics are in `DeployedSectionsBundle.md`. The measurement that identified the original fragments, and the decision that produced them, is `Development/Analysis/AgentBodyDrift.md`.
+
+`ProtocolConstraints:Subagent` was removed in v2.3. Six of its eight bullets restated rules already present in the Communication Protocol's deployed text (Key Rules and the artifact access section). The ASCII-only rule moved to the protocol (Key Rule 10). The single-responsibility bullet moved to `ExecutionPhilosophyCommon`. The full reasoning is in `DeploymentBlocks/ProtocolConstraints.md`.
 
 **This document holds none of their text**, and neither does any other document. That rule is what keeps the payload and the rationale from becoming two copies of the same thing; rule 23 of §9 is its mechanical form.
 
@@ -625,17 +623,17 @@ All five are `applies_to: subagent`; §8 says why the orchestrator carries none.
 
 ## 8. Why the Orchestrator Carries No Canonical Body Regions
 
-All five blocks are subagent-only, and the orchestrator's equivalents stay hand-authored in its own file. Three reasons, in increasing order of weight.
+All four blocks are subagent-only, and the orchestrator's equivalents stay hand-authored in its own file. Three reasons, in increasing order of weight.
 
 **There is one orchestrator.** Single-sourcing exists to stop forty-two copies from diverging. One copy cannot diverge from itself. Deploying the orchestrator's own text into the orchestrator's own file from a third file would add a hop and a staleness surface to buy nothing.
 
-**Four of the five are not variants of the subagent text.** `ClosingProcedure` has no counterpart at all: the orchestrator returns no protocol response and closes no task. `ErrorHandlingCommon` inverts — the orchestrator's error handling is a tiered retry-and-escalate strategy for codes it *receives*, not a mapping for codes it returns. `ProtocolConstraints` and `ExecutionPhilosophyCommon` are about context discipline and append-only state rather than artifact access and status selection. Writing orchestrator versions would mean four new blocks sharing no sentence with their counterparts, maintained in a file the orchestrator's author does not otherwise open.
+**Three of the four are not variants of the subagent text.** `ClosingProcedure` has no counterpart at all: the orchestrator returns no protocol response and closes no task. `ErrorHandlingCommon` inverts — the orchestrator's error handling is a tiered retry-and-escalate strategy for codes it *receives*, not a mapping for codes it returns. `ExecutionPhilosophyCommon` addresses different role-specific concerns: the subagent common philosophy is about using its one-task context and preserving memory for successors, while the orchestrator manages a continuing run and append-only state. Writing orchestrator versions would mean three new blocks sharing no sentence with their counterparts, maintained in a file the orchestrator's author does not otherwise open.
 
 **Provenance is the clearest case.** The orchestrator writes one file, the orchestration artifact, whose schema already sets its own frontmatter obligations — and `created_by` has no value it could carry, since instance ids are minted *by* the orchestrator *for* subagents. This is why the contract's orchestrator-role block differs from its subagent-role block rather than the orchestrator simply carrying less.
 
 **The one that does not fit this argument, and the cost of including it anyway.** `AuthorityHierarchy` *is* a genuine variant — the orchestrator's version shares three of five ranks and its closing rationale with the subagent block. The two state one ranking principle for two readers, so the risk is not two copies drifting by accident but the principle being amended in one role and not the other. That is not hypothetical: the harness went unranked in both, was fixed for subagents when the fragment was single-sourced, and was fixed for the orchestrator only because someone noticed the connection by hand. Deploying it was considered and rejected on cost (`DeploymentBlocks/AuthorityHierarchy.md` §6), which leaves a standing review obligation rather than a mechanism: **an amendment to either hierarchy is checked against the other.**
 
-The consequence for the tool: none of the five blocks declares `applies_to: orchestrator`, the orchestrator source carries none of the five regions, and neither fact is an error (§2.4).
+The consequence for the tool: none of the four blocks declares `applies_to: orchestrator`, the orchestrator source carries none of the four regions, and neither fact is an error (§2.4).
 
 ---
 
@@ -707,8 +705,8 @@ All errors, and none of them can flag a creative agent: each is a field the tool
 | 9b | Every project region sits under its usual parent (§6.2) | Advice | Tool | Yes — should be downgraded |
 | 10 | No boundary name appears twice in one file | Error | Tool | Yes |
 | 11 | Every opened boundary is closed, with matching name | Error | Tool | Yes |
-| 12 | In a source file, every managed region is empty | Error | Tool | No |
-| 13 | Project and custom regions nested inside managed regions are preserved on regeneration | — | Tool | No — tool currently destroys them |
+| 12 | In a source file, a managed region contains no unmarked text; nested project regions are permitted | Error | Tool | No |
+| 13 | Project and custom regions nested inside managed regions are preserved on regeneration | Error | Tool | Yes |
 | 14 | Every managed name is one the tool has a source for (§2.5) | Error | Tool | Yes |
 
 Rule 14 replaces the former "`ProtocolExtension` does not appear". Project-region names are open and unlisted names are preserved, not orphaned (§6.2); managed names stay closed, because an unrecognised one leaves the tool with a slot and no content.
@@ -740,11 +738,11 @@ The `r` rules are what §4 already asks for in prose. They are listed here so th
 | # | Rule | Severity | Mechanism | Implemented |
 |---|---|---|---|---|
 | 20 | Every bundle block declares a valid `target`, `applies_to`, and an existing `specified_in` | Error | Tool | No |
-| 21 | Every deployed agent's `bundle_version` equals the bundle's, and all agents in one deployment agree | Warning | Tool | No |
-| 22 | Every bundle-sourced managed region's body equals its block byte-for-byte | Warning | Tool | No |
+| 21 | Every deployed agent's `mosaic_bundle_version` equals the bundle source's `bundle_version`, and all agents in one deployment agree | Warning | Tool | No |
+| 22 | Every bundle-sourced managed region's canonical projection equals its block byte-for-byte (§9.3) | Warning | Tool | No |
 | 23 | No document outside the bundle contains a block's opening or closing content line | Warning | Review | No |
 
-21 and 22 warn because a stale or hand-edited deployment still runs — the user is being told to redeploy, not stopped. 22 catches a hand-edited deployed file; 23 catches a design document that started quoting what it was only supposed to explain. Elaborated in `DeployedSectionsBundle.md` §9.
+For rule 22, the canonical projection removes each direct nested project/custom region in full and trims leading and trailing whitespace; the bundle block receives the same outer-whitespace trim before comparison. Nested user-owned content is not part of the comparison, while interior canonical bytes remain exact. 21 and 22 warn because a stale or hand-edited deployment still runs — the user is being told to redeploy, not stopped. 22 catches a hand-edited deployed file; 23 catches a design document that started quoting what it was only supposed to explain. Elaborated in `DeployedSectionsBundle.md` §9.
 
 ### 9.4 Cheapest First
 
@@ -752,21 +750,21 @@ Rules 1–4 and 14 are a morning's work and are pure integrity. Rules 16–18 ar
 
 ---
 
-## 10. Migration
+## 10. Migration Record
 
-The migration touches forty-two subagent files. It is mechanical apart from one review step.
+The completed migration touched forty-two subagent files. It was mechanical apart from one review step.
 
 1. **Add `role: subagent`** to all forty-two, `role: orchestrator` to the orchestrator.
 2. **Replace the Authority Hierarchy block** with an empty `<AuthorityHierarchy type="managed">` region.
 3. **Delete the trailing HITL and return-JSON steps** from every Process list; add an empty `<ClosingProcedure type="managed">` region after the list, before the authority hierarchy region.
-4. **Replace the five contract-restating constraint bullets** at the top of `Constraints` with an empty `<ProtocolConstraints type="managed">` region, keeping every agent-specific constraint below it.
+4. ~~**Replace the five contract-restating constraint bullets**~~ **Superseded.** The `<ProtocolConstraints type="managed">` region was removed in v2.3. Its protocol-restatement bullets were redundant with the Communication Protocol's Key Rules; its ASCII-only rule moved to the protocol; its single-responsibility bullet moved to `ExecutionPhilosophyCommon`. The `Constraints` section now begins directly with agent-specific constraints, followed by `<HarnessConstraints type="managed">`.
 5. **Replace the retry bullet** at the top of `ErrorHandling` with an empty `<ErrorHandlingCommon type="managed">` region, keeping the agent's status mapping. Delete any error-code recall bullet outright — the contract's region carries the full table.
-6. **Replace the Context Management, Memory via Artifacts, and Quality over Completeness bullets** with an empty `<ExecutionPhilosophyCommon type="managed">` region at the top of `ExecutionPhilosophy`, ahead of `<ContextLimits type="project">`.
+6. **Replace the Context Management and Memory via Artifacts bullets** with an empty `<ExecutionPhilosophyCommon type="managed">` region at the top of `ExecutionPhilosophy`, ahead of `<ContextLimits type="project">`. Remove generic status-selection prose from execution philosophy; the contract and agent-specific status mapping own it.
 7. ~~**Rewrite `OutputFormat`**~~ **Superseded.** The `OutputFormat` section was removed entirely in v2.0 rather than rewritten. The `status_message` examples and `error_code` choices it would have carried were deleted from all forty-seven agents: the Communication Protocol already supplies the contract, `ErrorHandling` already carries the agent-specific status mapping, and the worked examples were actively causing verbose message parroting. If experience shows agents need more status guidance, `ErrorHandling` (§4.5) is the place to expand.
 8. **Update the three vocabulary files** together (§10.1).
 9. **Bump each agent's `version`** — minor, since regions were added and hand-authored content was removed. The bundle version does not move: its blocks did not change, only their destinations came into existence.
 
-Steps 2–6 are verifiable two ways: after deployment, each region must be byte-identical across all forty-two files and to its block in the bundle (uniformity), and everything outside the touched regions must be byte-identical to the pre-migration file (isolation). Step 7 is not mechanically verifiable and needs review; rule 17 confirms only that no envelope survived.
+Steps 2–6 are verifiable two ways: after deployment, each region's canonical projection must be byte-identical across all forty-two files and to its block in the bundle (uniformity), while nested user-owned regions and everything outside the touched regions remain byte-identical to the pre-migration file (isolation). Step 7 is not mechanically verifiable and needs review; rule 17 confirms only that no envelope survived.
 
 **Before migrating any fragment,** diff its full block across all forty-two files. The counts in the drift analysis each test one representative line and are a triage signal, not a verification.
 
@@ -778,9 +776,9 @@ Three files hold the boundary vocabulary in machine-readable form: `Catalog/Cata
 
 Changes this document makes to them:
 
-- `CanonicalDeployed` gains `AuthorityHierarchy`, `ClosingProcedure`, `ProtocolConstraints`, `ErrorHandlingCommon`, `ExecutionPhilosophyCommon`. It remains a closed set (rule 14).
+- `CanonicalDeployed` gains `AuthorityHierarchy`, `ClosingProcedure`, `ErrorHandlingCommon`, `ExecutionPhilosophyCommon`. (`ProtocolConstraints` was added in v1.0 and removed in v2.3.) It remains a closed set (rule 14).
 - `CanonicalDeployed` loses `ArtifactProvenance`, and `CanonicalSections` does not gain it — the region ceases to exist on the provenance merge.
-- `CanonicalDeployed` loses `LanguagePatterns` and `CustomConstraints` (§2.5.1), leaving nine names. `DeployedParent` loses the same two entries. `LanguagePatterns` becomes a catalogued injection name (§6.1); `CustomConstraints` ceases to exist in any vocabulary.
+- `CanonicalDeployed` loses `LanguagePatterns` and `CustomConstraints` (§2.5.1), leaving eight names. `DeployedParent` loses the same two entries. `LanguagePatterns` becomes a catalogued injection name (§6.1); `CustomConstraints` ceases to exist in any vocabulary.
 - The managed-name classifier's `default:` branch stops resolving to the harness class. `HarnessConstraints` becomes an explicit case, and an unclassified name is an error (§2.5.1).
 - `DeployedParent` gains the five new names with the parents in §2.5.
 - `CanonicalOrder` becomes six slots (seven before v2.0 removed `OutputFormat`), of which slot 2 is managed, and is consumed as a subsequence rather than an equality check (§2.3).
@@ -853,6 +851,7 @@ A change to this schema is never local. The table below lists what must be check
 
 | Version | Date | Summary |
 |---------|------|---------|
+| 2.3 | 2026-09-26 | **Agent-specific status mapping and managed-region preservation aligned with current behavior.** `PARTIALLY_DONE` now covers every incomplete but continuable assignment, including unresolved acceptance criteria, rather than only deliberate quality stops. `COMPLETED_NEEDS_ACTION` is defined by an agent-specific action condition on a completed assignment, and mappings must not infer status from workflow position or outside-scope future work. Project/custom regions nested inside managed regions are valid and preserved; conformance compares only the canonical projection after excising those user-owned regions. |
 | 2.2 | 2026-08-18 | **Custom-region placement rule stated unambiguously; enclosing-section change warning documented.** §6.4's "On normal update" paragraph rewritten: custom regions are no longer described as preserved "in their current position." On every update the tool resolves the region's parent section by name and appends the region at the end of that parent's content — no positional information is kept. A new paragraph in §6.4 documents the enclosing-section change warning: when the core section directly enclosing a custom region changes its own content, the tool emits a TODO asking the user to review their custom content for contradictions against the updated section text. §6.1's "Position on update" cell and §2.1's table and intro paragraph updated to match — the contradiction between "in their current position" / "writes them back where they were" and principle 10's "no positional information is kept" is resolved in favour of principle 10. |
 | 2.1 | 2026-08-15 | **`IdentityExtension` and `ErrorHandlingExtension` removed from catalogue and all agents.** Neither passed the inclusion test: `IdentityExtension` (47→0 agents) offered ambient "domain expertise" no instruction consumed; `ErrorHandlingExtension` (46→0) offered "project recovery guidance" no project would know how to fill. §6.5's inclusion guidance rewritten from the vague "could use" to a two-part test: the region must be generally applicable (most projects have something to put there) AND improve agent performance when provided. §4.1 and §4.5 project-injection lines removed. §6.2 catalogue drops from seven names to five. `CatalogFilesFormat.md` updated. Analysis in `SubagentProjectRegions-Review.md` §4.5 and §4.9. |
 | 2.0 | 2026-08-15 | **`OutputFormat` section removed.** The section carried `status_message` examples and `error_code` choices per agent — two things the Communication Protocol's deployed region and `ErrorHandling` (§4.5) already cover between them. The examples were actively causing verbose message parroting rather than helping. Canonical order drops from seven slots to six; §2.3, §2.4, §5.1 updated. §4.6 deleted, §4.7 renumbered to §4.6. Conformance rules 17 and 17r retired; rule 16 simplified. Migration step 7 marked superseded. §15's rename item moved to Rejected. All forty-seven subagent files already migrated — no `OutputFormat` region remains in the catalog. Analysis in `SubagentProjectRegions-Review.md` §4.10. |
@@ -904,9 +903,7 @@ A change to this schema is never local. The table below lists what must be check
 - **Most of §9 is unimplemented, and the implemented part is now wrong in three places.** `docformat/validate.go` checks boundary structure only — no frontmatter conformance, no section content, no bundle comparison. On top of that backlog, three live checks no longer match this document: `unknown-injection` must go entirely (§6.2), `out-of-order-section` must become a subsequence test rather than rejecting unknown top-level names (§2.3), and project-injection parent placement must drop from error to advice (rule 9b). The three subtractions are the fastest way to stop the validator flagging legitimate work.
 - **Severity and mode are specified but the validator has one of each.** Everything it reports is an error, and it behaves identically on MOSAIC's tree and a user's. §9.1's two axes and §9.2's strict/lenient split both need building, along with routing warnings into `TODO.md` and the deployment summary rather than only to a console.
 - **No review-mechanism rules run.** Rules 15r–18r are specified with `Review` as their mechanism and nothing performs them. The intended vehicle is a validation subagent given them as a checklist; that agent does not exist.
-- **The provenance merge is specified but not executed.** The design layer is done — `CommunicationProtocol.md` v1.10 owns the stamp, and `ArtifactProvenance.md` is a tombstone. What remains is mechanical: forty-two agent files still carry older provenance regions and injections, and the three vocabulary copies plus the `Tools/Common/testdata/boundary/` fixtures still encode eight-slot ordering. Until that lands, deployed agents do not match §2.3.
-- **The HITL obligation is stated twice** in every subagent file: once in the contract's managed region, once in `ClosingProcedure`. Both single-sourced, so they cannot drift accidentally. Options and the argument are in `DeploymentBlocks/ClosingProcedure.md` §7.
-- **The deployment tool does not read the bundle at all.** Until it does, the five blocks are deployed nowhere and the migration in §10 cannot complete. Tracked in `DeployedSectionsBundle.md` §10.
+- **The HITL procedure has a nearby trigger** in every subagent file. The contract is its sole normative statement; `ClosingProcedure` points to it at the end of the Process sequence so the agent encounters the trigger where it acts. The argument is in `DeploymentBlocks/ClosingProcedure.md` §7.
 - **The tool's role enum is partially aligned.** `domain.AgentRole` now has `subagent` / `orchestrator` / `utility`. The new `standalone` value (§3.2) is not yet represented in the code. `ParseAgentRole` accepts only `subagent` and `orchestrator`; it needs to accept `utility` and `standalone` as well.
 - **Role is still inferred from path in the tool.** The frontmatter field is specified here but nothing reads it. Until it does, `role` is documentation, and a file moved between folders still changes what it is.
 - **`Catalog/CatalogFilesFormat.md` and this document overlap.** That file states the agent format from the tool's side, with no rationale, and has already drifted. It should be reduced to a pointer plus the skill and hook conventions it uniquely covers (§10.1).

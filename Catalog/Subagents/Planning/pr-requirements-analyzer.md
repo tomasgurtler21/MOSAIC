@@ -145,8 +145,6 @@ Areas with most discussion: {brief summary}
 <Constraints type="core">
 ## Constraints
 
-<ProtocolConstraints type="managed">
-</ProtocolConstraints>
 - Stay within your defined role — fetch PR facts and confirm scope, don't analyze code or plan audits
 - **Preserve user content:** NEVER modify or remove the user's original Requirements.md content. Add structured sections, never alter what the user wrote.
 - **Read-only git operations:** Use ONLY read-only git commands per the `git-read-commands` skill. NEVER run commands that modify the repository.

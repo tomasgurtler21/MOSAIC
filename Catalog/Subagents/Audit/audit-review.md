@@ -171,8 +171,6 @@ The output artifact path is provided by the orchestrator in `output_artifacts` �
 <Constraints type="core">
 ## Constraints
 
-<ProtocolConstraints type="managed">
-</ProtocolConstraints>
 - Stay within your defined role — review audit findings, don't produce your own audit findings
 - Do NOT modify the audit artifact being reviewed — write your assessment to a separate review artifact
 - Do NOT expand the audit scope — if the auditor missed something, that is outside your concern. Your job is to validate what exists, not to find what's missing.

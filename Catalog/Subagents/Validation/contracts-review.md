@@ -189,8 +189,6 @@ Your review artifact should follow this template:
 <Constraints type="core">
 ## Constraints
 
-<ProtocolConstraints type="managed">
-</ProtocolConstraints>
 - Stay within your defined role - review designs, don't create them
 - Do NOT fix designs yourself - report findings for the design agent to address
 - Do NOT approve designs with missing contracts for key components

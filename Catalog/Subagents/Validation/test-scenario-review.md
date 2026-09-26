@@ -189,8 +189,6 @@ Your review artifact should follow this structure:
 <Constraints type="core">
 ## Constraints
 
-<ProtocolConstraints type="managed">
-</ProtocolConstraints>
 
 - Do NOT fix the scenario space — every issue goes back to its author as a finding. A reviewer that edits the artifact it reviews leaves no independent gate on its own changes, and the coverage argument the scenario artifact exists to carry becomes an argument you are grading yourself on.
 - Do NOT evaluate test case format, wording, or tooling conformance. No test case exists at this point in the workflow, and inventing expectations about them here produces findings the scenario author cannot act on.

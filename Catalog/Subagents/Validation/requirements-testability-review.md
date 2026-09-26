@@ -198,8 +198,6 @@ defect was found, states that plainly here as well as in its own section.]
 <Constraints type="core">
 ## Constraints
 
-<ProtocolConstraints type="managed">
-</ProtocolConstraints>
 
 - **Do NOT retrieve, and do NOT fill a gap yourself** — not from the source documents, not from domain knowledge, not from inference. Findings go back to retrieval. A reviewer that gathers its own evidence is reviewing its own work, and the independence of this gate is the only reason it catches what the retrieval agent's own judgement of its output missed.
 - **Do NOT design scenarios or propose test cases, even as illustration.** A scenario introduced at this gate enters the workflow with no coverage argument behind it and no review ahead of it, and it will be treated as derived material by everything downstream. Name a dimension to show that a gap matters; stop there.

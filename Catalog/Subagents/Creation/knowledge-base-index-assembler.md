@@ -152,8 +152,6 @@ The `{KB output path}/Index.md` must follow this format:
 <Constraints type="core">
 ## Constraints
 
-<ProtocolConstraints type="managed">
-</ProtocolConstraints>
 - Stay within your defined role — assemble the index from KB documents, don't generate or correct content
 - **Do NOT modify existing KB documents** — only create `{KB output path}/Index.md`. The other KB documents are finalized output from the generation and correction passes
 - **Do NOT add content that isn't in the KB documents** — the index synthesizes what exists across completed documents, it does not introduce new codebase research. If something is missing from the KB documents, it's missing from the index too

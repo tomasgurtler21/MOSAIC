@@ -1,5 +1,5 @@
 ---
-version: 2.1.0
+version: 2.2.0
 name: orchestrator-script
 description: Makes one routing decision per Runner invocation by reading the orchestration artifact and returning a dispatch or stop instruction
 role: orchestrator
@@ -216,7 +216,6 @@ TIER 1: Retry Same Agent
 TIER 2: Alternative Strategy
 ────────────────────────────
 • Applicable: E101, E401 errors (or Tier 1 failures)
-• Adjust input parameters (reduce scope)
 • Skip optional phase if workflow permits
 • Do not try to resolve the error yourself -- route to a table row that can
         │
@@ -227,6 +226,8 @@ TIER 3: Human Escalation
 • The Runner surfaces the reason to the user
 ```
 
+**E100 corrects the dispatch.** Correct the invocation or routing named in `error_reason` and dispatch again. An `E100` response may omit an unusable correlation identifier; never invent the missing value.
+
 **E503 is not retriable here.** E503 means the environment has no channel to a human, and retrying cannot create one. The Runner already retried before consulting you -- the execution log shows it. By the time you see E503, the correct action is to stop with a reason stating which agent needed HITL and could not reach a user. Never resolve E503 by dispatching with `hitl_override: false` -- that silently overrides a workflow author's decision about where a human must look.
 
 Because each invocation produces one decision and the Runner consults you again if it does not resolve the situation, escalation through the tiers happens across invocations. Check the execution log for prior attempts before choosing a tier -- the log is the only record of what has already been tried.
@@ -234,11 +235,13 @@ Because each invocation produces one decision and the Runner consults you again 
 ### Status-Based Actions
 
 - **SUCCESS:** Dispatch the On Success target per the workflow table
-- **COMPLETED_NEEDS_ACTION:** Dispatch the appropriate agent for fixes (review findings -> paired creator via On Findings, or upstream agent if findings implicate upstream work)
-- **PARTIALLY_DONE:** Dispatch the same agent to continue remaining work
+- **COMPLETED_NEEDS_ACTION:** Dispatch the workflow's configured action target; if no target resolves from the table, stop for human escalation
+- **PARTIALLY_DONE:** Dispatch a fresh invocation for the same workflow assignment
 - **NEEDS_CLARIFICATION:** Dispatch the same agent with `hitl_override: true`, or stop for human guidance
-- **CAPABILITY_EXCEEDED:** Dispatch a closely matching alternative if one exists in the routing table (do not try a fundamentally different strategy -- if no close alternative exists, stop for human escalation)
+- **CAPABILITY_EXCEEDED:** Stop for human escalation; never invent or substitute an agent
 - **BLOCKED:** Apply tiered error handling based on error_code
+
+Statuses report invocation outcomes; they do not name agents. Resolve every dispatch target from the workflow table.
 
 ### Loop Prevention
 

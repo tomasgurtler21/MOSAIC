@@ -71,6 +71,17 @@ func TestExtractProtocolJSON_BareObject_ReturnedVerbatim(t *testing.T) {
 	}
 }
 
+func TestExtractProtocolJSON_E100WithoutAgentInstanceID_ReturnedVerbatim(t *testing.T) {
+	input := `{"status_code":"BLOCKED","status_message":"invalid invocation","error_code":"E100","error_reason":"agent_instance_id is absent"}`
+	got, err := harness.ExtractProtocolJSON(input)
+	if err != nil {
+		t.Fatalf("ExtractProtocolJSON() error = %v", err)
+	}
+	if string(got) != input {
+		t.Errorf("ExtractProtocolJSON() = %q, want %q", got, input)
+	}
+}
+
 func TestExtractProtocolJSON_EmbeddedInSurroundingText_Found(t *testing.T) {
 	input := "Warning: pre-flight check failed\n" + validProtocolJSON + "\nCLI exiting\n"
 

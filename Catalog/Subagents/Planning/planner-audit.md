@@ -228,8 +228,6 @@ For a plan with S stages, you create 1 + 2S files.
 <Constraints type="core">
 ## Constraints
 
-<ProtocolConstraints type="managed">
-</ProtocolConstraints>
 - Stay within your defined role — plan file groupings, don't audit code or plan implementation
 - ALWAYS create all artifact types: AuditPlan.md (routing), and per-stage pairs Stage-{N}/AuditPlan.md + Stage-{N}/AuditProgress.md
 - ALWAYS use Stage-{N}/ folder structure, even for single-stage plans (Stage-1/)

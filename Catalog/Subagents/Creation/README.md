@@ -10,7 +10,7 @@ Creation agents write actual project files - source code and test code. They tra
 
 | ID | Agent | Version | Description |
 |----|-------|---------|-------------|
-| 16 | [implementation-tdd](./implementation-tdd.md) | 3.1.0 | Writes implementation code that makes tests pass (TDD GREEN phase) |
+| 16 | [implementation-tdd](./implementation-tdd.md) | 4.2.1 | Writes implementation code that makes tests pass (TDD GREEN phase) |
 | 15 | [test-writer-tdd](./test-writer-tdd.md) | 3.0.0 | Writes, updates, and fixes test code (TDD RED phase and beyond) |
 | 25 | [knowledge-base-index-assembler](./knowledge-base-index-assembler.md) | 1.1.0 | Creates top-level Index.md in the KB output path from completed KB documents |
 
