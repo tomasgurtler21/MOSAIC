@@ -16,7 +16,7 @@ import (
 	"mosaic-run/internal/domain"
 )
 
-// ScriptedEntry is one queued response for the FakeAdapter.
+// ScriptedEntry is one queued response for the MockAdapter.
 //
 // Exactly one of Response, Err, or RawJSON should be set per entry:
 //   - Response: returned as the protocol response (happy-path entry).
@@ -32,36 +32,36 @@ type ScriptedEntry struct {
 	RawJSON  []byte
 }
 
-// Invocation records one call to FakeAdapter.Invoke.
+// Invocation records one call to MockAdapter.Invoke.
 type Invocation struct {
 	Agent   domain.AgentReference
 	Request domain.ProtocolRequest
 }
 
-// FakeAdapter implements domain.HarnessAdapter with scripted responses.
+// MockAdapter implements domain.HarnessAdapter with scripted responses.
 //
 // Scripted entries are queued per agent identifier and consumed in FIFO order.
 // When the queue for a given agent is exhausted, Invoke returns an error
 // rather than blocking or panicking. All invocations are recorded so tests
 // can assert call order and argument values.
-type FakeAdapter struct {
+type MockAdapter struct {
 	queue       map[string][]ScriptedEntry
 	invocations []Invocation
 }
 
-// NewFakeAdapter returns a FakeAdapter with an empty queue.
-func NewFakeAdapter() *FakeAdapter {
-	return &FakeAdapter{queue: make(map[string][]ScriptedEntry)}
+// NewMockAdapter returns a MockAdapter with an empty queue.
+func NewMockAdapter() *MockAdapter {
+	return &MockAdapter{queue: make(map[string][]ScriptedEntry)}
 }
 
 // Queue appends scripted entries for the given agent identifier.
 // Entries are consumed in the order they were added (FIFO).
-func (f *FakeAdapter) Queue(agentID string, entries ...ScriptedEntry) {
+func (f *MockAdapter) Queue(agentID string, entries ...ScriptedEntry) {
 	f.queue[agentID] = append(f.queue[agentID], entries...)
 }
 
 // Invocations returns all recorded invocations in call order.
-func (f *FakeAdapter) Invocations() []Invocation {
+func (f *MockAdapter) Invocations() []Invocation {
 	return f.invocations
 }
 
@@ -69,7 +69,7 @@ func (f *FakeAdapter) Invocations() []Invocation {
 // across all queued agents. A non-zero value after a run indicates that fewer
 // agents were dispatched than expected, helping detect over-queued responses
 // where the session dispatched fewer agents than the test author intended.
-func (f *FakeAdapter) RemainingQueueSize() int {
+func (f *MockAdapter) RemainingQueueSize() int {
 	total := 0
 	for _, entries := range f.queue {
 		total += len(entries)
@@ -83,7 +83,7 @@ func (f *FakeAdapter) RemainingQueueSize() int {
 // the scripted response or error. If the context is already cancelled, it
 // returns ctx.Err() without consuming an entry. If the queue is exhausted,
 // it returns a descriptive error.
-func (f *FakeAdapter) Invoke(ctx context.Context, agent domain.AgentReference, request domain.ProtocolRequest) (domain.ProtocolResponse, error) {
+func (f *MockAdapter) Invoke(ctx context.Context, agent domain.AgentReference, request domain.ProtocolRequest) (domain.ProtocolResponse, error) {
 	// Honour context cancellation before consuming a scripted entry.
 	select {
 	case <-ctx.Done():

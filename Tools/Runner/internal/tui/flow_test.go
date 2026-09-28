@@ -14,7 +14,8 @@ import (
 	tuicommon "mosaic-common/tui"
 	"mosaic-common/interaction"
 	"mosaic-run/internal/domain"
-	"mosaic-run/internal/tui/screens"
+	"mosaic-run/internal/tui/screens/runconfig"
+	"mosaic-run/internal/tui/screens/runflow"
 )
 
 // ---------------------------------------------------------------------------
@@ -331,7 +332,7 @@ func TestFlow_RunningNoticeThenCompletion_RowMarkedComplete(t *testing.T) {
 func TestFlow_ConfigScreen_InfraClassStep_PopulatesInfraClassSelections(t *testing.T) {
 	tuiTheme := tuicommon.DefaultTheme()
 	style := stylesFromTheme(tuiTheme)
-	s := screens.NewConfigScreen(80, 24, style)
+	s := runconfig.NewConfigScreen(80, 24, style)
 
 	// Inject two same-class checkpoint agents. The step should be shown so the user
 	// can select which one to use for this run.
@@ -401,7 +402,7 @@ func TestFlow_ConfigScreen_InfraClassStep_PopulatesInfraClassSelections(t *testi
 func TestFlow_ConfigScreen_InfraClassStep_SkippedWhenSingleAgentPerClass(t *testing.T) {
 	tuiTheme := tuicommon.DefaultTheme()
 	style := stylesFromTheme(tuiTheme)
-	s := screens.NewConfigScreen(80, 24, style)
+	s := runconfig.NewConfigScreen(80, 24, style)
 
 	// Inject a single checkpoint agent. No selection prompt should be shown.
 	s.SetDeclaredAgents([]domain.DeclaredInfraAgent{
@@ -442,14 +443,14 @@ func TestFlow_ConfigScreen_InfraClassStep_SkippedWhenSingleAgentPerClass(t *test
 }
 
 // driveConfigStepEnter sends one Enter key press to the ConfigScreen.
-func driveConfigStepEnter(s *screens.ConfigScreen) {
+func driveConfigStepEnter(s *runconfig.ConfigScreen) {
 	s.Update(tea.KeyMsg{Type: tea.KeyEnter})
 }
 
 // driveConfigStepTimeout types a valid invocation timeout ("30m") into the
 // ConfigScreen and confirms it.  Must be called when the ConfigScreen is at
 // the invocation-timeout step (configStepHarnessTimeout).
-func driveConfigStepTimeout(s *screens.ConfigScreen) {
+func driveConfigStepTimeout(s *runconfig.ConfigScreen) {
 	s.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'3'}})
 	s.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'0'}})
 	s.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'m'}})
@@ -468,5 +469,5 @@ func progressRowForTest(agentInstance, phase, stage string) progressRow {
 	}
 }
 
-// progressRow is an alias to screens.ProgressRow for use in tests.
-type progressRow = screens.ProgressRow
+// progressRow is an alias to runflow.ProgressRow for use in tests.
+type progressRow = runflow.ProgressRow

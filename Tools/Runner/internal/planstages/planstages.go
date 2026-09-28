@@ -94,66 +94,14 @@ func ReadStages(path string, needsApproach bool) (domain.StageSet, error) {
 		}
 	}
 
-	// Parse rows.
+	// Parse rows using the per-row helper.
 	entries := make([]domain.StageEntry, 0, len(tbl.Rows))
-	for rowIdx, row := range tbl.Rows {
-		_ = rowIdx
-
-		// Parse stage number.
-		stageStr := strings.TrimSpace(row[stageCol])
-		stageNum, err := strconv.Atoi(stageStr)
+	for _, row := range tbl.Rows {
+		entry, err := parseStageRow(row, path, stageCol, hitlCol, dependsCol, approachCol, needsApproach)
 		if err != nil {
-			return domain.StageSet{}, &domain.RefusalError{
-				Component: "planstages",
-				Resource:  path,
-				Reason:    fmt.Sprintf("stage number %q is not an integer", stageStr),
-			}
+			return domain.StageSet{}, err
 		}
-
-		// Parse HITL.
-		hitlStr := strings.TrimSpace(row[hitlCol])
-		hitl := strings.EqualFold(hitlStr, "TRUE")
-
-		// Parse Depends On.
-		dependsStr := strings.TrimSpace(row[dependsCol])
-		var dependsOn []domain.StageNumber
-		if dependsStr != "-" && dependsStr != "" {
-			parts := strings.Split(dependsStr, ",")
-			for _, p := range parts {
-				p = strings.TrimSpace(p)
-				n, err := strconv.Atoi(p)
-				if err != nil {
-					return domain.StageSet{}, &domain.RefusalError{
-						Component: "planstages",
-						Resource:  path,
-						Reason:    fmt.Sprintf("dependency %q in stage %d is not an integer", p, stageNum),
-					}
-				}
-				dependsOn = append(dependsOn, domain.StageNumber(n))
-			}
-		}
-
-		// Parse Approach (only when column is present and needsApproach is true).
-		// Values are taken verbatim with no membership check against any fixed set.
-		var approach domain.Approach
-		if approachCol != -1 && needsApproach {
-			approachStr := strings.TrimSpace(row[approachCol])
-			if approachStr == "" || approachStr == "-" {
-				return domain.StageSet{}, &domain.RefusalError{
-					Component: "planstages",
-					Resource:  path,
-					Reason:    fmt.Sprintf("stage %d has an empty Approach value", stageNum),
-				}
-			}
-			approach = domain.Approach(approachStr)
-		}
-
-		entries = append(entries, domain.StageEntry{
-			Number:    domain.StageNumber(stageNum),
-			HITL:      hitl,
-			DependsOn: dependsOn,
-			Approach:  approach,
-		})
+		entries = append(entries, entry)
 	}
 
 	// Validate: stages must start at 1 and be consecutive.
@@ -195,6 +143,66 @@ func ReadStages(path string, needsApproach bool) (domain.StageSet, error) {
 	}
 
 	return domain.StageSet{Entries: entries}, nil
+}
+
+// parseStageRow parses a single table row into a domain.StageEntry. It returns
+// a *domain.RefusalError if any field cannot be parsed or fails validation.
+func parseStageRow(row []string, path string, stageCol, hitlCol, dependsCol, approachCol int, needsApproach bool) (domain.StageEntry, error) {
+	// Parse stage number.
+	stageStr := strings.TrimSpace(row[stageCol])
+	stageNum, err := strconv.Atoi(stageStr)
+	if err != nil {
+		return domain.StageEntry{}, &domain.RefusalError{
+			Component: "planstages",
+			Resource:  path,
+			Reason:    fmt.Sprintf("stage number %q is not an integer", stageStr),
+		}
+	}
+
+	// Parse HITL.
+	hitlStr := strings.TrimSpace(row[hitlCol])
+	hitl := strings.EqualFold(hitlStr, "TRUE")
+
+	// Parse Depends On.
+	dependsStr := strings.TrimSpace(row[dependsCol])
+	var dependsOn []domain.StageNumber
+	if dependsStr != "-" && dependsStr != "" {
+		parts := strings.Split(dependsStr, ",")
+		for _, p := range parts {
+			p = strings.TrimSpace(p)
+			n, err := strconv.Atoi(p)
+			if err != nil {
+				return domain.StageEntry{}, &domain.RefusalError{
+					Component: "planstages",
+					Resource:  path,
+					Reason:    fmt.Sprintf("dependency %q in stage %d is not an integer", p, stageNum),
+				}
+			}
+			dependsOn = append(dependsOn, domain.StageNumber(n))
+		}
+	}
+
+	// Parse Approach (only when column is present and needsApproach is true).
+	// Values are taken verbatim with no membership check against any fixed set.
+	var approach domain.Approach
+	if approachCol != -1 && needsApproach {
+		approachStr := strings.TrimSpace(row[approachCol])
+		if approachStr == "" || approachStr == "-" {
+			return domain.StageEntry{}, &domain.RefusalError{
+				Component: "planstages",
+				Resource:  path,
+				Reason:    fmt.Sprintf("stage %d has an empty Approach value", stageNum),
+			}
+		}
+		approach = domain.Approach(approachStr)
+	}
+
+	return domain.StageEntry{
+		Number:    domain.StageNumber(stageNum),
+		HITL:      hitl,
+		DependsOn: dependsOn,
+		Approach:  approach,
+	}, nil
 }
 
 // findStagesHeading scans data for a "## Stages" heading line and returns

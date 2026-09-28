@@ -112,7 +112,7 @@ func TestSession_Start_EmptyStemOrchestrator_RefusesBeforeArtifact(t *testing.T)
 
 	store := &memStore{}
 	ses := session.New(session.Deps{
-		Harness:  harness.NewFakeAdapter(),
+		Harness:  harness.NewMockAdapter(),
 		Store:    store,
 		Clock:    fixedClock{t: epoch},
 		Interact: &noopInteraction{},
@@ -155,7 +155,7 @@ func TestSession_Start_EmptyStemOrchestrator_RefusalMessageNonEmpty(t *testing.T
 
 	store := &memStore{}
 	ses := session.New(session.Deps{
-		Harness:  harness.NewFakeAdapter(),
+		Harness:  harness.NewMockAdapter(),
 		Store:    store,
 		Clock:    fixedClock{t: epoch},
 		Interact: &noopInteraction{},
@@ -271,7 +271,7 @@ func TestSession_Start_BindsRunContextToManualResolver(t *testing.T) {
 	writeAgentFile(t, dir, "agent-b")
 
 	ses := session.New(session.Deps{
-		Harness:  harness.NewFakeAdapter(),
+		Harness:  harness.NewMockAdapter(),
 		Store:    &memStore{},
 		Clock:    fixedClock{t: epoch},
 		Interact: &noopInteraction{},
@@ -304,7 +304,7 @@ func TestSession_Start_BindsRunContextToPreConsultant(t *testing.T) {
 	writeAgentFile(t, dir, "agent-b")
 
 	ses := session.New(session.Deps{
-		Harness:    harness.NewFakeAdapter(),
+		Harness:    harness.NewMockAdapter(),
 		Store:      &memStore{},
 		Clock:      fixedClock{t: epoch},
 		Interact:   &noopInteraction{},

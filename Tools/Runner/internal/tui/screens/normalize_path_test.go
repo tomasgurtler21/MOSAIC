@@ -146,9 +146,9 @@ func TestNormalizePath(t *testing.T) {
 
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
-			got := normalizePath(tc.input)
+			got := NormalizePath(tc.input)
 			if got != tc.want {
-				t.Errorf("normalizePath(%q) = %q, want %q", tc.input, got, tc.want)
+				t.Errorf("NormalizePath(%q) = %q, want %q", tc.input, got, tc.want)
 			}
 		})
 	}

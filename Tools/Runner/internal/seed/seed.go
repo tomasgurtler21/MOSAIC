@@ -1,16 +1,16 @@
 // Package seed builds and applies plans that copy user-supplied source files
 // and directories into a target folder.
 //
-// Planning and application are deliberately separate. BuildPlan performs every
+// Planning and application are deliberately separate. NewPlan performs every
 // validation and writes nothing, so a caller can reject an invalid seed set
 // before creating the target folder. Apply performs every write and revalidates
 // nothing. Neither function knows anything about runs, sessions, or the CLI.
 //
-// BuildPlan also enforces a naming rule: exactly one source across the whole
+// NewPlan also enforces a naming rule: exactly one source across the whole
 // seed set must be a "Requirement*" candidate (case-insensitive, matched
 // against file sources and the top-level files of directory sources), and
 // that entry's destination is renamed to Requirements.md. A seed set with
-// zero or more than one candidate is refused; see BuildPlan for the precedence
+// zero or more than one candidate is refused; see NewPlan for the precedence
 // of this refusal relative to the others.
 package seed
 
@@ -50,7 +50,7 @@ type Entry struct {
 }
 
 // Plan is a validated, ordered set of copies. The zero Plan is a valid empty
-// plan. A Plan returned by BuildPlan has passed every planning refusal rule;
+// plan. A Plan returned by NewPlan has passed every planning refusal rule;
 // a Plan constructed any other way has not, and Apply does not recheck.
 type Plan struct {
 	// Entries in application order: sources in the order given, and within a
@@ -94,7 +94,7 @@ func ReservedDestinations() []string {
 	return cp
 }
 
-// BuildPlan resolves sources into a validated copy plan. It performs no writes
+// NewPlan resolves sources into a validated copy plan. It performs no writes
 // and does not require targetFolder (or any folder) to exist.
 //
 // Each source names either a file or a directory:
@@ -117,7 +117,7 @@ func ReservedDestinations() []string {
 // to Requirements.md; every other entry keeps its destination unchanged. Zero
 // or more than one candidate refuses the whole seed set.
 //
-// BuildPlan returns a *domain.RefusalError with Component "seed" when any of the
+// NewPlan returns a *domain.RefusalError with Component "seed" when any of the
 // following hold; see "Refusal error shapes" for Resource/Reason contracts. They
 // are checked in this order, which determines which refusal a caller sees when
 // more than one would apply:
@@ -132,91 +132,16 @@ func ReservedDestinations() []string {
 // never use os.Stat, which follows links and would let a symlink through.
 //
 // A non-nil error is always accompanied by the zero Plan.
-func BuildPlan(sources []string) (Plan, error) {
+func NewPlan(sources []string) (Plan, error) {
 	if len(sources) == 0 {
 		return Plan{}, nil
 	}
 
 	// Phase 1: accumulate all entries, refusing per-source errors immediately
 	// (non-existent source, symlink as source, symlink inside directory source).
-	var entries []Entry
-
-	for _, src := range sources {
-		// Use Lstat so we detect symlinks without following them.
-		info, err := os.Lstat(src)
-		if err != nil {
-			if os.IsNotExist(err) {
-				return Plan{}, &domain.RefusalError{
-					Component: "seed",
-					Resource:  src,
-					Reason:    fmt.Sprintf("source path %s does not exist", src),
-				}
-			}
-			return Plan{}, &domain.RefusalError{
-				Component: "seed",
-				Resource:  src,
-				Reason:    fmt.Sprintf("cannot stat source %s: %v", src, err),
-			}
-		}
-
-		// Refuse source paths that are themselves symlinks.
-		if info.Mode()&fs.ModeSymlink != 0 {
-			return Plan{}, &domain.RefusalError{
-				Component: "seed",
-				Resource:  src,
-				Reason:    fmt.Sprintf("source %s is a symlink; symlinks are not seeded", src),
-			}
-		}
-
-		if info.IsDir() {
-			// Walk the directory, accumulating one entry per regular file.
-			// filepath.WalkDir visits entries in lexical order, which ensures
-			// deterministic output for a given filesystem state.
-			walkErr := filepath.WalkDir(src, func(p string, d fs.DirEntry, err error) error {
-				if err != nil {
-					return err
-				}
-				// Detect symlinks via the DirEntry type bits (never via Stat).
-				if d.Type()&fs.ModeSymlink != 0 {
-					return &domain.RefusalError{
-						Component: "seed",
-						Resource:  p,
-						Reason:    fmt.Sprintf("%s is a symlink inside a directory source; symlinks are not seeded", p),
-					}
-				}
-				// Skip the directory entries themselves; only regular files become entries.
-				if d.IsDir() {
-					return nil
-				}
-				// Compute the path relative to the named directory root, then
-				// normalise to forward slashes so the representation is identical
-				// on Windows and POSIX.
-				rel, relErr := filepath.Rel(src, p)
-				if relErr != nil {
-					return fmt.Errorf("seed: computing relative path for %q: %w", p, relErr)
-				}
-				dest := filepath.ToSlash(rel)
-				entries = append(entries, Entry{
-					Source:     p,
-					Dest:       dest,
-					SourceRoot: src,
-				})
-				return nil
-			})
-			if walkErr != nil {
-				return Plan{}, walkErr
-			}
-		} else {
-			// Regular file: destination is its base name at the plan root.
-			// filepath.Base returns a name without any separator, so no further
-			// normalisation is needed for forward-slash compliance.
-			dest := filepath.Base(src)
-			entries = append(entries, Entry{
-				Source:     src,
-				Dest:       dest,
-				SourceRoot: src,
-			})
-		}
+	entries, err := accumulateSeedEntries(sources)
+	if err != nil {
+		return Plan{}, err
 	}
 
 	// Requirements.md naming rule: exactly one entry across all sources
@@ -296,6 +221,95 @@ func BuildPlan(sources []string) (Plan, error) {
 	}
 
 	return Plan{Entries: entries}, nil
+}
+
+// accumulateSeedEntries resolves each source in sources into one or more Entry
+// values. It refuses immediately on a non-existent source, a source that is
+// itself a symlink, or a symlink encountered while walking a directory source.
+// Symlink detection uses os.Lstat and fs.DirEntry.Type()&fs.ModeSymlink; it
+// never uses os.Stat, which follows links.
+func accumulateSeedEntries(sources []string) ([]Entry, error) {
+	var entries []Entry
+
+	for _, src := range sources {
+		// Use Lstat so we detect symlinks without following them.
+		info, err := os.Lstat(src)
+		if err != nil {
+			if os.IsNotExist(err) {
+				return nil, &domain.RefusalError{
+					Component: "seed",
+					Resource:  src,
+					Reason:    fmt.Sprintf("source path %s does not exist", src),
+				}
+			}
+			return nil, &domain.RefusalError{
+				Component: "seed",
+				Resource:  src,
+				Reason:    fmt.Sprintf("cannot stat source %s: %v", src, err),
+			}
+		}
+
+		// Refuse source paths that are themselves symlinks.
+		if info.Mode()&fs.ModeSymlink != 0 {
+			return nil, &domain.RefusalError{
+				Component: "seed",
+				Resource:  src,
+				Reason:    fmt.Sprintf("source %s is a symlink; symlinks are not seeded", src),
+			}
+		}
+
+		if info.IsDir() {
+			// Walk the directory, accumulating one entry per regular file.
+			// filepath.WalkDir visits entries in lexical order, which ensures
+			// deterministic output for a given filesystem state.
+			walkErr := filepath.WalkDir(src, func(p string, d fs.DirEntry, err error) error {
+				if err != nil {
+					return err
+				}
+				// Detect symlinks via the DirEntry type bits (never via Stat).
+				if d.Type()&fs.ModeSymlink != 0 {
+					return &domain.RefusalError{
+						Component: "seed",
+						Resource:  p,
+						Reason:    fmt.Sprintf("%s is a symlink inside a directory source; symlinks are not seeded", p),
+					}
+				}
+				// Skip the directory entries themselves; only regular files become entries.
+				if d.IsDir() {
+					return nil
+				}
+				// Compute the path relative to the named directory root, then
+				// normalise to forward slashes so the representation is identical
+				// on Windows and POSIX.
+				rel, relErr := filepath.Rel(src, p)
+				if relErr != nil {
+					return fmt.Errorf("seed: computing relative path for %q: %w", p, relErr)
+				}
+				dest := filepath.ToSlash(rel)
+				entries = append(entries, Entry{
+					Source:     p,
+					Dest:       dest,
+					SourceRoot: src,
+				})
+				return nil
+			})
+			if walkErr != nil {
+				return nil, walkErr
+			}
+		} else {
+			// Regular file: destination is its base name at the plan root.
+			// filepath.Base returns a name without any separator, so no further
+			// normalisation is needed for forward-slash compliance.
+			dest := filepath.Base(src)
+			entries = append(entries, Entry{
+				Source:     src,
+				Dest:       dest,
+				SourceRoot: src,
+			})
+		}
+	}
+
+	return entries, nil
 }
 
 // Apply copies every entry in plan into targetFolder. targetFolder must already

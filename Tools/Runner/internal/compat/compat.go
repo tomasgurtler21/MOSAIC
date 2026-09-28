@@ -54,48 +54,21 @@ func Admit(table domain.RoutingTable) (domain.AdmittedWorkflow, error) {
 		}
 	}
 
-	// --- Condition 6: Agent-with-mode notation ---
 	// Check before any structural analysis so the error is precise.
-	for _, row := range table.Rows {
-		if strings.ContainsAny(row.Agent, "()") {
-			return refuse(fmt.Sprintf(
-				"agent-with-mode notation is not supported: row %d has agent %q (parentheses not allowed in agent identifiers)",
-				row.Index, row.Agent,
-			))
-		}
+	if reason, failed := checkAgentModeNotation(table.Rows); failed {
+		return refuse(reason)
 	}
 
-	// --- Condition 3: Staged phase with name other than "EXECUTION" ---
-	for _, row := range table.Rows {
-		if row.PhaseParsed.IsStaged && row.PhaseParsed.Name != "EXECUTION" {
-			return refuse(fmt.Sprintf(
-				"staged phase %q in row %d is not supported: only EXECUTION may be staged",
-				row.PhaseParsed.Name, row.Index,
-			))
-		}
+	if reason, failed := checkStagedPhaseName(table.Rows); failed {
+		return refuse(reason)
 	}
 
-	// --- Condition 5: Parallel dispatch (comma in OnSuccess.Value) ---
-	for _, row := range table.Rows {
-		if row.OnSuccess.ColumnPresent && strings.Contains(row.OnSuccess.Value, ",") {
-			return refuse(fmt.Sprintf(
-				"parallel dispatch is not supported: row %d has OnSuccess %q (comma-separated agents indicate parallel routing)",
-				row.Index, row.OnSuccess.Value,
-			))
-		}
+	if reason, failed := checkParallelDispatch(table.Rows); failed {
+		return refuse(reason)
 	}
 
-	// Identify EXECUTION rows and the pre/post-EXECUTION ranges.
-	firstExecIdx := -1
-	lastExecIdx := -1
-	for _, row := range table.Rows {
-		if row.PhaseParsed.IsStaged {
-			if firstExecIdx < 0 {
-				firstExecIdx = row.Index
-			}
-			lastExecIdx = row.Index
-		}
-	}
+	// Identify the EXECUTION row range.
+	firstExecIdx, lastExecIdx := findStagedRange(table.Rows)
 
 	// If no staged rows, there are no further checks to do. Return a non-staged AdmittedWorkflow.
 	// (This is an edge case — the supported set always has staged rows.)
@@ -106,70 +79,22 @@ func Admit(table domain.RoutingTable) (domain.AdmittedWorkflow, error) {
 		}, nil
 	}
 
-	// --- Condition 2: Multiple staged phase blocks ---
-	// A staged phase block is a contiguous run of staged rows. If non-staged rows
-	// appear between staged rows, that's two blocks.
-	seenNonStaged := false
-	for i := firstExecIdx; i <= lastExecIdx; i++ {
-		row := table.Rows[i]
-		if !row.PhaseParsed.IsStaged {
-			seenNonStaged = true
-		} else if seenNonStaged {
-			// A staged row appeared after a non-staged row inside the EXECUTION range.
-			return refuse(
-				"more than one staged phase block: EXECUTION rows are split by non-staged rows, which is not supported",
-			)
-		}
+	if reason, failed := checkSingleStagedBlock(table.Rows, firstExecIdx, lastExecIdx); failed {
+		return refuse(reason)
 	}
 
 	// Compute pre/post execution row ranges.
 	preExecStart := 0
-	preExecEnd := firstExecIdx   // exclusive
+	preExecEnd := firstExecIdx // exclusive
 	postExecStart := lastExecIdx + 1
 	postExecEnd := len(table.Rows)
 
-	// --- Condition 1: Stage source not from plan artifact ---
-	// If there are pre-EXECUTION rows and none of them output Stage-*/Plan.md,
-	// the stage set cannot come from the plan artifact.
-	if preExecEnd > preExecStart {
-		hasPlanStageSource := false
-		for i := preExecStart; i < preExecEnd; i++ {
-			for _, art := range table.Rows[i].OutputArtifacts {
-				if art == "Stage-*/Plan.md" {
-					hasPlanStageSource = true
-					break
-				}
-			}
-			if hasPlanStageSource {
-				break
-			}
-		}
-		if !hasPlanStageSource {
-			return refuse(
-				"stage source is not the plan artifact: no pre-EXECUTION row produces Stage-*/Plan.md; " +
-					"the runner requires stages to be defined by the plan artifact",
-			)
-		}
+	if reason, failed := checkPlanStageSource(table.Rows, preExecStart, preExecEnd); failed {
+		return refuse(reason)
 	}
 
-	// --- Condition 4: Dynamic or growing stage set ---
-	// An EXECUTION row that produces Stage-*/Plan.md signals that stages can be
-	// added during execution (the plan artifact can grow), which is not supported.
-	for i := firstExecIdx; i <= lastExecIdx; i++ {
-		row := table.Rows[i]
-		if !row.PhaseParsed.IsStaged {
-			continue
-		}
-		for _, art := range row.OutputArtifacts {
-			if art == "Stage-*/Plan.md" {
-				return refuse(fmt.Sprintf(
-					"dynamic stage set detected: EXECUTION row %d produces Stage-*/Plan.md, "+
-						"which implies stages can be added during execution; "+
-						"only a fixed, pre-determined stage set is supported",
-					row.Index,
-				))
-			}
-		}
+	if reason, failed := checkDynamicStageSet(table.Rows, firstExecIdx, lastExecIdx); failed {
+		return refuse(reason)
 	}
 
 	// Collect EXECUTION rows only.
@@ -201,6 +126,116 @@ func Admit(table domain.RoutingTable) (domain.AdmittedWorkflow, error) {
 	}, nil
 }
 
+// checkAgentModeNotation implements FR-18a condition 6: agent-with-mode
+// notation ("agent-name(mode)") is not supported.
+func checkAgentModeNotation(rows []domain.RoutingRow) (reason string, failed bool) {
+	for _, row := range rows {
+		if strings.ContainsAny(row.Agent, "()") {
+			return fmt.Sprintf(
+				"agent-with-mode notation is not supported: row %d has agent %q (parentheses not allowed in agent identifiers)",
+				row.Index, row.Agent,
+			), true
+		}
+	}
+	return "", false
+}
+
+// checkStagedPhaseName implements FR-18a condition 3: a staged phase whose
+// name is not "EXECUTION" is not supported.
+func checkStagedPhaseName(rows []domain.RoutingRow) (reason string, failed bool) {
+	for _, row := range rows {
+		if row.PhaseParsed.IsStaged && row.PhaseParsed.Name != "EXECUTION" {
+			return fmt.Sprintf(
+				"staged phase %q in row %d is not supported: only EXECUTION may be staged",
+				row.PhaseParsed.Name, row.Index,
+			), true
+		}
+	}
+	return "", false
+}
+
+// checkParallelDispatch implements FR-18a condition 5: a comma-separated
+// OnSuccess value indicates parallel dispatch, which is not supported.
+func checkParallelDispatch(rows []domain.RoutingRow) (reason string, failed bool) {
+	for _, row := range rows {
+		if row.OnSuccess.ColumnPresent && strings.Contains(row.OnSuccess.Value, ",") {
+			return fmt.Sprintf(
+				"parallel dispatch is not supported: row %d has OnSuccess %q (comma-separated agents indicate parallel routing)",
+				row.Index, row.OnSuccess.Value,
+			), true
+		}
+	}
+	return "", false
+}
+
+// checkSingleStagedBlock implements FR-18a condition 2: a staged phase block
+// is a contiguous run of staged rows. If non-staged rows appear between
+// staged rows within the EXECUTION range, that's two blocks, which is not
+// supported.
+func checkSingleStagedBlock(rows []domain.RoutingRow, firstExecIdx, lastExecIdx int) (reason string, failed bool) {
+	seenNonStaged := false
+	for i := firstExecIdx; i <= lastExecIdx; i++ {
+		row := rows[i]
+		if !row.PhaseParsed.IsStaged {
+			seenNonStaged = true
+		} else if seenNonStaged {
+			// A staged row appeared after a non-staged row inside the EXECUTION range.
+			return "more than one staged phase block: EXECUTION rows are split by non-staged rows, which is not supported", true
+		}
+	}
+	return "", false
+}
+
+// checkPlanStageSource implements FR-18a condition 1: if there are
+// pre-EXECUTION rows and none of them output Stage-*/Plan.md, the stage set
+// cannot come from the plan artifact.
+func checkPlanStageSource(rows []domain.RoutingRow, preExecStart, preExecEnd int) (reason string, failed bool) {
+	if preExecEnd <= preExecStart {
+		return "", false
+	}
+
+	hasPlanStageSource := false
+	for i := preExecStart; i < preExecEnd; i++ {
+		for _, art := range rows[i].OutputArtifacts {
+			if art == "Stage-*/Plan.md" {
+				hasPlanStageSource = true
+				break
+			}
+		}
+		if hasPlanStageSource {
+			break
+		}
+	}
+	if !hasPlanStageSource {
+		return "stage source is not the plan artifact: no pre-EXECUTION row produces Stage-*/Plan.md; " +
+			"the runner requires stages to be defined by the plan artifact", true
+	}
+	return "", false
+}
+
+// checkDynamicStageSet implements FR-18a condition 4: an EXECUTION row that
+// produces Stage-*/Plan.md signals that stages can be added during execution
+// (the plan artifact can grow), which is not supported.
+func checkDynamicStageSet(rows []domain.RoutingRow, firstExecIdx, lastExecIdx int) (reason string, failed bool) {
+	for i := firstExecIdx; i <= lastExecIdx; i++ {
+		row := rows[i]
+		if !row.PhaseParsed.IsStaged {
+			continue
+		}
+		for _, art := range row.OutputArtifacts {
+			if art == "Stage-*/Plan.md" {
+				return fmt.Sprintf(
+					"dynamic stage set detected: EXECUTION row %d produces Stage-*/Plan.md, "+
+						"which implies stages can be added during execution; "+
+						"only a fixed, pre-determined stage set is supported",
+					row.Index,
+				), true
+			}
+		}
+	}
+	return "", false
+}
+
 // resolveGroups partitions the EXECUTION rows into contiguous execution groups
 // using each row's PhaseParsed.Group. Agent identifiers are never inspected.
 //
@@ -228,17 +263,13 @@ func resolveGroups(
 		}
 	}
 
+	// A2/A3: cross-check whether an approach table is required, absent, or
+	// contradicted by a bare row, given whether any row declares a group.
+	if err := checkGroupsRequireApproachTable(execRows, approach, groupsDeclared); err != nil {
+		return nil, false, err
+	}
+
 	if !groupsDeclared {
-		// All rows are bare (no group segments declared).
-
-		// A3: approach table present but rows are bare.
-		if approach.Present() {
-			return nil, false, fmt.Errorf(
-				"workflow declares an %q table but EXECUTION row %d declares no group segment",
-				domain.ExecutionGroupsHeading, execRows[0].Index,
-			)
-		}
-
 		// Bare workflow: single implicit group with empty Name covering all EXECUTION rows.
 		start := execRows[0].Index
 		end := execRows[len(execRows)-1].Index + 1
@@ -247,13 +278,44 @@ func resolveGroups(
 		}, false, nil
 	}
 
+	// Partition rows by group token, checking A1 (non-contiguous groups).
+	groups, err := partitionGroups(execRows)
+	if err != nil {
+		return nil, false, err
+	}
+
+	// A5/A4: cross-check the declared group set against the approach table.
+	if err := checkGroupSetsMatch(groups, approach); err != nil {
+		return nil, false, err
+	}
+
+	return groups, true, nil
+}
+
+// checkGroupsRequireApproachTable enforces A2 and A3: an approach table must
+// be present if and only if the EXECUTION rows declare groups, and once
+// present, every EXECUTION row must declare a group (none may be bare).
+func checkGroupsRequireApproachTable(execRows []domain.RoutingRow, approach domain.ApproachTable, groupsDeclared bool) error {
+	if !groupsDeclared {
+		// All rows are bare (no group segments declared).
+
+		// A3: approach table present but rows are bare.
+		if approach.Present() {
+			return fmt.Errorf(
+				"workflow declares an %q table but EXECUTION row %d declares no group segment",
+				domain.ExecutionGroupsHeading, execRows[0].Index,
+			)
+		}
+		return nil
+	}
+
 	// groupsDeclared = true: at least one row has a group segment.
 
 	// A2: grouped rows but no approach table.
 	if !approach.Present() {
 		for _, row := range execRows {
 			if row.PhaseParsed.Group != "" {
-				return nil, false, fmt.Errorf(
+				return fmt.Errorf(
 					"EXECUTION row %d declares group %q but the workflow has no %q table",
 					row.Index, row.PhaseParsed.Group, domain.ExecutionGroupsHeading,
 				)
@@ -264,20 +326,19 @@ func resolveGroups(
 	// A3: approach table present but at least one EXECUTION row is bare.
 	for _, row := range execRows {
 		if row.PhaseParsed.Group == "" {
-			return nil, false, fmt.Errorf(
+			return fmt.Errorf(
 				"workflow declares an %q table but EXECUTION row %d declares no group segment",
 				domain.ExecutionGroupsHeading, row.Index,
 			)
 		}
 	}
+	return nil
+}
 
-	// Partition rows by group token, checking A1 (non-contiguous groups).
-	type groupState struct {
-		startRow int
-		endRow   int  // exclusive (last seen row index + 1)
-		ended    bool // true once a different group appeared after this one
-	}
-
+// partitionGroups partitions execRows into contiguous named execution groups
+// by their PhaseParsed.Group token, in first-appearance order. It implements
+// A1: a group that has already ended may not be re-opened by a later row.
+func partitionGroups(execRows []domain.RoutingRow) ([]domain.ExecutionGroup, error) {
 	var groupOrder []domain.GroupName
 	groupStates := map[domain.GroupName]*groupState{}
 	currentGroup := domain.GroupName("")
@@ -295,7 +356,7 @@ func resolveGroups(
 			state, seen := groupStates[g]
 			if seen && state.ended {
 				// A1: this group already ended; a row is re-opening it.
-				return nil, false, fmt.Errorf(
+				return nil, fmt.Errorf(
 					"execution groups must be contiguous row ranges: row %d declares group %q, which already ended at row %d",
 					row.Index, g, state.endRow-1,
 				)
@@ -322,11 +383,19 @@ func resolveGroups(
 			EndRow:   s.endRow,
 		}
 	}
+	return groups, nil
+}
 
+// checkGroupSetsMatch cross-checks the resolved execution groups against the
+// approach table's declared groups. It implements A5 (an EXECUTION row
+// declares a group absent from every approach table row) and A4 (the
+// approach table names a group that no EXECUTION row belongs to), in that
+// order.
+func checkGroupSetsMatch(groups []domain.ExecutionGroup, approach domain.ApproachTable) error {
 	// Build the set of groups declared in EXECUTION rows.
-	execGroupSet := make(map[domain.GroupName]bool, len(groupOrder))
-	for _, name := range groupOrder {
-		execGroupSet[name] = true
+	execGroupSet := make(map[domain.GroupName]bool, len(groups))
+	for _, g := range groups {
+		execGroupSet[g.Name] = true
 	}
 
 	// Build the set of groups named anywhere in the approach table.
@@ -340,12 +409,15 @@ func resolveGroups(
 	// A5: an EXECUTION row declares a group absent from every approach table row.
 	// Check before A4 so the offending row's token (verbatim from the Phase column)
 	// appears in the refusal message, enabling the author to correct capitalisation.
-	for _, row := range execRows {
-		g := row.PhaseParsed.Group
-		if !tableGroupSet[g] {
-			return nil, false, fmt.Errorf(
+	//
+	// Iterate groups in resolved order so the message references the group
+	// name as declared by the EXECUTION rows (row indices are not tracked
+	// once partitioned, so the group's start row stands in for the row).
+	for _, g := range groups {
+		if !tableGroupSet[g.Name] {
+			return fmt.Errorf(
 				"EXECUTION row %d declares group %q, which appears in no %q table row",
-				row.Index, g, domain.ExecutionGroupsHeading,
+				g.StartRow, g.Name, domain.ExecutionGroupsHeading,
 			)
 		}
 	}
@@ -354,13 +426,34 @@ func resolveGroups(
 	for _, seq := range approach.Rows {
 		for _, g := range seq.Groups {
 			if !execGroupSet[g] {
-				return nil, false, fmt.Errorf(
+				return fmt.Errorf(
 					"%q table row %q lists group %q, which no EXECUTION row declares",
 					domain.ExecutionGroupsHeading, seq.Approach, g,
 				)
 			}
 		}
 	}
+	return nil
+}
 
-	return groups, true, nil
+// groupState tracks the row range of a single execution group during partitioning.
+type groupState struct {
+	startRow int
+	endRow   int  // exclusive (last seen row index + 1)
+	ended    bool // true once a different group appeared after this one
+}
+
+// findStagedRange returns the first and last row.Index values in rows that have
+// PhaseParsed.IsStaged set. Returns (-1, -1) if no staged rows exist.
+func findStagedRange(rows []domain.RoutingRow) (first, last int) {
+	first, last = -1, -1
+	for _, row := range rows {
+		if row.PhaseParsed.IsStaged {
+			if first < 0 {
+				first = row.Index
+			}
+			last = row.Index
+		}
+	}
+	return first, last
 }

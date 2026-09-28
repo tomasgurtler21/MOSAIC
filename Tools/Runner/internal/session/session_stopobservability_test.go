@@ -78,7 +78,7 @@ func TestSession_StopObserved_EngineStep_LogsCheckpointIdentifier(t *testing.T) 
 	writeAgentFile(t, dir, "agent-a")
 	writeAgentFile(t, dir, "agent-b")
 
-	f := harness.NewFakeAdapter()
+	f := harness.NewMockAdapter()
 	store := &memStore{}
 	logger := &sessionRecordingLogger{}
 
@@ -123,7 +123,7 @@ func TestSession_StopObserved_EngineHITLRedispatch_LogsCheckpointIdentifier(t *t
 	writeAgentFile(t, dir, "agent-a")
 	writeAgentFile(t, dir, "agent-b")
 
-	f := harness.NewFakeAdapter()
+	f := harness.NewMockAdapter()
 	store := &memStore{}
 	logger := &sessionRecordingLogger{}
 
@@ -182,7 +182,7 @@ func TestSession_StopObserved_ConsultDispatch_LogsCheckpointIdentifier(t *testin
 	writeAgentFile(t, dir, "agent-a")
 	writeAgentFile(t, dir, "agent-b")
 
-	f := harness.NewFakeAdapter()
+	f := harness.NewMockAdapter()
 	store := &memStore{}
 	logger := &sessionRecordingLogger{}
 	consultant := &scriptedRoutingConsultant{}
@@ -202,7 +202,7 @@ func TestSession_StopObserved_ConsultDispatch_LogsCheckpointIdentifier(t *testin
 	})
 
 	// No scripted entry for agent-a: a dispatch despite the stop would surface
-	// as a FakeAdapter "no scripted response queued" error, not RunStopped.
+	// as a MockAdapter "no scripted response queued" error, not RunStopped.
 
 	// Act
 	got, err := ses.Start(context.Background(), baseOrchestratedConfig(orchPath))
@@ -228,7 +228,7 @@ func TestSession_StopObserved_ConsultHITLRedispatch_LogsCheckpointIdentifier(t *
 	writeAgentFile(t, dir, "agent-a")
 	writeAgentFile(t, dir, "agent-b")
 
-	f := harness.NewFakeAdapter()
+	f := harness.NewMockAdapter()
 	store := &memStore{}
 	logger := &sessionRecordingLogger{}
 	consultant := &scriptedRoutingConsultant{}
@@ -288,7 +288,7 @@ func TestSession_StopObserved_InfraDispatch_LogsCheckpointIdentifier(t *testing.
 	writeAgentFile(t, dir, "review-agent-a")
 	writeAgentFile(t, dir, "review-agent-b")
 
-	f := harness.NewFakeAdapter()
+	f := harness.NewMockAdapter()
 	store := &memStore{}
 	logger := &sessionRecordingLogger{}
 
@@ -345,7 +345,7 @@ func TestSession_StopObserved_AlwaysFalsePredicate_LogsNothing(t *testing.T) {
 	writeAgentFile(t, dir, "agent-a")
 	writeAgentFile(t, dir, "agent-b")
 
-	f := harness.NewFakeAdapter()
+	f := harness.NewMockAdapter()
 	store := &memStore{}
 	logger := &sessionRecordingLogger{}
 
