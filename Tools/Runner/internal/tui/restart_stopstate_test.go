@@ -37,7 +37,7 @@ import (
 	tuicommon "mosaic-common/tui"
 	"mosaic-run/internal/domain"
 	"mosaic-run/internal/session"
-	"mosaic-run/internal/tui/screens"
+	"mosaic-run/internal/tui/screens/runconfig"
 )
 
 // ---------------------------------------------------------------------------
@@ -197,7 +197,7 @@ func TestRestart_ExecOverrideRetry_DisarmsSignalBeforeRebuildingSession(t *testi
 	m := newRootModel(context.Background(), sess, Options{
 		Theme:      tuicommon.DefaultTheme(),
 		StopSignal: stopSignal,
-		SessionFactory: func(string, bool, string, screens.ConfigSelection) session.Session {
+		SessionFactory: func(string, bool, string, runconfig.ConfigSelection) session.Session {
 			factoryCalled = true
 			armedAtBuild = stopSignal.Requested()
 			return sess

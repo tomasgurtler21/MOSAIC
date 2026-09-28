@@ -58,20 +58,29 @@ const harnessPackage = modulePrefix + "internal/harness"
 
 // harnessSelectionConsumers lists the files (relative to internal/) explicitly
 // permitted to import internal/harness despite the general isolation rule.
-// These import only the package's Selection composition surface (Selections,
-// Accepts, CLISelections, FlagValues, FlagValueList, FakeHarnessID) — never a
-// concrete adapter type — to drive the --harness flag's usage/validation and
-// the TUI configuration screen's harness step from Runner's one accepted set
-// (mosaic-common/harness's CLI catalog plus the tool-local "fake" test
-// double). The concrete adapter types remain reachable only through
-// domain.HarnessAdapter; this exception is narrowly scoped to these two files
-// rather than to the whole package, so the general rule still catches any
-// other file that starts constructing adapters directly.
+// These import only the package's Selection and discovery surface
+// (FakeHarnessID, Selection, Selections, Accepts, CLISelections, FlagValues,
+// FlagValueList, DiscoverOrchestrator) — never a concrete adapter type or a
+// harness sub-package (claudecode, ghcpcli, opencode, cliexec) — to drive the --harness flag's usage/validation and
+// resolution, and the TUI configuration screen's harness step, from Runner's
+// one accepted set (mosaic-common/harness's CLI catalog plus the tool-local
+// "fake" test double). The concrete adapter types (MockAdapter included)
+// remain off-limits to every file below; they stay reachable only through
+// domain.HarnessAdapter. This exception is narrowly scoped to the files
+// listed rather than to the whole package, so the general rule still catches
+// any other file that starts constructing adapters directly.
 var harnessSelectionConsumers = map[string]bool{
-	"cli/run.go":                true,
-	"cli/flagspecs.go":          true, // uses FakeHarnessID and FlagValues() for flag registration
-	"tui/screens/setup.go":      true,
-	"tui/screens/testharness.go": true, // uses CLISelections() to populate the test harness multi-select
+	// cli/run_harness.go carries every harness.* reference carved out of
+	// cli/run.go (validateHarnessFlag, discoverOrchestratorPath); run.go
+	// itself no longer imports harness.
+	"cli/run_harness.go":         true,
+	"cli/flagspecs.go":           true, // uses FakeHarnessID and FlagValues() for flag registration
+	"tui/screens/setup/setup.go": true,
+	// tui/screens/runconfig/config.go and config_view.go are carved out of setup.go:
+	// the ConfigScreen harness step reads CLISelections() there.
+	"tui/screens/runconfig/config.go":      true,
+	"tui/screens/runconfig/config_view.go": true,
+	"tui/screens/devtest/testharness.go":   true, // uses CLISelections() to populate the test harness multi-select
 }
 
 // rule describes one import-boundary constraint for a single package directory.
@@ -161,6 +170,41 @@ var rules = []rule{
 	{
 		dir:  "internal/tui/screens",
 		desc: "tui/screens is an adapter frontend sub-package: must not import the cli sibling frontend",
+		forbidPrefix: []string{
+			modulePrefix + "internal/cli",
+		},
+	},
+	{
+		dir:  "internal/tui/screens/setup",
+		desc: "tui/screens/setup is an adapter frontend sub-package: must not import the cli sibling frontend",
+		forbidPrefix: []string{
+			modulePrefix + "internal/cli",
+		},
+	},
+	{
+		dir:  "internal/tui/screens/runconfig",
+		desc: "tui/screens/runconfig is an adapter frontend sub-package: must not import the cli sibling frontend",
+		forbidPrefix: []string{
+			modulePrefix + "internal/cli",
+		},
+	},
+	{
+		dir:  "internal/tui/screens/runflow",
+		desc: "tui/screens/runflow is an adapter frontend sub-package: must not import the cli sibling frontend",
+		forbidPrefix: []string{
+			modulePrefix + "internal/cli",
+		},
+	},
+	{
+		dir:  "internal/tui/screens/decision",
+		desc: "tui/screens/decision is an adapter frontend sub-package: must not import the cli sibling frontend",
+		forbidPrefix: []string{
+			modulePrefix + "internal/cli",
+		},
+	},
+	{
+		dir:  "internal/tui/screens/devtest",
+		desc: "tui/screens/devtest is an adapter frontend sub-package: must not import the cli sibling frontend",
 		forbidPrefix: []string{
 			modulePrefix + "internal/cli",
 		},

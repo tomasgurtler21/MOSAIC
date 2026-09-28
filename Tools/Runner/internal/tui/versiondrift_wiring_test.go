@@ -18,7 +18,7 @@ import (
 	tea "github.com/charmbracelet/bubbletea"
 
 	"mosaic-run/internal/domain"
-	"mosaic-run/internal/tui/screens"
+	"mosaic-run/internal/tui/screens/setup"
 )
 
 // versionDriftPrompt is the prompt text the configuration screen renders when it
@@ -35,7 +35,7 @@ func driveModelToConfigScreen(t *testing.T, m *rootModel, wf domain.WorkflowRegi
 	style := stylesFromTheme(m.theme)
 	workflows := []domain.WorkflowRegion{wf}
 	m.workflows = workflows
-	m.workflowScreen = screens.NewWorkflowSelectScreen(workflows, m.width, m.height, style)
+	m.workflowScreen = setup.NewWorkflowSelectScreen(workflows, m.width, m.height, style)
 	m.screen = screenSetupWorkflow
 
 	m.Update(tea.KeyMsg{Type: tea.KeyEnter}) // select the workflow

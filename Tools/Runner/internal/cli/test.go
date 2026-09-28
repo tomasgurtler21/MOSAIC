@@ -22,11 +22,13 @@ import (
 	"mosaic-run/internal/testcheck"
 	"mosaic-run/internal/testdeploy"
 	"mosaic-run/internal/testrun"
+	"mosaic-run/internal/testrun/invoker"
+	"mosaic-run/internal/testrun/resolve"
 )
 
 // resolveAndAnnounce is the package-level seam for harness binary resolution.
 // Tests override this variable to inject failures without executing real resolution.
-var resolveAndAnnounce = testrun.ResolveAndAnnounce
+var resolveAndAnnounce = resolve.ResolveAndAnnounce
 
 // RunTestCommand executes the "test" subcommand entry point.
 //
@@ -202,7 +204,7 @@ func runTestSubcmd(ctx context.Context, cmd *cobra.Command, workDir string, out,
 	}
 	cfg.ResolvedPaths = resolvedPaths
 
-	invoker := testrun.NewSubprocessRunInvoker(testrun.RunInvokerOptions{
+	runInvoker := invoker.NewSubprocessRunInvoker(invoker.RunInvokerOptions{
 		WorkingDir:  workDir,
 		DebugLogger: logger,
 	})
@@ -212,7 +214,7 @@ func runTestSubcmd(ctx context.Context, cmd *cobra.Command, workDir string, out,
 	orch := testrun.NewOrchestrator(testrun.OrchestratorDeps{
 		Catalog:    cat,
 		Deployer:   deployer,
-		RunInvoker: invoker,
+		RunInvoker: runInvoker,
 		Checker:    checker,
 		Reporter:   reporter,
 	})
@@ -414,7 +416,7 @@ func (r *cliProgressReporter) OnTestDone(harnessID string, workflow string, mode
 		// Show stderr block when non-empty.
 		if result.ChildStderr != "" {
 			fmt.Fprintf(r.out, "  stderr:\n")
-			content := testrun.TruncateTail(result.ChildStderr, testrun.MaxStderrDisplayBytes)
+			content := invoker.TruncateTail(result.ChildStderr, invoker.MaxStderrDisplayBytes)
 			fmt.Fprintf(r.out, "%s", content)
 			if len(content) > 0 && content[len(content)-1] != '\n' {
 				fmt.Fprintf(r.out, "\n")
@@ -435,7 +437,7 @@ func (r *cliProgressReporter) OnTestDone(harnessID string, workflow string, mode
 		// Show stderr block when non-empty (independent of exit code).
 		if result.ChildStderr != "" {
 			fmt.Fprintf(r.out, "  stderr:\n")
-			content := testrun.TruncateTail(result.ChildStderr, testrun.MaxStderrDisplayBytes)
+			content := invoker.TruncateTail(result.ChildStderr, invoker.MaxStderrDisplayBytes)
 			fmt.Fprintf(r.out, "%s", content)
 			if len(content) > 0 && content[len(content)-1] != '\n' {
 				fmt.Fprintf(r.out, "\n")

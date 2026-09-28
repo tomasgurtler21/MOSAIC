@@ -84,15 +84,20 @@ func TestCheckImport_ForbidPrefix(t *testing.T) {
 	}
 
 	tests := []struct {
-		imp       string
-		wantViol  bool
+		imp      string
+		wantViol bool
 	}{
-		{"mosaic-run/internal/tui", true},           // exact match
-		{"mosaic-run/internal/tui/screens", true},   // sub-package
-		{"mosaic-run/internal/cli", true},           // exact match
-		{"mosaic-run/internal/domain", false},       // allowed
-		{"mosaic-run/internal/engine", false},       // allowed
-		{"context", false},                          // stdlib
+		{"mosaic-run/internal/tui", true},               // exact match
+		{"mosaic-run/internal/tui/screens", true},       // sub-package
+		{"mosaic-run/internal/tui/screens/setup", true}, // sub-package
+		{"mosaic-run/internal/tui/screens/runconfig", true},
+		{"mosaic-run/internal/tui/screens/runflow", true},
+		{"mosaic-run/internal/tui/screens/decision", true},
+		{"mosaic-run/internal/tui/screens/devtest", true},
+		{"mosaic-run/internal/cli", true},     // exact match
+		{"mosaic-run/internal/domain", false}, // allowed
+		{"mosaic-run/internal/engine", false}, // allowed
+		{"context", false},                    // stdlib
 	}
 
 	for _, tt := range tests {

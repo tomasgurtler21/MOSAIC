@@ -1,7 +1,7 @@
 # Harness Package
 
 > Part of: mosaic-run
-> Responsibility: Implements the `domain.HarnessAdapter` port for all three supported harnesses (Claude Code, GHCP CLI, OpenCode) plus a `FakeAdapter` for test use, and provides protocol serialization helpers.
+> Responsibility: Implements the `domain.HarnessAdapter` port for all three supported harnesses (Claude Code, GHCP CLI, OpenCode) plus a `MockAdapter` for test use, and provides protocol serialization helpers.
 
 ## Overview
 
@@ -16,7 +16,7 @@ All three production adapters share the same `mosaic-common/harness` spawner inf
 | `ClaudeCodeAdapter` | Spawns Claude Code CLI per invocation. Extracts the agent's `tools` frontmatter field before spawning and passes tool names to `BuildArgs` via `SpawnRequest.DerivedTools`. Sets `SpawnRequest.ToolsDerived=true` after a successful extraction call so `BuildArgs` knows derivation was performed. Uses `--permission-mode dontAsk` + `--allowedTools` when tools are present; uses `--permission-mode dontAsk` with no `--allowedTools` when the tools field is empty (strict mode, no tools permitted); rejects the invocation before spawning only when the tools field is missing. |
 | `GHCPCLIAdapter` | Spawns GHCP CLI per invocation. Supports two permission modes: Blanket (`--yolo --no-ask-user`) and Partial Allowlist (`--allow-tool` entries from `SpawnRequest.DerivedTools` + `--no-ask-user`). Mode is resolved once at adapter construction and stored on the struct. |
 | `OpenCodeAdapter` | Spawns OpenCode per invocation. Always passes `--auto`, which converts every `ask` permission to `allow` for that invocation while leaving explicitly-denied capabilities unchanged. No per-tool allowlist is extracted or needed. |
-| `FakeAdapter` | Test double. Queues scripted `ProtocolResponse`, `error`, or raw JSON payloads per agent identifier (FIFO). Records all invocations so tests can assert call order and arguments. |
+| `MockAdapter` | Test double. Queues scripted `ProtocolResponse`, `error`, or raw JSON payloads per agent identifier (FIFO). Records all invocations so tests can assert call order and arguments. |
 | Protocol helpers | `MarshalRequest` / `UnmarshalResponse` encode and decode Communication Protocol v1.8 JSON messages. |
 
 ## Permission-Mode Implementation

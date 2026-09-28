@@ -52,7 +52,7 @@ func startResume(t *testing.T, recordedWorkflow string, store *memStore) domain.
 	writeAgentFile(t, dir, "agent-b")
 
 	ses := session.New(session.Deps{
-		Harness:  harness.NewFakeAdapter(),
+		Harness:  harness.NewMockAdapter(),
 		Store:    store,
 		Clock:    fixedClock{t: epoch},
 		Interact: &noopInteraction{},
@@ -358,7 +358,7 @@ func TestSession_Start_Resume_RecordedTaskSurvivesAResumeWithNoConfiguredTask(t 
 	writeAgentFile(t, dir, "agent-a")
 	writeAgentFile(t, dir, "agent-b")
 
-	f := harness.NewFakeAdapter()
+	f := harness.NewMockAdapter()
 	f.Queue("agent-b", harness.ScriptedEntry{Response: &domain.ProtocolResponse{
 		AgentInstanceID: "agent-b#2",
 		StatusCode:      domain.StatusSUCCESS,
@@ -419,7 +419,7 @@ func TestSession_Start_NewRun_WorkflowNotFound_RefusalNamesNoRun(t *testing.T) {
 	writeAgentFile(t, dir, "agent-b")
 
 	ses := session.New(session.Deps{
-		Harness:  harness.NewFakeAdapter(),
+		Harness:  harness.NewMockAdapter(),
 		Store:    &memStore{},
 		Clock:    fixedClock{t: epoch},
 		Interact: &noopInteraction{},

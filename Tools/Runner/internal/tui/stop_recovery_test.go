@@ -21,6 +21,7 @@ import (
 
 	tuicommon "mosaic-common/tui"
 	"mosaic-run/internal/domain"
+	"mosaic-run/internal/tui/screens/decision"
 	"mosaic-run/internal/tui/screens"
 )
 
@@ -43,8 +44,8 @@ func newStopRecoveryModel(stopReason string) *rootModel {
 }
 
 // newStopScreen creates a StopScreen for direct screen-level tests.
-func newStopScreen(reason string) *screens.StopScreen {
-	return screens.NewStopScreen(reason, 80, 24, screens.Styles{})
+func newStopScreen(reason string) *decision.StopScreen {
+	return decision.NewStopScreen(reason, 80, 24, screens.Styles{})
 }
 
 // ---------------------------------------------------------------------------
@@ -93,8 +94,8 @@ func TestStopScreen_SelectRetry_ReportsRetryChoice(t *testing.T) {
 	if !s.Done() {
 		t.Error("Done() = false after Enter on Retry; want true")
 	}
-	if s.Choice() != screens.StopChoiceRetry {
-		t.Errorf("Choice() = %q, want %q", s.Choice(), screens.StopChoiceRetry)
+	if s.Choice() != decision.StopChoiceRetry {
+		t.Errorf("Choice() = %q, want %q", s.Choice(), decision.StopChoiceRetry)
 	}
 }
 
@@ -111,8 +112,8 @@ func TestStopScreen_SelectManualDispatch_ReportsManualDispatchChoice(t *testing.
 	if !s.Done() {
 		t.Error("Done() = false after selecting Manual dispatch; want true")
 	}
-	if s.Choice() != screens.StopChoiceManualDispatch {
-		t.Errorf("Choice() = %q, want %q", s.Choice(), screens.StopChoiceManualDispatch)
+	if s.Choice() != decision.StopChoiceManualDispatch {
+		t.Errorf("Choice() = %q, want %q", s.Choice(), decision.StopChoiceManualDispatch)
 	}
 }
 
@@ -143,9 +144,9 @@ func TestStopScreen_CursorDoesNotWrapBelowManualDispatch(t *testing.T) {
 	}
 	s.Update(tea.KeyMsg{Type: tea.KeyEnter})
 
-	if s.Choice() != screens.StopChoiceManualDispatch {
+	if s.Choice() != decision.StopChoiceManualDispatch {
 		t.Errorf("Choice() = %q after over-pressing Down; want %q (cursor must clamp at last option)",
-			s.Choice(), screens.StopChoiceManualDispatch)
+			s.Choice(), decision.StopChoiceManualDispatch)
 	}
 }
 

@@ -32,7 +32,7 @@ import (
 	tuicommon "mosaic-common/tui"
 	"mosaic-run/internal/domain"
 	"mosaic-run/internal/session"
-	"mosaic-run/internal/tui/screens"
+	"mosaic-run/internal/tui/screens/runconfig"
 )
 
 // ---------------------------------------------------------------------------
@@ -53,7 +53,7 @@ func newResumeModel(outcome domain.RunOutcome) *rootModel {
 // the given outcome and whose SessionFactory is the supplied function.
 func newResumeModelWithFactory(
 	outcome domain.RunOutcome,
-	factory func(string, bool, string, screens.ConfigSelection) session.Session,
+	factory func(string, bool, string, runconfig.ConfigSelection) session.Session,
 ) *rootModel {
 	sess := &stubNavSession{outcome: outcome}
 	return newRootModel(context.Background(), sess, Options{
@@ -158,7 +158,7 @@ func TestResume_RunStopped_CallsSessionFactory(t *testing.T) {
 
 	m := newResumeModelWithFactory(
 		domain.RunOutcome{Status: domain.RunStopped},
-		func(runFolder string, isNewRun bool, orchFile string, cfg screens.ConfigSelection) session.Session {
+		func(runFolder string, isNewRun bool, orchFile string, cfg runconfig.ConfigSelection) session.Session {
 			factoryCalled = true
 			return returnSess
 		},
@@ -189,7 +189,7 @@ func TestResume_RunStopped_FactoryReceivesExistingRunIdentity(t *testing.T) {
 
 	m := newResumeModelWithFactory(
 		domain.RunOutcome{Status: domain.RunStopped},
-		func(runFolder string, isNewRun bool, orchFile string, cfg screens.ConfigSelection) session.Session {
+		func(runFolder string, isNewRun bool, orchFile string, cfg runconfig.ConfigSelection) session.Session {
 			capturedFolder = runFolder
 			capturedOrchFile = orchFile
 			capturedIsNewRun = isNewRun
