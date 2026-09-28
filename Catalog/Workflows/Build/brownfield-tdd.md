@@ -1,5 +1,5 @@
 ---
-version: "3.8"
+version: "3.9"
 name: "Brownfield TDD Workflow"
 description: "New features or significant changes to an existing codebase requiring test-first development with full research and design."
 hint: "The main workhorse — best on shell-buildable codebases. Works best at a certain feature size, discovered through use rather than designed in. The two size-mismatch directions fail differently: too small wastes cost on overspecified Requirements/Plan and triggers unnecessary correction round-trips; too big genuinely starves execution agents of context, making them more error-prone and pushing you toward needing stronger models."
@@ -35,7 +35,7 @@ artifacts:
   - TestResults.md
 ---
 
-<Workflow type="core" name="brownfield-tdd" version="3.8">
+<Workflow type="core" name="brownfield-tdd" version="3.9">
 ## Brownfield TDD Workflow
 
 **Use when:** New features or significant changes to an **existing codebase** requiring test-first development with full research and design.
@@ -44,7 +44,7 @@ artifacts:
 |-------|----------|:----:|------------|-------------|-------|--------|
 | RESEARCH | codebase-research | FALSE | requirements-refinement | - | Requirements.md | Research.md |
 | RESEARCH | requirements-refinement | TRUE | requirements-review | - | Research.md, Requirements.md | Requirements.md |
-| RESEARCH | requirements-review | FALSE | planner-tdd-soft | requirements-refinement | Requirements.md | requirements-review.md |
+| RESEARCH | requirements-review | FALSE | planner-tdd-soft | requirements-refinement | Requirements.md, Research.md | requirements-review.md |
 | PLANNING | planner-tdd-soft | TRUE | plan-review | - | Research.md, Requirements.md | Plan.md, Stage-*/Plan.md, Stage-*/PlanProgress.md |
 | PLANNING | plan-review | FALSE | contracts-designer | planner-tdd-soft | Requirements.md, Plan.md, Stage-*/Plan.md, Stage-*/PlanProgress.md | plan-review.md |
 | DESIGN | contracts-designer | TRUE | contracts-review | - | Research.md, Requirements.md, Plan.md, Stage-*/Plan.md | ContractsDesign.md |
@@ -94,6 +94,7 @@ Quality tracks feature sizing more than it tracks raw context budget. This was n
 | 3.7 | 2026-08-06 | MOSAIC | Make test-runner findings route back to planner |
 | 3.6 | 2026-08-05 | MOSAIC | Initial version |
 | 3.8 | 2026-08-26 | MOSAIC | Replace Unicode emoji with ASCII tokens in HITL column (TRUE/FALSE). |
+| 3.9 | 2026-09-28 | MOSAIC | Add Research.md to requirements-review inputs; its codebase alignment and feasibility checks run on research findings. |
 
 ---
 

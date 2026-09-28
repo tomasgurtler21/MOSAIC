@@ -1,5 +1,5 @@
 ---
-version: "2.2"
+version: "2.3"
 name: "Brownfield TDD Build-Verified Workflow"
 description: "New features or significant changes to an existing codebase requiring test-first development where compilation/build cannot be verified via standard terminal tools (e.g., PLC/SCL with proprietary toolchains, embedded systems, cross-compilation environments)."
 hint: "Field-verified (used for real PLC programming), not just theoretical. Use over standard brownfield-tdd whenever building/running tests requires a non-trivial toolchain — offloading that complexity onto a dedicated build-review agent keeps it out of the execution agents' context instead of overloading them with build/deploy mechanics."
@@ -36,7 +36,7 @@ artifacts:
   - Stage-{StageNumber}/implementation-review.md
 ---
 
-<Workflow type="core" name="brownfield-tdd-build-verified" version="2.2">
+<Workflow type="core" name="brownfield-tdd-build-verified" version="2.3">
 ## Brownfield TDD Build-Verified Workflow
 
 **Use when:** New features or significant changes to an **existing codebase** requiring test-first development where **compilation/build cannot be verified via standard terminal tools** (e.g., PLC/SCL with proprietary toolchains, embedded systems, cross-compilation environments). Adds a dedicated build-and-deploy step between code writing and code review. Review agents execute tests on the target platform to verify TDD RED/GREEN phases.
@@ -45,7 +45,7 @@ artifacts:
 |-------|----------|:----:|------------|-------------|-------|--------|
 | RESEARCH | codebase-research | FALSE | requirements-refinement | - | Requirements.md | Research.md |
 | RESEARCH | requirements-refinement | TRUE | requirements-review | - | Research.md, Requirements.md | Requirements.md |
-| RESEARCH | requirements-review | FALSE | planner-tdd-soft | requirements-refinement | Requirements.md | requirements-review.md |
+| RESEARCH | requirements-review | FALSE | planner-tdd-soft | requirements-refinement | Requirements.md, Research.md | requirements-review.md |
 | PLANNING | planner-tdd-soft | TRUE | plan-review | - | Research.md, Requirements.md | Plan.md, Stage-*/Plan.md, Stage-*/PlanProgress.md |
 | PLANNING | plan-review | FALSE | contracts-designer | planner-tdd-soft | Requirements.md, Plan.md, Stage-*/Plan.md, Stage-*/PlanProgress.md | plan-review.md |
 | DESIGN | contracts-designer | TRUE | contracts-review | - | Research.md, Requirements.md, Plan.md, Stage-*/Plan.md | ContractsDesign.md |
@@ -96,6 +96,7 @@ Field-verified on real PLC/SCL programming work, not just a theoretical variant.
 |---------|------|--------|---------|
 | 2.1 | 2026-08-17 | MOSAIC | Changelog tracking begins here; earlier revisions predate this record. |
 | 2.2 | 2026-08-26 | MOSAIC | Replace Unicode emoji with ASCII tokens in HITL column (TRUE/FALSE). |
+| 2.3 | 2026-09-28 | MOSAIC | Add Research.md to requirements-review inputs; its codebase alignment and feasibility checks run on research findings. |
 
 ---
 
