@@ -26,10 +26,10 @@ func init() {
 		"ExecutionPhilosophy",
 	}
 
-	// CanonicalDeployed lists the nine tool-managed boundary names, a closed set.
+	// CanonicalDeployed lists the eight tool-managed boundary names, a closed set.
 	// Every name here must be declared with type="managed" in any document that uses it.
 	// ArtifactProvenance, LanguagePatterns, and CustomConstraints are removed;
-	// AuthorityHierarchy, ClosingProcedure, ProtocolConstraints, ErrorHandlingCommon,
+	// AuthorityHierarchy, ClosingProcedure, ErrorHandlingCommon,
 	// and ExecutionPhilosophyCommon are added.
 	CanonicalDeployed = []string{
 		"CommunicationProtocol",
@@ -37,7 +37,6 @@ func init() {
 		"ClosingProcedure",
 		"AvailableWorkflows",
 		"InfrastructureAgents",
-		"ProtocolConstraints",
 		"HarnessConstraints",
 		"ErrorHandlingCommon",
 		"ExecutionPhilosophyCommon",
@@ -45,14 +44,13 @@ func init() {
 
 	// DeployedParent maps each tool-managed boundary name to its required parent section.
 	// An entry whose value is "" means the boundary must appear at body top level
-	// (for example, CommunicationProtocol). Nine entries, mirroring boundary_constants.py.
+	// (for example, CommunicationProtocol). Eight entries, mirroring boundary_constants.py.
 	DeployedParent = map[string]string{
 		"CommunicationProtocol":     "", // top level — must not be nested inside any section
 		"AuthorityHierarchy":        "Identity",
 		"ClosingProcedure":          "Identity",
 		"AvailableWorkflows":        "Identity",
 		"InfrastructureAgents":      "Identity",
-		"ProtocolConstraints":       "Constraints",
 		"HarnessConstraints":        "Constraints",
 		"ErrorHandlingCommon":       "ErrorHandling",
 		"ExecutionPhilosophyCommon": "ExecutionPhilosophy",
@@ -77,13 +75,11 @@ func init() {
 	// Projects needing to extend the protocol use a custom ProtocolExtension region instead:
 	// MOSAIC defines injection (type="project") slots; projects invent custom (type="custom") ones.
 	InjectionParent = map[string]string{
-		"IdentityExtension":      "Identity",
 		"CodebaseContext":        "Capabilities",
 		"LanguagePatterns":       "Capabilities", // moved from CanonicalDeployed
 		"OutputArtifactTemplate": "Capabilities",
 		"SeverityThresholds":     "Capabilities",
 		"SeverityDefinitions":    "Capabilities",
-		"ErrorHandlingExtension": "ErrorHandling",
 		"ContextLimits":          "ExecutionPhilosophy",
 	}
 }

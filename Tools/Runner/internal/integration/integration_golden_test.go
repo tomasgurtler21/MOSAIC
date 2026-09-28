@@ -40,6 +40,7 @@ func TestIntegration_LinearWorkflow_GoldenFileMatch(t *testing.T) {
 
 	sess := newSession(f, artifactPath)
 	cfg := domain.RunConfig{
+		RunID: integrationRunID,
 		OrchestratorFilePath: orchPath,
 		WorkflowID:           "linear",
 		Task:                 "test task",
@@ -163,6 +164,7 @@ func TestIntegration_AllFourApproaches_StagedWorkflow_GoldenFileMatch(t *testing
 
 	sess := newSession(f, artifactPath)
 	cfg := domain.RunConfig{
+		RunID: integrationRunID,
 		OrchestratorFilePath: orchPath,
 		WorkflowID:           "four-approach-staged",
 		Task:                 "four-approach task",

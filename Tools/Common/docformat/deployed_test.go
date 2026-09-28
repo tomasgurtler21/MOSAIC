@@ -219,17 +219,17 @@ func TestBody_Deployed_AbsentName_ReturnsFalse(t *testing.T) {
 }
 
 func TestBody_Deployed_FindsNodeAtAnyNestingDepth(t *testing.T) {
-	// ProtocolConstraints is nested inside <Constraints type="core">; Deployed() must find it
+	// HarnessConstraints is nested inside <Constraints type="core">; Deployed() must find it
 	// regardless of nesting depth.
 	doc := parsedBoundaryFixture(t, "deployed-in-section.md")
 
-	node, ok := doc.Body().Deployed("ProtocolConstraints")
+	node, ok := doc.Body().Deployed("HarnessConstraints")
 
 	if !ok {
-		t.Fatal("Deployed(\"ProtocolConstraints\") returned false for a deployed node nested inside a section")
+		t.Fatal("Deployed(\"HarnessConstraints\") returned false for a deployed node nested inside a section")
 	}
-	if node.Name() != "ProtocolConstraints" {
-		t.Errorf("Name: want %q, got %q", "ProtocolConstraints", node.Name())
+	if node.Name() != "HarnessConstraints" {
+		t.Errorf("Name: want %q, got %q", "HarnessConstraints", node.Name())
 	}
 }
 
@@ -237,9 +237,9 @@ func TestBody_Deployed_NestedNode_ParentIsContainingSection(t *testing.T) {
 	// A deployed node nested inside a section must have that section as its Parent.
 	doc := parsedBoundaryFixture(t, "deployed-in-section.md")
 
-	deployed, ok := doc.Body().Deployed("ProtocolConstraints")
+	deployed, ok := doc.Body().Deployed("HarnessConstraints")
 	if !ok {
-		t.Fatal("Deployed(\"ProtocolConstraints\") not found")
+		t.Fatal("Deployed(\"HarnessConstraints\") not found")
 	}
 	section, ok := doc.Body().Section("Constraints")
 	if !ok {
@@ -271,7 +271,7 @@ func TestBody_Deployed_TopLevelNode_HasNilParent(t *testing.T) {
 func TestBody_DeployedRegions_ReturnsAllDeployedNodesInDocumentOrder(t *testing.T) {
 	// mixed-markers.md has two deployed regions in document order:
 	//   1. CommunicationProtocol (top level)
-	//   2. ProtocolConstraints (nested inside <Constraints type="core">)
+	//   2. HarnessConstraints (nested inside <Constraints type="core">)
 	doc := parsedBoundaryFixture(t, "mixed-markers.md")
 
 	regions := doc.Body().DeployedRegions()
@@ -282,8 +282,8 @@ func TestBody_DeployedRegions_ReturnsAllDeployedNodesInDocumentOrder(t *testing.
 	if regions[0].Name() != "CommunicationProtocol" {
 		t.Errorf("regions[0].Name: want %q, got %q", "CommunicationProtocol", regions[0].Name())
 	}
-	if regions[1].Name() != "ProtocolConstraints" {
-		t.Errorf("regions[1].Name: want %q, got %q", "ProtocolConstraints", regions[1].Name())
+	if regions[1].Name() != "HarnessConstraints" {
+		t.Errorf("regions[1].Name: want %q, got %q", "HarnessConstraints", regions[1].Name())
 	}
 }
 
@@ -323,8 +323,8 @@ func TestBody_Injections_DoesNotReturnDeployedNodes(t *testing.T) {
 	if names["CommunicationProtocol"] {
 		t.Error("Injections() must not include the deployed node \"CommunicationProtocol\"")
 	}
-	if names["ProtocolConstraints"] {
-		t.Error("Injections() must not include the deployed node \"ProtocolConstraints\"")
+	if names["HarnessConstraints"] {
+		t.Error("Injections() must not include the deployed node \"HarnessConstraints\"")
 	}
 }
 
@@ -360,7 +360,7 @@ func TestBody_Regions_ReturnsInjectionAndDeployedNodesInterleavedInDocumentOrder
 	// mixed-markers.md layout (document order):
 	//   <IdentityExtension type="project">   — inside <Identity type="core">
 	//   <CommunicationProtocol type="managed"> — top level
-	//   <ProtocolConstraints type="managed">   — inside <Constraints type="core">
+	//   <HarnessConstraints type="managed">   — inside <Constraints type="core">
 	//   <CodebaseContext type="project">     — inside <Constraints type="core">
 	doc := parsedBoundaryFixture(t, "mixed-markers.md")
 
@@ -377,7 +377,7 @@ func TestBody_Regions_ReturnsInjectionAndDeployedNodesInterleavedInDocumentOrder
 	expected := []want{
 		{"IdentityExtension", docformat.NodeInjection},
 		{"CommunicationProtocol", docformat.NodeDeployed},
-		{"ProtocolConstraints", docformat.NodeDeployed},
+		{"HarnessConstraints", docformat.NodeDeployed},
 		{"CodebaseContext", docformat.NodeInjection},
 	}
 	for i, e := range expected {

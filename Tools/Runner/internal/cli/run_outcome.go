@@ -44,6 +44,9 @@ func runSessionAndReport(ctx context.Context, config domain.RunConfig, store dom
 	} else if exitCode != ExitSuccess {
 		// Print non-success messages to stderr so stdout stays machine-readable.
 		fmt.Fprintf(errOut, "%s\n", outcome.Message)
+		if outcome.Status == domain.RunStartFailed {
+			fmt.Fprintln(errOut, "The run was kept; resuming it retries the failed step.")
+		}
 	}
 	return exitCode
 }
@@ -63,6 +66,8 @@ func outcomeToExitCode(outcome domain.RunOutcome) int {
 		return ExitFailure
 	case domain.RunStoppedByConsultant:
 		return ExitStoppedByConsultant
+	case domain.RunStartFailed:
+		return ExitStartFailed
 	default:
 		return ExitFailure
 	}

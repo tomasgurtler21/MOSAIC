@@ -214,7 +214,7 @@ func TestSession_Start_VersionMismatchArtifact_ReturnsRefusal(t *testing.T) {
 	})
 
 	cfg := baseLinearConfig(orchPath)
-	cfg.IsNewRun = false          // resume: artifact already exists
+	markResume(&cfg)
 	cfg.AllowVersionDrift = false // default; explicit for clarity
 
 	got, err := ses.Start(context.Background(), cfg)

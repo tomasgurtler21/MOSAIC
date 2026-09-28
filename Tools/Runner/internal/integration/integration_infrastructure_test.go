@@ -55,6 +55,7 @@ func TestIntegration_InfrastructureAgent_MidWorkflow_RunsToCorrectEnd(t *testing
 	artifactPath := filepath.Join(dir, "Orchestration.md")
 	sess := newSession(f, artifactPath)
 	cfg := domain.RunConfig{
+		RunID: integrationRunID,
 		OrchestratorFilePath: orchPath,
 		WorkflowID:           "linear",
 		Task:                 "test task",
@@ -111,13 +112,16 @@ func TestIntegration_InfrastructureAgent_ResumeAfterCleanStop_NotMisdiagnosedAsI
 	// last entry -- this is a clean stop, not an interruption.
 	const artifactContent = `---
 type: orchestration-artifact
+run_id: 20260727T170000Z-a3f9
 workflow: linear
 workflow_version: "1.0"
 task: "test task"
 started: 2026-01-01T00:00:00Z
 last_updated: 2026-01-01T00:00:00Z
 global_sequence: 2
-mode: auto
+runner_mode: auto
+runner_pre_consultation: disabled
+runner_manual_resolution: disabled
 checkpoints: disabled
 current_state:
   phase: PLANNING
@@ -145,7 +149,8 @@ current_state:
 | --- | ---- |
 </WorkflowNotes>
 `
-	artifactPath := filepath.Join(dir, "Orchestration.md")
+	runFolder := scopedRunFolder(t, dir)
+	artifactPath := filepath.Join(runFolder, "Orchestration.md")
 	if err := os.WriteFile(artifactPath, []byte(artifactContent), 0600); err != nil {
 		t.Fatalf("write artifact: %v", err)
 	}
@@ -164,10 +169,12 @@ current_state:
 
 	sess := newSession(f, artifactPath)
 	cfg := domain.RunConfig{
+		RunID: integrationRunID,
 		OrchestratorFilePath: orchPath,
 		WorkflowID:           "linear",
 		Task:                 "test task",
 		IsNewRun:             false,
+		RunFolder:            runFolder,
 		RunSettings:          domain.RunSettings{Checkpoints: true}, // enable checkpoint class so its triggers are evaluated
 	}
 
@@ -204,13 +211,16 @@ func TestIntegration_InfrastructureAgent_InterruptedAfterActivity_ResumesCorrect
 	// current_state could be updated to reflect it.
 	const artifactContent = `---
 type: orchestration-artifact
+run_id: 20260727T170000Z-a3f9
 workflow: linear
 workflow_version: "1.0"
 task: "test task"
 started: 2026-01-01T00:00:00Z
 last_updated: 2026-01-01T00:00:00Z
 global_sequence: 3
-mode: auto
+runner_mode: auto
+runner_pre_consultation: disabled
+runner_manual_resolution: disabled
 checkpoints: disabled
 current_state:
   phase: PLANNING
@@ -239,7 +249,8 @@ current_state:
 | --- | ---- |
 </WorkflowNotes>
 `
-	artifactPath := filepath.Join(dir, "Orchestration.md")
+	runFolder := scopedRunFolder(t, dir)
+	artifactPath := filepath.Join(runFolder, "Orchestration.md")
 	if err := os.WriteFile(artifactPath, []byte(artifactContent), 0600); err != nil {
 		t.Fatalf("write artifact: %v", err)
 	}
@@ -260,10 +271,12 @@ current_state:
 
 	sess := newSession(f, artifactPath)
 	cfg := domain.RunConfig{
+		RunID: integrationRunID,
 		OrchestratorFilePath: orchPath,
 		WorkflowID:           "linear",
 		Task:                 "test task",
 		IsNewRun:             false,
+		RunFolder:            runFolder,
 		RunSettings:          domain.RunSettings{Checkpoints: true}, // enable checkpoint class so its triggers are evaluated
 	}
 

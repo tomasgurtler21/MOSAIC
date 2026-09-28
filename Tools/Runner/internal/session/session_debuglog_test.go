@@ -300,11 +300,11 @@ func TestSession_Start_WithLogger_DeviationResolution_LogsDeviation(t *testing.T
 	}
 }
 
-// TestSession_Start_WithLogger_DeviationUnresolved_LoggedWithoutStoreApply
+// TestSession_Start_WithLogger_HarnessErrorDeviationUnresolved_RecordsE501Row
 // verifies that when a harness error occurs and no routing consultant is wired,
-// the session logs EventSessionDeviationUnresolved without calling Store.Apply.
-// This covers the path that leaves no trace in Orchestration.md.
-func TestSession_Start_WithLogger_DeviationUnresolved_LoggedWithoutStoreApply(t *testing.T) {
+// the failed step is still recorded as a BLOCKED/E501 workflow row and the
+// session logs EventSessionDeviationUnresolved.
+func TestSession_Start_WithLogger_HarnessErrorDeviationUnresolved_RecordsE501Row(t *testing.T) {
 	logger := &sessionRecordingLogger{}
 	ses, f, store, orchPath := newTestDeviationWorkflowSession(t, logger)
 
@@ -323,9 +323,17 @@ func TestSession_Start_WithLogger_DeviationUnresolved_LoggedWithoutStoreApply(t 
 		t.Errorf("want %s logged on unresolved deviation, got events: %v",
 			domain.EventSessionDeviationUnresolved, logger.allEvents())
 	}
-	// Store.Apply must NOT have been called: the unresolved step was never recorded.
-	if len(store.Applied) != 0 {
-		t.Errorf("want Store.Apply NOT called on unresolved deviation, got %d calls", len(store.Applied))
+	// The failed step is recorded as an accepted workflow row before routing.
+	if len(store.Applied) != 1 {
+		t.Fatalf("want exactly one recorded step (the harness-error row), got %d", len(store.Applied))
+	}
+	step := store.Applied[0]
+	if step.IsInfrastructure || step.HITLRejected {
+		t.Errorf("want the harness-error row to be an accepted workflow row, got infra=%v rejected=%v",
+			step.IsInfrastructure, step.HITLRejected)
+	}
+	if step.Status != domain.StatusBLOCKED || step.ErrorCode != domain.ErrorTOOL_UNAVAILABLE {
+		t.Errorf("want harness-error row BLOCKED/E501, got %s/%s", step.Status, step.ErrorCode)
 	}
 }
 

@@ -17,7 +17,7 @@ All three production adapters share the same `mosaic-common/harness` spawner inf
 | `GHCPCLIAdapter` | Spawns GHCP CLI per invocation. Supports two permission modes: Blanket (`--yolo --no-ask-user`) and Partial Allowlist (`--allow-tool` entries from `SpawnRequest.DerivedTools` + `--no-ask-user`). Mode is resolved once at adapter construction and stored on the struct. |
 | `OpenCodeAdapter` | Spawns OpenCode per invocation. Always passes `--auto`, which converts every `ask` permission to `allow` for that invocation while leaving explicitly-denied capabilities unchanged. No per-tool allowlist is extracted or needed. |
 | `MockAdapter` | Test double. Queues scripted `ProtocolResponse`, `error`, or raw JSON payloads per agent identifier (FIFO). Records all invocations so tests can assert call order and arguments. |
-| Protocol helpers | `MarshalRequest` / `UnmarshalResponse` encode and decode Communication Protocol v1.8 JSON messages. |
+| Protocol helpers | `MarshalRequest` / `UnmarshalResponse` encode and decode Communication Protocol v1.12 JSON messages. |
 
 ## Permission-Mode Implementation
 

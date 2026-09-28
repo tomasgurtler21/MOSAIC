@@ -66,6 +66,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 	"time"
 )
@@ -78,6 +79,7 @@ func writeArtifact(t *testing.T, dir, phase string, lastUpdated time.Time) {
 	t.Helper()
 	content := fmt.Sprintf(`---
 type: orchestration-artifact
+run_id: %s
 workflow: test-workflow
 workflow_version: "1.0"
 task: "test task"
@@ -103,7 +105,7 @@ current_state:
 | Artifact | Created In | Created By |
 | -------- | ---------- | ---------- |
 </Artifacts>
-`, lastUpdated.UTC().Format(time.RFC3339), phase)
+`, folderRunID(dir), lastUpdated.UTC().Format(time.RFC3339), phase)
 
 	if err := os.WriteFile(filepath.Join(dir, "Orchestration.md"), []byte(content), 0600); err != nil {
 		t.Fatalf("writeArtifact: %v", err)
@@ -116,6 +118,7 @@ func writeArtifactWithMeta(t *testing.T, dir, phase, workflow, task string, last
 	t.Helper()
 	content := fmt.Sprintf(`---
 type: orchestration-artifact
+run_id: %s
 workflow: %s
 workflow_version: "1.0"
 task: %q
@@ -141,7 +144,7 @@ current_state:
 | Artifact | Created In | Created By |
 | -------- | ---------- | ---------- |
 </Artifacts>
-`, workflow, task, lastUpdated.UTC().Format(time.RFC3339), phase)
+`, folderRunID(dir), workflow, task, lastUpdated.UTC().Format(time.RFC3339), phase)
 
 	if err := os.WriteFile(filepath.Join(dir, "Orchestration.md"), []byte(content), 0600); err != nil {
 		t.Fatalf("writeArtifactWithMeta: %v", err)
@@ -155,6 +158,7 @@ func writeArtifactWithState(t *testing.T, dir, phase, stage, lastAgent string, l
 	t.Helper()
 	content := fmt.Sprintf(`---
 type: orchestration-artifact
+run_id: %s
 workflow: test-workflow
 workflow_version: "1.0"
 task: "test task"
@@ -180,7 +184,7 @@ current_state:
 | Artifact | Created In | Created By |
 | -------- | ---------- | ---------- |
 </Artifacts>
-`, lastUpdated.UTC().Format(time.RFC3339), phase, stage, lastAgent)
+`, folderRunID(dir), lastUpdated.UTC().Format(time.RFC3339), phase, stage, lastAgent)
 
 	if err := os.WriteFile(filepath.Join(dir, "Orchestration.md"), []byte(content), 0600); err != nil {
 		t.Fatalf("writeArtifactWithState: %v", err)
@@ -210,3 +214,51 @@ var (
 	t2 = time.Date(2026, 1, 2, 0, 0, 0, 0, time.UTC)
 	t3 = time.Date(2026, 1, 3, 0, 0, 0, 0, time.UTC)
 )
+
+// folderRunID returns the run_id named by an Orchestration-{run_id}/ folder, so
+// fixtures record the identity their folder carries.
+func folderRunID(dir string) string {
+	return strings.TrimPrefix(filepath.Base(dir), "Orchestration-")
+}
+
+// writeArtifactWithRunIDLine writes a parseable Orchestration.md in dir whose
+// run_id line is exactly runIDLine, so identity problems can be authored
+// directly: pass "" to omit the key, "run_id: \"\"" for an empty value.
+func writeArtifactWithRunIDLine(t *testing.T, dir, runIDLine string, lastUpdated time.Time) {
+	t.Helper()
+	line := ""
+	if runIDLine != "" {
+		line = runIDLine + "\n"
+	}
+	content := fmt.Sprintf(`---
+type: orchestration-artifact
+%sworkflow: test-workflow
+workflow_version: "1.0"
+task: "test task"
+started: 2026-01-01T00:00:00Z
+last_updated: %s
+global_sequence: 1
+checkpoints: disabled
+current_state:
+  phase: EXECUTION
+  stage: ""
+  last_status: SUCCESS
+  last_agent: "agent#1"
+  error_code: null
+---
+
+<ExecutionLog type="core">
+| Seq | Agent   | Phase     | Stage | Status  | Timestamp            | Summary | Checkpoint |
+| --- | ------- | --------- | ----- | ------- | -------------------- | ------- | ---------- |
+| 1   | agent#1 | EXECUTION | -     | SUCCESS | 2026-01-01T00:00:00Z | done    | -          |
+</ExecutionLog>
+
+<Artifacts type="core">
+| Artifact | Created In | Created By |
+| -------- | ---------- | ---------- |
+</Artifacts>
+`, line, lastUpdated.UTC().Format(time.RFC3339))
+	if err := os.WriteFile(filepath.Join(dir, "Orchestration.md"), []byte(content), 0600); err != nil {
+		t.Fatalf("writeArtifactWithRunIDLine: %v", err)
+	}
+}

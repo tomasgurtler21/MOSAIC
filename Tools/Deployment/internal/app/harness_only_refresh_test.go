@@ -103,7 +103,7 @@ func refreshBundleBlock(regionName string, role domain.AgentRole) []byte {
 	return []byte("CANONICAL " + strings.ToUpper(regionName) + " FOR " + strings.ToUpper(roleStr) + "\n")
 }
 
-// fixtureRefreshBundle returns a BundleContent covering all nine canonical deployed
+// fixtureRefreshBundle returns a BundleContent covering all eight canonical deployed
 // regions for both subagent and orchestrator roles. Each block's content is produced by
 // refreshBundleBlock so tests can deterministically assert on expected output.
 func fixtureRefreshBundle(version string) domain.BundleContent {
@@ -112,7 +112,6 @@ func fixtureRefreshBundle(version string) domain.BundleContent {
 		"ClosingProcedure",
 		"AvailableWorkflows",
 		"InfrastructureAgents",
-		"ProtocolConstraints",
 		"HarnessConstraints",
 		"ErrorHandlingCommon",
 		"ExecutionPhilosophyCommon",
@@ -199,10 +198,6 @@ user codebase context injection — must survive verbatim
 
 <Constraints type="core">
 
-<ProtocolConstraints type="managed">
-old protocol constraints content
-</ProtocolConstraints>
-
 <HarnessConstraints type="managed">
 old harness constraints content
 </HarnessConstraints>
@@ -226,11 +221,11 @@ old execution philosophy common content
 </ExecutionPhilosophy>
 `
 
-// fixtureOrchestratorFull is a complete harness-only orchestrator file with all nine
+// fixtureOrchestratorFull is a complete harness-only orchestrator file with all eight
 // canonical deployed regions populated with "old" content and injection regions carrying
 // user-authored content.
 //
-// This fixture is used for all-deployed scope tests where all nine regions must be
+// This fixture is used for all-deployed scope tests where all eight regions must be
 // refreshed.
 const fixtureOrchestratorFull = `---
 id: 43
@@ -274,10 +269,6 @@ old communication protocol content
 </Capabilities>
 
 <Constraints type="core">
-
-<ProtocolConstraints type="managed">
-old protocol constraints content
-</ProtocolConstraints>
 
 <HarnessConstraints type="managed">
 old harness constraints content
@@ -372,10 +363,6 @@ old communication protocol content
 
 <Constraints type="core">
 
-<ProtocolConstraints type="managed">
-old protocol constraints content
-</ProtocolConstraints>
-
 <HarnessConstraints type="managed">
 old harness constraints content
 </HarnessConstraints>
@@ -423,10 +410,6 @@ old communication protocol content
 </Capabilities>
 
 <Constraints type="core">
-
-<ProtocolConstraints type="managed">
-old protocol constraints content
-</ProtocolConstraints>
 
 <HarnessConstraints type="managed">
 old harness constraints content
@@ -697,7 +680,6 @@ func TestRefreshHarnessOnly_AllDeployedScope_BundleRegionsCarryRoleMatchedConten
 	bundleRegions := []string{
 		"AuthorityHierarchy",
 		"ClosingProcedure",
-		"ProtocolConstraints",
 		"HarnessConstraints",
 	}
 

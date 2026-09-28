@@ -19,20 +19,21 @@ type InfrastructureOverride struct {
 // It is the runner's only durable state.
 type ArtifactState struct {
 	// Frontmatter (Tier 1)
-	RunID           string          // set once at creation, never modified; empty for pre-v1.8 artifacts
+	RunID           string          // set once at creation, never modified; required and always a valid run id
 	Type            string          // "orchestration-artifact"
 	Workflow        WorkflowID
 	WorkflowVersion WorkflowVersion
 	Task            string
 	Started         time.Time
 	LastUpdated     time.Time
-	GlobalSequence  int
+	GlobalSequence  int             // last allocated invocation number
 
 	// RunSettings holds every run-configuration decision that is settled at run
 	// start, immutable for the run, and persisted in the artifact frontmatter so
 	// a resumed run reads it back instead of re-asking. Embedding promotes all
-	// seven fields (Mode, Checkpoints, Commits, CommitBranchVariant, CommitBranch,
-	// PreConsultation, ManualResolution) directly onto ArtifactState.
+	// fields (Mode, Checkpoints, Commits, CommitBranchVariant, CommitBranch,
+	// PreConsultation, ManualResolution, ReviewLoopLimit, InfraClassSelections)
+	// directly onto ArtifactState.
 	RunSettings
 
 	// InfrastructureOverrides carries the optional infrastructure_overrides
@@ -41,12 +42,22 @@ type ArtifactState struct {
 	InfrastructureOverrides []InfrastructureOverride
 	CurrentState            CurrentState
 
+	// UnknownFrontmatter preserves, in file order, every top-level frontmatter
+	// key this version does not model, verbatim, so rewrites never drop them.
+	UnknownFrontmatter []FrontmatterEntry
+
 	// Structured sections (Tier 2)
 	ExecutionLog     []ExecutionLogEntry
 	ArtifactRegistry []ArtifactRegistryEntry
 
 	// Opaque section (Tier 3) -- preserved on write, never modified by the runner
 	WorkflowNotes []WorkflowNote
+}
+
+// FrontmatterEntry is one preserved top-level frontmatter key.
+type FrontmatterEntry struct {
+	Key   string   // the top-level key
+	Lines []string // the key's line and every indented continuation line, verbatim, without trailing newlines
 }
 
 // CurrentState is the mutable nested block in the frontmatter.

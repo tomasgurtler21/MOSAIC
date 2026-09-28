@@ -23,6 +23,7 @@ func TestInfrastructureFlag_Omitted_LeavesFilterNil(t *testing.T) {
 		"--task", "do work",
 		"--mode", "auto",
 		"--new-run",
+		"--review-loop-limit", "3",
 	}, &spyStore{}, sess)
 
 	if code != cli.ExitSuccess {
@@ -50,6 +51,7 @@ func TestInfrastructureFlag_WithoutDevTestMode_IsRejected(t *testing.T) {
 		"--task", "do work",
 		"--mode", "auto",
 		"--new-run",
+		"--review-loop-limit", "3",
 		"--infrastructure", "mosaictest-review",
 	}, sess)
 
@@ -78,6 +80,7 @@ func TestInfrastructureFlag_WithDevTestMode_IsAccepted(t *testing.T) {
 		"--task", "do work",
 		"--mode", "auto",
 		"--new-run",
+		"--review-loop-limit", "3",
 		"--infrastructure", "mosaictest-review",
 		"--dev-test-mode",
 	}, &spyStore{}, sess)
@@ -103,6 +106,7 @@ func TestInfrastructureFlag_ParsedToFilterSlice(t *testing.T) {
 		"--task", "do work",
 		"--mode", "auto",
 		"--new-run",
+		"--review-loop-limit", "3",
 		"--infrastructure", "k1,k2",
 		"--dev-test-mode",
 	}, &spyStore{}, sess)
@@ -133,6 +137,7 @@ func TestInfrastructureFlag_EmptyValue_ParsedToNonNilEmpty(t *testing.T) {
 		"--task", "do work",
 		"--mode", "auto",
 		"--new-run",
+		"--review-loop-limit", "3",
 		"--infrastructure=",
 		"--dev-test-mode",
 	}, &spyStore{}, sess)
@@ -185,6 +190,7 @@ func TestInfrastructureFlag_CommaSplitEdgeCases(t *testing.T) {
 				"--task", "do work",
 				"--mode", "auto",
 				"--new-run",
+				"--review-loop-limit", "3",
 				"--infrastructure", c.raw,
 				"--dev-test-mode",
 			}

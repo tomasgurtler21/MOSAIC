@@ -4,7 +4,10 @@ package artifact_test
 // global sequence, and workflow notes preservation.
 
 import (
+	"bytes"
 	"context"
+	"fmt"
+	"os"
 	"path/filepath"
 	"testing"
 	"time"
@@ -227,19 +230,115 @@ func TestApply_CurrentState_LastAgentUpdated(t *testing.T) {
 	}
 }
 
-func TestApply_GlobalSequence_Incremented(t *testing.T) {
+func TestApply_GlobalSequence_EqualsStepSeq(t *testing.T) {
 	store, state := mustCreateStore(t)
-	before := state.GlobalSequence
 	ctx := context.Background()
-	step := newTestStep(1, "planner#1", "PLANNING", "", domain.StatusSUCCESS, time.Now(), nil)
+	step := newTestStep(3, "planner#3", "PLANNING", "", domain.StatusSUCCESS, time.Now(), nil)
 
 	after, err := store.Apply(ctx, state, step)
 	if err != nil {
 		t.Fatalf("Apply: %v", err)
 	}
 
-	if after.GlobalSequence <= before {
-		t.Errorf("GlobalSequence: want > %d after Apply, got %d", before, after.GlobalSequence)
+	if after.GlobalSequence != 3 {
+		t.Errorf("GlobalSequence: want step.Seq 3 (last-allocated semantics), got %d", after.GlobalSequence)
+	}
+}
+
+func TestApply_GlobalSequence_StoredHigherThanStepSeq_KeepsStored(t *testing.T) {
+	// A stored value above the step Seq marks an interrupted allocation; the
+	// stored number must never move backwards: global_sequence = max(stored, Seq).
+	store, _ := writeArtifact(t, withGlobalSequence("7"))
+	ctx := context.Background()
+	state, err := store.Read(ctx)
+	if err != nil {
+		t.Fatalf("Read: %v", err)
+	}
+	step := newTestStep(2, "planner#2", "PLANNING", "", domain.StatusSUCCESS, time.Now(), nil)
+
+	after, err := store.Apply(ctx, state, step)
+	if err != nil {
+		t.Fatalf("Apply: %v", err)
+	}
+
+	if after.GlobalSequence != 7 {
+		t.Errorf("GlobalSequence: want max(7, 2) = 7, got %d", after.GlobalSequence)
+	}
+}
+
+func TestApply_SeqNotAboveLoggedSeq_RefusedNothingWritten(t *testing.T) {
+	cases := []struct {
+		name string
+		seq  int
+	}{
+		{"duplicate of highest logged seq", 1},
+		{"below highest logged seq", 0},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			store, path := writeArtifact(t, minimalArtifactWithExecutionRow(""))
+			ctx := context.Background()
+			state, err := store.Read(ctx)
+			if err != nil {
+				t.Fatalf("Read: %v", err)
+			}
+			before, err := os.ReadFile(path)
+			if err != nil {
+				t.Fatalf("ReadFile: %v", err)
+			}
+			step := newTestStep(tc.seq, fmt.Sprintf("planner#%d", tc.seq), "PLANNING", "", domain.StatusSUCCESS, time.Now(), nil)
+
+			_, err = store.Apply(ctx, state, step)
+
+			if err == nil {
+				t.Fatal("Apply: want error for Seq not above the highest logged Seq, got nil")
+			}
+			after, rerr := os.ReadFile(path)
+			if rerr != nil {
+				t.Fatalf("ReadFile: %v", rerr)
+			}
+			if !bytes.Equal(before, after) {
+				t.Error("artifact changed on disk despite refused Apply")
+			}
+		})
+	}
+}
+
+func TestApply_AgentInstanceSuffixMismatchesSeq_RefusedNothingWritten(t *testing.T) {
+	cases := []struct {
+		name  string
+		agent string
+	}{
+		{"suffix differs from seq", "planner#1"},
+		{"no numeric suffix", "planner"},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			store, path := writeArtifact(t, minimalArtifactWithExecutionRow(""))
+			ctx := context.Background()
+			state, err := store.Read(ctx)
+			if err != nil {
+				t.Fatalf("Read: %v", err)
+			}
+			before, err := os.ReadFile(path)
+			if err != nil {
+				t.Fatalf("ReadFile: %v", err)
+			}
+			step := newTestStep(2, tc.agent, "PLANNING", "", domain.StatusSUCCESS, time.Now(), nil)
+
+			_, err = store.Apply(ctx, state, step)
+
+			if err == nil {
+				t.Fatal("Apply: want error when AgentInstance does not end in #Seq, got nil")
+			}
+			after, rerr := os.ReadFile(path)
+			if rerr != nil {
+				t.Fatalf("ReadFile: %v", rerr)
+			}
+			if !bytes.Equal(before, after) {
+				t.Error("artifact changed on disk despite refused Apply")
+			}
+		})
 	}
 }
 
@@ -333,7 +432,7 @@ func TestApply_WorkflowNotes_PreservedUnchanged(t *testing.T) {
 
 	// Seed the temp file.
 	info := domain.WorkflowInfo{ID: state.Workflow, Version: state.WorkflowVersion}
-	seedState, err := tempStore.Create(ctx, info, state.Task, domain.RunSettings{Checkpoints: state.Checkpoints}, state.Started, "")
+	seedState, err := tempStore.Create(ctx, info, state.Task, domain.RunSettings{Checkpoints: state.Checkpoints}, state.Started, testRunID)
 	if err != nil {
 		t.Fatalf("Create temp: %v", err)
 	}

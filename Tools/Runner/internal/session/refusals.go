@@ -3,6 +3,7 @@ package session
 import (
 	"errors"
 	"fmt"
+	"path/filepath"
 
 	"mosaic-run/internal/domain"
 	"mosaic-run/internal/orchfile"
@@ -82,5 +83,65 @@ func (s *sessionImpl) resumeRecordedNoWorkflowRefusal(runID string) domain.RunOu
 		Component: "workflow",
 		Resource:  runID,
 		Reason:    reason,
+	})
+}
+
+// startFailed builds the outcome for a run start that failed after the run
+// artifact was created (commit setup or pre-consultation). Everything written
+// so far is kept and a resume retries the failed step. cause may be nil.
+func (s *sessionImpl) startFailed(message string, cause error) domain.RunOutcome {
+	s.deps.Debug.Log(domain.EventSessionRefusal, message)
+	return domain.RunOutcome{
+		Status:  domain.RunStartFailed,
+		Message: message,
+		Cause:   cause,
+	}
+}
+
+// checkResumeRunIdentity reports why a resumed artifact's recorded run_id is
+// unusable, or nil when it is present, well-formed and matches the run the
+// enclosing Orchestration-{run_id}/ folder belongs to.
+func checkResumeRunIdentity(recorded string, config domain.RunConfig) *domain.RunIdentityError {
+	switch {
+	case recorded == "":
+		return &domain.RunIdentityError{Problem: domain.RunIdentityEmpty, RunID: recorded}
+	case !domain.IsValidRunID(recorded):
+		return &domain.RunIdentityError{Problem: domain.RunIdentityMalformed, RunID: recorded}
+	}
+	folderRunID := config.RunID
+	if config.RunFolder != "" {
+		if id, ok := domain.ParseRunFolder(filepath.Base(config.RunFolder)); ok {
+			folderRunID = id
+		}
+	}
+	if folderRunID != "" && recorded != folderRunID {
+		return &domain.RunIdentityError{
+			Problem: domain.RunIdentityFolderMismatch,
+			RunID:   recorded,
+			Folder:  domain.RunScopedFolder(folderRunID),
+		}
+	}
+	return nil
+}
+
+// runIdentityRefusal refuses a resume whose artifact has an unusable run_id.
+// The message names the problem; the cause carries it to the frontends.
+func (s *sessionImpl) runIdentityRefusal(idErr *domain.RunIdentityError, config domain.RunConfig) domain.RunOutcome {
+	var reason string
+	switch idErr.Problem {
+	case domain.RunIdentityMalformed:
+		reason = fmt.Sprintf("the artifact's run_id %q is malformed; a valid run_id "+
+			"({YYYYMMDD}T{HHMMSS}Z-{4-hex}) is required to resume", idErr.RunID)
+	case domain.RunIdentityFolderMismatch:
+		reason = fmt.Sprintf("the artifact's run_id %q does not match its run folder %q",
+			idErr.RunID, idErr.Folder)
+	default:
+		reason = "the artifact has no run_id (absent or empty); a valid run_id is required to resume"
+	}
+	return s.refusalCaused(reason, &domain.RefusalError{
+		Component: "artifact",
+		Resource:  config.RunID,
+		Reason:    reason,
+		Cause:     idErr,
 	})
 }

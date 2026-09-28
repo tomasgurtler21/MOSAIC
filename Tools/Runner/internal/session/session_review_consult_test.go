@@ -308,23 +308,15 @@ func TestSession_ReviewConsult_Dispatch_AgentRunsAndCallSite2Fires(t *testing.T)
 		t.Errorf("want agent-a dispatched 2 times (engine + consultation), got %d", agentACount)
 	}
 
-	// AC2.3: verify the consultation dispatch writes an infrastructure log row.
-	// In the GREEN path, consultRoute records the consultation at seq=4 as an
-	// infrastructure-flagged CompletedStep before dispatching the named agent.
-	// The AgentInstance is "{orchStem}#{consultSeq}" -- here "review-class-orch#4".
-	// An implementation that dispatches the agent but omits Store.Apply would
-	// leave this entry absent from store.Applied.
-	var consultRecord *domain.CompletedStep
-	for i := range store.Applied {
-		step := &store.Applied[i]
-		if step.IsInfrastructure && strings.HasPrefix(step.AgentInstance, "orchestrator#") {
-			consultRecord = step
-			break
+	// The consultation dispatch leaves no Execution Log row: no
+	// infrastructure row and no row attributed to the orchestrator.
+	requireNoConsultationRows(t, store)
+	// Every recorded invocation (workflow and infrastructure) takes the next
+	// sequence slot: the consultation dispatch collides with nothing.
+	for i, step := range store.Applied {
+		if step.Seq != i+1 {
+			t.Errorf("want applied row %d (%s) at Seq %d, got %d", i, step.AgentInstance, i+1, step.Seq)
 		}
-	}
-	if consultRecord == nil {
-		t.Error("want consultation dispatch to write an infrastructure log row (AC2.3), " +
-			"but no IsInfrastructure=true entry with AgentInstance prefix 'orchestrator#' found in store.Applied")
 	}
 
 	// The second consultation (call site 2) carries the last review's message

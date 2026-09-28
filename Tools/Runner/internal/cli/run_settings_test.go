@@ -19,6 +19,7 @@ func TestModeFlag_Absent_ProducesRefusal(t *testing.T) {
 		"--workflow", "w1",
 		"--task", "do work",
 		"--new-run",
+		"--review-loop-limit", "3",
 	}, sess)
 	if code != cli.ExitUsage {
 		t.Errorf("exit code = %d, want ExitUsage when --mode is absent", code)
@@ -46,11 +47,12 @@ func TestModeFlag_ValidValues_AreAccepted(t *testing.T) {
 			sess := &scriptedSession{outcome: domain.RunOutcome{Status: domain.RunCompleted}}
 			args := []string{
 				"run",
-		
+
 				"--workflow", "w1",
 				"--task", "do work",
 				"--mode", mode,
 				"--new-run",
+				"--review-loop-limit", "3",
 			}
 			code, _, errOut := runCLIWithStore(t, args, &spyStore{}, sess)
 			if code != cli.ExitSuccess {
@@ -75,6 +77,7 @@ func TestModeFlag_UnrecognisedValue_ProducesRefusal(t *testing.T) {
 		"--task", "do work",
 		"--mode", "quick",
 		"--new-run",
+		"--review-loop-limit", "3",
 	}, sess)
 	if code != cli.ExitUsage {
 		t.Errorf("exit code = %d, want ExitUsage for unrecognised --mode value", code)
@@ -242,6 +245,7 @@ func TestOnDeviationFlag_IsRejectedAsUnknown(t *testing.T) {
 		"--task", "do work",
 		"--mode", "auto",
 		"--new-run",
+		"--review-loop-limit", "3",
 		"--on-deviation", "stop",
 	}, sess)
 	if code != cli.ExitUsage {

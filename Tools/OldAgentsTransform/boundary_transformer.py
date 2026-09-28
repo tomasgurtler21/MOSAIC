@@ -26,6 +26,7 @@ from boundary_constants import (
     CANONICAL_SECTIONS,
     EXPECTED_MARKER,
     INJECTION_OLD_MARKER_MAP,
+    LEGACY_INPUT_NAMES,
     MARKER_TO_INJECTION_NAME,
     SECTION_HEADING_MAP,
     TAG_PATTERN,
@@ -41,6 +42,7 @@ from region_insertion import (
 )
 
 import file_classification as _fc
+from fence import fence_mask
 
 from document_kind import classify_document as _classify_document
 from non_conformance import NonConformance, detect_output_non_conformances
@@ -432,7 +434,7 @@ def transform_file(
         _section_spans = find_section_spans(_body_for_regions)
         _region_result = apply_conduct_regions(_body_for_regions, _section_spans)
         transformed_body = dict(transformed_body)
-        transformed_body["lines"] = _region_result.lines
+        transformed_body["lines"] = _strip_retired_boundaries(_region_result.lines)
         transformed_body["deployed_added"] = (
             transformed_body.get("deployed_added", []) + _region_result.deployed_added
         )
@@ -487,8 +489,8 @@ def transform_file(
             success=True,
             errors=[],
             sections_added=transformed_body["sections_added"],
-            injections_added=transformed_body["injections_added"],
-            deployed_added=transformed_body.get("deployed_added", []),
+            injections_added=_without_retired(transformed_body["injections_added"]),
+            deployed_added=_without_retired(transformed_body.get("deployed_added", [])),
             version_before=version_before,
             version_after=version_after,
             degraded=True,
@@ -557,7 +559,7 @@ def transform_file(
     _section_spans = find_section_spans(_body_for_regions)
     _region_result = apply_conduct_regions(_body_for_regions, _section_spans)
     transformed_body = dict(transformed_body)
-    transformed_body["lines"] = _region_result.lines
+    transformed_body["lines"] = _strip_retired_boundaries(_region_result.lines)
     transformed_body["deployed_added"] = (
         transformed_body.get("deployed_added", []) + _region_result.deployed_added
     )
@@ -614,8 +616,8 @@ def transform_file(
         success=True,
         errors=[],
         sections_added=transformed_body["sections_added"],
-        injections_added=transformed_body["injections_added"],
-        deployed_added=transformed_body.get("deployed_added", []),
+        injections_added=_without_retired(transformed_body["injections_added"]),
+        deployed_added=_without_retired(transformed_body.get("deployed_added", [])),
         version_before=version_before,
         version_after=version_after,
         non_conformances=_region_ncs + _fm_ncs + _output_ncs,
@@ -1234,6 +1236,32 @@ def _match_region_marker(line: str) -> Optional[dict]:
         }
 
     return None
+
+
+def _without_retired(names: list[str]) -> list[str]:
+    """Drop retired legacy-input names from a reported-names list."""
+    return [n for n in names if n not in LEGACY_INPUT_NAMES]
+
+
+def _strip_retired_boundaries(lines: list[str]) -> list[str]:
+    """Remove open/close boundary tag lines naming a retired name (outside fences).
+
+    Retired names (see LEGACY_INPUT_NAMES) are recognised on migration input only.
+    The body pass converts their legacy markers to boundary tags so that region
+    placement and prose deletion treat them as boundaries and conduct regions land
+    where the marker sat; the tags are removed here, after placement. Content
+    between a stripped open/close pair, or after a legacy marker, stays inline in
+    its section, so no retired region survives in migrated output.
+    """
+    mask = fence_mask(lines)
+    kept = []
+    for idx, ln in enumerate(lines):
+        if not mask[idx]:
+            m = TAG_PATTERN.match(ln.strip())
+            if m is not None and m.group("name") in LEGACY_INPUT_NAMES:
+                continue
+        kept.append(ln)
+    return kept
 
 
 # Keep the old name as an alias for backward compatibility with any external callers.

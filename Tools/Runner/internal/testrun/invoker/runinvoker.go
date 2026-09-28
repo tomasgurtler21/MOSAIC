@@ -323,6 +323,9 @@ func buildRunArgs(inv testrun.RunInvocation) []string {
 		"--input", inv.FixturePath,
 		"--task", inv.Task,
 		"--pre-consult=" + strconv.FormatBool(inv.PreConsult),
+		// The run subcommand requires a review loop limit for a new run; test
+		// runs impose none.
+		"--review-loop-limit", "none",
 	}
 	if inv.ExecutablePath != "" {
 		args = append(args, "--executable-path", inv.ExecutablePath)

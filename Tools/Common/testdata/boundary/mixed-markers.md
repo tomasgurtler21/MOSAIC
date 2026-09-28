@@ -14,9 +14,9 @@ Protocol content.
 
 <Constraints type="core">
 Constraints content.
-<ProtocolConstraints type="managed">
+<HarnessConstraints type="managed">
 Harness content.
-</ProtocolConstraints>
+</HarnessConstraints>
 <CodebaseContext type="project">
 Project context.
 </CodebaseContext>

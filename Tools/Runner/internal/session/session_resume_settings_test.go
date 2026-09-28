@@ -62,7 +62,7 @@ func TestSession_Start_Resume_UsesModeFromArtifact(t *testing.T) {
 	}})
 
 	cfg := baseLinearConfig(orchPath)
-	cfg.IsNewRun = false
+	markResume(&cfg)
 	// Checkpoints=true with no checkpoint agent declared → the current session
 	// code refuses the run at the checkpoint validation step. I5.4 must override
 	// cfg with artifact values (Checkpoints=false) before this check fires.
@@ -142,7 +142,7 @@ func TestSession_Start_Resume_NoCommitSetupDispatch(t *testing.T) {
 	}})
 
 	cfg := baseCommitConfig(orchPath)
-	cfg.IsNewRun = false
+	markResume(&cfg)
 	// CommitBranch is set to a value that differs from the artifact's recorded
 	// branch. A correct I5.4 reads CommitBranch from the artifact (existingBranch);
 	// a buggy I5.4 that copies cfg.CommitBranch into the state would leave
@@ -222,7 +222,7 @@ func TestSession_Start_Resume_AllSettingsPreservedFromArtifact(t *testing.T) {
 	}})
 
 	cfg := baseLinearConfig(orchPath)
-	cfg.IsNewRun = false
+	markResume(&cfg)
 	// Checkpoints=true with no checkpoint agent → current code refuses the run.
 	// I5.4 must read Checkpoints=false from the artifact before this check fires.
 	cfg.Checkpoints = true

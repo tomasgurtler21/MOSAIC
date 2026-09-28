@@ -140,8 +140,6 @@ Your test results artifact should follow this template:
 <Constraints type="core">
 ## Constraints
 
-<ProtocolConstraints type="managed">
-</ProtocolConstraints>
 - Stay within your defined role - run tests, don't write them
 - Do NOT fix failing tests - report them for appropriate agent
 - Do NOT modify test files or implementation

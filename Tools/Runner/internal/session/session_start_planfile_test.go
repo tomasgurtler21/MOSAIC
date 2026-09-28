@@ -23,7 +23,7 @@ import (
 // reads the stage set from Plan.md at the start, enters the EXECUTION phase,
 // dispatches all rows across all stages, and returns RunCompleted.
 func TestSession_Start_StagedWorkflow_Completes(t *testing.T) {
-	dir := t.TempDir()
+	dir := scopedTempDir(t)
 	orchPath := copyOrchestratorFile(t, dir, "staged-orch.md")
 	writeAgentFile(t, dir, "implementation-tdd")
 	writeAgentFile(t, dir, "implementation-review")
@@ -85,7 +85,7 @@ func TestSession_Start_StagedWorkflow_Completes(t *testing.T) {
 // pre-EXECUTION rows) run to completion.
 func TestSession_Start_PlanFile_ResolvedFromRunFolder_StagesApplied(t *testing.T) {
 	orchDir := t.TempDir()
-	runFolder := t.TempDir() // deliberately distinct from orchDir
+	runFolder := scopedTempDir(t) // deliberately distinct from orchDir
 	orchPath := copyOrchestratorFile(t, orchDir, "staged-orch.md")
 	writeAgentFile(t, orchDir, "implementation-tdd")
 	writeAgentFile(t, orchDir, "implementation-review")
@@ -143,7 +143,7 @@ func TestSession_Start_PlanFile_ResolvedFromRunFolder_StagesApplied(t *testing.T
 // clear reason instead of silently reading the wrong file.
 func TestSession_Start_PlanFile_InOrchestratorDir_NotPickedUp(t *testing.T) {
 	orchDir := t.TempDir()
-	runFolder := t.TempDir() // Plan.md is intentionally absent here
+	runFolder := scopedTempDir(t) // Plan.md is intentionally absent here
 
 	orchPath := copyOrchestratorFile(t, orchDir, "staged-orch.md")
 	writeAgentFile(t, orchDir, "implementation-tdd")
@@ -212,7 +212,7 @@ func TestSession_Start_PlanFile_InOrchestratorDir_NotPickedUp(t *testing.T) {
 // and the first pre-EXECUTION row is dispatched normally.
 func TestSession_Start_NoPlanFile_NewRun_DispatchesFirstPreExecutionRow(t *testing.T) {
 	orchDir := t.TempDir()
-	runFolder := t.TempDir() // no Plan.md written here or anywhere else
+	runFolder := scopedTempDir(t) // no Plan.md written here or anywhere else
 
 	orchPath := copyOrchestratorFile(t, orchDir, "pre-exec-staged-orch.md")
 	writeAgentFile(t, orchDir, "planner")
@@ -271,7 +271,7 @@ func TestSession_Start_NoPlanFile_NewRun_DispatchesFirstPreExecutionRow(t *testi
 // next pre-EXECUTION row without treating the missing plan file as a fault.
 func TestSession_Start_NoPlanFile_ResumedRun_DispatchesNextPreExecutionRow(t *testing.T) {
 	orchDir := t.TempDir()
-	runFolder := t.TempDir() // no Plan.md written here or anywhere else
+	runFolder := scopedTempDir(t) // no Plan.md written here or anywhere else
 
 	orchPath := copyOrchestratorFile(t, orchDir, "pre-exec-staged-orch.md")
 	writeAgentFile(t, orchDir, "planner")
@@ -317,6 +317,7 @@ func TestSession_Start_NoPlanFile_ResumedRun_DispatchesNextPreExecutionRow(t *te
 		WorkflowID:           "pre-exec-staged",
 		Task:                 "task",
 		IsNewRun:             false, // resume: artifact already exists
+		RunID:               testRunID,
 
 		RunFolder:            runFolder,
 	}
@@ -346,7 +347,7 @@ func TestSession_Start_NoPlanFile_ResumedRun_DispatchesNextPreExecutionRow(t *te
 // heading) still refuses a new run of a staged workflow.
 func TestSession_Start_MalformedPlanFile_NewRun_ReturnsRefusal(t *testing.T) {
 	orchDir := t.TempDir()
-	runFolder := t.TempDir()
+	runFolder := scopedTempDir(t)
 
 	orchPath := copyOrchestratorFile(t, orchDir, "staged-orch.md")
 	writeAgentFile(t, orchDir, "implementation-tdd")
@@ -383,7 +384,7 @@ func TestSession_Start_MalformedPlanFile_NewRun_ReturnsRefusal(t *testing.T) {
 // new one.
 func TestSession_Start_MalformedPlanFile_ResumedRun_ReturnsRefusal(t *testing.T) {
 	orchDir := t.TempDir()
-	runFolder := t.TempDir()
+	runFolder := scopedTempDir(t)
 
 	orchPath := copyOrchestratorFile(t, orchDir, "staged-orch.md")
 	writeAgentFile(t, orchDir, "implementation-tdd")
@@ -416,6 +417,7 @@ func TestSession_Start_MalformedPlanFile_ResumedRun_ReturnsRefusal(t *testing.T)
 		WorkflowID:           "staged",
 		Task:                 "task",
 		IsNewRun:             false, // resume: artifact already exists
+		RunID:               testRunID,
 
 		RunFolder:            runFolder,
 	}

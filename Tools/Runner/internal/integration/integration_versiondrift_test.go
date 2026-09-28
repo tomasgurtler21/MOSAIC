@@ -16,13 +16,16 @@ import (
 // "2.0" with agent-a already completed. Used by both version-drift tests.
 const versionDriftArtifact = `---
 type: orchestration-artifact
+run_id: 20260727T170000Z-a3f9
 workflow: linear
 workflow_version: "2.0"
 task: "old task"
 started: 2026-01-01T00:00:00Z
 last_updated: 2026-01-01T00:00:00Z
 global_sequence: 1
-mode: auto
+runner_mode: auto
+runner_pre_consultation: disabled
+runner_manual_resolution: disabled
 checkpoints: disabled
 current_state:
   phase: PLANNING
@@ -63,7 +66,8 @@ func TestIntegration_VersionDrift_Refused(t *testing.T) {
 
 	// Existing artifact records workflow_version "2.0"; the current workflow
 	// definition is "1.0". Without AllowVersionDrift the session must refuse.
-	artifactPath := filepath.Join(dir, "Orchestration.md")
+	runFolder := scopedRunFolder(t, dir)
+	artifactPath := filepath.Join(runFolder, "Orchestration.md")
 	if err := os.WriteFile(artifactPath, []byte(versionDriftArtifact), 0600); err != nil {
 		t.Fatalf("write existing artifact: %v", err)
 	}
@@ -71,10 +75,12 @@ func TestIntegration_VersionDrift_Refused(t *testing.T) {
 	f := harness.NewMockAdapter()
 	sess := newSession(f, artifactPath)
 	cfg := domain.RunConfig{
+		RunID: integrationRunID,
 		OrchestratorFilePath: orchPath,
 		WorkflowID:           "linear",
 		Task:                 "test task",
 		IsNewRun:             false, // resume: versionDrift artifact already written
+		RunFolder:            runFolder,
 		AllowVersionDrift:    false,
 	}
 
@@ -100,7 +106,8 @@ func TestIntegration_VersionDrift_AllowOverride_Resumes(t *testing.T) {
 
 	// Existing artifact has agent-a completed; agent-b is pending.
 	// With AllowVersionDrift=true the session must resume and dispatch only agent-b.
-	artifactPath := filepath.Join(dir, "Orchestration.md")
+	runFolder := scopedRunFolder(t, dir)
+	artifactPath := filepath.Join(runFolder, "Orchestration.md")
 	if err := os.WriteFile(artifactPath, []byte(versionDriftArtifact), 0600); err != nil {
 		t.Fatalf("write existing artifact: %v", err)
 	}
@@ -113,10 +120,12 @@ func TestIntegration_VersionDrift_AllowOverride_Resumes(t *testing.T) {
 	}})
 	sess := newSession(f, artifactPath)
 	cfg := domain.RunConfig{
+		RunID: integrationRunID,
 		OrchestratorFilePath: orchPath,
 		WorkflowID:           "linear",
 		Task:                 "test task",
 		IsNewRun:             false, // resume: versionDrift artifact already written
+		RunFolder:            runFolder,
 		AllowVersionDrift:    true,
 	}
 

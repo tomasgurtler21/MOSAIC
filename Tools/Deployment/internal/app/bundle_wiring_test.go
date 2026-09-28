@@ -49,7 +49,7 @@ func (s *stubBundleLoader) LoadBundle(_ string) (domain.BundleContent, error) {
 // Compile-time interface check.
 var _ catalog.BundleLoader = (*stubBundleLoader)(nil)
 
-// minimalBundleContent returns a BundleContent with all five subagent blocks and the given
+// minimalBundleContent returns a BundleContent with all four subagent blocks and the given
 // version string, suitable for use in wiring tests that do not exercise the bundle filling
 // logic itself.
 func minimalBundleContent(version string) domain.BundleContent {
@@ -58,7 +58,6 @@ func minimalBundleContent(version string) domain.BundleContent {
 		Blocks: []domain.BundleBlock{
 			{Name: "AuthorityHierarchy:Subagent", Target: "AuthorityHierarchy", AppliesTo: "subagent", Content: []byte("authority hierarchy content\n")},
 			{Name: "ClosingProcedure:Subagent", Target: "ClosingProcedure", AppliesTo: "subagent", Content: []byte("closing procedure content\n")},
-			{Name: "ProtocolConstraints:Subagent", Target: "ProtocolConstraints", AppliesTo: "subagent", Content: []byte("protocol constraints content\n")},
 			{Name: "ErrorHandlingCommon:Subagent", Target: "ErrorHandlingCommon", AppliesTo: "subagent", Content: []byte("error handling common content\n")},
 			{Name: "ExecutionPhilosophyCommon:Subagent", Target: "ExecutionPhilosophyCommon", AppliesTo: "subagent", Content: []byte("execution philosophy common content\n")},
 		},

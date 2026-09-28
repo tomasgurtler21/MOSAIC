@@ -129,6 +129,7 @@ func (s *sessionImpl) handleEngineDispatch(ctx context.Context, rs *runStartCtx,
 		return domain.RunOutcome{Status: domain.RunStopped, Message: "run stopped: graceful stop confirmed"}, true, false, nil
 	}
 
+	s.beginOutputs(ctx, rs.config.RunFolder, step.Request.OutputArtifacts)
 	response, invokeErr := s.invokeAndLog(ctx, step.Agent, step.Request)
 	if invokeErr != nil {
 		var bypassResp domain.ProtocolResponse
@@ -152,7 +153,7 @@ func (s *sessionImpl) handleEngineDispatch(ctx context.Context, rs *runStartCtx,
 	if !result.accepted {
 		return domain.RunOutcome{}, false, true, nil
 	}
-	out, done, err := s.postAutoDispatchApply(ctx, rs, result.hitlStep, result.hitlResponse, result.hitlAttemptSeq)
+	out, done, err := s.postAutoDispatchApply(ctx, rs, result.hitlStep, result.hitlResponse, result.hitlAttemptSeq, result.written, result.routed, result.routedResp)
 	return out, done, false, err
 }
 
@@ -175,11 +176,9 @@ func (s *sessionImpl) prepareAutoDispatchRequest(ctx context.Context, rs *runSta
 		}
 	}
 	step.Request.RunID = rs.state.RunID
-	if rs.state.RunID != "" {
-		folder := domain.RunScopedFolder(rs.state.RunID) + "/"
-		step.Request.InputArtifacts = resolveToRunScoped(step.Request.InputArtifacts, folder)
-		step.Request.OutputArtifacts = resolveToRunScoped(step.Request.OutputArtifacts, folder)
-	}
+	folder := domain.RunScopedFolder(rs.state.RunID) + "/"
+	step.Request.InputArtifacts = resolveToRunScoped(step.Request.InputArtifacts, folder)
+	step.Request.OutputArtifacts = resolveToRunScoped(step.Request.OutputArtifacts, folder)
 	s.deps.Debug.Log(domain.EventSessionDispatchStart, "dispatching step",
 		domain.F("agent", step.Request.AgentInstanceID),
 		domain.F("phase", step.Phase),
@@ -208,22 +207,14 @@ func (s *sessionImpl) handleAutoHarnessErrorAndBypass(ctx context.Context, rs *r
 	s.deps.Debug.Log(domain.EventSessionHarnessError, invokeErr.Error(),
 		domain.F("agent", step.Request.AgentInstanceID),
 	)
+	harnessResp := domain.HarnessErrorResponse(step.Request.AgentInstanceID, rs.config.RunID, invokeErr)
 	deviationInfo := domain.DeviationInfo{
-		Kind: domain.DeviationHarnessError,
-		Response: domain.ProtocolResponse{
-			AgentInstanceID: step.Request.AgentInstanceID,
-			StatusCode:      domain.StatusBLOCKED,
-			StatusMessage:   invokeErr.Error(),
-		},
+		Kind:     domain.DeviationNonSuccess,
+		Response: harnessResp,
 		CurrentRow:    step.RowIndex,
 		CurrentPhase:  step.Phase,
 		CurrentStage:  step.Stage,
 		ArtifactState: rs.state,
-	}
-	if s.deps.Routing == nil {
-		msg := fmt.Sprintf("harness error: no routing consultant configured: %s", invokeErr.Error())
-		s.deps.Debug.Log(domain.EventSessionDeviationUnresolved, msg)
-		return domain.ProtocolResponse{}, step, true, false, domain.RunOutcome{Status: domain.RunDeviationUnresolved, Message: msg}, nil
 	}
 	// Persist a record of the failed dispatch attempt.
 	failedStep := domain.CompletedStep{
@@ -232,10 +223,10 @@ func (s *sessionImpl) handleAutoHarnessErrorAndBypass(ctx context.Context, rs *r
 		Phase:            step.Phase,
 		Stage:            step.Stage,
 		Status:           domain.StatusBLOCKED,
+		ErrorCode:        domain.ErrorTOOL_UNAVAILABLE,
 		Summary:          invokeErr.Error(),
 		Timestamp:        s.deps.Clock.Now(),
 		Inputs:           formatInputs(step.Request.InputArtifacts),
-		IsInfrastructure: true,
 	}
 	newState, applyErr := s.deps.Store.Apply(ctx, rs.state, failedStep)
 	if applyErr != nil {
@@ -244,6 +235,11 @@ func (s *sessionImpl) handleAutoHarnessErrorAndBypass(ctx context.Context, rs *r
 	}
 	rs.state = newState
 	rs.seq = rs.state.GlobalSequence
+	if s.deps.Routing == nil {
+		msg := fmt.Sprintf("harness error: no routing consultant configured: %s", invokeErr.Error())
+		s.deps.Debug.Log(domain.EventSessionDeviationUnresolved, msg)
+		return domain.ProtocolResponse{}, step, true, false, domain.RunOutcome{Status: domain.RunDeviationUnresolved, Message: msg}, nil
+	}
 	// Raw-text bypass: one direct retry before consulting the orchestrator.
 	if isRawTextHarnessError(invokeErr) && rs.antiLoop.recordDispatch(step.RowIndex, step.Agent.Identifier) {
 		bypassSeq := rs.state.GlobalSequence + 1
@@ -254,6 +250,7 @@ func (s *sessionImpl) handleAutoHarnessErrorAndBypass(ctx context.Context, rs *r
 			return bypassResp, step, false, false, domain.RunOutcome{}, nil
 		}
 	}
+	rs.lastResponse = &harnessResp
 	done, out, outErr := s.consultRoute(ctx, &deviationInfo, &rs.state, &rs.seq,
 		&rs.lastResponse, &rs.prevWorkflowStep, &rs.refreshedStages, &rs.stages,
 		rs.table, rs.agents, rs.config, rs.declaredInfraAgents, rs.admitted, &rs.antiLoop)
@@ -263,7 +260,7 @@ func (s *sessionImpl) handleAutoHarnessErrorAndBypass(ctx context.Context, rs *r
 // postAutoDispatchApply applies the HITL-accepted response to the artifact,
 // sends the progress notice, evaluates infrastructure triggers, and performs
 // stage-set re-derivation.
-func (s *sessionImpl) postAutoDispatchApply(ctx context.Context, rs *runStartCtx, hitlStep domain.DispatchStep, hitlResp domain.ProtocolResponse, hitlAttemptSeq int) (domain.RunOutcome, bool, error) {
+func (s *sessionImpl) postAutoDispatchApply(ctx context.Context, rs *runStartCtx, hitlStep domain.DispatchStep, hitlResp domain.ProtocolResponse, hitlAttemptSeq int, written []string, routed *domain.RoutedOutcome, routedResp *domain.ProtocolResponse) (domain.RunOutcome, bool, error) {
 	completedStep := domain.CompletedStep{
 		Seq:             hitlAttemptSeq,
 		AgentInstance:   hitlStep.Request.AgentInstanceID,
@@ -274,7 +271,8 @@ func (s *sessionImpl) postAutoDispatchApply(ctx context.Context, rs *runStartCtx
 		Summary:         hitlResp.StatusMessage,
 		Timestamp:       s.deps.Clock.Now(),
 		Inputs:          formatInputs(hitlStep.Request.InputArtifacts),
-		OutputArtifacts: hitlStep.Request.OutputArtifacts,
+		WrittenArtifacts: written,
+		Routed:           routed,
 	}
 	newState, err := s.deps.Store.Apply(ctx, rs.state, completedStep)
 	if err != nil {
@@ -289,7 +287,11 @@ func (s *sessionImpl) postAutoDispatchApply(ctx context.Context, rs *runStartCtx
 	)
 	rs.seq = hitlAttemptSeq
 	rs.lastResponse = &hitlResp
-	rs.lastOutputArtifacts = hitlStep.Request.OutputArtifacts
+	if routedResp != nil {
+		// Routing follows the original attempt, not the repairing re-dispatch.
+		rs.lastResponse = routedResp
+	}
+	rs.lastOutputArtifacts = written
 	s.deps.Interact.Notify(ctx, interaction.Notice{
 		Level:   interaction.NoticeInfo,
 		Title:   completedStep.AgentInstance,
@@ -327,6 +329,7 @@ func (s *sessionImpl) postDispatchTriggers(ctx context.Context, rs *runStartCtx,
 		rs.declaredInfraAgents, rs.config,
 		buildActiveAgentsFilter(rs.declaredInfraAgents, rs.config.InfraClassSelections),
 		orchDir, rowIdx, rs.admitted, rs.stages,
+		true, // only HITL-accepted steps reach trigger evaluation
 	)
 	if trigErr != nil {
 		if ctx.Err() != nil {

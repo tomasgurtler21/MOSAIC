@@ -1,8 +1,9 @@
 package session_test
 
-// Tests for consultation failure classes, consultation log attribution (non-default
-// orchestrator identifier), and resume with trailing consultation rows (position
-// recovery and rewind for both default and non-default orchestrator identifiers).
+// Tests for consultation failure classes, consultations leaving no row for a
+// non-default orchestrator identifier, and resume of artifacts written by an
+// earlier Runner version that still carry consultation rows (position recovery
+// and rewind for both default and non-default orchestrator identifiers).
 
 import (
 	"context"
@@ -51,14 +52,14 @@ func TestSession_ConsultationFailureClasses_AllTerminal(t *testing.T) {
 	}
 }
 
-// ===== Consultation log attribution =====
+// ===== Consultation leaves no artifact trace =====
 
-// TestSession_Consultation_NonDefaultOrchestrator_RowNamesInvokedOrchestrator
-// verifies that a consultation row's agent instance uses the file stem of the
-// orchestrator supplied to the run, not any hardcoded identifier. With an
-// orchestrator file named "custom-orch.md" every infrastructure row must carry
-// the prefix "custom-orch", not "orchestrator-script" or any other literal.
-func TestSession_Consultation_NonDefaultOrchestrator_RowNamesInvokedOrchestrator(t *testing.T) {
+// TestSession_Consultation_NonDefaultOrchestrator_LeavesNoRow verifies that
+// consultations of a script orchestrator with a non-default identifier
+// ("custom-orch.md") leave no Execution Log row either: the artifact holds only
+// the workflow step the consultation chose, and no entry is attributed to the
+// orchestrator.
+func TestSession_Consultation_NonDefaultOrchestrator_LeavesNoRow(t *testing.T) {
 	consultant := &scriptedRoutingConsultant{}
 	consultant.queueDispatch("agent-a", "do work", 0)
 	consultant.queueStop("done")
@@ -88,7 +89,7 @@ func TestSession_Consultation_NonDefaultOrchestrator_RowNamesInvokedOrchestrator
 		Interact: &noopInteraction{},
 	})
 
-	// The consultation at seq=1 is followed by agent-a at seq=2.
+	// Only agent-a is recorded, at the first sequence slot.
 	f.Queue("agent-a", harness.ScriptedEntry{Response: &domain.ProtocolResponse{
 		AgentInstanceID: "agent-a#2",
 		StatusCode:      domain.StatusSUCCESS,
@@ -104,22 +105,17 @@ func TestSession_Consultation_NonDefaultOrchestrator_RowNamesInvokedOrchestrator
 	}
 	ses.Start(context.Background(), cfg) //nolint:errcheck
 
-	// Every infrastructure row must carry "custom-orch#N". Any other prefix
-	// indicates the implementation used a hardcoded identifier instead of
-	// deriving the identity from the resolved orchestrator file.
-	infraRows := 0
 	for _, step := range store.Applied {
-		if !step.IsInfrastructure {
-			continue
-		}
-		infraRows++
-		if !strings.HasPrefix(step.AgentInstance, "custom-orch#") {
-			t.Errorf("want consultation row AgentInstance to start with custom-orch#, got %q",
-				step.AgentInstance)
+		if step.IsInfrastructure || strings.HasPrefix(step.AgentInstance, "custom-orch#") {
+			t.Errorf("want no row attributed to the orchestrator, got %q (Seq %d)",
+				step.AgentInstance, step.Seq)
 		}
 	}
-	if infraRows == 0 {
-		t.Error("want at least one infrastructure-flagged consultation row, got 0")
+	if len(store.Applied) != 1 || store.Applied[0].Seq != 1 {
+		t.Errorf("want exactly one applied row (agent-a at Seq 1), got %+v", store.Applied)
+	}
+	if consultant.CallCount != 2 {
+		t.Errorf("want 2 consultations observed through the consultant, got %d", consultant.CallCount)
 	}
 }
 
@@ -170,7 +166,7 @@ func TestSession_Resume_WithTrailingConsultationRow_PositionRecovery(t *testing.
 	}})
 
 	cfg := baseOrchestratedConfig(orchPath)
-	cfg.IsNewRun = false
+	markResume(&cfg)
 
 	got, err := ses.Start(context.Background(), cfg)
 
@@ -249,7 +245,7 @@ func TestSession_Resume_Rewind_WithConsultationRowsInLog_CorrectlyIdentifiesLast
 	}})
 
 	cfg := baseOrchestratedConfig(orchPath)
-	cfg.IsNewRun = false
+	markResume(&cfg)
 
 	got, err := ses.Start(context.Background(), cfg)
 
@@ -353,6 +349,7 @@ func TestSession_Resume_WithTrailingConsultationRow_NonDefaultOrchestrator_Posit
 		IsNewRun:             false,
 		RunSettings:          domain.RunSettings{Mode: domain.ExecutionModeOrchestrated},
 	}
+	markResume(&cfg)
 
 	got, err := ses.Start(context.Background(), cfg)
 
@@ -460,6 +457,7 @@ func TestSession_Resume_Rewind_WithConsultationRowsInLog_NonDefaultOrchestrator_
 		IsNewRun:             false,
 		RunSettings:          domain.RunSettings{Mode: domain.ExecutionModeOrchestrated},
 	}
+	markResume(&cfg)
 
 	got, err := ses.Start(context.Background(), cfg)
 

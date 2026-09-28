@@ -166,6 +166,7 @@ func buildInteractiveWiring(in interactiveWiringInput) interactiveWiring {
 			Manual:        routingDeps.Manual,
 			PreConsult:    routingDeps.PreConsult,
 			Approvals:     routingDeps.Approvals,
+			Outputs:       artifact.NewOutputWriteDetector(),
 			StopRequested: in.StopSignal.Requested,
 		}
 	}

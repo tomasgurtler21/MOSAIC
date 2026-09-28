@@ -61,21 +61,18 @@ Before the fix, the HITL check loop iterated over the raw output-artifact list a
 
 ## Expected Run
 
-Five Orchestration.md log rows.
+Two Orchestration.md log rows. Every consultation — before dispatch 1, before dispatch 2, and the final stop — dispatches to the orchestrator but allocates no `Seq` and leaves no row; each surfaces only in the dispatch log.
 
-| Log `Seq` | `Agent` | Kind | `Phase` | `Status` | `Summary` shows |
-|:---:|---|---|---|---|---|
-| 1 | `orchestrator-script#1` | consultation | - | "" | step-one task description |
-| 2 | `mosaictest-scripted#1` | workflow step | VALIDATION | SUCCESS | dispatch 1 / hitl=false / stage glob paths ready |
-| 3 | `orchestrator-script#3` | consultation | - | "" | step-two task description with hitl override |
-| 4 | `mosaictest-scripted#2` | workflow step | VALIDATION | BLOCKED | E503 / human_in_the_loop=true as designed |
-| 5 | `orchestrator-script#5` | consultation | - | "" | stop reason |
+| Log `Seq` | `Agent` | `Phase` | `Status` | `Summary` shows |
+|:---:|---|---|---|---|
+| 1 | `mosaictest-scripted#1` | VALIDATION | SUCCESS | dispatch 1 / hitl=false / stage glob paths ready |
+| 2 | `mosaictest-scripted#2` | VALIDATION | BLOCKED | E503 / human_in_the_loop=true as designed |
 
 **Run outcome:** `RunStoppedByConsultant`. The orchestrator ends the run after the BLOCKED from dispatch 2.
 
-**Key observation:** Row 4 shows exactly one BLOCKED entry for the HITL row — no additional redispatch row appears. This is the assertion: the glob expansion ran (expanding `Stage-*/HITLGlobStage.md` to `Stage-1/` and `Stage-2/`) and both pre-placed files were found as approved. `DecideHITLCompliance` returned `HITLAccept` via the `Status != SUCCESS` shortcut without redispatching.
+**Key observation:** Row 2 shows exactly one BLOCKED entry for the HITL row — no additional redispatch row appears. This is the assertion: the glob expansion ran (expanding `Stage-*/HITLGlobStage.md` to `Stage-1/` and `Stage-2/`) and both pre-placed files were found as approved. `DecideHITLCompliance` returned `HITLAccept` via the `Status != SUCCESS` shortcut without redispatching.
 
-**RunnerLogs verification:** The debug log must contain a `session.hitl.accept` or equivalent event after seq 4, with no `session.hitl.redispatch` event. A `session.consult.stop` entry must follow naming the fixture's stop reason.
+**RunnerLogs verification:** The debug log must contain a `session.hitl.accept` or equivalent event after seq 2, with no `session.hitl.redispatch` event. A `session.consult.stop` entry must follow naming the fixture's stop reason.
 
 ---
 
@@ -83,11 +80,12 @@ Five Orchestration.md log rows.
 
 | Observation | Where to look |
 |---|---|
-| A sixth log row appears showing a second BLOCKED from `mosaictest-scripted` | HITL false-redispatch occurred: the glob was not expanded and `ApprovalFileMissing` triggered a redispatch even for a BLOCKED response |
-| Seq 2 shows BLOCKED instead of SUCCESS | The first dispatch incorrectly received `human_in_the_loop: true` — the routing fixture's `hitl: true` override may have leaked into dispatch 1 |
-| Seq 4 shows SUCCESS instead of BLOCKED | The `hitl: true` override did not reach the agent — check the routing fixture override parsing |
+| A third log row appears showing a second BLOCKED from `mosaictest-scripted` | HITL false-redispatch occurred: the glob was not expanded and `ApprovalFileMissing` triggered a redispatch even for a BLOCKED response |
+| Seq 1 shows BLOCKED instead of SUCCESS | The first dispatch incorrectly received `human_in_the_loop: true` — the routing fixture's `hitl: true` override may have leaked into dispatch 1 |
+| Seq 2 shows SUCCESS instead of BLOCKED | The `hitl: true` override did not reach the agent — check the routing fixture override parsing |
 | Run fails with `stage set not available` or similar | Plan.md was not re-derived after dispatch 1 — check that `Stage-*` in output artifacts triggers re-derivation |
 | Approval check finds `ApprovalFileMissing` for Stage-1 or Stage-2 | The pre-placed `Stage-N/HITLGlobStage.md` files were not seeded correctly, or `expandStageGlobs` did not produce the expected concrete paths |
+| An `orchestrator-script` row appears in `Orchestration.md` | Consultations must leave no row in the artifact; a consultation wrongly called `Store.Apply` or allocated a `Seq` |
 
 ---
 

@@ -37,7 +37,7 @@ func TestAdmit_A1_NonContiguousGroups_ReturnsRefusalError(t *testing.T) {
 		}},
 	}
 
-	_, err := compat.Admit(table)
+	_, err := compat.Admit(table, domain.ExecutionModeAuto)
 
 	if err == nil {
 		t.Fatal("Admit must refuse non-contiguous group rows (A1)")
@@ -61,7 +61,7 @@ func TestAdmit_A1_NonContiguousGroups_RefusalMessage_NamesRowAndGroup(t *testing
 		}},
 	}
 
-	_, err := compat.Admit(table)
+	_, err := compat.Admit(table, domain.ExecutionModeAuto)
 
 	re := asRefusalError(t, err)
 	if !strings.Contains(re.Reason, "row 3") {
@@ -86,7 +86,7 @@ func TestAdmit_A2_GroupsWithoutApproachTable_ReturnsRefusalError(t *testing.T) {
 		},
 	}
 
-	_, err := compat.Admit(table)
+	_, err := compat.Admit(table, domain.ExecutionModeAuto)
 
 	if err == nil {
 		t.Fatal("Admit must refuse grouped EXECUTION rows when no approach table is present (A2)")
@@ -106,7 +106,7 @@ func TestAdmit_A2_GroupsWithoutApproachTable_RefusalMessage_NamesRowAndGroup(t *
 		},
 	}
 
-	_, err := compat.Admit(table)
+	_, err := compat.Admit(table, domain.ExecutionModeAuto)
 
 	re := asRefusalError(t, err)
 	if !strings.Contains(re.Reason, "row 1") {
@@ -134,7 +134,7 @@ func TestAdmit_A3_ApproachTableWithBareRow_ReturnsRefusalError(t *testing.T) {
 		}},
 	}
 
-	_, err := compat.Admit(table)
+	_, err := compat.Admit(table, domain.ExecutionModeAuto)
 
 	if err == nil {
 		t.Fatal("Admit must refuse a bare EXECUTION row when an approach table is present (A3)")
@@ -157,7 +157,7 @@ func TestAdmit_A3_ApproachTableWithBareRow_RefusalMessage_NamesRow(t *testing.T)
 		}},
 	}
 
-	_, err := compat.Admit(table)
+	_, err := compat.Admit(table, domain.ExecutionModeAuto)
 
 	re := asRefusalError(t, err)
 	if !strings.Contains(re.Reason, "row 1") {
@@ -182,7 +182,7 @@ func TestAdmit_A4_ApproachTableGroupNotInExecutionRows_ReturnsRefusalError(t *te
 		}},
 	}
 
-	_, err := compat.Admit(table)
+	_, err := compat.Admit(table, domain.ExecutionModeAuto)
 
 	if err == nil {
 		t.Fatal("Admit must refuse when the approach table names a group absent from all EXECUTION rows (A4)")
@@ -205,7 +205,7 @@ func TestAdmit_A4_ApproachTableGroupNotInExecutionRows_RefusalMessage_NamesGroup
 		}},
 	}
 
-	_, err := compat.Admit(table)
+	_, err := compat.Admit(table, domain.ExecutionModeAuto)
 
 	re := asRefusalError(t, err)
 	if !strings.Contains(re.Reason, "Ghost") {
@@ -231,7 +231,7 @@ func TestAdmit_A5_ExecutionGroupNotInApproachTable_ReturnsRefusalError(t *testin
 		}},
 	}
 
-	_, err := compat.Admit(table)
+	_, err := compat.Admit(table, domain.ExecutionModeAuto)
 
 	if err == nil {
 		t.Fatal("Admit must refuse when an EXECUTION row's group is absent from every approach table row (A5)")
@@ -255,7 +255,7 @@ func TestAdmit_A5_ExecutionGroupNotInApproachTable_RefusalMessage_NamesRowAndGro
 		}},
 	}
 
-	_, err := compat.Admit(table)
+	_, err := compat.Admit(table, domain.ExecutionModeAuto)
 
 	re := asRefusalError(t, err)
 	if !strings.Contains(re.Reason, "row 3") {
@@ -284,7 +284,7 @@ func TestAdmit_GroupTokenMatching_IsCaseSensitive_ReturnsRefusalError(t *testing
 		}},
 	}
 
-	_, err := compat.Admit(table)
+	_, err := compat.Admit(table, domain.ExecutionModeAuto)
 
 	if err == nil {
 		t.Fatal(`Admit must refuse: group token "test" in Phase column must not match "Test" in the approach table (comparison is case-sensitive)`)
@@ -308,7 +308,7 @@ func TestAdmit_GroupTokenMatching_IsCaseSensitive_RefusalMessage_NamesOffender(t
 		}},
 	}
 
-	_, err := compat.Admit(table)
+	_, err := compat.Admit(table, domain.ExecutionModeAuto)
 
 	re := asRefusalError(t, err)
 	if re.Reason == "" {

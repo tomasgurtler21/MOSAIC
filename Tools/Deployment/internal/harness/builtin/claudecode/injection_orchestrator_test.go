@@ -75,7 +75,7 @@ func TestInjection_SubagentKey_EmptyAgentKey_ReturnsSharedContentOnly(t *testing
 //     Task-tool-fields instructions migrated from the hand-authored orchestrator file.
 //
 // Since shared is empty, merged result = orchestrator-only content. The skills-path
-// instruction ("cwd/.claude/skills") serves as the distinguishing marker that the
+// instruction (".claude/skills/ in the workspace root") serves as the distinguishing marker that the
 // orchestrator file was loaded and merged.
 //
 // RED: FAILS until I4.2 (create HarnessInjectionsOrchestrator.md for Claude Code) and
@@ -89,8 +89,8 @@ func TestInjection_OrchestratorKey_ReceivesMergedContent(t *testing.T) {
 	}
 	// The orchestrator-only content must include the skills-path instruction.
 	// This is the content currently hand-authored at .claude/agents/orchestrator.md lines 504-507.
-	if !strings.Contains(content, "cwd/.claude/skills") {
-		t.Errorf("orchestrator HarnessConstraints content is missing the skills-path instruction\ngot:  %q\nwant: content containing \"cwd/.claude/skills\"", content)
+	if !strings.Contains(content, ".claude/skills/ in the workspace root") {
+		t.Errorf("orchestrator HarnessConstraints content is missing the skills-path instruction\ngot:  %q\nwant: content containing \".claude/skills/ in the workspace root\"", content)
 	}
 }
 

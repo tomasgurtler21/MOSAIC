@@ -58,6 +58,7 @@ func TestConfigScreen_PromptsCount(t *testing.T) {
 	m.Update(tea.KeyMsg{Type: tea.KeyEnter}) // version drift
 	m.Update(tea.KeyMsg{Type: tea.KeyEnter}) // checkpoints → manual-resolution
 	m.Update(tea.KeyMsg{Type: tea.KeyEnter}) // manual-resolution: disabled (default, cursor 0) → progress
+	m.Update(tea.KeyMsg{Type: tea.KeyEnter}) // review loop limit: accept the suggested 3
 
 	if m.screen != screenProgress {
 		t.Errorf("screen = %v after six config steps, want screenProgress (%v)", m.screen, screenProgress)
@@ -180,6 +181,7 @@ func TestConfigScreen_HarnessStep_SelectionIsAlwaysClaudeCode(t *testing.T) {
 	s.Update(tea.KeyMsg{Type: tea.KeyEnter}) // checkpoints → manual resolution
 	s.Update(tea.KeyMsg{Type: tea.KeyEnter}) // manual resolution → done
 
+	acceptReviewLoopLimitIfAsked(s)
 	if !s.Done() {
 		t.Fatal("ConfigScreen did not reach Done() after driving through all steps; cannot verify Selection()")
 	}

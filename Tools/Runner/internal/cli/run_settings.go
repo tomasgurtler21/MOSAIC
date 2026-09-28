@@ -3,8 +3,11 @@ package cli
 import (
 	"fmt"
 	"io"
+	"os"
+	"path/filepath"
 	"strings"
 
+	"mosaic-run/internal/artifact"
 	"mosaic-run/internal/domain"
 )
 
@@ -22,6 +25,8 @@ type runConfigInputs struct {
 	parsedCommitBranch   domain.CommitBranchVariant
 	infraClassSelections map[string]string
 	infrastructureFilter []string
+	reviewLoopLimit      int
+	supplied             domain.SuppliedSettings
 }
 
 // parseModeFlag validates and parses the required --mode flag. It is
@@ -38,6 +43,74 @@ func parseModeFlag(raw string, errOut io.Writer) (mode domain.ExecutionMode, exi
 		return "", ExitUsage, false
 	}
 	return parsed, ExitSuccess, true
+}
+
+// parseModeForRun applies the --mode rules for the kind of run being started.
+// A new run and the first resume of a native-created artifact (which records
+// no runner settings) require --mode. A resume of a run that already records
+// its settings does not: --mode is then optional, and when given it is only
+// compared with the recorded value.
+func parseModeForRun(f runFlags, isNewRun, needsAdoption bool, errOut io.Writer) (mode domain.ExecutionMode, exitCode int, ok bool) {
+	if isNewRun || needsAdoption || f.modeChanged {
+		return parseModeFlag(f.mode, errOut)
+	}
+	return domain.ExecutionModeUnset, ExitSuccess, true
+}
+
+// parseReviewLoopLimitFlag parses --review-loop-limit. A new run requires it.
+// On a resume it is optional and, when given, is only compared with the
+// recorded limit. The result is 0 for "none" and when the flag is not given.
+func parseReviewLoopLimitFlag(f runFlags, isNewRun bool, errOut io.Writer) (limit int, exitCode int, ok bool) {
+	const accepted = "a positive integer, \"none\" or \"no limit\""
+	if !f.reviewLoopLimitChanged {
+		if isNewRun {
+			fmt.Fprintf(errOut, "error: --review-loop-limit is required for a new run; accepted values: %s\n", accepted)
+			return 0, ExitUsage, false
+		}
+		return 0, ExitSuccess, true
+	}
+	n, err := domain.ParseReviewLoopLimit(f.reviewLoopLimit)
+	if err != nil {
+		fmt.Fprintf(errOut, "error: invalid --review-loop-limit value %q; accepted values: %s\n", f.reviewLoopLimit, accepted)
+		return 0, ExitUsage, false
+	}
+	return n, ExitSuccess, true
+}
+
+// needsRunnerAdoption reports whether a resumed run's artifact records no
+// runner settings, so this resume must obtain them from the caller. An
+// artifact that cannot be read or parsed is left to the session to refuse.
+func needsRunnerAdoption(runFolder string, isNewRun bool) bool {
+	if isNewRun {
+		return false
+	}
+	data, err := os.ReadFile(filepath.Join(runFolder, "Orchestration.md"))
+	if err != nil {
+		return false
+	}
+	state, err := artifact.Parse(data)
+	if err != nil {
+		return false
+	}
+	return state.Mode == domain.ExecutionModeUnset
+}
+
+// commitSetupPending reports whether a resumed run enables commits but records
+// no commit branch, so its next start retries commit setup. An unreadable
+// artifact is never pending here; the session refuses it.
+func commitSetupPending(runFolder string, isNewRun bool) bool {
+	if isNewRun {
+		return false
+	}
+	data, err := os.ReadFile(filepath.Join(runFolder, "Orchestration.md"))
+	if err != nil {
+		return false
+	}
+	state, err := artifact.Parse(data)
+	if err != nil {
+		return false
+	}
+	return state.Commits && state.CommitBranch == ""
 }
 
 // executionModeStrings renders every valid execution mode as a string, for
@@ -153,8 +226,10 @@ func buildRunConfig(f runFlags, in runConfigInputs) domain.RunConfig {
 			CommitBranchVariant: in.parsedCommitBranch,
 			PreConsultation:     f.preConsult,
 			ManualResolution:    f.manualResolution,
+			InfraClassSelections: in.infraClassSelections,
+			ReviewLoopLimit:     in.reviewLoopLimit,
 		},
-		InfraClassSelections: in.infraClassSelections,
+		Supplied: in.supplied,
 		SeedInputs:           f.inputFlags,
 		InfrastructureFilter: in.infrastructureFilter,
 	}

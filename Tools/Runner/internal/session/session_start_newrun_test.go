@@ -46,7 +46,7 @@ func TestSession_Start_IsNewRunFalse_MissingArtifact_ReturnsRefusal(t *testing.T
 	// store.exists is false by default (no artifact)
 
 	cfg := baseLinearConfig(orchPath)
-	cfg.IsNewRun = false // attempt to resume with no artifact present
+	markResume(&cfg)
 
 	got, err := ses.Start(context.Background(), cfg)
 
@@ -183,7 +183,7 @@ func TestSession_Start_IsNewRunFalse_ResumePathRefusal_MessageUnchanged(t *testi
 	// store.exists is false by default (no artifact)
 
 	cfg := baseLinearConfig(orchPath)
-	cfg.IsNewRun = false // attempt to resume with no artifact present
+	markResume(&cfg)
 
 	got, err := ses.Start(context.Background(), cfg)
 

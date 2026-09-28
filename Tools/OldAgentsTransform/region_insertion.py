@@ -366,7 +366,7 @@ _EP_QUALITY = DeletionRule(
 )
 
 # ---------------------------------------------------------------------------
-# Deletion rules for Stage 4 regions (ProtocolConstraints)
+# Deletion rules for legacy ProtocolConstraints bullets (input only)
 # ---------------------------------------------------------------------------
 
 # PC-bullet-1 through PC-bullet-4: exact-match bullets, corpus-verified.
@@ -415,7 +415,7 @@ _PC_BULLET_5 = DeletionRule(
 
 # ---------------------------------------------------------------------------
 # CONDUCT_REGIONS table — Stage 2 adds rows 1 and 2; Stage 3 adds rows 3 and 4;
-# Stage 4 adds rows 5 and 6 (ProtocolConstraints, HarnessConstraints).
+# Stage 4 adds row 5 (HarnessConstraints).
 # ---------------------------------------------------------------------------
 
 CONDUCT_REGIONS: tuple[RegionSpec, ...] = (
@@ -452,32 +452,22 @@ CONDUCT_REGIONS: tuple[RegionSpec, ...] = (
         supersedes=(_EP_CONTEXT, _EP_MEMORY, _EP_QUALITY),
     ),
     RegionSpec(
-        name="ProtocolConstraints",
-        parent_section="Constraints",
-        anchor=Anchor.SECTION_START,
-        anchor_ref=None,
-        fallback_anchor=None,
-        supersedes=(_PC_BULLET_1, _PC_BULLET_2, _PC_BULLET_3, _PC_BULLET_4, _PC_BULLET_5),
-    ),
-    RegionSpec(
         name="HarnessConstraints",
         parent_section="Constraints",
-        # CustomConstraints is retired from CANONICAL_DEPLOYED, so it can no longer
-        # serve as this row's anchor_ref. Re-anchored to AFTER_REGION of
-        # ProtocolConstraints, the row immediately preceding it in the Constraints
-        # section, with SECTION_CONTENT_END kept as fallback for files where
-        # ProtocolConstraints was not emitted.
-        anchor=Anchor.AFTER_REGION,
-        anchor_ref=(BoundaryKind.DEPLOYED, "ProtocolConstraints"),
+        # Anchored at the start of the Constraints section. The legacy
+        # ProtocolConstraints bullets are still removed from old input, so they
+        # are attached to this row's deletion rules.
+        anchor=Anchor.SECTION_START,
+        anchor_ref=None,
         fallback_anchor=Anchor.SECTION_CONTENT_END,
-        supersedes=(),
+        supersedes=(_PC_BULLET_1, _PC_BULLET_2, _PC_BULLET_3, _PC_BULLET_4, _PC_BULLET_5),
     ),
 )
 """The declarative placement + deletion table.
 
 Populated incrementally across stages.  Stage 2 adds ClosingProcedure and
 AuthorityHierarchy.  Stage 3 adds ErrorHandlingCommon and ExecutionPhilosophyCommon.
-Stage 4 adds ProtocolConstraints and HarnessConstraints.
+Stage 4 adds HarnessConstraints.
 """
 
 

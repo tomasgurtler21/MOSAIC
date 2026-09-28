@@ -60,23 +60,30 @@ Checkpoint and commit classes produce markers that the Runner extracts mechanica
 
 ## Expected Run
 
-Six sidecar dispatches total (what the sidecar records). The review trigger fires after the 3rd workflow step, followed by a routing consultation where the orchestrator stops.
+Five sidecar dispatches total (what the sidecar records): one pre-run consultation, three workflow
+steps, one review trigger, followed by a post-review routing consultation. The review trigger
+fires after the 3rd workflow step, followed by a routing consultation where the orchestrator
+stops.
 
-**Important: Execution Log vs sidecar dispatches.** The Runner's Execution Log (inside `Orchestration.md`) records rows only for steps that complete the log-write path. The post-review routing consultation is handled by `consultRoute`, which returns on a stop instruction *before* writing an Execution Log row. Therefore the Execution Log has **5 rows** (Seq 0–4), not 6. The consultation still happens — it is visible as the 6th entry in the sidecar dispatch log — and the STOPPED run outcome is the evidence that it occurred.
+**Important: Execution Log vs sidecar dispatches.** The Runner's Execution Log (inside
+`Orchestration.md`) records rows only for steps that complete the log-write path. Neither the
+pre-run consultation nor the post-review routing consultation allocates a `Seq` or writes a row —
+consultations leave no `Orchestration.md` row at all. Therefore the Execution Log has **4 rows**
+(Seq 1-4). Both consultations still happen — they are visible as entries in the sidecar dispatch
+log — and the STOPPED run outcome is the evidence the post-review one occurred.
 
 | Log `Seq` | `Agent` | Kind | `Phase` | `Status` | `Summary` shows |
 |:---:|---|---|---|---|---|
-| 0 | `orchestrator-script#pre_consultation#1` | consultation | -- | "" | pre-run consultation response |
 | 1 | `mosaictest-scripted#1` | workflow step | RESEARCH | SUCCESS | unconditional SUCCESS |
 | 2 | `mosaictest-scripted#2` | workflow step | PLANNING | SUCCESS | unconditional SUCCESS |
 | 3 | `mosaictest-scripted#3` | workflow step | DESIGN | SUCCESS | unconditional SUCCESS |
 | 4 | `mosaictest-review#4` | infra trigger | -- | SUCCESS | canned review message |
 
-**Run outcome:** STOPPED (stopped-by-consultant), exit_code 6. The orchestrator stops the run after receiving the review's observations. The stop consultation is the 6th sidecar dispatch but produces no Execution Log row.
+**Run outcome:** STOPPED (stopped-by-consultant), exit_code 6. The orchestrator stops the run after receiving the review's observations. The stop consultation is a sidecar dispatch but produces no Execution Log row.
 
 **Key observations:**
 - Seq 4 is the review infrastructure dispatch. `INVOCATION_INTERVAL(3)` fires because 3 workflow steps have completed since run start.
-- After Seq 4, the Runner performs the post-review routing consultation with the orchestrator. This is the unique review-class behaviour — the Runner consulted the orchestrator with the review's `status_message` as `last_status_message`. This consultation is the 6th sidecar dispatch and is confirmed by the STOPPED run outcome, but it does not produce an Execution Log row.
+- After Seq 4, the Runner performs the post-review routing consultation with the orchestrator. This is the unique review-class behaviour — the Runner consulted the orchestrator with the review's `status_message` as `last_status_message`. This consultation is a sidecar dispatch and is confirmed by the STOPPED run outcome, but it does not produce an Execution Log row or consume a `Seq`.
 - The consultation's `last_status_message` field contains the review's canned text: `MosaicTest infrastructure stub / class=review / declared trigger=INVOCATION_INTERVAL(3) / instance=mosaictest-review#4 / nothing inspected / returning SUCCESS`.
 - No orchestrator consultation occurs for the three SUCCESS workflow steps — Auto mode handles those mechanically.
 - The review row is flagged `IsInfrastructure=true` in the log and does not update `current_state`.
@@ -94,6 +101,7 @@ Six sidecar dispatches total (what the sidecar records). The review trigger fire
 | Review fires after step 2 instead of step 3 | The invocation interval is counting wrong — it should fire after 3 completions, not 2. Off-by-one in the interval check. |
 | Orchestrator consulted after a regular SUCCESS step | Auto mode should not consult for SUCCESS with `On Success = next` — the engine handles routing mechanically. A routing fixture rule matched unexpectedly, or the mode logic is broken. |
 | Review row updates `current_state` | Infrastructure rows must not update `current_state`; the engine is treating an infra step as a workflow step |
+| An `orchestrator-script` row appears in `Orchestration.md`, or `Seq` skips a number | Consultations must leave no row in the artifact; a consultation wrongly called `Store.Apply` or allocated a `Seq` |
 
 ---
 

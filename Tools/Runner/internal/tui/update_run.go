@@ -460,10 +460,11 @@ func (m *rootModel) startSession() tea.Cmd {
 			IsNewRun:             sel.isNewRun,
 			AllowVersionDrift:    sel.config.AllowVersionDrift,
 			RunSettings:          sel.config.Settings,
-			InfraClassSelections: sel.config.InfraClassSelections,
+			Supplied:             sel.config.Supplied,
 			SeedInputs:           seedInputs,
 			ManualDispatch:       sel.manualDispatch,
 		}
+		config.InfraClassSelections = sel.config.InfraClassSelections
 		outcome, err := sess.Start(ctx, config)
 		if err != nil {
 			return runErrorMsg{err: err}

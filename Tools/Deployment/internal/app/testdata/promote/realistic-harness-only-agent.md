@@ -69,10 +69,6 @@ Avoid checking for issues that are auto-fixed by gofmt.
 <Constraints type="core">
 ## Constraints
 
-<ProtocolConstraints type="managed">
-- NEVER skip the JSON response block
-- NEVER invent status codes
-</ProtocolConstraints>
 <HarnessConstraints type="managed">
 Harness-specific constraint: always use absolute file paths.
 </HarnessConstraints>

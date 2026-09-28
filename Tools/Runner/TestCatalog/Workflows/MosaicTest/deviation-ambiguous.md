@@ -52,22 +52,20 @@ Unlike `deviation-blocked`, this workflow's first invocation returns `COMPLETED_
 
 ## Expected Run
 
-Four Orchestration.md log rows. A consultation appears even though the mode is Auto-review — because the hint is ambiguous.
+Two Orchestration.md log rows. A dispatch-log consultation appears even though the mode is Auto-review — because the hint is ambiguous — but it leaves no row in `Orchestration.md` and consumes no `Seq`.
 
-| Log `Seq` | `Agent` | Kind | `Phase` | `Status` | `Summary` shows |
-|:---:|---|---|---|---|---|
-| 0 | `orchestrator-script#pre_consultation#1` | consultation | — | "" | pre-run consultation response |
-| 1 | `mosaictest-scripted#1` | workflow step | RESEARCH | COMPLETED_NEEDS_ACTION | findings produced, marker written |
-| 2 | `orchestrator-script#2` | consultation | — | "" | the re-dispatch task description |
-| 3 | `mosaictest-scripted#3` | workflow step | RESEARCH | SUCCESS | marker present, echoed task description |
+| Log `Seq` | `Agent` | `Phase` | `Status` | `Summary` shows |
+|:---:|---|---|---|---|
+| 1 | `mosaictest-scripted#1` | RESEARCH | COMPLETED_NEEDS_ACTION | findings produced, marker written |
+| 2 | `mosaictest-scripted#2` | RESEARCH | SUCCESS | marker present, echoed task description |
 
 **Run outcome:** completed normally (`RunCompleted`). The engine routed the recovery dispatch's SUCCESS to COMPLETE via On Success.
 
-**The proof:** A consultation row appears at Seq 2, even though the mode is Auto-review. The ambiguous On Findings hint forced the engine to deviate.
+**The proof:** The dispatch log shows an `orchestrator-script` consultation between row 1 and row 2, even though the mode is Auto-review. The ambiguous On Findings hint forced the engine to deviate. The consultation still leaves no `Orchestration.md` row, so the re-dispatch is recorded as `mosaictest-scripted#2`, immediately following `#1`.
 
-**Contrast with `findings-loop` Auto-review run:** That run has the same mode, the same status code, but an unambiguous On Findings — and produces NO consultation row. Together, the two workflows prove the engine distinguishes ambiguous from unambiguous.
+**Contrast with `findings-loop` Auto-review run:** That run has the same mode, the same status code, but an unambiguous On Findings — and produces NO dispatch-log consultation at all. Together, the two workflows prove the engine distinguishes ambiguous from unambiguous.
 
-**Note:** `mosaictest-review` (interval 3) may fire after Seq 3 if deployed. Account for an additional infrastructure row.
+**Note:** `mosaictest-review` (interval 3) may fire after Seq 2 if deployed. Account for an additional infrastructure row.
 
 ---
 
@@ -75,10 +73,11 @@ Four Orchestration.md log rows. A consultation appears even though the mode is A
 
 | Observation | Where to look |
 |---|---|
-| No consultation row — run completes in 2 steps like `findings-loop` Auto-review | The engine is treating the ambiguous hint as unambiguous — `isUnambiguousHint` is broken |
+| No consultation in the dispatch log — run completes in 2 steps identically to `findings-loop` Auto-review | The engine is treating the ambiguous hint as unambiguous — `isUnambiguousHint` is broken |
 | Consultation happens but names an unknown agent | The routing table is not reaching the consultant |
 | Second dispatch returns COMPLETED_NEEDS_ACTION instead of SUCCESS | The marker file was not written by the first invocation |
 | Run stops after Seq 1 with deviation unresolved | The orchestrator consultation path is not wired for this harness |
+| An `orchestrator-script` row appears in `Orchestration.md` | Consultations must leave no row in the artifact; a routing consultation wrongly called `Store.Apply` or allocated a `Seq` |
 
 ---
 

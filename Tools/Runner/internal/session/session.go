@@ -10,7 +10,17 @@
 //     f. Read stage set if a staged phase is present (planstages)
 //     g. Settle checkpoint value (FR-9 refusal if no provider)
 //     h. Create or resume the artifact
-//     i. Pre-consultation (auto and auto-review modes, when enabled)
+//     i. Commit setup (commits enabled and no commit_branch recorded): an
+//        ordinary out-of-band invocation against the existing artifact. It
+//        takes the next sequence and always gets an Execution Log row without
+//        moving current_state; only SUCCESS with a [branch:{name}] marker
+//        records commit_branch and lets the run continue
+//     j. Pre-consultation (auto and auto-review modes, when enabled); it
+//        never touches the artifact
+//
+//     A failed commit setup or pre-consultation ends the start with
+//     RunStartFailed. The run folder, the artifact and any setup row are
+//     kept, no workflow step is dispatched, and a resume retries the step.
 //
 //  2. Dispatch loop: ask engine -> dispatch via harness -> apply to artifact -> repeat.
 //
@@ -22,23 +32,45 @@
 //     - On Findings auto-routing: engine returns Dispatch for COMPLETED_NEEDS_ACTION
 //       with an unambiguous OnFindings hint; session treats it identically to any
 //       other Dispatch (harness -> artifact update). No consultation is needed.
+//       At the review loop limit (persisted in the artifact state the engine
+//       receives) the engine returns a Deviation instead.
 //     - Stage-* output re-derivation: after a completed row's output artifacts
 //       include a Stage-* pattern, session re-reads the plan artifact via
 //       planstages to obtain a refreshed stage set for the engine's next call.
 //     - Deviation: engine returns Deviation; session routes through the
 //       RoutingConsultant (consultRoute). If no consultant is wired, the run
 //       terminates with RunDeviationUnresolved.
-//     - Harness error: a harness-level failure is treated as a Deviation with
-//       kind DeviationHarnessError ("never a crash" per port contract). Routed
-//       through the RoutingConsultant the same way as engine-originated deviations.
-//     - HITL verification: after each auto-routed SUCCESS, output artifacts are
-//       checked for human_approved. A non-compliant result triggers one HITL
-//       redispatch; if the redispatch is also non-compliant, the deviation is
-//       escalated to the RoutingConsultant.
-//     - Consultation recording: every RoutingConsultant invocation is recorded
-//       as an infrastructure-flagged CompletedStep under "{orchestrator-stem}#{seq}"
-//       (where orchestrator-stem is the file stem of the orchestrator file supplied
-//       to the run), consuming global_sequence without moving current_state.
+//     - Harness error: a harness-level failure (timeout, launch failure) is
+//       recorded as a synthetic BLOCKED response with error code E501, whose
+//       status message and error reason are the Runner's error description
+//       ("never a crash" per port contract). It is persisted as an accepted
+//       workflow row (current_state.error_code E501) and routed through the
+//       RoutingConsultant as an ordinary BLOCKED/E501 deviation; the next
+//       consultation request carries the description as last_error_reason.
+//     - HITL verification: after every attempt of an HITL-dispatched step, whatever
+//       its status, the outputs the attempt actually created or modified (found
+//       by the OutputWriteDetector against a baseline taken before the first
+//       attempt) are checked for human_approved. Declared outputs that were not
+//       written are neither registered nor gated. A non-compliant result
+//       triggers one HITL redispatch; if the redispatch is also non-compliant,
+//       the deviation is escalated to the RoutingConsultant. Only written
+//       outputs are registered in the Artifacts table.
+//       A BLOCKED response with error code E503 (the agent could not reach the
+//       user) is exempt: it is accepted without a redispatch and routed as
+//       BLOCKED. When a gate-discharging redispatch returns SUCCESS, its row is
+//       recorded as returned under the redispatch's agent instance, but
+//       current_state, routing and trigger evaluation follow the original
+//       attempt's status and error code.
+//     - Consultation recording: a RoutingConsultant invocation (routing,
+//       pre-consultation, stop or failure) writes nothing to the artifact: no
+//       Execution Log row, no global_sequence advance, no current_state change.
+//       It stays visible in the diagnostic, dispatch and MOSAIC logs. After a
+//       successful routing consultation, and before any later state write, the
+//       session re-reads the artifact so any Workflow Notes the script
+//       orchestrator appended directly during its deliberation are preserved;
+//       the session's local sequence then follows the re-read artifact's
+//       global_sequence, so the agent the consultation dispatches takes the
+//       next Seq directly, with no collision from a consultation row.
 //     - Graceful stop: session records current state and returns RunStopped.
 //     - Infrastructure-agent trigger: a named no-op hook is called after each
 //       harness invocation (FR-40).
@@ -68,7 +100,9 @@ type Session interface {
 	//
 	// Returns the run outcome when the run completes, stops, or is refused.
 	// Refusals (pre-invocation failures) are returned as RunOutcome{Status:
-	// RunRefused} with a nil error. Unexpected infrastructure failures return
+	// RunRefused} with a nil error. A commit setup or pre-consultation failure
+	// after the artifact exists is RunOutcome{Status: RunStartFailed}, also
+	// with a nil error; the artifact is kept and a resume retries the step. Unexpected infrastructure failures return
 	// a non-nil error.
 	Start(ctx context.Context, config domain.RunConfig) (domain.RunOutcome, error)
 }
@@ -128,6 +162,12 @@ type Deps struct {
 	// compliance verification. Nil is normalised in New to a reader that
 	// reports ApprovalUnreadable, so the session never nil-checks it.
 	Approvals domain.ApprovalReader
+
+	// Outputs detects which declared outputs an invocation wrote. Nil is
+	// normalised in New to a conservative detector that reports every
+	// declared concrete path as written. Production wires
+	// artifact.NewOutputWriteDetector().
+	Outputs domain.OutputWriteDetector
 
 	// StopRequested reports whether a graceful stop has been confirmed. The
 	// dispatch loop polls it at safe boundaries (immediately before each
@@ -200,6 +240,9 @@ type sessionImpl struct {
 	// when config.ManualDispatch is true; cleared after the first consultRoute
 	// call so that subsequent routing decisions use the configured consultant.
 	manualDispatchPending bool
+	// outputBaseline is the pre-invocation output snapshot of the step in
+	// flight. It is set before the first attempt and reused by re-dispatches.
+	outputBaseline domain.OutputBaseline
 	// snapshotDir is the absolute path to the run-scoped agent snapshot
 	// directory created by the copy-and-invoke strategy at step 5b. Empty
 	// until step 5b succeeds for path-based harnesses. Used by cleanup to

@@ -347,6 +347,7 @@ func candidatesToQuestion(scan runscan.ScanResult) runselect.Question {
 			Run:        u.RunInfo,
 			Selectable: false,
 			Reason:     u.Reason,
+			Detail:     u.Detail,
 		})
 	}
 	return runselect.Question{Choices: choices}

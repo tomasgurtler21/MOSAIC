@@ -9,8 +9,9 @@ last_updated: 2026-01-29T10:00:00Z
 global_sequence: 2
 checkpoints: enabled
 commits: disabled
-pre_consultation: disabled
-manual_resolution: disabled
+runner_mode: orchestrated
+runner_pre_consultation: disabled
+runner_manual_resolution: disabled
 current_state:
   phase: EXECUTION
   stage: 1

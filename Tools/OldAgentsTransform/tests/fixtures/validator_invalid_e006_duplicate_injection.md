@@ -8,12 +8,12 @@ description: Invalid file - same INJECTION name appears more than once in the fi
 <Identity type="core">
 # TestAgent Agent
 
-<IdentityExtension type="project">
-First occurrence of IdentityExtension injection.
-</IdentityExtension>
+<CodebaseContext type="project">
+First occurrence of CodebaseContext injection.
+</CodebaseContext>
 
-<IdentityExtension type="project">
+<CodebaseContext type="project">
 Second occurrence - duplicate injection boundary name.
-</IdentityExtension>
+</CodebaseContext>
 
 </Identity>

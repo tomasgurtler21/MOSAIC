@@ -173,7 +173,7 @@ func TestStructureNames_SectionsAndTopLevelDeployed_ReturnsAllInterleaved(t *tes
 	// mixed-markers.md top-level items in document order:
 	//   <Identity type="core">
 	//   <CommunicationProtocol type="managed">
-	//   <Constraints type="core"> (contains <ProtocolConstraints type="managed"> — nested, excluded)
+	//   <Constraints type="core"> (contains <HarnessConstraints type="managed"> — nested, excluded)
 	// StructureNames must return all three top-level structural slots.
 	doc := parsedBoundaryFixture(t, "mixed-markers.md")
 
@@ -194,15 +194,15 @@ func TestStructureNames_SectionsAndTopLevelDeployed_ReturnsAllInterleaved(t *tes
 }
 
 func TestStructureNames_NestedDeployedRegion_NotIncluded(t *testing.T) {
-	// mixed-markers.md has <ProtocolConstraints type="managed"> nested inside
+	// mixed-markers.md has <HarnessConstraints type="managed"> nested inside
 	// <Constraints type="core">. It must not appear in StructureNames.
 	doc := parsedBoundaryFixture(t, "mixed-markers.md")
 
 	names := docformat.StructureNames(doc.Body())
 
 	for _, name := range names {
-		if name == "ProtocolConstraints" {
-			t.Error("StructureNames must not include the nested deployed region ProtocolConstraints")
+		if name == "HarnessConstraints" {
+			t.Error("StructureNames must not include the nested deployed region HarnessConstraints")
 		}
 	}
 }

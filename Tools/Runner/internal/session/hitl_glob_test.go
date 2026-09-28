@@ -15,21 +15,21 @@ package session_test
 //
 //   All stage files approved (orchestrated mode):
 //   - HITL=true, Stage-* output, stages={1,2}, all per-stage files approved ->
-//     session must NOT redispatch the agent. Currently fails (RED) because the
-//     session reads the literal Stage-*/Plan.md path (which is always missing)
-//     rather than the expanded per-stage paths.
+//     session must NOT redispatch the agent. Stage files are written during the dispatch
+//     and detected by the real write detector.
 //
 //   Some stage files unapproved (orchestrated mode):
 //   - HITL=true, Stage-* output, stages={1,2}, Stage-2/Plan.md unapproved ->
 //     session must redispatch once then escalate.
 //
 //   Zero files on disk / nil StageSet (orchestrated mode):
-//   - HITL=true, Stage-* output, stages=nil (Plan.md absent -> re-derivation fails)
-//     -> session must treat zero expansion as non-compliant and trigger a redispatch.
+//   - HITL=true, Stage-* output, no stage file written and no Plan.md -> the
+//     declared output was never written, so the step is accepted without a
+//     redispatch.
 //
 //   All stage files approved (auto mode, hitlCheckLoop):
-//   - Same scenario via the engine's auto-routing path. Currently fails (RED) because
-//     the hitlCheckLoop also does not expand Stage-* before approval reads.
+//   - Same scenario via the engine's auto-routing path. Stage files are written during the
+//     dispatch and detected by the real write detector.
 
 import (
 	"context"
@@ -74,6 +74,7 @@ func newHITLGlobStagedSession(
 	consultant domain.RoutingConsultant,
 	approvals domain.ApprovalReader,
 	runFolder string,
+	agentAWrites func(),
 ) (ses session.Session, f *harness.MockAdapter, store *memStore, orchPath string) {
 	t.Helper()
 	dir := t.TempDir()
@@ -83,11 +84,14 @@ func newHITLGlobStagedSession(
 
 	f = harness.NewMockAdapter()
 	store = &memStore{}
+	// agent-a's output files are written during its first invocation, so the
+	// write detector attributes them to that dispatch.
 	ses = session.New(session.Deps{
-		Harness:   f,
+		Harness:   &fileWritingAdapter{inner: f, agentID: "agent-a", setup: agentAWrites},
 		Store:     store,
 		Routing:   consultant,
 		Approvals: approvals,
+		Outputs:   artifact.NewOutputWriteDetector(),
 		Clock:     fixedClock{t: epoch},
 		Interact:  &noopInteraction{},
 	})
@@ -161,25 +165,26 @@ func writePlanMD(t *testing.T, runFolder string) {
 // a Stage-* wildcard, and all expanded per-stage files carry human_approved: true,
 // the session accepts the step without redispatching the agent.
 //
-// This test is in the RED phase: without Stage-* expansion in the hitlLoop inside
-// consultRoute, the session reads the literal "Stage-*/Plan.md" path, which is
-// always absent from disk, and incorrectly triggers a redispatch. The fix must
-// expand Stage-*/Plan.md to Stage-1/Plan.md and Stage-2/Plan.md before reading
-// approvals, so that both approved files are found and the step is accepted.
+// The stage files are written during agent-a's dispatch and the real write
+// detector is wired, so the gate only reads them once the session detects them
+// as written outputs of that dispatch. The session must expand Stage-*/Plan.md
+// to Stage-1/Plan.md and Stage-2/Plan.md, find both approved, and accept.
 func TestSession_HITL_GlobApproval_Orchestrated_AllApproved_NoRedispatch(t *testing.T) {
-	tmpDir := t.TempDir()
+	tmpDir := chdirWorkspace(t)
 
 	// Pre-create Plan.md so the session can re-derive the stage set (2 stages)
 	// after the planner row completes.
 	writePlanMD(t, tmpDir)
 
-	// Pre-create per-stage files, both approved.
-	writeStageArtifact(t, tmpDir, 1, approvedArtifactContent)
-	writeStageArtifact(t, tmpDir, 2, approvedArtifactContent)
+	// Both per-stage files are written (approved) by agent-a during its dispatch.
+	writeStages := func() {
+		writeStageArtifact(t, tmpDir, 1, approvedArtifactContent)
+		writeStageArtifact(t, tmpDir, 2, approvedArtifactContent)
+	}
 
 	// The glob path that agent-a declares as its output. The session must expand
 	// this to Stage-1/Plan.md and Stage-2/Plan.md before reading approvals.
-	globPath := filepath.Join(tmpDir, "Stage-*/Plan.md")
+	globPath := "Stage-*/Plan.md"
 	globPaths := []string{globPath}
 
 	consultant := &scriptedRoutingConsultant{}
@@ -192,7 +197,7 @@ func TestSession_HITL_GlobApproval_Orchestrated_AllApproved_NoRedispatch(t *test
 	// After agent-a completes successfully (no redispatch), the consultant stops.
 	consultant.queueStop("all stages approved")
 
-	ses, f, _, orchPath := newHITLGlobStagedSession(t, consultant, artifact.NewApprovalReader(), tmpDir)
+	ses, f, _, orchPath := newHITLGlobStagedSession(t, consultant, artifact.NewApprovalReader(), tmpDir, writeStages)
 
 	f.Queue("planner", harness.ScriptedEntry{Response: &domain.ProtocolResponse{
 		AgentInstanceID: "planner#1",
@@ -225,14 +230,16 @@ func TestSession_HITL_GlobApproval_Orchestrated_AllApproved_NoRedispatch(t *test
 // carry human_approved: false, the session redispatches once and then escalates
 // when the redispatched result is still non-compliant.
 func TestSession_HITL_GlobApproval_Orchestrated_SomeUnapproved_RedispatchThenEscalate(t *testing.T) {
-	tmpDir := t.TempDir()
+	tmpDir := chdirWorkspace(t)
 	writePlanMD(t, tmpDir)
 
-	// Stage 1 approved, stage 2 unapproved.
-	writeStageArtifact(t, tmpDir, 1, approvedArtifactContent)
-	writeStageArtifact(t, tmpDir, 2, unapprovedArtifactContent)
+	// Stage 1 approved, stage 2 unapproved; both written by agent-a's dispatch.
+	writeStages := func() {
+		writeStageArtifact(t, tmpDir, 1, approvedArtifactContent)
+		writeStageArtifact(t, tmpDir, 2, unapprovedArtifactContent)
+	}
 
-	globPath := filepath.Join(tmpDir, "Stage-*/Plan.md")
+	globPath := "Stage-*/Plan.md"
 	globPaths := []string{globPath}
 
 	consultant := &scriptedRoutingConsultant{}
@@ -243,7 +250,7 @@ func TestSession_HITL_GlobApproval_Orchestrated_SomeUnapproved_RedispatchThenEsc
 	// deviation by stopping.
 	consultant.queueStop("HITL escalation: stage 2 unapproved after redispatch")
 
-	ses, f, _, orchPath := newHITLGlobStagedSession(t, consultant, artifact.NewApprovalReader(), tmpDir)
+	ses, f, _, orchPath := newHITLGlobStagedSession(t, consultant, artifact.NewApprovalReader(), tmpDir, writeStages)
 
 	f.Queue("planner", harness.ScriptedEntry{Response: &domain.ProtocolResponse{
 		AgentInstanceID: "planner#1",
@@ -278,32 +285,37 @@ func TestSession_HITL_GlobApproval_Orchestrated_SomeUnapproved_RedispatchThenEsc
 	}
 }
 
-// TestSession_HITL_GlobApproval_Orchestrated_ZeroFiles_NonCompliant verifies
-// that when a HITL=true step has Stage-* output artifacts but the stage set could
-// not be derived (Plan.md absent -> stages is nil), the session treats the
-// zero-expansion result as non-compliant and triggers a redispatch rather than
-// silently accepting the step.
-//
-// This exercises the zero-match handling: when expandStageGlobs returns the glob
-// path unchanged (because stages is nil), the HITL loop must synthesize an
-// ApprovalFileMissing entry so DecideHITLCompliance sees non-compliance instead
-// of hitting the len(Approvals)==0 -> HITLAccept short-circuit.
-func TestSession_HITL_GlobApproval_Orchestrated_ZeroFiles_NonCompliant(t *testing.T) {
-	tmpDir := t.TempDir()
-	// Deliberately do NOT write Plan.md: stage re-derivation will fail, leaving
-	// stages nil when agent-a's HITL check runs.
+// TestSession_HITL_GlobApproval_Orchestrated_ZeroFiles_Accepted verifies that
+// when a HITL=true step declares a Stage-* output and the invocation writes no
+// matching file (Plan.md is absent, so no stage set exists either), the step is
+// accepted without a redispatch: a declared output that was never written is not
+// a gate miss.
+func TestSession_HITL_GlobApproval_Orchestrated_ZeroFiles_Accepted(t *testing.T) {
+	tmpDir := chdirWorkspace(t)
+	// Deliberately do NOT write Plan.md or any stage file.
 
-	globPath := filepath.Join(tmpDir, "Stage-*/Plan.md")
+	globPath := "Stage-*/Plan.md"
 	globPaths := []string{globPath}
 
 	consultant := &scriptedRoutingConsultant{}
 	consultant.queueDispatch("planner", "create the plan", 0)
 	consultant.queueDispatchWithOutputs("agent-a", "do the work", 1, &globPaths)
-	// After HITL non-compliance (zero expansion, no stage files) -> redispatch ->
-	// still non-compliant -> escalation. Consultant resolves by stopping.
-	consultant.queueStop("HITL escalation: no stage files found")
+	consultant.queueStop("done")
 
-	ses, f, _, orchPath := newHITLGlobStagedSession(t, consultant, artifact.NewApprovalReader(), tmpDir)
+	dir := t.TempDir()
+	orchPath := copyOrchestratorFile(t, dir, "hitl-glob-staged-orch.md")
+	writeAgentFile(t, dir, "planner")
+	writeAgentFile(t, dir, "agent-a")
+	f := harness.NewMockAdapter()
+	ses := session.New(session.Deps{
+		Harness:   f,
+		Store:     &memStore{},
+		Routing:   consultant,
+		Approvals: artifact.NewApprovalReader(),
+		Outputs:   artifact.NewOutputWriteDetector(),
+		Clock:     fixedClock{t: epoch},
+		Interact:  &noopInteraction{},
+	})
 
 	f.Queue("planner", harness.ScriptedEntry{Response: &domain.ProtocolResponse{
 		AgentInstanceID: "planner#1",
@@ -313,25 +325,18 @@ func TestSession_HITL_GlobApproval_Orchestrated_ZeroFiles_NonCompliant(t *testin
 	f.Queue("agent-a", harness.ScriptedEntry{Response: &domain.ProtocolResponse{
 		AgentInstanceID: "agent-a#2",
 		StatusCode:      domain.StatusSUCCESS,
-		StatusMessage:   "work done (attempt 1)",
-	}})
-	f.Queue("agent-a", harness.ScriptedEntry{Response: &domain.ProtocolResponse{
-		AgentInstanceID: "agent-a#3",
-		StatusCode:      domain.StatusSUCCESS,
-		StatusMessage:   "work done (attempt 2)",
+		StatusMessage:   "work done",
 	}})
 
 	ses.Start(context.Background(), hitlGlobOrchestratedConfig(orchPath, tmpDir)) //nolint:errcheck
 
-	// agent-a must be dispatched at least twice: the nil-stages case must produce
-	// non-compliance (not silent acceptance), triggering at least one redispatch.
 	agentACalls := 0
 	for _, inv := range f.Invocations() {
 		if inv.Agent.Identifier == "agent-a" {
 			agentACalls++
 		}
 	}
-	if agentACalls < 2 {
-		t.Errorf("want agent-a dispatched at least twice (nil stages -> zero-match non-compliance -> redispatch), got %d invocations", agentACalls)
+	if agentACalls != 1 {
+		t.Errorf("want agent-a dispatched exactly once (no stage file written -> nothing to gate), got %d invocations", agentACalls)
 	}
 }

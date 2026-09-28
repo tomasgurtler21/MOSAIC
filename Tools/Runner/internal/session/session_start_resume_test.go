@@ -50,7 +50,7 @@ func TestSession_Start_ResumesFromExistingArtifact(t *testing.T) {
 	}})
 
 	cfg := baseLinearConfig(orchPath)
-	cfg.IsNewRun = false // resume: artifact already exists
+	markResume(&cfg)
 
 	got, err := ses.Start(context.Background(), cfg)
 
@@ -110,7 +110,7 @@ func TestSession_Start_MidInvocationInterruption_RerunsLastStep(t *testing.T) {
 	}})
 
 	cfg := baseLinearConfig(orchPath)
-	cfg.IsNewRun = false // resume: artifact already exists
+	markResume(&cfg)
 
 	got, err := ses.Start(context.Background(), cfg)
 

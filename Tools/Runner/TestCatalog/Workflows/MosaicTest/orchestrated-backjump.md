@@ -58,20 +58,17 @@ When `mosaictest-scripted` is dispatched with `human_in_the_loop: true`, it retu
 
 ## Expected Run
 
-Six Orchestration.md log rows. The stop consultation is NOT logged in Orchestration.md — it surfaces as a `session.consult.stop` event in RunnerLogs and as the TUI/CLI exit message.
+Three Orchestration.md log rows. Every consultation — including the one before each dispatch and the final stop — dispatches to the orchestrator but allocates no `Seq` and leaves no row in `Orchestration.md`; each surfaces only as a dispatch-log entry, and the stop additionally as a `session.consult.stop` event in RunnerLogs and as the TUI/CLI exit message.
 
-| Log `Seq` | `Agent` | Kind | `Phase` | `Status` | `Summary` shows |
-|:---:|---|---|---|---|---|
-| 1 | `orchestrator-script#1` | consultation | — | "" | task description for dispatch one (no overrides) |
-| 2 | `mosaictest-scripted#1` | workflow step | RESEARCH | SUCCESS | echo of task_description_1 |
-| 3 | `orchestrator-script#3` | consultation | — | "" | task description for dispatch two (input_artifacts override) |
-| 4 | `mosaictest-scripted#2` | workflow step | RESEARCH | SUCCESS | echo of task_description_2; Inputs shows both paths |
-| 5 | `orchestrator-script#5` | consultation | — | "" | task description for dispatch three (hitl=true) |
-| 6 | `mosaictest-scripted#3` | workflow step | RESEARCH | BLOCKED | E503 message (hitl=true, no user-interaction tool) |
+| Log `Seq` | `Agent` | `Phase` | `Status` | `Summary` shows |
+|:---:|---|---|---|---|
+| 1 | `mosaictest-scripted#1` | RESEARCH | SUCCESS | echo of task_description_1 |
+| 2 | `mosaictest-scripted#2` | RESEARCH | SUCCESS | echo of task_description_2; Inputs shows both paths |
+| 3 | `mosaictest-scripted#3` | RESEARCH | BLOCKED | E503 message (hitl=true, no user-interaction tool) |
 
 **Run outcome:** stopped by the orchestrator (`RunStoppedByConsultant`). The fixture's stop reason names the BLOCKED as the expected trigger.
 
-**Inputs column check:** Row 2 should show only `MosaicTestScript/backjump-echo.md`. Row 4 should show `MosaicTestScript/backjump-echo.md, MosaicTestExtraInput.md` (or the orchestration-prefixed paths).
+**Inputs column check:** Row 1 should show only `MosaicTestScript/backjump-echo.md`. Row 2 should show `MosaicTestScript/backjump-echo.md, MosaicTestExtraInput.md` (or the orchestration-prefixed paths).
 
 **RunnerLogs verification:** The debug log must contain a `session.consult.stop` entry with the fixture's stop reason.
 
@@ -81,11 +78,12 @@ Six Orchestration.md log rows. The stop consultation is NOT logged in Orchestrat
 
 | Observation | Where to look |
 |---|---|
-| Row 4's Inputs column shows only the table default (one path) | The Runner is ignoring the orchestrator's `input_artifacts` override |
-| Row 6 shows SUCCESS instead of BLOCKED | The `hitl_override` did not propagate — the agent was dispatched without `human_in_the_loop: true` |
-| Row 6 shows BLOCKED but the stop consultation does not appear | The Runner did not consult the orchestrator after a BLOCKED in Orchestrated mode |
-| The run completes after row 2 | Mode confusion — the engine is routing via `On Success = COMPLETE` instead of consulting |
-| Summaries are identical across rows 2 and 4 | Task descriptions not carried through — same issue as orchestrated-linear |
+| Row 2's Inputs column shows only the table default (one path) | The Runner is ignoring the orchestrator's `input_artifacts` override |
+| Row 3 shows SUCCESS instead of BLOCKED | The `hitl_override` did not propagate — the agent was dispatched without `human_in_the_loop: true` |
+| Row 3 shows BLOCKED but the stop consultation does not appear | The Runner did not consult the orchestrator after a BLOCKED in Orchestrated mode |
+| The run completes after row 1 | Mode confusion — the engine is routing via `On Success = COMPLETE` instead of consulting |
+| Summaries are identical across rows 1 and 2 | Task descriptions not carried through — same issue as orchestrated-linear |
+| An `orchestrator-script` row appears in `Orchestration.md`, or `Seq` skips a number | Consultations must leave no row and allocate no `Seq`; a consultation wrongly called `Store.Apply` |
 
 ---
 

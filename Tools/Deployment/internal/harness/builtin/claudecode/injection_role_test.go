@@ -72,10 +72,10 @@ func TestInjection_OrchestratorRole_NonOrchestratorKey_ReturnsMergedContent(t *t
 
 	// The merged content must include the skills-path instruction that distinguishes
 	// orchestrator content from shared content for Claude Code.
-	if !strings.Contains(orchContent, "cwd/.claude/skills") {
+	if !strings.Contains(orchContent, ".claude/skills/ in the workspace root") {
 		t.Errorf("orchestrator-role HarnessConstraints content is missing the skills-path instruction\n"+
 			"got:  %q\n"+
-			"want: content containing \"cwd/.claude/skills\"\n\n"+
+			"want: content containing \".claude/skills/ in the workspace root\"\n\n"+
 			"The orchestrator injection must be served to any agent with Role == domain.RoleOrchestrator, "+
 			"not only to agents with AgentKey == \"orchestrator\"",
 			orchContent)
@@ -102,9 +102,9 @@ func TestInjection_OrchestratorRole_WithOrchestratorKey_StillReturnsMergedConten
 		t.Fatal("Injection(HarnessConstraints, orchestrator, RoleOrchestrator) returned ok=false; " +
 			"orchestrator must receive content (ok=true) for HarnessConstraints")
 	}
-	if !strings.Contains(content, "cwd/.claude/skills") {
+	if !strings.Contains(content, ".claude/skills/ in the workspace root") {
 		t.Errorf("Injection(HarnessConstraints, orchestrator, RoleOrchestrator) missing skills-path instruction\n"+
-			"got: %q\nwant: content containing \"cwd/.claude/skills\"", content)
+			"got: %q\nwant: content containing \".claude/skills/ in the workspace root\"", content)
 	}
 }
 

@@ -16,7 +16,6 @@ package session_test
 
 import (
 	"context"
-	"fmt"
 	"os"
 	"path/filepath"
 	"testing"
@@ -53,19 +52,16 @@ func hitlGlobSelfRefOrchestratedConfig(orchPath, runFolder string) domain.RunCon
 // paths (Stage-1/Plan.md, Stage-2/Plan.md). When all expanded files carry
 // human_approved: true the step must be accepted without redispatch.
 //
-// RED phase: without the pre-loop stage re-derivation, stages is nil at HITL
-// check time, expandStageGlobs passes through the literal Stage-*/Plan.md path,
-// the approval read fails (no such literal file on disk), the step is
-// non-compliant, and planner is redispatched. The test fails because
-// plannerCalls != 1.
+// The real write detector is wired; stage files are written during planner's
+// dispatch and gated once the stage set is derived from Plan.md.
 func TestSession_HITL_GlobApproval_SelfRef_Orchestrated_AllApproved_NoRedispatch(t *testing.T) {
 	// tmpDir starts empty: Plan.md is absent at session startup so the session's
 	// step-8a2 plan read does not pre-populate the stage set. Plan.md and stage
 	// files are written to disk when planner is invoked (via fileWritingAdapter),
 	// simulating the agent creating them as output.
-	tmpDir := t.TempDir()
+	tmpDir := chdirWorkspace(t)
 
-	globPath := filepath.Join(tmpDir, "Stage-*/Plan.md")
+	globPath := "Stage-*/Plan.md"
 	globPaths := []string{globPath}
 
 	inner := harness.NewMockAdapter()
@@ -113,6 +109,7 @@ func TestSession_HITL_GlobApproval_SelfRef_Orchestrated_AllApproved_NoRedispatch
 		Store:     store,
 		Routing:   consultant,
 		Approvals: artifact.NewApprovalReader(),
+		Outputs:   artifact.NewOutputWriteDetector(),
 		Clock:     fixedClock{t: epoch},
 		Interact:  &noopInteraction{},
 	})
@@ -139,18 +136,13 @@ func TestSession_HITL_GlobApproval_SelfRef_Orchestrated_AllApproved_NoRedispatch
 // artifact (plan-review, row 1), the run completes via the intended path:
 // planner dispatched once (HITL passes cleanly), then plan-review dispatched once.
 //
-// RED phase: without the pre-loop stage re-derivation, planner's HITL check
-// fails (stages nil -> literal path read -> non-compliant), triggering an
-// automatic redispatch. After the redispatch also fails, HITL escalates and
-// the consultant's instruction to dispatch plan-review is consumed during the
-// escalation rather than the intended post-success routing. The test fails
-// because plannerCalls != 1, showing that the first row was not accepted
-// cleanly and the downstream consumer was reached via the wrong path.
+// The real write detector is wired; stage files are written during planner's
+// dispatch and gated once the stage set is derived from Plan.md.
 func TestSession_HITL_GlobApproval_SelfRef_Downstream_AllApproved_PlanReviewDispatched(t *testing.T) {
 	// tmpDir starts empty: Plan.md is absent at session startup.
-	tmpDir := t.TempDir()
+	tmpDir := chdirWorkspace(t)
 
-	globPath := filepath.Join(tmpDir, "Stage-*/Plan.md")
+	globPath := "Stage-*/Plan.md"
 	plannerOutputPaths := []string{globPath}
 	reviewInputPaths := []string{globPath}
 
@@ -203,6 +195,7 @@ func TestSession_HITL_GlobApproval_SelfRef_Downstream_AllApproved_PlanReviewDisp
 		Store:     store,
 		Routing:   consultant,
 		Approvals: artifact.NewApprovalReader(),
+		Outputs:   artifact.NewOutputWriteDetector(),
 		Clock:     fixedClock{t: epoch},
 		Interact:  &noopInteraction{},
 	})
@@ -248,8 +241,8 @@ func TestSession_HITL_GlobApproval_SelfRef_Downstream_AllApproved_PlanReviewDisp
 // hitlGlobSelfRefAutoContent builds an inline single-row workflow definition
 // where planner has HITL=TRUE and Stage-*/Plan.md as output, using the provided
 // absolute runFolder path. No preceding row establishes a stage set.
-func hitlGlobSelfRefAutoContent(runFolder string) string {
-	return fmt.Sprintf(`<Workflow type="core" name="hitl-glob-selfref-auto" version="1.0">
+func hitlGlobSelfRefAutoContent() string {
+	return (`<Workflow type="core" name="hitl-glob-selfref-auto" version="1.0">
 ## HITL Glob Self-Referential Auto Workflow (inline)
 
 Used by auto-mode self-referential HITL+Stage-* tests to verify that the
@@ -258,9 +251,9 @@ dispatched row is both the Stage-* producer and the HITL subject.
 
 | Phase | Subagent | HITL | On Success | On Findings | Input | Output |
 |-------|----------|:----:|------------|-------------|-------|--------|
-| PLANNING | planner | TRUE | COMPLETE | - | - | %s/Stage-*/Plan.md |
+| PLANNING | planner | TRUE | COMPLETE | - | - | Stage-*/Plan.md |
 </Workflow>
-`, runFolder)
+`)
 }
 
 // TestSession_HITL_GlobApproval_SelfRef_Auto_AllApproved_NoRedispatch verifies
@@ -273,21 +266,15 @@ dispatched row is both the Stage-* producer and the HITL subject.
 // When all expanded files carry human_approved: true the step must be accepted
 // without redispatch.
 //
-// RED phase: without the pre-loop stage re-derivation, stages is nil at
-// hitlCheckLoop time, expandStageGlobs passes through the literal path, the
-// approval read fails, the step is non-compliant, and planner is redispatched.
-// The test fails because plannerCalls != 1.
-//
-// Design note: tmpDir starts empty so the session's step-8a2 plan read at
-// startup does not pre-populate the stage set. Plan.md and stage files are
-// written during planner's first Invoke, simulating the agent creating them.
+// The real write detector is wired; stage files are written during planner's
+// dispatch and gated once the stage set is derived from Plan.md.
 func TestSession_HITL_GlobApproval_SelfRef_Auto_AllApproved_NoRedispatch(t *testing.T) {
 	// tmpDir starts empty: no Plan.md at session startup.
-	tmpDir := t.TempDir()
+	tmpDir := chdirWorkspace(t)
 
 	// Write the inline single-row orchestrator with absolute Stage-* output path.
 	orchDir := t.TempDir()
-	orchContent := hitlGlobSelfRefAutoContent(tmpDir)
+	orchContent := hitlGlobSelfRefAutoContent()
 	orchPath := filepath.Join(orchDir, "orchestrator.md")
 	if err := os.WriteFile(orchPath, []byte(orchContent), 0600); err != nil {
 		t.Fatalf("write inline orchestrator: %v", err)
@@ -323,6 +310,7 @@ func TestSession_HITL_GlobApproval_SelfRef_Auto_AllApproved_NoRedispatch(t *test
 		Harness:   fa,
 		Store:     store,
 		Approvals: artifact.NewApprovalReader(),
+		Outputs:   artifact.NewOutputWriteDetector(),
 		Clock:     fixedClock{t: epoch},
 		Interact:  &noopInteraction{},
 		// No Routing: auto-mode uses engine routing.
@@ -359,18 +347,18 @@ func TestSession_HITL_GlobApproval_SelfRef_Auto_AllApproved_NoRedispatch(t *test
 // planner and agent-a rows use the provided absolute runFolder path in their
 // output artifact column. This lets the auto-mode test use real absolute file
 // paths without requiring a static fixture with hard-coded paths.
-func hitlGlobAutoOrchestratorContent(runFolder string) string {
-	return fmt.Sprintf(`<Workflow type="core" name="hitl-glob-auto" version="1.0">
+func hitlGlobAutoOrchestratorContent() string {
+	return (`<Workflow type="core" name="hitl-glob-auto" version="1.0">
 ## HITL Glob Auto Workflow (inline)
 
 Used by auto-mode HITL+glob tests to verify the hitlCheckLoop path.
 
 | Phase | Subagent | HITL | On Success | On Findings | Input | Output |
 |-------|----------|:----:|------------|-------------|-------|--------|
-| PLANNING | planner | FALSE | agent-a | - | - | %s/Stage-*/Plan.md |
-| PLANNING | agent-a | TRUE | COMPLETE | - | - | %s/Stage-*/Plan.md |
+| PLANNING | planner | FALSE | agent-a | - | - | Stage-*/Plan.md |
+| PLANNING | agent-a | TRUE | COMPLETE | - | - | Stage-*/Plan.md |
 </Workflow>
-`, runFolder, runFolder)
+`)
 }
 
 // TestSession_HITL_GlobApproval_Auto_AllApproved_NoRedispatch verifies that
@@ -378,22 +366,17 @@ Used by auto-mode HITL+glob tests to verify the hitlCheckLoop path.
 // artifact patterns before reading approvals. When all expanded per-stage files
 // are approved the agent must be dispatched exactly once.
 //
-// This test is in the RED phase: the hitlCheckLoop at ~session.go:755 does not
-// currently expand Stage-* before approval reads, so it reads the literal path
-// (which always fails) and incorrectly redispatches.
+// The stage files are written during agent-a's dispatch and the real write
+// detector is wired, so only detected written outputs are gated.
 func TestSession_HITL_GlobApproval_Auto_AllApproved_NoRedispatch(t *testing.T) {
-	tmpDir := t.TempDir()
+	tmpDir := chdirWorkspace(t)
 
 	// Pre-create Plan.md for stage-set re-derivation (2 stages).
 	writePlanMD(t, tmpDir)
 
-	// Pre-create per-stage files, both approved.
-	writeStageArtifact(t, tmpDir, 1, approvedArtifactContent)
-	writeStageArtifact(t, tmpDir, 2, approvedArtifactContent)
-
 	// Write the orchestrator file inline with absolute Stage-* output paths.
 	orchDir := t.TempDir()
-	orchContent := hitlGlobAutoOrchestratorContent(tmpDir)
+	orchContent := hitlGlobAutoOrchestratorContent()
 	orchPath := filepath.Join(orchDir, "orchestrator.md")
 	if err := os.WriteFile(orchPath, []byte(orchContent), 0600); err != nil {
 		t.Fatalf("write inline orchestrator: %v", err)
@@ -403,10 +386,21 @@ func TestSession_HITL_GlobApproval_Auto_AllApproved_NoRedispatch(t *testing.T) {
 
 	f := harness.NewMockAdapter()
 	store := &memStore{}
+	// Both approved per-stage files are written during agent-a's dispatch so the
+	// real write detector attributes them to it.
+	fa := &fileWritingAdapter{
+		inner:   f,
+		agentID: "agent-a",
+		setup: func() {
+			writeStageArtifact(t, tmpDir, 1, approvedArtifactContent)
+			writeStageArtifact(t, tmpDir, 2, approvedArtifactContent)
+		},
+	}
 	ses := session.New(session.Deps{
-		Harness:   f,
+		Harness:   fa,
 		Store:     store,
 		Approvals: artifact.NewApprovalReader(),
+		Outputs:   artifact.NewOutputWriteDetector(),
 		Clock:     fixedClock{t: epoch},
 		Interact:  &noopInteraction{},
 		// No Routing: auto-mode uses engine routing.

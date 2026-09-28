@@ -13,15 +13,6 @@
         "error_code": "E503",
         "error_reason": "USER_CONTACT_UNAVAILABLE: human_in_the_loop is true but agent has no means to contact user"
       }
-    },
-    {
-      "match": { "tool": "dispatch", "agent": "requirements-refinement", "invocation": 2 },
-      "response": {
-        "agent_instance_id": "requirements-refinement#3",
-        "run_id": "{run_id}",
-        "status_code": "SUCCESS",
-        "status_message": "Requirements refined with verbose flag specifics. User reviewed and approved."
-      }
     }
   ]
 }

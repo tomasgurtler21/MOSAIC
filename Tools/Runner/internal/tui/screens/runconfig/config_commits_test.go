@@ -55,6 +55,7 @@ func TestConfigScreen_CommitsStep_NotShown_WhenNoCommitAgentDeclared(t *testing.
 		pressKey(s, tea.KeyEnter) // accept default (disabled)
 	}
 
+	acceptReviewLoopLimitIfAsked(s)
 	if !s.Done() {
 		t.Errorf("ConfigScreen did not reach Done() after all applicable steps (no commit agent, orchestrated mode); "+
 			"current step = %v", s.step)

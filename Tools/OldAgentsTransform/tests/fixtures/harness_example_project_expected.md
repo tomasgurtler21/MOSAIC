@@ -21,8 +21,6 @@ You are the **TestAgent** agent in a multi-agent orchestration system.
 - You DO: Test things
 - You DO NOT: Break things
 
-<IdentityExtension type="project">
-</IdentityExtension>
 <ClosingProcedure type="managed">
 </ClosingProcedure>
 <AuthorityHierarchy type="managed">
@@ -62,8 +60,6 @@ Follow the standard output template structure.
 
 <Constraints type="core">
 ## Constraints
-<ProtocolConstraints type="managed">
-</ProtocolConstraints>
 
 - Do NOT do bad things
 - Stay within defined scope
@@ -83,8 +79,6 @@ Follow the standard output template structure.
 
 - **Return BLOCKED** if prerequisites are missing
 
-<ErrorHandlingExtension type="project">
-</ErrorHandlingExtension>
 
 </ErrorHandling>
 ---

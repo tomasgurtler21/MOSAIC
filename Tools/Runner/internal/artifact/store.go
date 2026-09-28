@@ -6,6 +6,8 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"strconv"
+	"strings"
 	"time"
 
 	"mosaic-run/internal/domain"
@@ -72,6 +74,16 @@ func (f *fileStore) Read(ctx context.Context) (domain.ArtifactState, error) {
 }
 
 func (f *fileStore) Create(ctx context.Context, info domain.WorkflowInfo, task string, settings domain.RunSettings, now time.Time, runID string) (domain.ArtifactState, error) {
+	// Every artifact carries a valid run_id; nothing is written otherwise.
+	if !domain.IsValidRunID(runID) {
+		return domain.ArtifactState{}, &domain.RefusalError{
+			Component: "artifact",
+			Resource:  f.path,
+			Reason:    "cannot create an artifact without a valid run_id",
+			Cause:     &domain.RunIdentityError{Problem: runIDProblem(runID), RunID: runID},
+		}
+	}
+
 	// Reject a non-absolute store path before any filesystem side effects.
 	// A relative path would land in the process CWD, never in the intended
 	// run-scoped folder. Absolute non-run-scoped paths are permitted (many
@@ -117,6 +129,16 @@ func (f *fileStore) Create(ctx context.Context, info domain.WorkflowInfo, task s
 }
 
 func (f *fileStore) Apply(ctx context.Context, state domain.ArtifactState, step domain.CompletedStep) (domain.ArtifactState, error) {
+	// Sequence numbers are strictly increasing and name their invocation.
+	for _, e := range state.ExecutionLog {
+		if step.Seq <= e.Seq {
+			return domain.ArtifactState{}, fmt.Errorf("artifact: step seq %d is not above logged seq %d", step.Seq, e.Seq)
+		}
+	}
+	if !strings.HasSuffix(step.AgentInstance, "#"+strconv.Itoa(step.Seq)) {
+		return domain.ArtifactState{}, fmt.Errorf("artifact: agent instance %q does not end in #%d", step.AgentInstance, step.Seq)
+	}
+
 	// Build the new execution log entry.
 	newEntry := domain.ExecutionLogEntry{
 		Seq:        step.Seq,
@@ -133,7 +155,11 @@ func (f *fileStore) Apply(ctx context.Context, state domain.ArtifactState, step 
 	// Build the new state.
 	newState := state
 	newState.ExecutionLog = append(append([]domain.ExecutionLogEntry(nil), state.ExecutionLog...), newEntry)
-	newState.GlobalSequence = state.GlobalSequence + 1
+	// global_sequence holds the last allocated number. A higher stored value
+	// (an interrupted allocation) is kept.
+	if step.Seq > newState.GlobalSequence {
+		newState.GlobalSequence = step.Seq
+	}
 	newState.LastUpdated = step.Timestamp
 
 	// current_state is updated only for workflow steps. An infrastructure
@@ -147,25 +173,26 @@ func (f *fileStore) Apply(ctx context.Context, state domain.ArtifactState, step 
 		newState.CurrentState = domain.CurrentState{
 			Phase:      step.Phase,
 			Stage:      step.Stage,
-			LastStatus: step.Status,
+			LastStatus: step.RoutedStatus(),
 			LastAgent:  step.AgentInstance,
-			ErrorCode:  step.ErrorCode,
+			ErrorCode:  step.RoutedErrorCode(),
 		}
 	}
 
-	// Upsert artifact registry entries.
+	// Upsert artifact registry entries. A key and its run-folder-prefixed form
+	// denote the same artifact.
 	registry := append([]domain.ArtifactRegistryEntry(nil), state.ArtifactRegistry...)
-	for _, art := range step.OutputArtifacts {
-		createdIn := step.Phase
-		if step.Stage != "" {
-			createdIn = step.Phase + "." + step.Stage
-		}
+	createdIn := step.Phase
+	if step.Stage != "" {
+		createdIn = step.Phase + "." + step.Stage
+	}
+	for _, art := range step.WrittenArtifacts {
 		entry := domain.ArtifactRegistryEntry{
 			Artifact:  art,
 			CreatedIn: createdIn,
 			CreatedBy: step.AgentInstance,
 		}
-		registry = upsertRegistry(registry, entry)
+		registry = upsertRegistry(state.RunID, registry, entry)
 	}
 	newState.ArtifactRegistry = registry
 
@@ -181,16 +208,35 @@ func (f *fileStore) Apply(ctx context.Context, state domain.ArtifactState, step 
 	return newState, nil
 }
 
-// upsertRegistry upserts an artifact registry entry: updates an existing entry
-// with the same Artifact path, or appends a new one.
-func upsertRegistry(registry []domain.ArtifactRegistryEntry, entry domain.ArtifactRegistryEntry) []domain.ArtifactRegistryEntry {
-	for i, e := range registry {
-		if e.Artifact == entry.Artifact {
-			registry[i] = entry
-			return registry
+// registryKey removes the "Orchestration-{runID}/" prefix from an artifact path
+// so that prefixed and unprefixed forms compare equal.
+func registryKey(runID, artifact string) string {
+	if runID == "" {
+		return artifact
+	}
+	return strings.TrimPrefix(artifact, "Orchestration-"+runID+"/")
+}
+
+// upsertRegistry replaces the entry for entry.Artifact in place at its first
+// occurrence, removes any later duplicates of the same key, or appends the
+// entry when the key is new.
+func upsertRegistry(runID string, registry []domain.ArtifactRegistryEntry, entry domain.ArtifactRegistryEntry) []domain.ArtifactRegistryEntry {
+	out := make([]domain.ArtifactRegistryEntry, 0, len(registry)+1)
+	replaced := false
+	for _, e := range registry {
+		if registryKey(runID, e.Artifact) != registryKey(runID, entry.Artifact) {
+			out = append(out, e)
+			continue
+		}
+		if !replaced {
+			out = append(out, entry)
+			replaced = true
 		}
 	}
-	return append(registry, entry)
+	if !replaced {
+		out = append(out, entry)
+	}
+	return out
 }
 
 // atomicWrite writes data to path atomically using write-to-temp-then-rename.

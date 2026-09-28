@@ -66,11 +66,27 @@ func resolveRunIdentityByRunID(workDir, runIDFlag string, errOut io.Writer) (run
 		return "", "", false, nil, ExitUsage, false
 	}
 
-	// Check whether the run is completed. Parse errors are treated as
-	// resumable (the session layer will surface any real parse issues). A
-	// successful parse also yields the recorded position directly, so the
-	// announcement need not read the artifact again.
-	if state, parseErr := artifact.Parse(data); parseErr == nil {
+	// An unusable run identity is refused here, naming the problem. Other
+	// parse errors are treated as resumable (the session layer will surface
+	// any real parse issues). A successful parse also yields the recorded
+	// position directly, so the announcement need not read the artifact again.
+	state, parseErr := artifact.Parse(data)
+	var idErr *domain.RunIdentityError
+	if errors.As(parseErr, &idErr) {
+		reason := idErr.Error()
+		var refErr *domain.RefusalError
+		if errors.As(parseErr, &refErr) {
+			reason = refErr.Reason
+		}
+		fmt.Fprintf(errOut, "error: run %s cannot be resumed: %s\n", runIDFlag, reason)
+		return "", "", false, nil, ExitUsage, false
+	}
+	if parseErr == nil {
+		if state.RunID != runIDFlag {
+			fmt.Fprintf(errOut, "error: run %s cannot be resumed: the artifact's run_id %q does not match its run folder %q\n",
+				runIDFlag, state.RunID, domain.RunScopedFolder(runIDFlag))
+			return "", "", false, nil, ExitUsage, false
+		}
 		if strings.EqualFold(state.CurrentState.Phase, "COMPLETED") {
 			fmt.Fprintf(errOut, "error: run %s is completed and cannot be resumed\n", runIDFlag)
 			return "", "", false, nil, ExitUsage, false
@@ -137,7 +153,11 @@ func formatSelectionRefusal(q runselect.Question) string {
 		case runselect.ChoiceResume:
 			resumable = append(resumable, c.ID)
 		case runselect.ChoiceUnresumable:
-			unresumable = append(unresumable, fmt.Sprintf("%s (%s)", c.ID, c.Reason.Description()))
+			why := c.Reason.Description()
+			if c.Detail != "" {
+				why += ": " + c.Detail
+			}
+			unresumable = append(unresumable, fmt.Sprintf("%s (%s)", c.ID, why))
 		}
 	}
 	var sb strings.Builder

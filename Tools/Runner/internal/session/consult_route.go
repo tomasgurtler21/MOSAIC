@@ -52,6 +52,7 @@ func (s *sessionImpl) consultRoute(
 	if *lastResponse != nil {
 		msg := (*lastResponse).StatusMessage
 		req.LastStatusMessage = &msg
+		req.LastErrorReason = domain.LastErrorReasonFor(*lastResponse)
 	}
 
 	// Route to the appropriate resolver; handle errors and terminal instructions.
@@ -64,10 +65,11 @@ func (s *sessionImpl) consultRoute(
 	// Look up the routing table row and derive the effective stage.
 	row, effectiveStage := consultRowAndStage(table, dispInstr, deviation, entryStage)
 
-	// Record the consultation as an infrastructure log row and re-read the artifact.
-	if done, outcome, outErr = s.consultRecordAndRead(ctx, state, row, effectiveStage, dispInstr); done || outErr != nil {
-		return done, outcome, outErr
-	}
+	// The consultation itself writes nothing to the artifact: no Execution Log
+	// row, no global_sequence advance, no current_state change. Re-read the
+	// artifact so any Workflow Notes the orchestrator appended directly during
+	// its deliberation are visible to the session before any later state write.
+	s.consultReread(ctx, state, seq)
 
 	// Resolve the dispatched agent and build the ProtocolRequest.
 	agentRef, agentReq, phase, dispSeq, ok := buildConsultAgentRequest(
@@ -124,6 +126,7 @@ func (s *sessionImpl) consultRoute(
 	}
 
 	// Invoke the harness. A harness error is a deviation, not a crash.
+	s.beginOutputs(ctx, config.RunFolder, agentReq.OutputArtifacts)
 	response, invokeErr := s.invokeAndLog(ctx, agentRef, agentReq)
 	if invokeErr != nil {
 		return s.consultHandleHarnessErr(ctx, agentRef, agentReq, invokeErr, dispSeq, phase, effectiveStage,
@@ -133,7 +136,7 @@ func (s *sessionImpl) consultRoute(
 
 	// Run HITL compliance verification. Use agentReq.HumanInTheLoop (which
 	// already incorporates any HITLOverride from dispInstr) as effectiveHITL.
-	finalResp, finalSeq, cont, hitlDone, hitlOut, hitlErr := s.runConsultHITL(
+	finalResp, finalSeq, routed, routedResp, cont, hitlDone, hitlOut, hitlErr := s.runConsultHITL(
 		ctx, agentRef, agentReq, response, dispSeq, agentReq.HumanInTheLoop, dispInstr, effectiveStage, phase,
 		state, seq, lastResponse, prevWorkflowStep, refreshedStages, stages,
 		table, agents, config, declaredInfraAgents, admitted, antiLoop,
@@ -144,7 +147,7 @@ func (s *sessionImpl) consultRoute(
 
 	// Apply the accepted response and evaluate infrastructure triggers.
 	return s.applyConsultStep(
-		ctx, agentRef, agentReq, finalResp, finalSeq, phase, effectiveStage, dispInstr,
+		ctx, agentRef, agentReq, finalResp, finalSeq, routed, routedResp, phase, effectiveStage, dispInstr,
 		state, seq, lastResponse, prevWorkflowStep, refreshedStages, stages,
 		table, agents, config, declaredInfraAgents, admitted, antiLoop,
 	)
@@ -221,37 +224,19 @@ func consultRowAndStage(
 	return row, effectiveStage
 }
 
-// consultRecordAndRead records the consultation as an infrastructure-flagged
-// Execution Log row (consuming a global_sequence slot without moving
-// current_state) and then re-reads the artifact so any Workflow Notes the
-// orchestrator appended during its deliberation are visible to the session.
-func (s *sessionImpl) consultRecordAndRead(
-	ctx context.Context,
-	state *domain.ArtifactState,
-	row domain.RoutingRow,
-	effectiveStage string,
-	dispInstr *domain.DispatchInstruction,
-) (done bool, outcome domain.RunOutcome, err error) {
-	consultSeq := state.GlobalSequence + 1
-	consultStep := domain.CompletedStep{
-		Seq:              consultSeq,
-		AgentInstance:    s.orchRef.Identifier + "#" + strconv.Itoa(consultSeq),
-		Phase:            row.PhaseParsed.Name,
-		Stage:            effectiveStage,
-		Status:           domain.StatusSUCCESS,
-		Summary:          dispInstr.TaskDescription,
-		Timestamp:        s.deps.Clock.Now(),
-		IsInfrastructure: true,
-	}
-	newState, applyErr := s.deps.Store.Apply(ctx, *state, consultStep)
-	if applyErr != nil {
-		return true, domain.RunOutcome{Status: domain.RunFailed, Message: applyErr.Error()}, applyErr
-	}
-	*state = newState
+// consultReread re-reads the artifact after a successful routing consultation
+// returns, before any later state write, so that any Workflow Notes the
+// script orchestrator appended directly to the artifact during its
+// deliberation are preserved. The consultation itself is never recorded: it
+// consumes no global_sequence slot, writes no Execution Log row and does not
+// move current_state. The session's local sequence follows the re-read
+// artifact's global_sequence directly, so the agent the consultation
+// dispatches takes the next Seq with no collision from a consultation row.
+func (s *sessionImpl) consultReread(ctx context.Context, state *domain.ArtifactState, seq *int) {
 	if freshState, readErr := s.deps.Store.Read(ctx); readErr == nil {
 		*state = freshState
 	}
-	return false, domain.RunOutcome{}, nil
+	*seq = state.GlobalSequence
 }
 
 // buildConsultAgentRequest resolves the dispatched agent reference, resolves
@@ -310,11 +295,9 @@ func buildConsultAgentRequest(
 		OutputArtifacts: outputArts,
 		HumanInTheLoop:  effectiveHITL,
 	}
-	if state.RunID != "" {
-		folder := domain.RunScopedFolder(state.RunID) + "/"
-		agentReq.InputArtifacts = resolveToRunScoped(agentReq.InputArtifacts, folder)
-		agentReq.OutputArtifacts = resolveToRunScoped(agentReq.OutputArtifacts, folder)
-	}
+	folder := domain.RunScopedFolder(state.RunID) + "/"
+	agentReq.InputArtifacts = resolveToRunScoped(agentReq.InputArtifacts, folder)
+	agentReq.OutputArtifacts = resolveToRunScoped(agentReq.OutputArtifacts, folder)
 	phase = row.PhaseParsed.Name
 	return agentRef, agentReq, phase, dispSeq, true
 }
@@ -355,23 +338,20 @@ func (s *sessionImpl) consultHandleHarnessErr(
 		Phase:            phase,
 		Stage:            effectiveStage,
 		Status:           domain.StatusBLOCKED,
+		ErrorCode:        domain.ErrorTOOL_UNAVAILABLE,
 		Summary:          invokeErr.Error(),
 		Timestamp:        s.deps.Clock.Now(),
 		Inputs:           formatInputs(agentReq.InputArtifacts),
-		IsInfrastructure: true,
 	}
 	crNewState, crApplyErr := s.deps.Store.Apply(ctx, *state, crFailedStep)
 	if crApplyErr != nil {
 		return true, domain.RunOutcome{Status: domain.RunFailed, Message: crApplyErr.Error()}, crApplyErr
 	}
 	*state = crNewState
+	harnessResp := domain.HarnessErrorResponse(agentReq.AgentInstanceID, config.RunID, invokeErr)
 	devInfo := domain.DeviationInfo{
-		Kind: domain.DeviationHarnessError,
-		Response: domain.ProtocolResponse{
-			AgentInstanceID: agentReq.AgentInstanceID,
-			StatusCode:      domain.StatusBLOCKED,
-			StatusMessage:   invokeErr.Error(),
-		},
+		Kind:     domain.DeviationNonSuccess,
+		Response: harnessResp,
 		CurrentRow:    dispInstr.RowIndex,
 		CurrentPhase:  phase,
 		ArtifactState: *state,
@@ -383,7 +363,7 @@ func (s *sessionImpl) consultHandleHarnessErr(
 		bypassReq := agentReq
 		bypassReq.AgentInstanceID = fmt.Sprintf("%s#%d", agentRef.Identifier, bypassSeq)
 		if bypassResp, bypassErr := s.invokeAndLog(ctx, agentRef, bypassReq); bypassErr == nil {
-			finalResp, finalSeq, cont, hitlDone, hitlOut, hitlErr := s.runConsultHITL(
+			finalResp, finalSeq, routed, routedResp, cont, hitlDone, hitlOut, hitlErr := s.runConsultHITL(
 				ctx, agentRef, bypassReq, bypassResp, bypassSeq, agentReq.HumanInTheLoop, dispInstr,
 				effectiveStage, phase, state, seq, lastResponse, prevWorkflowStep, refreshedStages, stages,
 				table, agents, config, declaredInfraAgents, admitted, antiLoop,
@@ -391,11 +371,12 @@ func (s *sessionImpl) consultHandleHarnessErr(
 			if cont || hitlDone || hitlErr != nil {
 				return hitlDone, hitlOut, hitlErr
 			}
-			return s.applyConsultStep(ctx, agentRef, bypassReq, finalResp, finalSeq, phase, effectiveStage, dispInstr,
+			return s.applyConsultStep(ctx, agentRef, bypassReq, finalResp, finalSeq, routed, routedResp, phase, effectiveStage, dispInstr,
 				state, seq, lastResponse, prevWorkflowStep, refreshedStages, stages,
 				table, agents, config, declaredInfraAgents, admitted, antiLoop)
 		}
 	}
+	*lastResponse = &harnessResp
 	return s.consultRoute(ctx, &devInfo, state, seq, lastResponse, prevWorkflowStep,
 		refreshedStages, stages, table, agents, config, declaredInfraAgents, admitted, antiLoop)
 }

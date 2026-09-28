@@ -46,6 +46,7 @@ func TestConfigScreen_VersionDrift_ResumedRun_MatchingVersions_SkipsVersionDrift
 	// Arrange
 	s := NewConfigScreen(80, 24, screens.Styles{})
 	s.SetIsNewRun(false)
+	s.SetNeedsRunnerAdoption(true) // a resumed native artifact still asks the mode first
 	s.SetVersionDriftInfo("1.0", "1.0")
 
 	// Act
@@ -68,6 +69,7 @@ func TestConfigScreen_VersionDrift_ResumedRun_DifferentVersions_AllowingDriftRec
 	// Arrange
 	s := NewConfigScreen(80, 24, screens.Styles{})
 	s.SetIsNewRun(false)
+	s.SetNeedsRunnerAdoption(true) // a resumed native artifact still asks the mode first
 	s.SetVersionDriftInfo("1.0", "2.0")
 
 	// Act
@@ -103,6 +105,7 @@ func TestConfigScreen_VersionDrift_ResumedRun_DifferentVersions_RefusingDriftRec
 	// Arrange
 	s := NewConfigScreen(80, 24, screens.Styles{})
 	s.SetIsNewRun(false)
+	s.SetNeedsRunnerAdoption(true) // a resumed native artifact still asks the mode first
 	s.SetVersionDriftInfo("1.0", "2.0")
 	driveConfigScreenPastModeAndHarness(s)
 	if s.step != configStepVersionDrift {
@@ -178,6 +181,7 @@ func TestConfigScreen_VersionDrift_EmptyVersions_TreatsAsMatching(t *testing.T) 
 	// Arrange
 	s := NewConfigScreen(80, 24, screens.Styles{})
 	s.SetIsNewRun(false)
+	s.SetNeedsRunnerAdoption(true) // a resumed native artifact still asks the mode first
 	s.SetVersionDriftInfo("", "")
 
 	// Act
@@ -197,6 +201,7 @@ func TestConfigScreen_VersionDrift_RecordedVersionEmpty_TreatsAsMismatch(t *test
 	// Arrange
 	s := NewConfigScreen(80, 24, screens.Styles{})
 	s.SetIsNewRun(false)
+	s.SetNeedsRunnerAdoption(true) // a resumed native artifact still asks the mode first
 	s.SetVersionDriftInfo("", "1.0")
 
 	// Act
@@ -227,6 +232,7 @@ func TestConfigScreen_VersionDrift_CurrentVersionEmpty_TreatsAsMismatch(t *testi
 	// Arrange
 	s := NewConfigScreen(80, 24, screens.Styles{})
 	s.SetIsNewRun(false)
+	s.SetNeedsRunnerAdoption(true) // a resumed native artifact still asks the mode first
 	s.SetVersionDriftInfo("1.0", "")
 
 	// Act

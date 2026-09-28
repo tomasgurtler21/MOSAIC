@@ -419,6 +419,8 @@ The generated generic file:
   - `name` — taken from the source `name` field when present; otherwise derived
     from the output filename.
   - `role` — taken from the source `role` field.
+  - Source-only keys `infrastructure`, `triggers` and `on_failure` are in the
+    default drop set of every builtin harness and never appear in deployed files.
   - All other source fields not in the drop set are carried over verbatim (e.g.
     `description`, `recommended_tier`, `tools`, `required_skills`).
   - Deployment and transform stamps are **dropped**: `transform_version`,

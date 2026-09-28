@@ -22,8 +22,6 @@ import (
 	"mosaic-agent-test/internal/protocolcheck"
 )
 
-const protocolV1 protocolcheck.Version = "1.10"
-
 const wellFormedInvocation = `{
   "agent_instance_id": "researcher#1",
   "run_id": "run-1",
@@ -130,7 +128,7 @@ const responseWithResultData = `{
 // --- Well-formed messages produce no violations ---
 
 func TestCheckInvocation_WellFormed_ProducesNoViolations(t *testing.T) {
-	result := protocolcheck.CheckInvocation(wellFormedInvocation, protocolV1)
+	result := protocolcheck.CheckInvocation(wellFormedInvocation)
 
 	if !result.Parsed {
 		t.Fatal("Parsed = false, want true for a well-formed invocation")
@@ -141,7 +139,7 @@ func TestCheckInvocation_WellFormed_ProducesNoViolations(t *testing.T) {
 }
 
 func TestCheckResponse_WellFormedSuccess_ProducesNoViolations(t *testing.T) {
-	result := protocolcheck.CheckResponse(wellFormedResponseSuccess, protocolV1, protocolcheck.UnknownRequest)
+	result := protocolcheck.CheckResponse(wellFormedResponseSuccess, protocolcheck.UnknownRequest)
 
 	if !result.Parsed {
 		t.Fatal("Parsed = false, want true for a well-formed response")
@@ -152,7 +150,7 @@ func TestCheckResponse_WellFormedSuccess_ProducesNoViolations(t *testing.T) {
 }
 
 func TestCheckResponse_WellFormedBlockedWithErrorFields_ProducesNoViolations(t *testing.T) {
-	result := protocolcheck.CheckResponse(wellFormedResponseBlocked, protocolV1, protocolcheck.UnknownRequest)
+	result := protocolcheck.CheckResponse(wellFormedResponseBlocked, protocolcheck.UnknownRequest)
 
 	if !result.Parsed {
 		t.Fatal("Parsed = false, want true for a well-formed BLOCKED response")
@@ -163,7 +161,7 @@ func TestCheckResponse_WellFormedBlockedWithErrorFields_ProducesNoViolations(t *
 }
 
 func TestCheckResponse_E100MayOmitUnusableIdentifier(t *testing.T) {
-	result := protocolcheck.CheckResponse(wellFormedInvalidInvocationRejectionWithoutRunID, protocolV1, protocolcheck.UnknownRequest)
+	result := protocolcheck.CheckResponse(wellFormedInvalidInvocationRejectionWithoutRunID, protocolcheck.UnknownRequest)
 
 	if !result.Parsed {
 		t.Fatal("Parsed = false, want true for an E100 rejection")
@@ -176,7 +174,7 @@ func TestCheckResponse_E100MayOmitUnusableIdentifier(t *testing.T) {
 // --- Each violation class is detected and counted ---
 
 func TestCheckInvocation_MissingTaskDescription_DetectsMissingRequiredField(t *testing.T) {
-	result := protocolcheck.CheckInvocation(invocationMissingTaskDescription, protocolV1)
+	result := protocolcheck.CheckInvocation(invocationMissingTaskDescription)
 
 	if !hasClass(result, protocolcheck.ViolationMissingRequiredField) {
 		t.Errorf("expected %q among violations, got %+v", protocolcheck.ViolationMissingRequiredField, result.Violations)
@@ -184,7 +182,7 @@ func TestCheckInvocation_MissingTaskDescription_DetectsMissingRequiredField(t *t
 }
 
 func TestCheckResponse_MissingStatusCode_DetectsMissingRequiredField(t *testing.T) {
-	result := protocolcheck.CheckResponse(responseMissingRequiredField, protocolV1, protocolcheck.UnknownRequest)
+	result := protocolcheck.CheckResponse(responseMissingRequiredField, protocolcheck.UnknownRequest)
 
 	if !hasClass(result, protocolcheck.ViolationMissingRequiredField) {
 		t.Errorf("expected %q among violations, got %+v", protocolcheck.ViolationMissingRequiredField, result.Violations)
@@ -192,7 +190,7 @@ func TestCheckResponse_MissingStatusCode_DetectsMissingRequiredField(t *testing.
 }
 
 func TestCheckResponse_InventedStatusCode_IsDetected(t *testing.T) {
-	result := protocolcheck.CheckResponse(responseInventedStatusCode, protocolV1, protocolcheck.UnknownRequest)
+	result := protocolcheck.CheckResponse(responseInventedStatusCode, protocolcheck.UnknownRequest)
 
 	if !hasClass(result, protocolcheck.ViolationInventedStatusCode) {
 		t.Errorf("expected %q among violations, got %+v", protocolcheck.ViolationInventedStatusCode, result.Violations)
@@ -200,7 +198,7 @@ func TestCheckResponse_InventedStatusCode_IsDetected(t *testing.T) {
 }
 
 func TestCheckResponse_ErrorFieldsPresentWithoutBlockedStatus_IsDetected(t *testing.T) {
-	result := protocolcheck.CheckResponse(responseErrorFieldsWithoutBlocked, protocolV1, protocolcheck.UnknownRequest)
+	result := protocolcheck.CheckResponse(responseErrorFieldsWithoutBlocked, protocolcheck.UnknownRequest)
 
 	if !hasClass(result, protocolcheck.ViolationErrorFieldsWithoutBlocked) {
 		t.Errorf("expected %q among violations, got %+v", protocolcheck.ViolationErrorFieldsWithoutBlocked, result.Violations)
@@ -208,7 +206,7 @@ func TestCheckResponse_ErrorFieldsPresentWithoutBlockedStatus_IsDetected(t *test
 }
 
 func TestCheckResponse_ErrorFieldsAbsentOnBlockedStatus_IsDetected(t *testing.T) {
-	result := protocolcheck.CheckResponse(responseMissingErrorFieldsOnBlocked, protocolV1, protocolcheck.UnknownRequest)
+	result := protocolcheck.CheckResponse(responseMissingErrorFieldsOnBlocked, protocolcheck.UnknownRequest)
 
 	if !hasClass(result, protocolcheck.ViolationMissingErrorFieldsOnBlocked) {
 		t.Errorf("expected %q among violations, got %+v", protocolcheck.ViolationMissingErrorFieldsOnBlocked, result.Violations)
@@ -216,7 +214,7 @@ func TestCheckResponse_ErrorFieldsAbsentOnBlockedStatus_IsDetected(t *testing.T)
 }
 
 func TestCheckResponse_InventedErrorCode_IsDetected(t *testing.T) {
-	result := protocolcheck.CheckResponse(responseInventedErrorCode, protocolV1, protocolcheck.UnknownRequest)
+	result := protocolcheck.CheckResponse(responseInventedErrorCode, protocolcheck.UnknownRequest)
 
 	if !hasClass(result, protocolcheck.ViolationInventedErrorCode) {
 		t.Errorf("expected %q among violations, got %+v", protocolcheck.ViolationInventedErrorCode, result.Violations)
@@ -227,7 +225,7 @@ func TestCheckResponse_WrappedInProse_IsDetectedAsNotBareMessage(t *testing.T) {
 	// A response wrapped in prose rather than being the message is a
 	// distinct violation from being unparseable outright: the JSON is
 	// present and valid, it is merely not the whole reply.
-	result := protocolcheck.CheckResponse(responseWrappedInProse, protocolV1, protocolcheck.UnknownRequest)
+	result := protocolcheck.CheckResponse(responseWrappedInProse, protocolcheck.UnknownRequest)
 
 	if !hasClass(result, protocolcheck.ViolationNotBareMessage) {
 		t.Errorf("expected %q among violations, got %+v", protocolcheck.ViolationNotBareMessage, result.Violations)
@@ -235,7 +233,7 @@ func TestCheckResponse_WrappedInProse_IsDetectedAsNotBareMessage(t *testing.T) {
 }
 
 func TestCheckResponse_Unparseable_ReportsNotParsedWithUnparseableViolation(t *testing.T) {
-	result := protocolcheck.CheckResponse(responseUnparseable, protocolV1, protocolcheck.UnknownRequest)
+	result := protocolcheck.CheckResponse(responseUnparseable, protocolcheck.UnknownRequest)
 
 	if result.Parsed {
 		t.Error("Parsed = true, want false for text with no recoverable protocol JSON")
@@ -248,7 +246,7 @@ func TestCheckResponse_Unparseable_ReportsNotParsedWithUnparseableViolation(t *t
 // --- Counting ---
 
 func TestResult_CountByClass_TalliesEachViolationOnce(t *testing.T) {
-	result := protocolcheck.CheckResponse(responseErrorFieldsWithoutBlocked, protocolV1, protocolcheck.UnknownRequest)
+	result := protocolcheck.CheckResponse(responseErrorFieldsWithoutBlocked, protocolcheck.UnknownRequest)
 
 	counts := result.CountByClass()
 
@@ -258,7 +256,7 @@ func TestResult_CountByClass_TalliesEachViolationOnce(t *testing.T) {
 }
 
 func TestResult_CountByClass_OnNoViolations_ReturnsNoEntries(t *testing.T) {
-	result := protocolcheck.CheckResponse(wellFormedResponseSuccess, protocolV1, protocolcheck.UnknownRequest)
+	result := protocolcheck.CheckResponse(wellFormedResponseSuccess, protocolcheck.UnknownRequest)
 
 	counts := result.CountByClass()
 
@@ -278,7 +276,7 @@ func TestResult_CountByClass_OnNoViolations_ReturnsNoEntries(t *testing.T) {
 func TestCheckResponse_AppliesEquallyToTheSubjectsOwnFinalMessage(t *testing.T) {
 	subjectsOwnFinalMessage := wellFormedResponseSuccess
 
-	result := protocolcheck.CheckResponse(subjectsOwnFinalMessage, protocolV1, protocolcheck.UnknownRequest)
+	result := protocolcheck.CheckResponse(subjectsOwnFinalMessage, protocolcheck.UnknownRequest)
 
 	if !result.Parsed {
 		t.Fatal("Parsed = false, want true — the subject's own final message validates through the identical path as a collaborator's")
@@ -296,7 +294,7 @@ func TestCheckResponse_AppliesEquallyToTheSubjectsOwnFinalMessage(t *testing.T) 
 func TestCheckResponse_ResultDataRequested_ProducesNoViolation(t *testing.T) {
 	requested := protocolcheck.ResponseContext{RequestKnown: true, IncludeResultSummary: true}
 
-	result := protocolcheck.CheckResponse(responseWithResultData, protocolV1, requested)
+	result := protocolcheck.CheckResponse(responseWithResultData, requested)
 
 	if hasClass(result, protocolcheck.ViolationUnrequestedResultData) {
 		t.Errorf("expected no %q violation when the originating invocation set include_result_summary, got %+v", protocolcheck.ViolationUnrequestedResultData, result.Violations)
@@ -312,7 +310,7 @@ func TestCheckResponse_ResultDataRequested_ProducesNoViolation(t *testing.T) {
 func TestCheckResponse_ResultDataNotRequested_DetectsUnrequestedResultData(t *testing.T) {
 	notRequested := protocolcheck.ResponseContext{RequestKnown: true, IncludeResultSummary: false}
 
-	result := protocolcheck.CheckResponse(responseWithResultData, protocolV1, notRequested)
+	result := protocolcheck.CheckResponse(responseWithResultData, notRequested)
 
 	if !hasClass(result, protocolcheck.ViolationUnrequestedResultData) {
 		t.Errorf("expected %q among violations, got %+v", protocolcheck.ViolationUnrequestedResultData, result.Violations)
@@ -327,7 +325,7 @@ func TestCheckResponse_ResultDataNotRequested_DetectsUnrequestedResultData(t *te
 // counted as a violation from an unknown request, and must never be
 // silently dropped either — it appears in Unevaluated.
 func TestCheckResponse_UnknownRequest_ReportsResultDataClassAsUnevaluated(t *testing.T) {
-	result := protocolcheck.CheckResponse(responseWithResultData, protocolV1, protocolcheck.UnknownRequest)
+	result := protocolcheck.CheckResponse(responseWithResultData, protocolcheck.UnknownRequest)
 
 	if hasClass(result, protocolcheck.ViolationUnrequestedResultData) {
 		t.Errorf("expected no %q violation when the originating request is unknown, got %+v", protocolcheck.ViolationUnrequestedResultData, result.Violations)
@@ -348,7 +346,7 @@ func TestCheckResponse_UnknownRequest_ReportsResultDataClassAsUnevaluated(t *tes
 // CountByClass — an unknown request must not be able to fail a
 // ClassProtocolViolations assertion.
 func TestResult_CountByClass_NeverCountsAnUnevaluatedClass(t *testing.T) {
-	result := protocolcheck.CheckResponse(responseWithResultData, protocolV1, protocolcheck.UnknownRequest)
+	result := protocolcheck.CheckResponse(responseWithResultData, protocolcheck.UnknownRequest)
 
 	counts := result.CountByClass()
 

@@ -335,7 +335,7 @@ func TestNext_Paths_UnresolvableStageNumber_ReturnsStop(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Parse: %v", err)
 	}
-	aw, err := compat.Admit(table)
+	aw, err := compat.Admit(table, domain.ExecutionModeAuto)
 	if err != nil {
 		t.Fatalf("Admit: %v", err)
 	}

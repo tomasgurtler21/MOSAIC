@@ -503,30 +503,67 @@ class TestOrderingConstraints:
             "No corpus file carried both ExecutionPhilosophyCommon and ContextLimits"
         )
 
-    def test_constraints_regions_are_ordered_pc_then_hc_then_cc(
+    def test_harness_constraints_is_the_only_conduct_region_in_constraints(
         self, successful_corpus: list[CorpusEntry]
     ):
         checked_any = False
         for entry in successful_corpus:
             lines = entry.output_text.splitlines(keepends=False)
-            pc_idx = lines.index('<ProtocolConstraints type="managed">') \
-                if '<ProtocolConstraints type="managed">' in lines else None
-            hc_idx = lines.index('<HarnessConstraints type="managed">') \
-                if '<HarnessConstraints type="managed">' in lines else None
-            cc_idx = lines.index('<CustomConstraints type="custom">') \
-                if '<CustomConstraints type="custom">' in lines else None
+            assert '<ProtocolConstraints type="managed">' not in lines, (
+                f"{entry.label}: ProtocolConstraints must never be emitted"
+            )
+            if '<HarnessConstraints type="managed">' not in lines:
+                continue
+            if '<Constraints type="core">' not in lines:
+                continue
+            checked_any = True
+            hc_idx = lines.index('<HarnessConstraints type="managed">')
+            open_idx = lines.index('<Constraints type="core">')
+            close_idx = lines.index("</Constraints>")
+            assert open_idx < hc_idx < close_idx, (
+                f"{entry.label}: HarnessConstraints must sit inside the Constraints section"
+            )
+        assert checked_any, "No corpus file exercised HarnessConstraints placement"
 
-            if pc_idx is not None and hc_idx is not None:
-                checked_any = True
-                assert pc_idx < hc_idx, (
-                    f"{entry.label}: ProtocolConstraints must precede HarnessConstraints"
-                )
-            if hc_idx is not None and cc_idx is not None:
-                checked_any = True
-                assert hc_idx < cc_idx, (
-                    f"{entry.label}: HarnessConstraints must precede CustomConstraints"
-                )
-        assert checked_any, "No corpus file exercised the Constraints region ordering"
+
+class TestRetiredNamesAbsentFromMigratedOutput:
+    """No migrated output in the corpus carries ProtocolConstraints, IdentityExtension
+    or ErrorHandlingExtension, although legacy inputs in the corpus still use them."""
+
+    _RETIRED = ("ProtocolConstraints", "IdentityExtension", "ErrorHandlingExtension")
+
+    def test_no_retired_region_tag_in_any_corpus_output(
+        self, successful_corpus: list[CorpusEntry]
+    ):
+        from fence import fence_mask
+        offenders: list[str] = []
+        for entry in successful_corpus:
+            lines = entry.output_text.splitlines(keepends=True)
+            mask = fence_mask(lines)
+            for idx, line in enumerate(lines):
+                if mask[idx]:
+                    continue
+                stripped = line.strip()
+                for name in self._RETIRED:
+                    if stripped.startswith(f"<{name} ") or stripped == f"</{name}>":
+                        offenders.append(f"{entry.label}:{idx + 1}: {stripped}")
+        assert offenders == [], f"Retired names present in migrated output: {offenders}"
+
+    def test_corpus_still_exercises_legacy_inputs(self, successful_corpus: list[CorpusEntry]):
+        """Guard against a vacuous pass: the corpus contains legacy input that carries
+        the retired markers or bullets."""
+        legacy_inputs = [
+            e.label for e in successful_corpus
+            if "[INJECTION: identity_extension]" in e.input_text
+            or "[INJECTION: error_handling_extension]" in e.input_text
+        ]
+        assert legacy_inputs, "No corpus input carries a legacy retired-name marker"
+
+    def test_no_retired_name_reported_as_emitted(self, successful_corpus: list[CorpusEntry]):
+        for entry in successful_corpus:
+            for name in self._RETIRED:
+                assert name not in entry.result.deployed_added, entry.label
+                assert name not in entry.result.injections_added, entry.label
 
 
 # ---------------------------------------------------------------------------
@@ -755,11 +792,10 @@ class TestStage5AllFourBehaviours:
         assert set(stage5_acceptance.result.deployed_added) >= {
             "ClosingProcedure",
             "AuthorityHierarchy",
-            "ProtocolConstraints",
             "ErrorHandlingCommon",
             "ExecutionPhilosophyCommon",
         }, (
-            f"result.deployed_added must record all five conduct regions as emitted; "
+            f"result.deployed_added must record all four conduct regions as emitted; "
             f"got: {set(stage5_acceptance.result.deployed_added)!r}"
         )
 
@@ -978,20 +1014,18 @@ class TestStage5AllFourBehaviours:
             "PC-bullet-4 must not survive in the output"
         )
 
-    def test_protocol_constraints_region_is_empty(
+    def test_protocol_constraints_region_is_absent(
         self, stage5_acceptance: _Stage5Result
     ) -> None:
-        """The ProtocolConstraints managed region must be empty."""
-        body = extract_region(
+        """No ProtocolConstraints region is emitted: the legacy bullets are deleted and
+        the retired region name never reaches the output."""
+        assert extract_region(
             stage5_acceptance.output_text,
             BoundaryKind.DEPLOYED,
             "ProtocolConstraints",
-        )
-        assert body is not None, "ProtocolConstraints region must be present"
-        assert body.strip() == "", (
-            "ProtocolConstraints managed region must be empty — "
-            "the legacy PC bullets were deleted by the PC deletion rules"
-        )
+        ) is None, "ProtocolConstraints region must not be present in the output"
+        assert "ProtocolConstraints" not in stage5_acceptance.output_text
+        assert "ProtocolConstraints" not in stage5_acceptance.result.deployed_added
 
     def test_eh_retry_prose_variant_does_not_survive(
         self, stage5_acceptance: _Stage5Result
@@ -1125,6 +1159,49 @@ class TestCrossCopyVocabularyInvariant:
         "ErrorHandling",
         "ExecutionPhilosophy",
     )
+
+    _EXPECTED_CANONICAL_DEPLOYED: tuple[str, ...] = (
+        "CommunicationProtocol",
+        "AuthorityHierarchy",
+        "ClosingProcedure",
+        "AvailableWorkflows",
+        "InfrastructureAgents",
+        "HarnessConstraints",
+        "ErrorHandlingCommon",
+        "ExecutionPhilosophyCommon",
+    )
+
+    _EXPECTED_DEPLOYED_PARENT: dict[str, str | None] = {
+        "CommunicationProtocol": None,
+        "AuthorityHierarchy": "Identity",
+        "ClosingProcedure": "Identity",
+        "AvailableWorkflows": "Identity",
+        "InfrastructureAgents": "Identity",
+        "HarnessConstraints": "Constraints",
+        "ErrorHandlingCommon": "ErrorHandling",
+        "ExecutionPhilosophyCommon": "ExecutionPhilosophy",
+    }
+
+    _EXPECTED_INJECTION_PARENT: dict[str, str | None] = {
+        "CodebaseContext": "Capabilities",
+        "LanguagePatterns": "Capabilities",
+        "OutputArtifactTemplate": "Capabilities",
+        "SeverityThresholds": "Capabilities",
+        "SeverityDefinitions": "Capabilities",
+        "ContextLimits": "ExecutionPhilosophy",
+    }
+
+    def test_canonical_deployed_matches_go_eight_name_sequence(self) -> None:
+        """CANONICAL_DEPLOYED equals Go CanonicalDeployed name-for-name and in order."""
+        assert _bc.CANONICAL_DEPLOYED == self._EXPECTED_CANONICAL_DEPLOYED
+
+    def test_deployed_parent_map_matches_go_deployed_parent(self) -> None:
+        """DEPLOYED_PARENT_MAP holds the same eight pairs as Go DeployedParent."""
+        assert _bc.DEPLOYED_PARENT_MAP == self._EXPECTED_DEPLOYED_PARENT
+
+    def test_injection_parent_map_matches_go_injection_parent(self) -> None:
+        """INJECTION_PARENT_MAP holds the same six pairs as Go InjectionParent."""
+        assert _bc.INJECTION_PARENT_MAP == self._EXPECTED_INJECTION_PARENT
 
     def test_canonical_sections_matches_expected_five_entry_sequence(self) -> None:
         """CANONICAL_SECTIONS must equal the exact 5-entry sequence pinned here and in Go.

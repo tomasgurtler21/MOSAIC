@@ -132,6 +132,7 @@ func TestSessionFactory_WithoutExecOverride_ModelSendsEmptyPath(t *testing.T) {
 		tea.KeyMsg{Type: tea.KeyEnter},
 		tea.KeyMsg{Type: tea.KeyEnter},
 		tea.KeyMsg{Type: tea.KeyEnter},
+		tea.KeyMsg{Type: tea.KeyEnter}, // review loop limit: accept the suggested 3
 	}
 	for _, key := range keys {
 		m.Update(key)

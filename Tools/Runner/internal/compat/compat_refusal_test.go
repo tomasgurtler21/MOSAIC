@@ -25,7 +25,7 @@ func TestAdmit_MultipleStagedPhaseBlocks_ReturnsRefusalError(t *testing.T) {
 		},
 	}
 
-	_, err := compat.Admit(table)
+	_, err := compat.Admit(table, domain.ExecutionModeAuto)
 
 	if err == nil {
 		t.Fatal("Admit must refuse a workflow with multiple staged phase blocks")
@@ -44,7 +44,7 @@ func TestAdmit_MultipleStagedPhaseBlocks_RefusalMessage_NonEmpty(t *testing.T) {
 		},
 	}
 
-	_, err := compat.Admit(table)
+	_, err := compat.Admit(table, domain.ExecutionModeAuto)
 
 	re := asRefusalError(t, err)
 	if re.Reason == "" {
@@ -72,7 +72,7 @@ func TestAdmit_NonExecutionStagedPhase_ReturnsRefusalError(t *testing.T) {
 		},
 	}
 
-	_, err := compat.Admit(table)
+	_, err := compat.Admit(table, domain.ExecutionModeAuto)
 
 	if err == nil {
 		t.Fatal("Admit must refuse a workflow where the staged phase is not EXECUTION")
@@ -93,7 +93,7 @@ func TestAdmit_NonExecutionStagedPhase_RefusalMessage_MentionsPhaseName(t *testi
 		},
 	}
 
-	_, err := compat.Admit(table)
+	_, err := compat.Admit(table, domain.ExecutionModeAuto)
 
 	re := asRefusalError(t, err)
 	if re.Reason == "" {
@@ -125,7 +125,7 @@ func TestAdmit_DynamicStageSet_ReturnsRefusalError(t *testing.T) {
 		},
 	}
 
-	_, err := compat.Admit(table)
+	_, err := compat.Admit(table, domain.ExecutionModeAuto)
 
 	if err == nil {
 		t.Fatal("Admit must refuse a workflow with a dynamic or growing stage set")
@@ -154,7 +154,7 @@ func TestAdmit_DynamicStageSet_RefusalMessage_NonEmpty(t *testing.T) {
 		},
 	}
 
-	_, err := compat.Admit(table)
+	_, err := compat.Admit(table, domain.ExecutionModeAuto)
 
 	re := asRefusalError(t, err)
 	if re.Reason == "" {
@@ -179,7 +179,7 @@ func TestAdmit_AgentWithModeNotation_ReturnsRefusalError(t *testing.T) {
 		},
 	}
 
-	_, err := compat.Admit(table)
+	_, err := compat.Admit(table, domain.ExecutionModeAuto)
 
 	if err == nil {
 		t.Fatal("Admit must refuse a workflow with agent-with-mode notation")
@@ -200,7 +200,7 @@ func TestAdmit_AgentWithModeNotation_RefusalMessage_NamesAgent(t *testing.T) {
 		},
 	}
 
-	_, err := compat.Admit(table)
+	_, err := compat.Admit(table, domain.ExecutionModeAuto)
 
 	re := asRefusalError(t, err)
 	if re.Reason == "" {
@@ -232,7 +232,7 @@ func TestAdmit_ParallelDispatch_OnSuccessMultipleAgents_ReturnsRefusalError(t *t
 		},
 	}
 
-	_, err := compat.Admit(table)
+	_, err := compat.Admit(table, domain.ExecutionModeAuto)
 
 	if err == nil {
 		t.Fatal("Admit must refuse a workflow with parallel dispatch notation")
@@ -261,7 +261,7 @@ func TestAdmit_ParallelDispatch_RefusalMessage_NonEmpty(t *testing.T) {
 		},
 	}
 
-	_, err := compat.Admit(table)
+	_, err := compat.Admit(table, domain.ExecutionModeAuto)
 
 	re := asRefusalError(t, err)
 	if re.Reason == "" {
@@ -297,7 +297,7 @@ func TestAdmit_NonPlanStageSource_ReturnsRefusalError(t *testing.T) {
 		},
 	}
 
-	_, err := compat.Admit(table)
+	_, err := compat.Admit(table, domain.ExecutionModeAuto)
 
 	if err == nil {
 		t.Fatal("Admit must refuse a workflow where stage source is not the plan artifact")
@@ -326,7 +326,7 @@ func TestAdmit_NonPlanStageSource_RefusalMessage_NonEmpty(t *testing.T) {
 		},
 	}
 
-	_, err := compat.Admit(table)
+	_, err := compat.Admit(table, domain.ExecutionModeAuto)
 
 	re := asRefusalError(t, err)
 	if re.Reason == "" {
@@ -353,7 +353,7 @@ func TestAdmit_RefusalError_ComponentIsCompat(t *testing.T) {
 		},
 	}
 
-	_, err := compat.Admit(table)
+	_, err := compat.Admit(table, domain.ExecutionModeAuto)
 
 	re := asRefusalError(t, err)
 	if re.Component != "compat" {
@@ -376,7 +376,7 @@ func TestAdmit_RefusalError_ResourceNamesWorkflow(t *testing.T) {
 		},
 	}
 
-	_, err := compat.Admit(table)
+	_, err := compat.Admit(table, domain.ExecutionModeAuto)
 
 	re := asRefusalError(t, err)
 	if re.Resource == "" {
@@ -400,7 +400,7 @@ func TestAdmit_RefusalError_ReasonIsNonEmpty(t *testing.T) {
 		},
 	}
 
-	_, err := compat.Admit(table)
+	_, err := compat.Admit(table, domain.ExecutionModeAuto)
 
 	re := asRefusalError(t, err)
 	if re.Reason == "" {

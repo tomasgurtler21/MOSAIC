@@ -224,6 +224,8 @@ func (m *rootModel) updateSetupHarness(msg tea.Msg) (tea.Model, tea.Cmd) {
 // workflow screen at all.
 func (m *rootModel) prepareConfigScreen() {
 	m.configScreen.SetIsNewRun(m.selections.isNewRun)
+	m.configScreen.SetNeedsRunnerAdoption(m.needsRunnerAdoption())
+	m.configScreen.SetCommitSetupPending(m.commitSetupPending())
 	m.configScreen.SetVersionDriftInfo(
 		string(m.recordedWorkflowVersion()),
 		string(m.selectedWorkflowVersion()),
@@ -469,4 +471,42 @@ func (m *rootModel) announceIdentity() runselect.Identity {
 		LastUpdated: state.LastUpdated,
 	}
 	return id
+}
+
+// needsRunnerAdoption reports whether the resumed run's artifact records no
+// runner settings (a native-created artifact), so the configuration wizard has
+// to ask for them once. A new run, and an artifact that cannot be read or
+// parsed, never needs adoption here; the session refuses the latter.
+func (m *rootModel) needsRunnerAdoption() bool {
+	if m.selections.isNewRun || m.selections.runFolder == "" {
+		return false
+	}
+	data, err := os.ReadFile(filepath.Join(m.selections.runFolder, "Orchestration.md"))
+	if err != nil {
+		return false
+	}
+	state, err := artifact.Parse(data)
+	if err != nil {
+		return false
+	}
+	return state.Mode == domain.ExecutionModeUnset
+}
+
+// commitSetupPending reports whether the resumed run enables commits but
+// records no commit branch, so the wizard must ask for the branch variant
+// explicitly. A new run, and an artifact that cannot be read or parsed, never
+// has a pending setup here; the session refuses the latter.
+func (m *rootModel) commitSetupPending() bool {
+	if m.selections.isNewRun || m.selections.runFolder == "" {
+		return false
+	}
+	data, err := os.ReadFile(filepath.Join(m.selections.runFolder, "Orchestration.md"))
+	if err != nil {
+		return false
+	}
+	state, err := artifact.Parse(data)
+	if err != nil {
+		return false
+	}
+	return state.Commits && state.CommitBranch == ""
 }

@@ -318,76 +318,6 @@ func TestSession_Start_Dispatch_DoesNotDoublePrefixAlreadyScopedPaths(t *testing
 	}
 }
 
-// TestSession_Start_Dispatch_EmptyRunID_PathsNotPrefixed verifies that when
-// RunID is empty (pre-v1.8 or caller did not set it), artifact paths are NOT
-// prefixed. This maintains backward compatibility with runs that have no run_id.
-//
-// RED phase note: this test passes vacuously during the RED phase because no
-// path resolution exists yet — empty RunID produces the same no-op result as
-// correct behavior. It will provide correct regression protection once the
-// implementation adds path prefixing (spurious prefixing with empty RunID would
-// be caught).
-func TestSession_Start_Dispatch_EmptyRunID_PathsNotPrefixed(t *testing.T) {
-	dir := t.TempDir()
-
-	const resolveWorkflow = `<Workflow type="core" name="no-runid" version="1.0">
-## No RunID Workflow
-
-| Phase | Subagent | HITL | Input | Output |
-|-------|----------|:----:|-------|--------|
-| PLANNING | agent-a | FALSE | Plan.md | Progress.md |
-</Workflow>
-`
-	orchPath := filepath.Join(dir, "no-runid-orch.md")
-	if err := os.WriteFile(orchPath, []byte(resolveWorkflow), 0600); err != nil {
-		t.Fatalf("write no-runid-orch.md: %v", err)
-	}
-	writeAgentFile(t, dir, "agent-a")
-
-	f := harness.NewMockAdapter()
-	store := &memStore{}
-	ses := session.New(session.Deps{
-		Harness:   f,
-		Store:     store,
-		Clock:     fixedClock{t: epoch},
-		Interact:  &noopInteraction{},
-	})
-
-	f.Queue("agent-a", harness.ScriptedEntry{Response: &domain.ProtocolResponse{
-		AgentInstanceID: "agent-a#1",
-		StatusCode:      domain.StatusSUCCESS,
-		StatusMessage:   "done",
-	}})
-
-	cfg := domain.RunConfig{
-		OrchestratorFilePath: orchPath,
-		WorkflowID:           "no-runid",
-		Task:                 "task",
-		RunID:                "", // no run_id
-		IsNewRun:             true,
-		RunSettings:          domain.RunSettings{Mode: domain.ExecutionModeAuto},
-	}
-
-	ses.Start(context.Background(), cfg) //nolint:errcheck
-
-	invs := f.Invocations()
-	if len(invs) < 1 {
-		t.Fatal("want at least one harness invocation, got none")
-	}
-
-	req := invs[0].Request
-
-	// With empty RunID, paths must remain unchanged (no Orchestration-/ prefix added).
-	if !containsInput(req.InputArtifacts, "Plan.md") {
-		t.Errorf("InputArtifacts: want unscoped %q when RunID is empty, got %v",
-			"Plan.md", req.InputArtifacts)
-	}
-	// RunID in request must also be empty.
-	if req.RunID != "" {
-		t.Errorf("ProtocolRequest.RunID: want empty string when config.RunID is empty, got %q", req.RunID)
-	}
-}
-
 // TestSession_Start_Dispatch_PopulatesRunID_FromArtifactState_ResumedRun verifies
 // that on the resume path (IsNewRun=false), every ProtocolRequest sent to the
 // harness carries the RunID from the artifact state returned by Store.Read.
@@ -418,8 +348,9 @@ func TestSession_Start_Dispatch_PopulatesRunID_FromArtifactState_ResumedRun(t *t
 	// cfg.RunID is empty — it is not the source of ProtocolRequest.RunID on the
 	// resume path. The session must derive RunID from the loaded artifact state.
 	cfg := baseLinearConfig(orchPath)
-	cfg.IsNewRun = false
+	markResume(&cfg)
 	cfg.RunID = "" // deliberately empty to distinguish from state.RunID
+	cfg.RunFolder = filepath.Join(filepath.Dir(orchPath), domain.RunScopedFolder(artifactRunID))
 
 	f.Queue("agent-a", harness.ScriptedEntry{Response: &domain.ProtocolResponse{
 		AgentInstanceID: "agent-a#1",

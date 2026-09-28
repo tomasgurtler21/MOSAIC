@@ -10,7 +10,6 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
-	"strings"
 	"testing"
 
 	"mosaic-run/internal/domain"
@@ -196,57 +195,33 @@ func TestSession_AntiLoopGuard_PartiallyDoneAppliesGuard(t *testing.T) {
 	}
 }
 
-// TestSession_ConsultStep_PhaseFieldIsNonEmpty verifies that the consultation
-// infrastructure row written to the execution log by consultRoute carries a
-// non-empty Phase field. The Phase is derived from the workflow row at the
-// dispatched rowIndex and must match the phase declared in the orchestrator
-// file (e.g. "PLANNING" for the hitl-linear fixture).
-//
-// In the current implementation the consultStep struct literal omits the Phase
-// field, leaving it as an empty string. The fix adds Phase: phase so the row
-// correctly records which workflow phase the consultation covered.
-func TestSession_ConsultStep_PhaseFieldIsNonEmpty(t *testing.T) {
+// TestSession_ConsultDispatch_HITLStep_LeavesNoConsultationRow verifies that a
+// consultant-routed dispatch of a HITL step records only the workflow step, in
+// the phase declared by the workflow, and no consultation row.
+func TestSession_ConsultDispatch_HITLStep_LeavesNoConsultationRow(t *testing.T) {
 	consultant := &scriptedRoutingConsultant{}
 	consultant.queueDispatch("agent-a", "do the work", 0)
 	consultant.queueStop("done")
 
-	// Use ApprovalTrue so HITL passes without cycling; the test focuses on
-	// the consultStep row, not on HITL redispatch behavior.
+	// ApprovalTrue so HITL passes without cycling; the test focuses on what is
+	// recorded, not on HITL redispatch behavior.
 	ses, f, store, orchPath := newHITLLinearSession(t, consultant, &fixedApprovalReader{domain.ApprovalTrue})
 
 	f.Queue("agent-a", harness.ScriptedEntry{Response: &domain.ProtocolResponse{
-		AgentInstanceID: "agent-a#2",
+		AgentInstanceID: "agent-a#1",
 		StatusCode:      domain.StatusSUCCESS,
 		StatusMessage:   "done",
 	}})
 
 	ses.Start(context.Background(), baseOrchestratedConfig(orchPath)) //nolint:errcheck
 
-	// Confirm the consultation infrastructure row is present.
-	infraCount := 0
-	for _, step := range store.Applied {
-		if step.IsInfrastructure && strings.HasPrefix(step.AgentInstance, "orchestrator#") {
-			infraCount++
-		}
+	requireNoConsultationRows(t, store)
+	if len(store.Applied) != 1 {
+		t.Fatalf("want exactly one applied row (the workflow step), got %d: %+v", len(store.Applied), store.Applied)
 	}
-	if infraCount == 0 {
-		t.Fatal("want at least one consultStep infrastructure row in the execution log, got 0; " +
-			"cannot verify Phase field without a consultation row")
-	}
-
-	// Every consultStep row must carry the exact Phase declared in the workflow.
-	// The hitl-linear fixture declares both rows as phase "PLANNING", so the
-	// dispatched row (index 0) must produce Phase=="PLANNING", not just any
-	// non-empty string.
-	const wantPhase = "PLANNING"
-	for _, step := range store.Applied {
-		if !step.IsInfrastructure || !strings.HasPrefix(step.AgentInstance, "orchestrator#") {
-			continue
-		}
-		if step.Phase != wantPhase {
-			t.Errorf("consultStep infrastructure row %q has Phase=%q; want %q (the phase declared in the hitl-linear fixture)",
-				step.AgentInstance, step.Phase, wantPhase)
-		}
+	// The hitl-linear fixture declares the dispatched row in phase "PLANNING".
+	if got := store.Applied[0]; got.Phase != "PLANNING" || got.Seq != 1 {
+		t.Errorf("want workflow step in phase PLANNING at Seq 1, got phase %q Seq %d", got.Phase, got.Seq)
 	}
 }
 

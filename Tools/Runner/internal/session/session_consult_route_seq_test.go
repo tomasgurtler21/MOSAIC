@@ -1,14 +1,19 @@
 package session_test
 
-// Tests for ConsultRoute stage carry-over (D2) and Seq monotonicity across
-// mixed routing paths (D3): cross-stage deviation dispatches must carry the
-// target row's stage, not state.CurrentState.Stage; and all Applied Seq values
-// must be strictly increasing when auto-routed, consultant-routed, and
-// HITL-rejected dispatches are interleaved.
+// Tests for ConsultRoute stage carry-over and Seq monotonicity across mixed
+// routing paths: cross-stage deviation dispatches must carry the target row's
+// stage, not state.CurrentState.Stage; and all recorded Seq values must be
+// strictly increasing, with no collision between a consultation and the
+// dispatch it chose, when auto-routed, consultant-routed, HITL-rejected,
+// harness-error and resumed dispatches are interleaved. Consultations consume
+// no sequence slot.
 
 import (
 	"context"
 	"errors"
+	"fmt"
+	"reflect"
+	"strings"
 	"sync"
 	"testing"
 
@@ -85,7 +90,7 @@ func TestSession_ConsultRoute_CrossStageDeviation_UsesTargetRowStage(t *testing.
 	consultant.queueDispatch("agent-a", "recover Stage-2 after harness failure", 2)
 	consultant.queueStop("Stage-2 step completed after recovery")
 
-	dir := t.TempDir()
+	dir := scopedTempDir(t)
 	orchPath := copyOrchestratorFile(t, dir, "consult-staged-orch.md")
 	writeAgentFile(t, dir, "agent-a")
 	writeAgentFile(t, dir, "agent-b")
@@ -122,6 +127,7 @@ func TestSession_ConsultRoute_CrossStageDeviation_UsesTargetRowStage(t *testing.
 		WorkflowID:           "consult-staged",
 		Task:                 "test task",
 		IsNewRun:             false, // resume from pre-seeded Stage-1-done state
+		RunID:               testRunID,
 		RunFolder:            dir,
 		RunSettings:          domain.RunSettings{Mode: domain.ExecutionModeAuto},
 	}
@@ -156,44 +162,29 @@ func TestSession_ConsultRoute_CrossStageDeviation_UsesTargetRowStage(t *testing.
 			wantStage, workflowStep.Stage)
 	}
 
-	// Also verify the consultation record (infrastructure step) carries Stage = "2".
-	// Every CompletedStep produced by consultRoute must reflect the target row's stage.
-	for _, s := range store.Applied {
-		if s.IsInfrastructure && !s.HITLRejected && s.Stage != "" && s.Stage != wantStage {
-			t.Errorf("infrastructure ConsultStep.Stage = %q, want %q; "+
-				"all CompletedSteps in consultRoute must carry the target row stage, "+
-				"not the prior stage from state.CurrentState.Stage",
-				s.Stage, wantStage)
+	// The consultation itself writes no row: no infrastructure step may appear.
+	for _, step := range store.Applied {
+		if step.IsInfrastructure && !step.HITLRejected {
+			t.Errorf("want no consultation row in store.Applied, got infrastructure step %q", step.AgentInstance)
 		}
 	}
 }
 
 // TestSession_MixedRoutingPaths_SeqStrictlyMonotonic verifies that a run mixing
-// auto-routed dispatches, consultant-routed dispatches, and HITL-rejected rows
-// produces a strictly increasing Seq column across all persisted CompletedSteps.
+// auto-routed dispatches, a harness error, consultant-routed dispatches and
+// HITL-rejected rows records a strictly increasing Seq column, in which every
+// recorded invocation takes the next slot after global_sequence.
 //
 // Sequence:
 //
-//	(a) Stage-1/agent-a auto-dispatched and succeeds (Seq=1). After Apply:
-//	    seq=1, GlobalSequence=1.
-//	(b) Stage-1/agent-b auto-dispatch: harness returns an error, triggering
-//	    consultRoute. Inside consultRoute:
-//	    - consultStep consumed Seq=2; dispSeq = *seq+1 = 1+1 = 2 (same slot as
-//	      consultSeq, because *seq was not updated by the consultStep Apply).
-//	    - Agent-b is dispatched with HITLOverride=true. First attempt: SUCCESS +
-//	      ApprovalFalse -> HITLRedispatch (rlRejStep, Seq=3). After rlRejStep
-//	      Apply: *seq=3, currentAttemptSeq++ = 3.
-//	    - Second attempt (HITL redispatch): SUCCESS + ApprovalTrue -> HITLAccept
-//	      (workflowSeq=4). After workflowStep Apply: GlobalSequence=4.
-//	    - consultRoute sets *seq = currentAttemptSeq = 3 (the agent suffix
-//	      counter, NOT GlobalSequence). After return: seq=3, GlobalSequence=4.
-//	(c) Stage-2/agent-a auto-dispatched. hitlAttemptSeq = seq+1 = 4.
-//	    GlobalSequence is already 4 -> Seq=4 collision with workflowSeq from (b).
-//
-// The test asserts that all Applied[i].Seq values are strictly increasing.
-// With the current code step (c) produces a duplicate Seq=4.
-// After the fix *seq is reconciled to state.GlobalSequence after consultRoute
-// returns, so the next auto-dispatch gets Seq=5.
+//	(a) Stage-1/agent-a auto-dispatched and succeeds (Seq=1).
+//	(b) Stage-1/agent-b auto-dispatch: the harness returns an error, recorded
+//	    as a row (Seq=2), and the consultant is asked. The consultation
+//	    consumes no slot. It re-dispatches agent-b with HITLOverride=true: first
+//	    attempt SUCCESS + ApprovalFalse is a HITL-rejected row (Seq=3), the
+//	    redispatch is accepted (Seq=4).
+//	(c) Stage-2/agent-a and Stage-2/agent-b are auto-dispatched afterwards and
+//	    take Seq 5 and 6, with no collision with the accepted step from (b).
 func TestSession_MixedRoutingPaths_SeqStrictlyMonotonic(t *testing.T) {
 	hitlOverride := true
 	outputs := []string{"stage-1-b-output.md"}
@@ -210,7 +201,7 @@ func TestSession_MixedRoutingPaths_SeqStrictlyMonotonic(t *testing.T) {
 	// No further consultant instructions needed -- the run completes on its own
 	// via auto-routing.
 
-	dir := t.TempDir()
+	dir := scopedTempDir(t)
 	orchPath := copyOrchestratorFile(t, dir, "consult-staged-orch.md")
 	writeAgentFile(t, dir, "agent-a")
 	writeAgentFile(t, dir, "agent-b")
@@ -233,7 +224,7 @@ func TestSession_MixedRoutingPaths_SeqStrictlyMonotonic(t *testing.T) {
 		StatusCode:      domain.StatusSUCCESS,
 		StatusMessage:   "Stage-1/agent-a done",
 	}})
-	// (b) Stage-1/agent-b: harness error triggers consultRoute.
+	// (b) Stage-1/agent-b: harness error is recorded (Seq=2) and triggers consultRoute.
 	f.Queue("agent-b", harness.ScriptedEntry{Err: errors.New("simulated Stage-1/agent-b harness error")})
 	// Inside consultRoute: first agent-b dispatch (HITLOverride=true).
 	// ApprovalFalse -> HITLRedispatch (rlRejStep applied at Seq=3).
@@ -249,8 +240,7 @@ func TestSession_MixedRoutingPaths_SeqStrictlyMonotonic(t *testing.T) {
 		StatusMessage:   "Stage-1/agent-b accepted after redispatch",
 	}})
 	// (c) Stage-2/agent-a: auto-dispatched after consultRoute returns.
-	// With the bug: hitlAttemptSeq = seq+1 = 4 == GlobalSequence (already used).
-	// With the fix: hitlAttemptSeq = GlobalSequence+1 = 5 (reconciled seq).
+	// Its Seq must be global_sequence+1 = 5, not a repeat of the accepted step's 4.
 	f.Queue("agent-a", harness.ScriptedEntry{Response: &domain.ProtocolResponse{
 		AgentInstanceID: "agent-a#5",
 		StatusCode:      domain.StatusSUCCESS,
@@ -274,21 +264,152 @@ func TestSession_MixedRoutingPaths_SeqStrictlyMonotonic(t *testing.T) {
 
 	ses.Start(context.Background(), cfg) //nolint:errcheck
 
-	// Primary assertion: every Applied[i].Seq must be strictly greater than
-	// Applied[i-1].Seq. With the current code, the auto-dispatched Stage-2/agent-a
-	// step (c) computes Seq = seq+1 = 4, which duplicates the workflowSeq = 4
-	// that consultRoute applied for Stage-1/agent-b.
-	if len(store.Applied) < 4 {
-		t.Fatalf("want at least 4 applied steps (consult, rlRejStep, workflowStep, "+
-			"Stage-2/agent-a), got %d; the run may have terminated earlier than expected",
-			len(store.Applied))
+	// Primary assertion: the consultation leaves no row, and every recorded
+	// invocation takes the next slot after global_sequence (Seq 1..6).
+	requireNoConsultationRows(t, store)
+	if len(store.Applied) != 6 {
+		t.Fatalf("want 6 applied steps (agent-a, agent-b error, rejected attempt, accepted "+
+			"attempt, Stage-2/agent-a, Stage-2/agent-b), got %d: %+v", len(store.Applied), store.Applied)
 	}
-	for i := 1; i < len(store.Applied); i++ {
-		if store.Applied[i].Seq <= store.Applied[i-1].Seq {
-			t.Errorf("store.Applied[%d].Seq=%d is not greater than Applied[%d].Seq=%d; "+
-				"Seq values must be strictly increasing across auto-routed, consultant-routed, "+
-				"and HITL-rejected dispatches (D3 Seq reconciliation bug)",
-				i, store.Applied[i].Seq, i-1, store.Applied[i-1].Seq)
+	for i, step := range store.Applied {
+		if step.Seq != i+1 {
+			t.Errorf("store.Applied[%d] (%s) has Seq=%d, want %d: every recorded invocation must take the "+
+				"next slot, with no gap from a consultation and no collision after consultRoute returns",
+				i, step.AgentInstance, step.Seq, i+1)
 		}
+	}
+	if store.state.GlobalSequence != len(store.Applied) {
+		t.Errorf("want global_sequence %d (one per recorded invocation), got %d",
+			len(store.Applied), store.state.GlobalSequence)
+	}
+}
+
+// requireInstanceIDsMatchRecordedSeq fails unless every recorded row is named
+// "{agent}#{Seq}" and the rows' Seq values run 1..n without a gap or repeat.
+func requireInstanceIDsMatchRecordedSeq(t *testing.T, store *memStore) {
+	t.Helper()
+	for i, step := range store.Applied {
+		if step.Seq != i+1 {
+			t.Errorf("applied row %d (%s): want Seq %d, got %d", i, step.AgentInstance, i+1, step.Seq)
+		}
+		if !strings.HasSuffix(step.AgentInstance, fmt.Sprintf("#%d", step.Seq)) {
+			t.Errorf("applied row %d: want instance id to end with #%d, got %q", i, step.Seq, step.AgentInstance)
+		}
+	}
+}
+
+// TestSession_ConsultRoute_HITLRedispatch_SeqHasNoConsultationGap verifies that
+// consultant-routed dispatches with a HITL rejection and redispatch record
+// consecutive Seq values from 1, and that the dispatch after the redispatch
+// takes the next slot.
+//
+// Expected rows: agent-a#1 (rejected), agent-a#2 (accepted), agent-b#3.
+func TestSession_ConsultRoute_HITLRedispatch_SeqHasNoConsultationGap(t *testing.T) {
+	consultant := &scriptedRoutingConsultant{}
+	consultant.queueDispatch("agent-a", "step 1", 0)
+	consultant.queueDispatch("agent-b", "step 2", 1)
+	consultant.queueStop("done")
+
+	ses, f, store, orchPath := newHITLLinearSession(t, consultant,
+		&switchingApprovalReader{firstApproval: domain.ApprovalFalse, restApproval: domain.ApprovalTrue})
+	for _, id := range []string{"agent-a", "agent-a", "agent-b"} {
+		f.Queue(id, harness.ScriptedEntry{Response: &domain.ProtocolResponse{
+			AgentInstanceID: id + "#0",
+			StatusCode:      domain.StatusSUCCESS,
+			StatusMessage:   "done",
+		}})
+	}
+
+	ses.Start(context.Background(), baseOrchestratedConfig(orchPath)) //nolint:errcheck
+
+	requireNoConsultationRows(t, store)
+	if len(store.Applied) != 3 {
+		t.Fatalf("want 3 applied rows (rejected, accepted, agent-b), got %d: %+v", len(store.Applied), store.Applied)
+	}
+	requireInstanceIDsMatchRecordedSeq(t, store)
+	var dispatched []string
+	for _, inv := range f.Invocations() {
+		dispatched = append(dispatched, inv.Request.AgentInstanceID)
+	}
+	if !reflect.DeepEqual(dispatched, []string{"agent-a#1", "agent-a#2", "agent-b#3"}) {
+		t.Errorf("want dispatched instance ids agent-a#1, agent-a#2, agent-b#3, got %v", dispatched)
+	}
+}
+
+// TestSession_ConsultRoute_HarnessErrorThenRedispatch_SeqConsecutive verifies
+// that a harness error recorded as a row, followed by a consultation that
+// re-dispatches the same agent, gives the retry the next slot: the consultation
+// between the two consumes none.
+func TestSession_ConsultRoute_HarnessErrorThenRedispatch_SeqConsecutive(t *testing.T) {
+	consultant := &scriptedRoutingConsultant{}
+	consultant.queueDispatch("agent-a", "try the work", 0)
+	consultant.queueDispatch("agent-a", "retry after harness error", 0)
+	consultant.queueStop("done")
+
+	ses, f, store, orchPath := newOrchestratedSession(t, consultant)
+	f.Queue("agent-a", harness.ScriptedEntry{Err: errors.New("harness: subprocess timed out")})
+	f.Queue("agent-a", harness.ScriptedEntry{Response: &domain.ProtocolResponse{
+		AgentInstanceID: "agent-a#2",
+		StatusCode:      domain.StatusSUCCESS,
+		StatusMessage:   "done on retry",
+	}})
+
+	ses.Start(context.Background(), baseOrchestratedConfig(orchPath)) //nolint:errcheck
+
+	requireNoConsultationRows(t, store)
+	if len(store.Applied) != 2 {
+		t.Fatalf("want 2 applied rows (harness error, retry), got %d: %+v", len(store.Applied), store.Applied)
+	}
+	requireInstanceIDsMatchRecordedSeq(t, store)
+	if got := store.Applied[0]; got.Status != domain.StatusBLOCKED {
+		t.Errorf("want the harness-error row recorded as BLOCKED, got %q", got.Status)
+	}
+}
+
+// TestSession_ConsultRoute_ResumeContinuesFromGlobalSequence verifies that a
+// resumed orchestrated run takes its next Seq from the artifact's
+// global_sequence: the consultation that chooses the next dispatch takes no
+// slot, so the dispatch is recorded at global_sequence+1.
+func TestSession_ConsultRoute_ResumeContinuesFromGlobalSequence(t *testing.T) {
+	consultant := &scriptedRoutingConsultant{}
+	consultant.queueDispatch("agent-b", "step 2", 1)
+	consultant.queueStop("done")
+
+	ses, f, store, orchPath := newOrchestratedSession(t, consultant)
+	store.state = domain.ArtifactState{
+		Workflow:        "linear",
+		WorkflowVersion: "1.0",
+		Task:            "test task",
+		GlobalSequence:  1,
+		RunSettings:     domain.RunSettings{Mode: domain.ExecutionModeOrchestrated},
+		CurrentState: domain.CurrentState{
+			Phase:      "PLANNING",
+			LastStatus: domain.StatusSUCCESS,
+			LastAgent:  "agent-a#1",
+		},
+		ExecutionLog: []domain.ExecutionLogEntry{
+			{Seq: 1, Agent: "agent-a#1", Phase: "PLANNING", Status: domain.StatusSUCCESS},
+		},
+	}
+	store.exists = true
+	f.Queue("agent-b", harness.ScriptedEntry{Response: &domain.ProtocolResponse{
+		AgentInstanceID: "agent-b#2",
+		StatusCode:      domain.StatusSUCCESS,
+		StatusMessage:   "done",
+	}})
+
+	cfg := baseOrchestratedConfig(orchPath)
+	markResume(&cfg)
+	ses.Start(context.Background(), cfg) //nolint:errcheck
+
+	invs := f.Invocations()
+	if len(invs) != 1 || invs[0].Request.AgentInstanceID != "agent-b#2" {
+		t.Fatalf("want a single dispatch agent-b#2 after resuming at global_sequence 1, got %+v", invs)
+	}
+	if len(store.Applied) != 1 || store.Applied[0].Seq != 2 {
+		t.Errorf("want the dispatch recorded at Seq 2, got %+v", store.Applied)
+	}
+	if store.state.GlobalSequence != 2 {
+		t.Errorf("want global_sequence 2, got %d", store.state.GlobalSequence)
 	}
 }

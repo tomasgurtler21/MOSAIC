@@ -64,22 +64,20 @@ The escalation deviation could be resolved by re-dispatching a different agent, 
 
 ## Expected Run
 
-Four Orchestration.md log rows.
+Two Orchestration.md log rows. Pre-run consultation and the escalation-routing consultation both dispatch to the orchestrator, but neither allocates a `Seq` or leaves a row — they surface only in the dispatch log.
 
-| Log `Seq` | `Agent` | Kind | `Phase` | `Status` | `Summary` shows |
-|:---:|---|---|---|---|---|
-| 0 | `orchestrator-script#pre_consultation#1` | consultation | — | "" | pre-run consultation response |
-| 1 | `mosaictest-scripted#1` | workflow step | RESEARCH | SUCCESS | hitl_behaviour=proceed, approval=false, wrote unapproved artifact |
-| 2 | `mosaictest-scripted#2` | workflow step (HITL re-dispatch) | RESEARCH | SUCCESS | hitl_behaviour=proceed, approval=false, wrote unapproved artifact again |
-| 3 | `orchestrator-script#3` | consultation | — | "" | stop — HITL escalation acknowledged |
+| Log `Seq` | `Agent` | `Phase` | `Status` | `Summary` shows |
+|:---:|---|---|---|---|
+| 1 | `mosaictest-scripted#1` | RESEARCH | SUCCESS | hitl_behaviour=proceed, approval=false, wrote unapproved artifact |
+| 2 | `mosaictest-scripted#2` (HITL re-dispatch) | RESEARCH | SUCCESS | hitl_behaviour=proceed, approval=false, wrote unapproved artifact again |
 
 **Run outcome:** `RunStoppedByConsultant`. The orchestrator stops the run after the HITL escalation deviation.
 
 **Key observations:**
-- Rows 1 and 2 both show `SUCCESS` — the stub returned SUCCESS both times (E3 prevented the HITL auto-refusal).
+- Both rows show `SUCCESS` — the stub returned SUCCESS both times (E3 prevented the HITL auto-refusal). Both are recorded with `HITLRejected: true` (unapproved), so neither overwrites `current_state`.
 - No `COMPLETE` row — `On Success = COMPLETE` was never evaluated because the approval check intercepted before routing.
-- Row 2 is a re-dispatch of the same row, not a new row — the `Phase` is still `RESEARCH`, the agent is the same.
-- Row 3 proves the escalation reached the orchestrator as a deviation consultation.
+- Row 2 is a re-dispatch of the same row, not a new row — the `Phase` is still `RESEARCH`, the agent is the same, and its `Seq` immediately follows row 1's.
+- The dispatch log shows an `orchestrator-script` consultation after row 2, proving the escalation reached the orchestrator, but that consultation leaves no `Orchestration.md` row.
 
 ---
 
@@ -91,8 +89,9 @@ Four Orchestration.md log rows.
 | Run completes with COMPLETE after row 1 | E1 not implemented — the stub did not write the artifact, or the Runner did not read `human_approved`, so the approval check found nothing and accepted |
 | Only one SUCCESS row, then consultation | `DecideHITLCompliance` escalated without re-dispatching first — the `RedispatchUsed` flag may be stuck at true |
 | Three or more SUCCESS rows before consultation | The re-dispatch limit is not enforced — `RedispatchUsed` is not being set after the first re-dispatch |
-| Row 3 never appears, run hangs or crashes | The escalation did not produce a deviation, or the deviation-to-orchestrator path is broken for HITL escalations specifically |
+| No consultation appears after row 2, run hangs or crashes | The escalation did not produce a deviation, or the deviation-to-orchestrator path is broken for HITL escalations specifically |
 | The stub stops with "no matching rule" | The routing fixture does not cover `after mosaictest-scripted SUCCESS #2` — check the fixture's selector |
+| An `orchestrator-script` row appears in `Orchestration.md` | Consultations must leave no row in the artifact; a consultation wrongly called `Store.Apply` or allocated a `Seq` |
 
 ---
 

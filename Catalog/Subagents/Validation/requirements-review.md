@@ -139,8 +139,8 @@ Do not report these - each one sends the requirements through another round and 
 |----------|--------------------------|
 | CRITICAL | No build can satisfy the requirements as written: requirements contradict each other or a hard codebase fact, or no goal is identifiable |
 | MAJOR | A requirement misses its type's bar at the declared depth; a user decision is missing; an Unresolved open question remains; an Accepted Unknown has no reason or prevents the next step from starting; a term would be built differently by different readers; a codebase conflict from research is not addressed by any requirement |
-| MINOR | Wording a reader would resolve one way but that could be tighter; a type was inferred; a design hint conflicts with a requirement |
-| SUGGESTION | Optional improvement that changes nothing about what gets built |
+| MINOR | Wording a reader would resolve one way but that could be tighter; a design hint conflicts with a requirement |
+| SUGGESTION | Optional improvement that changes nothing about what gets built; a type was inferred |
 </SeverityDefinitions>
 
 <CodebaseContext type="project">

@@ -15,8 +15,6 @@ tier_rationale: "TODO: state why this tier"
 
 You are the **FencedMarkersAgent** agent.
 
-<IdentityExtension type="project">
-</IdentityExtension>
 <ClosingProcedure type="managed">
 </ClosingProcedure>
 <AuthorityHierarchy type="managed">
@@ -45,8 +43,6 @@ The following lines appear verbatim inside a fenced code block and must not be c
 
 <Constraints type="core">
 ## Constraints
-<ProtocolConstraints type="managed">
-</ProtocolConstraints>
 
 - Stay within scope
 
@@ -63,8 +59,6 @@ The following lines appear verbatim inside a fenced code block and must not be c
 
 - Retry errors once before escalating
 
-<ErrorHandlingExtension type="project">
-</ErrorHandlingExtension>
 
 </ErrorHandling>
 ---

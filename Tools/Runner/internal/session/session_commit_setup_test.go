@@ -9,6 +9,7 @@ import (
 	"errors"
 	"os"
 	"path/filepath"
+	"reflect"
 	"strings"
 	"testing"
 
@@ -111,132 +112,515 @@ func TestSession_Start_CommitsEnabled_SuccessfulSetup_IsFirstLogRow(t *testing.T
 	}
 }
 
-// TestSession_Start_CommitsEnabled_MissingBranchMarker_ReturnsRefusal verifies
-// that when the commit-class agent's setup dispatch returns SUCCESS but its
-// status_message does not contain a [branch:{name}] marker, the run is refused.
-// A missing marker means the branch was not established, so the run cannot
-// safely proceed.
-func TestSession_Start_CommitsEnabled_MissingBranchMarker_ReturnsRefusal(t *testing.T) {
-	ses, f, _, orchPath := newCommitSession(t)
+// ===== Artifact-first ordering =====
 
-	// The commit agent returns SUCCESS but omits the [branch:{name}] marker.
+// TestSession_Start_CommitsEnabled_ArtifactExistsBeforeSetupDispatch verifies
+// the durable state at the moment the commit setup agent and the first workflow
+// agent are dispatched. At the setup dispatch the artifact already exists with
+// commits enabled, no commit_branch and no log rows. At the first workflow
+// dispatch the setup row is recorded with Seq 1, commit_branch is set and
+// current_state still names no workflow step.
+func TestSession_Start_CommitsEnabled_ArtifactExistsBeforeSetupDispatch(t *testing.T) {
+	dir := t.TempDir()
+	orchPath := copyOrchestratorFile(t, dir, "commit-agent-orch.md")
+	writeAgentFile(t, dir, "agent-a")
+	writeAgentFile(t, dir, "agent-b")
+	writeAgentFile(t, dir, "commit-manager-git")
+
+	const wantBranch = "mosaic/run/order-test"
+	f := harness.NewMockAdapter()
+	store := &memStore{}
+
+	type snapshot struct {
+		seen         bool
+		exists       bool
+		commits      bool
+		branch       string
+		globalSeq    int
+		logRows      int
+		currentState domain.CurrentState
+		appliedCount int
+	}
+	var atSetup, atFirstWorkflow snapshot
+	capture := func(dst *snapshot) {
+		dst.seen = true
+		dst.exists = store.exists
+		dst.commits = store.state.RunSettings.Commits
+		dst.branch = store.state.CommitBranch
+		dst.globalSeq = store.state.GlobalSequence
+		dst.logRows = len(store.state.ExecutionLog)
+		dst.currentState = store.state.CurrentState
+		dst.appliedCount = len(store.Applied)
+	}
+	hooked := &beforeInvokeHarness{
+		delegate: f,
+		before: func(agentID string) {
+			switch agentID {
+			case "commit-manager-git":
+				capture(&atSetup)
+			case "agent-a":
+				if !atFirstWorkflow.seen {
+					capture(&atFirstWorkflow)
+				}
+			}
+		},
+	}
+	ses := session.New(session.Deps{
+		Harness:  hooked,
+		Store:    store,
+		Clock:    fixedClock{t: epoch},
+		Interact: &noopInteraction{},
+	})
+
 	f.Queue("commit-manager-git", harness.ScriptedEntry{Response: &domain.ProtocolResponse{
+		AgentInstanceID: "commit-manager-git#1",
+		StatusCode:      domain.StatusSUCCESS,
+		StatusMessage:   "branch ready [branch:" + wantBranch + "]",
+	}})
+	f.Queue("agent-a", harness.ScriptedEntry{Response: &domain.ProtocolResponse{
+		AgentInstanceID: "agent-a#2", StatusCode: domain.StatusSUCCESS, StatusMessage: "done",
+	}})
+	f.Queue("agent-b", harness.ScriptedEntry{Response: &domain.ProtocolResponse{
+		AgentInstanceID: "agent-b#3", StatusCode: domain.StatusSUCCESS, StatusMessage: "done",
+	}})
+
+	cfg := baseCommitConfig(orchPath)
+	cfg.RunID = "test-run-id"
+
+	got, err := ses.Start(context.Background(), cfg)
+
+	requireRunStatus(t, got, err, domain.RunCompleted)
+	if !atSetup.seen {
+		t.Fatal("want commit setup agent dispatched, but it was not")
+	}
+	if !atSetup.exists {
+		t.Error("want the artifact created before the commit setup dispatch, but the store had no artifact")
+	}
+	if !atSetup.commits {
+		t.Error("want commits enabled recorded in the artifact at the setup dispatch")
+	}
+	if atSetup.branch != "" || atSetup.globalSeq != 0 || atSetup.logRows != 0 {
+		t.Errorf("want a fresh artifact at the setup dispatch (no commit_branch, global_sequence 0, no rows), got branch=%q seq=%d rows=%d",
+			atSetup.branch, atSetup.globalSeq, atSetup.logRows)
+	}
+	if !atFirstWorkflow.seen {
+		t.Fatal("want the first workflow agent dispatched after a successful setup")
+	}
+	if atFirstWorkflow.branch != wantBranch {
+		t.Errorf("want commit_branch=%q recorded before the first workflow dispatch, got %q", wantBranch, atFirstWorkflow.branch)
+	}
+	if atFirstWorkflow.appliedCount != 1 || atFirstWorkflow.globalSeq != 1 || atFirstWorkflow.logRows != 1 {
+		t.Errorf("want exactly the setup row (Seq 1) recorded before the first workflow dispatch, got applied=%d seq=%d rows=%d",
+			atFirstWorkflow.appliedCount, atFirstWorkflow.globalSeq, atFirstWorkflow.logRows)
+	}
+	if !reflect.DeepEqual(atFirstWorkflow.currentState, domain.CurrentState{}) {
+		t.Errorf("want current_state untouched by commit setup, got %+v", atFirstWorkflow.currentState)
+	}
+}
+
+// TestSession_Start_CommitsEnabled_SetupAndWorkflowSeqsStrictlyIncrease verifies
+// that the setup row and every following workflow row carry strictly
+// increasing Seq values, with the setup row first.
+func TestSession_Start_CommitsEnabled_SetupAndWorkflowSeqsStrictlyIncrease(t *testing.T) {
+	ses, f, store, orchPath := newCommitSession(t)
+	f.Queue("commit-manager-git", harness.ScriptedEntry{Response: &domain.ProtocolResponse{
+		AgentInstanceID: "commit-manager-git#1", StatusCode: domain.StatusSUCCESS,
+		StatusMessage: "ok [branch:mosaic/run/seq-test]",
+	}})
+	f.Queue("agent-a", harness.ScriptedEntry{Response: &domain.ProtocolResponse{
+		AgentInstanceID: "agent-a#2", StatusCode: domain.StatusSUCCESS, StatusMessage: "done",
+	}})
+	f.Queue("agent-b", harness.ScriptedEntry{Response: &domain.ProtocolResponse{
+		AgentInstanceID: "agent-b#3", StatusCode: domain.StatusSUCCESS, StatusMessage: "done",
+	}})
+
+	got, err := ses.Start(context.Background(), baseCommitConfig(orchPath))
+
+	requireRunStatus(t, got, err, domain.RunCompleted)
+	if len(store.Applied) != 3 {
+		t.Fatalf("want 3 applied rows (setup + 2 workflow), got %d", len(store.Applied))
+	}
+	for i, step := range store.Applied {
+		if step.Seq != i+1 {
+			t.Errorf("applied row %d: want Seq=%d, got %d", i, i+1, step.Seq)
+		}
+	}
+	if store.Applied[0].AgentInstance != "commit-manager-git#1" {
+		t.Errorf("want setup instance commit-manager-git#1, got %q", store.Applied[0].AgentInstance)
+	}
+	if store.Applied[1].IsInfrastructure {
+		t.Error("want the first workflow row to be a workflow row, got an infrastructure row")
+	}
+}
+
+// ===== Failed setup keeps the artifact =====
+
+// setupFailureRun holds the observable result of a run whose commit setup
+// dispatch did not succeed.
+type setupFailureRun struct {
+	out       domain.RunOutcome
+	err       error
+	f         *harness.MockAdapter
+	store     *memStore
+	runFolder string
+}
+
+// startWithSetupEntry starts a new commits-enabled run whose commit setup
+// dispatch yields the given scripted entry.
+func startWithSetupEntry(t *testing.T, entry harness.ScriptedEntry) setupFailureRun {
+	t.Helper()
+	ses, f, store, orchPath := newCommitSession(t)
+	runFolder := filepath.Join(t.TempDir(), "Orchestration-test-run-id")
+	if err := os.MkdirAll(runFolder, 0o755); err != nil {
+		t.Fatalf("setup: create run folder: %v", err)
+	}
+	f.Queue("commit-manager-git", entry)
+
+	cfg := baseCommitConfig(orchPath)
+	cfg.RunID = "test-run-id"
+	cfg.RunFolder = runFolder
+
+	out, err := ses.Start(context.Background(), cfg)
+	return setupFailureRun{out: out, err: err, f: f, store: store, runFolder: runFolder}
+}
+
+// requireSetupFailureKept asserts everything a failed setup must leave behind:
+// a start-failed outcome, the artifact, the setup row (Seq 1, infrastructure,
+// with the given recorded status), no commit_branch, an untouched
+// current_state and no workflow dispatch.
+func requireSetupFailureKept(t *testing.T, r setupFailureRun, wantRowStatus domain.StatusCode) {
+	t.Helper()
+	requireStartFailed(t, r.out, r.err)
+
+	if !r.store.exists {
+		t.Error("want the artifact kept after a failed commit setup, but the store has none")
+	}
+	if _, statErr := os.Stat(r.runFolder); statErr != nil {
+		t.Errorf("want the run folder kept after a failed commit setup, stat error: %v", statErr)
+	}
+	if len(r.store.Applied) != 1 {
+		t.Fatalf("want exactly the setup row recorded, got %d applied rows", len(r.store.Applied))
+	}
+	row := r.store.Applied[0]
+	if row.Seq != 1 || row.AgentInstance != "commit-manager-git#1" {
+		t.Errorf("want setup row commit-manager-git#1 with Seq=1, got %q Seq=%d", row.AgentInstance, row.Seq)
+	}
+	if !row.IsInfrastructure {
+		t.Error("want the setup row recorded as an infrastructure row")
+	}
+	if row.Status != wantRowStatus {
+		t.Errorf("want setup row Status=%q, got %q", wantRowStatus, row.Status)
+	}
+	if r.store.state.CommitBranch != "" || len(r.store.BranchCalls) != 0 {
+		t.Errorf("want commit_branch absent after a failed setup, got %q (SetCommitBranch calls: %v)",
+			r.store.state.CommitBranch, r.store.BranchCalls)
+	}
+	if !reflect.DeepEqual(r.store.state.CurrentState, domain.CurrentState{}) {
+		t.Errorf("want current_state unchanged by the failed setup, got %+v", r.store.state.CurrentState)
+	}
+	if r.store.state.GlobalSequence != 1 {
+		t.Errorf("want global_sequence=1 after the setup row, got %d", r.store.state.GlobalSequence)
+	}
+	for _, inv := range r.f.Invocations() {
+		if inv.Agent.Identifier != "commit-manager-git" {
+			t.Errorf("want no workflow dispatch after a failed setup, got %q", inv.Agent.Identifier)
+		}
+	}
+}
+
+// TestSession_Start_CommitsEnabled_SetupBlocked_KeepsArtifactAndRow verifies
+// that a BLOCKED setup response yields a start failure that keeps the artifact
+// and records the setup row with the response's own status.
+func TestSession_Start_CommitsEnabled_SetupBlocked_KeepsArtifactAndRow(t *testing.T) {
+	r := startWithSetupEntry(t, harness.ScriptedEntry{Response: &domain.ProtocolResponse{
+		AgentInstanceID: "commit-manager-git#1",
+		StatusCode:      domain.StatusBLOCKED,
+		StatusMessage:   "dirty working tree",
+		ErrorCode:       domain.ErrorPERMISSION_DENIED,
+		ErrorReason:     "uncommitted changes",
+	}})
+
+	requireSetupFailureKept(t, r, domain.StatusBLOCKED)
+}
+
+// TestSession_Start_CommitsEnabled_MissingBranchMarker_KeepsArtifactAndRow
+// verifies that a SUCCESS setup response without a [branch:{name}] marker is a
+// start failure: the branch was not established, so the artifact and the row
+// are kept, commit_branch stays absent and no workflow step is dispatched.
+func TestSession_Start_CommitsEnabled_MissingBranchMarker_KeepsArtifactAndRow(t *testing.T) {
+	r := startWithSetupEntry(t, harness.ScriptedEntry{Response: &domain.ProtocolResponse{
 		AgentInstanceID: "commit-manager-git#1",
 		StatusCode:      domain.StatusSUCCESS,
 		StatusMessage:   "setup complete (no branch marker)",
 	}})
 
-	cfg := baseCommitConfig(orchPath)
-
-	got, err := ses.Start(context.Background(), cfg)
-
-	requireRefused(t, got, err)
+	requireSetupFailureKept(t, r, domain.StatusSUCCESS)
 }
 
-// TestSession_Start_CommitsEnabled_MissingBranchMarker_NoArtifactCreated verifies
-// that a missing branch marker refuses the run before ArtifactStore.Create is
-// called. No artifact should exist so a refused run leaves no trace.
-func TestSession_Start_CommitsEnabled_MissingBranchMarker_NoArtifactCreated(t *testing.T) {
-	ses, f, store, orchPath := newCommitSession(t)
-
-	f.Queue("commit-manager-git", harness.ScriptedEntry{Response: &domain.ProtocolResponse{
+// TestSession_Start_CommitsEnabled_EmptyBranchName_KeepsArtifactAndRow verifies
+// that an empty [branch:] marker is unreadable and treated like a missing one.
+func TestSession_Start_CommitsEnabled_EmptyBranchName_KeepsArtifactAndRow(t *testing.T) {
+	r := startWithSetupEntry(t, harness.ScriptedEntry{Response: &domain.ProtocolResponse{
 		AgentInstanceID: "commit-manager-git#1",
 		StatusCode:      domain.StatusSUCCESS,
-		StatusMessage:   "no marker here",
+		StatusMessage:   "setup complete [branch:]",
 	}})
 
-	cfg := baseCommitConfig(orchPath)
+	requireSetupFailureKept(t, r, domain.StatusSUCCESS)
+}
 
-	ses.Start(context.Background(), cfg) //nolint:errcheck
+// TestSession_Start_CommitsEnabled_HarnessError_KeepsArtifactAndRow verifies
+// that a harness failure during setup is recorded as a BLOCKED row (E501), the
+// artifact is kept, and the outcome carries the underlying error.
+func TestSession_Start_CommitsEnabled_HarnessError_KeepsArtifactAndRow(t *testing.T) {
+	harnessErr := errors.New("git: authentication failed")
+	r := startWithSetupEntry(t, harness.ScriptedEntry{Err: harnessErr})
 
-	if store.exists {
-		t.Error("want no artifact created when commit setup dispatch has no branch marker")
+	requireSetupFailureKept(t, r, domain.StatusBLOCKED)
+	if len(r.store.Applied) == 1 && r.store.Applied[0].ErrorCode != domain.ErrorTOOL_UNAVAILABLE {
+		t.Errorf("want the harness error recorded with error code %q, got %q",
+			domain.ErrorTOOL_UNAVAILABLE, r.store.Applied[0].ErrorCode)
+	}
+	if !errors.Is(r.out.Cause, harnessErr) {
+		t.Errorf("want outcome Cause to wrap the harness error, got %v", r.out.Cause)
 	}
 }
 
-// TestSession_Start_CommitsEnabled_HarnessError_ReturnsRefusal verifies that
-// when the harness fails during the commit setup dispatch, the run is refused.
-// The failure is immediately terminal with no retry.
-func TestSession_Start_CommitsEnabled_HarnessError_ReturnsRefusal(t *testing.T) {
-	ses, f, _, orchPath := newCommitSession(t)
-
-	// The harness fails entirely for the commit setup dispatch.
-	f.Queue("commit-manager-git", harness.ScriptedEntry{
-		Err: errors.New("git: authentication failed"),
-	})
-
-	cfg := baseCommitConfig(orchPath)
-
-	got, err := ses.Start(context.Background(), cfg)
-
-	requireRefused(t, got, err)
-}
-
-// TestSession_Start_CommitsEnabled_HarnessError_NoArtifactCreated verifies that
-// a harness error during commit setup refuses the run before any artifact is
-// created. The failure is terminal and no state survives.
-func TestSession_Start_CommitsEnabled_HarnessError_NoArtifactCreated(t *testing.T) {
+// TestSession_Start_CommitsEnabled_SetupApplyFailure_KeepsArtifact verifies
+// that when the setup dispatch succeeds but recording its row fails, the run
+// stops without dispatching a workflow step, does not set commit_branch, and
+// keeps the run folder: the run is resumable and nothing is removed.
+func TestSession_Start_CommitsEnabled_SetupApplyFailure_KeepsArtifact(t *testing.T) {
 	ses, f, store, orchPath := newCommitSession(t)
-
-	f.Queue("commit-manager-git", harness.ScriptedEntry{
-		Err: errors.New("git: timeout"),
-	})
-
-	cfg := baseCommitConfig(orchPath)
-
-	ses.Start(context.Background(), cfg) //nolint:errcheck
-
-	if store.exists {
-		t.Error("want no artifact created when commit setup dispatch harness fails")
-	}
-}
-
-// TestSession_Start_CommitsEnabled_SetupApplyFailure_ReturnsRefusal verifies that
-// when the commit setup dispatch succeeds (branch marker extracted) but recording
-// the dispatch as the first execution log row fails (ArtifactStore.Apply returns
-// an error), the run is refused and the run folder is removed. Recording failure
-// is terminal per the Plan's Risks table (§1): the run folder is removed and no
-// partial state survives.
-//
-// The test is in the RED phase: without commit setup row recording (I5.2), the
-// first Apply call happens for a workflow step, not the commit setup row, and the
-// run does not return RunRefused from this path.
-func TestSession_Start_CommitsEnabled_SetupApplyFailure_ReturnsRefusal(t *testing.T) {
-	ses, f, store, orchPath := newCommitSession(t)
-
-	// Create a real run folder that the session must remove on Apply failure.
-	dir := t.TempDir()
-	runFolder := filepath.Join(dir, "run")
+	runFolder := filepath.Join(t.TempDir(), "run")
 	if err := os.MkdirAll(runFolder, 0o755); err != nil {
 		t.Fatalf("setup: failed to create run folder: %v", err)
 	}
-
-	// Configure the store to fail the very first Apply call. When I5.2 is
-	// implemented, that first call will be the commit setup row recording;
-	// the session must treat this as a terminal failure and refuse the run.
 	store.applyErrOnFirst = true
 	store.applyFirstErr = errors.New("disk full: unable to record commit setup row")
-
-	const wantBranch = "mosaic/run/test-run-id"
 	f.Queue("commit-manager-git", harness.ScriptedEntry{Response: &domain.ProtocolResponse{
-		AgentInstanceID: "commit-manager-git#1",
-		StatusCode:      domain.StatusSUCCESS,
-		StatusMessage:   "branch ready [branch:" + wantBranch + "]",
+		AgentInstanceID: "commit-manager-git#1", StatusCode: domain.StatusSUCCESS,
+		StatusMessage: "branch ready [branch:mosaic/run/test-run-id]",
 	}})
 
 	cfg := baseCommitConfig(orchPath)
 	cfg.RunID = "test-run-id"
 	cfg.RunFolder = runFolder
 
+	got, _ := ses.Start(context.Background(), cfg)
+
+	if got.Status != domain.RunFailed && got.Status != domain.RunStartFailed {
+		t.Errorf("want RunFailed or RunStartFailed when the setup row cannot be recorded, got %q", got.Status)
+	}
+	if _, statErr := os.Stat(runFolder); statErr != nil {
+		t.Errorf("want run folder kept when the setup row cannot be recorded, stat error: %v", statErr)
+	}
+	if !store.exists {
+		t.Error("want the artifact kept when the setup row cannot be recorded")
+	}
+	for _, inv := range f.Invocations() {
+		if inv.Agent.Identifier != "commit-manager-git" {
+			t.Errorf("want no workflow dispatch, got %q", inv.Agent.Identifier)
+		}
+	}
+}
+
+// ===== Resume =====
+
+// commitResumeState returns a stored artifact for a run with commits enabled.
+func commitResumeState() domain.ArtifactState {
+	return domain.ArtifactState{
+		RunID:           testRunID,
+		Workflow:        "linear",
+		WorkflowVersion: "1.0",
+		Task:            "test task",
+		RunSettings: domain.RunSettings{
+			Mode:    domain.ExecutionModeAuto,
+			Commits: true,
+		},
+	}
+}
+
+func queueSuccessfulSetupAndWorkflow(f *harness.MockAdapter, branch string) {
+	f.Queue("commit-manager-git", harness.ScriptedEntry{Response: &domain.ProtocolResponse{
+		AgentInstanceID: "commit-manager-git#x", StatusCode: domain.StatusSUCCESS,
+		StatusMessage: "branch ready [branch:" + branch + "]",
+	}})
+	f.Queue("agent-a", harness.ScriptedEntry{Response: &domain.ProtocolResponse{
+		AgentInstanceID: "agent-a#x", StatusCode: domain.StatusSUCCESS, StatusMessage: "done",
+	}})
+	f.Queue("agent-b", harness.ScriptedEntry{Response: &domain.ProtocolResponse{
+		AgentInstanceID: "agent-b#x", StatusCode: domain.StatusSUCCESS, StatusMessage: "done",
+	}})
+}
+
+// TestSession_Start_Resume_CommitsEnabledNoBranch_InterruptedSetup_RetriesSetup
+// verifies that an artifact left by an interrupted setup (created, no row
+// recorded, no commit_branch) retries setup before any workflow step, records
+// the retry as the next sequence, and then runs the workflow.
+func TestSession_Start_Resume_CommitsEnabledNoBranch_InterruptedSetup_RetriesSetup(t *testing.T) {
+	ses, f, store, orchPath := newCommitSession(t)
+	store.state = commitResumeState()
+	store.exists = true
+	const wantBranch = "mosaic/run/retry-test"
+	queueSuccessfulSetupAndWorkflow(f, wantBranch)
+
+	cfg := baseCommitConfig(orchPath)
+	markResume(&cfg)
+	cfg.Supplied.CommitBranchVariant = true // a pending setup retry needs the variant
+
 	got, err := ses.Start(context.Background(), cfg)
 
-	requireRefused(t, got, err)
+	requireRunStatus(t, got, err, domain.RunCompleted)
+	invs := f.Invocations()
+	if len(invs) != 3 || invs[0].Agent.Identifier != "commit-manager-git" {
+		t.Fatalf("want setup dispatched first, then both workflow agents; got %d invocations", len(invs))
+	}
+	if store.state.CommitBranch != wantBranch {
+		t.Errorf("want commit_branch=%q after the retried setup, got %q", wantBranch, store.state.CommitBranch)
+	}
+	if len(store.Applied) != 3 {
+		t.Fatalf("want 3 applied rows (setup + 2 workflow), got %d", len(store.Applied))
+	}
+	for i, step := range store.Applied {
+		if step.Seq != i+1 {
+			t.Errorf("applied row %d: want Seq=%d, got %d", i, i+1, step.Seq)
+		}
+	}
+	if !store.Applied[0].IsInfrastructure {
+		t.Error("want the retried setup recorded as an infrastructure row")
+	}
+}
 
-	// The session must remove the run folder on Apply failure so that a refused
-	// run leaves no trace on disk. This mirrors the pre-consultation failure
-	// contract (os.RemoveAll(cfg.RunFolder) on any terminal pre-dispatch failure).
-	if _, statErr := os.Stat(runFolder); !os.IsNotExist(statErr) {
-		t.Error("want run folder removed when commit setup row Apply fails (failure must remove any run folder)")
+// TestSession_Start_Resume_AfterFailedSetup_RetriesSetupWithNextSequence
+// verifies that after a failed setup left its row behind, a resume retries
+// setup, records a new row with the next sequence (the earlier row stays), and
+// then runs the workflow.
+func TestSession_Start_Resume_AfterFailedSetup_RetriesSetupWithNextSequence(t *testing.T) {
+	ses, f, store, orchPath := newCommitSession(t)
+	store.state = commitResumeState()
+	store.state.GlobalSequence = 1
+	store.state.ExecutionLog = []domain.ExecutionLogEntry{
+		{Seq: 1, Agent: "commit-manager-git#1", Status: domain.StatusBLOCKED},
+	}
+	store.exists = true
+	const wantBranch = "mosaic/run/retry-after-failure"
+	queueSuccessfulSetupAndWorkflow(f, wantBranch)
+
+	cfg := baseCommitConfig(orchPath)
+	markResume(&cfg)
+	cfg.Supplied.CommitBranchVariant = true // a pending setup retry needs the variant
+
+	got, err := ses.Start(context.Background(), cfg)
+
+	requireRunStatus(t, got, err, domain.RunCompleted)
+	if len(store.Applied) != 3 {
+		t.Fatalf("want 3 newly applied rows (retried setup + 2 workflow), got %d", len(store.Applied))
+	}
+	if store.Applied[0].Seq != 2 || store.Applied[0].AgentInstance != "commit-manager-git#2" {
+		t.Errorf("want retried setup row commit-manager-git#2 with Seq=2, got %q Seq=%d",
+			store.Applied[0].AgentInstance, store.Applied[0].Seq)
+	}
+	if store.Applied[1].Seq != 3 || store.Applied[2].Seq != 4 {
+		t.Errorf("want workflow rows Seq 3 and 4, got %d and %d", store.Applied[1].Seq, store.Applied[2].Seq)
+	}
+	if store.state.CommitBranch != wantBranch {
+		t.Errorf("want commit_branch=%q after the retry, got %q", wantBranch, store.state.CommitBranch)
+	}
+}
+
+// TestSession_Start_Resume_CommitsEnabledNoBranch_RetryFailure_StaysResumable
+// verifies that a retried setup that fails again keeps the artifact, records
+// its row and dispatches no workflow step.
+func TestSession_Start_Resume_CommitsEnabledNoBranch_RetryFailure_StaysResumable(t *testing.T) {
+	ses, f, store, orchPath := newCommitSession(t)
+	store.state = commitResumeState()
+	store.exists = true
+	f.Queue("commit-manager-git", harness.ScriptedEntry{Response: &domain.ProtocolResponse{
+		AgentInstanceID: "commit-manager-git#1", StatusCode: domain.StatusSUCCESS,
+		StatusMessage: "no marker",
+	}})
+
+	cfg := baseCommitConfig(orchPath)
+	markResume(&cfg)
+	cfg.Supplied.CommitBranchVariant = true // a pending setup retry needs the variant
+
+	got, err := ses.Start(context.Background(), cfg)
+
+	requireStartFailed(t, got, err)
+	if len(store.Applied) != 1 || store.Applied[0].Seq != 1 {
+		t.Errorf("want the retry row recorded with Seq=1, got %d rows", len(store.Applied))
+	}
+	if store.state.CommitBranch != "" {
+		t.Errorf("want commit_branch absent after a failed retry, got %q", store.state.CommitBranch)
+	}
+	for _, inv := range f.Invocations() {
+		if inv.Agent.Identifier != "commit-manager-git" {
+			t.Errorf("want no workflow dispatch after a failed retry, got %q", inv.Agent.Identifier)
+		}
+	}
+}
+
+// TestSession_Start_Resume_CommitSetupPending_NoVariantSupplied_Refused
+// verifies that a pending setup retry without a commit branch variant is
+// refused before any dispatch.
+func TestSession_Start_Resume_CommitSetupPending_NoVariantSupplied_Refused(t *testing.T) {
+	ses, f, store, orchPath := newCommitSession(t)
+	store.state = commitResumeState()
+	store.exists = true
+	queueSuccessfulSetupAndWorkflow(f, "mosaic/run/never")
+
+	cfg := baseCommitConfig(orchPath)
+	markResume(&cfg)
+
+	got, err := ses.Start(context.Background(), cfg)
+
+	if err != nil {
+		t.Fatalf("want nil error, got %v", err)
+	}
+	if got.Status != domain.RunRefused {
+		t.Errorf("want RunRefused, got %q (message: %q)", got.Status, got.Message)
+	}
+	if n := len(f.Invocations()); n != 0 {
+		t.Errorf("want no dispatch after a refusal, got %d invocations", n)
+	}
+	if len(store.Applied) != 0 {
+		t.Errorf("want no rows applied after a refusal, got %d", len(store.Applied))
+	}
+}
+
+// TestSession_Start_Resume_CommitBranchPresent_DoesNotRerunSetup verifies that
+// a recorded commit_branch means setup is never run again on resume.
+func TestSession_Start_Resume_CommitBranchPresent_DoesNotRerunSetup(t *testing.T) {
+	ses, f, store, orchPath := newCommitSession(t)
+	store.state = commitResumeState()
+	store.state.CommitBranch = "mosaic/run/test-run-id"
+	store.state.GlobalSequence = 2
+	store.state.ExecutionLog = []domain.ExecutionLogEntry{
+		{Seq: 1, Agent: "commit-manager-git#1", Status: domain.StatusSUCCESS},
+		{Seq: 2, Agent: "agent-a#2", Phase: "PLANNING", Status: domain.StatusSUCCESS},
+	}
+	store.state.CurrentState = domain.CurrentState{
+		Phase: "PLANNING", LastStatus: domain.StatusSUCCESS, LastAgent: "agent-a#2",
+	}
+	store.exists = true
+	f.Queue("agent-b", harness.ScriptedEntry{Response: &domain.ProtocolResponse{
+		AgentInstanceID: "agent-b#3", StatusCode: domain.StatusSUCCESS, StatusMessage: "done",
+	}})
+
+	cfg := baseCommitConfig(orchPath)
+	markResume(&cfg)
+
+	got, err := ses.Start(context.Background(), cfg)
+
+	requireRunStatus(t, got, err, domain.RunCompleted)
+	for _, inv := range f.Invocations() {
+		if inv.Agent.Identifier == "commit-manager-git" {
+			t.Error("want commit setup NOT re-run when commit_branch is already recorded")
+		}
+	}
+	if len(store.BranchCalls) != 0 {
+		t.Errorf("want no SetCommitBranch call when commit_branch is present, got %v", store.BranchCalls)
 	}
 }
 

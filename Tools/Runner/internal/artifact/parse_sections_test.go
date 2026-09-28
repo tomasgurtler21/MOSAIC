@@ -280,7 +280,7 @@ func TestParse_ExecutionLog_OldFormatWithoutInputsColumn_InputsIsEmpty(t *testin
 
 func TestParse_InfrastructureOverrides_Absent_ReturnsNil(t *testing.T) {
 	// minimalArtifactBytes (no overrides block) is the common baseline.
-	data := minimalArtifactBytes("")
+	data := minimalArtifactBytes(testRunID)
 
 	state, err := artifact.Parse(data)
 	if err != nil {

@@ -277,6 +277,8 @@ func TestApply_RunSettings_CommitBranchVariantPersistsOnDisk(t *testing.T) {
 	store, state := mustCreateStore(t)
 	ctx := context.Background()
 	state.Commits = true
+	// The variant is not persisted; it is derived from CommitBranch on Parse.
+	state.CommitBranch = "feature/x"
 	state.CommitBranchVariant = domain.CommitBranchUserOwn
 	step := newTestStep(1, "planner#1", "PLANNING", "", domain.StatusSUCCESS, time.Now(), nil)
 
@@ -323,6 +325,8 @@ func TestApply_RunSettings_PreConsultationPersistsOnDisk(t *testing.T) {
 	// that was in the state passed to Apply.
 	store, state := mustCreateStore(t)
 	ctx := context.Background()
+	// Runner settings are persisted all-or-none, so Mode must be set too.
+	state.Mode = domain.ExecutionModeAuto
 	state.PreConsultation = true
 	step := newTestStep(1, "planner#1", "PLANNING", "", domain.StatusSUCCESS, time.Now(), nil)
 
@@ -345,6 +349,8 @@ func TestApply_RunSettings_ManualResolutionPersistsOnDisk(t *testing.T) {
 	// that was in the state passed to Apply.
 	store, state := mustCreateStore(t)
 	ctx := context.Background()
+	// Runner settings are persisted all-or-none, so Mode must be set too.
+	state.Mode = domain.ExecutionModeAuto
 	state.ManualResolution = true
 	step := newTestStep(1, "planner#1", "PLANNING", "", domain.StatusSUCCESS, time.Now(), nil)
 

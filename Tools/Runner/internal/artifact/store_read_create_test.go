@@ -63,7 +63,7 @@ func TestCreate_WorkflowID_SetInState(t *testing.T) {
 	ctx := context.Background()
 	info := domain.WorkflowInfo{ID: "quick-fix", Version: "3.0"}
 
-	state, err := store.Create(ctx, info, "some task", domain.RunSettings{}, time.Now(), "")
+	state, err := store.Create(ctx, info, "some task", domain.RunSettings{}, time.Now(), testRunID)
 	if err != nil {
 		t.Fatalf("Create: unexpected error: %v", err)
 	}
@@ -79,7 +79,7 @@ func TestCreate_WorkflowVersion_SetInState(t *testing.T) {
 	ctx := context.Background()
 	info := domain.WorkflowInfo{ID: "quick-fix", Version: "3.0"}
 
-	state, err := store.Create(ctx, info, "some task", domain.RunSettings{}, time.Now(), "")
+	state, err := store.Create(ctx, info, "some task", domain.RunSettings{}, time.Now(), testRunID)
 	if err != nil {
 		t.Fatalf("Create: unexpected error: %v", err)
 	}
@@ -95,7 +95,7 @@ func TestCreate_Task_SetInState(t *testing.T) {
 	ctx := context.Background()
 	info := domain.WorkflowInfo{ID: "quick-fix", Version: "3.0"}
 
-	state, err := store.Create(ctx, info, "My important task", domain.RunSettings{}, time.Now(), "")
+	state, err := store.Create(ctx, info, "My important task", domain.RunSettings{}, time.Now(), testRunID)
 	if err != nil {
 		t.Fatalf("Create: unexpected error: %v", err)
 	}
@@ -111,7 +111,7 @@ func TestCreate_CheckpointsEnabled_SetInState(t *testing.T) {
 	ctx := context.Background()
 	info := domain.WorkflowInfo{ID: "quick-fix", Version: "3.0"}
 
-	state, err := store.Create(ctx, info, "task", domain.RunSettings{Checkpoints: true}, time.Now(), "")
+	state, err := store.Create(ctx, info, "task", domain.RunSettings{Checkpoints: true}, time.Now(), testRunID)
 	if err != nil {
 		t.Fatalf("Create: unexpected error: %v", err)
 	}
@@ -127,7 +127,7 @@ func TestCreate_CheckpointsDisabled_SetInState(t *testing.T) {
 	ctx := context.Background()
 	info := domain.WorkflowInfo{ID: "quick-fix", Version: "3.0"}
 
-	state, err := store.Create(ctx, info, "task", domain.RunSettings{}, time.Now(), "")
+	state, err := store.Create(ctx, info, "task", domain.RunSettings{}, time.Now(), testRunID)
 	if err != nil {
 		t.Fatalf("Create: unexpected error: %v", err)
 	}
@@ -146,7 +146,7 @@ func TestCreate_Type_SetInState(t *testing.T) {
 	ctx := context.Background()
 	info := domain.WorkflowInfo{ID: "quick-fix", Version: "3.0"}
 
-	state, err := store.Create(ctx, info, "task", domain.RunSettings{}, time.Now(), "")
+	state, err := store.Create(ctx, info, "task", domain.RunSettings{}, time.Now(), testRunID)
 	if err != nil {
 		t.Fatalf("Create: unexpected error: %v", err)
 	}
@@ -165,7 +165,7 @@ func TestCreate_Started_SetFromNowParameter(t *testing.T) {
 	info := domain.WorkflowInfo{ID: "quick-fix", Version: "3.0"}
 	now := time.Date(2026, 3, 15, 12, 0, 0, 0, time.UTC)
 
-	state, err := store.Create(ctx, info, "task", domain.RunSettings{}, now, "")
+	state, err := store.Create(ctx, info, "task", domain.RunSettings{}, now, testRunID)
 	if err != nil {
 		t.Fatalf("Create: unexpected error: %v", err)
 	}
@@ -183,7 +183,7 @@ func TestCreate_GlobalSequence_InitiallyZero(t *testing.T) {
 	ctx := context.Background()
 	info := domain.WorkflowInfo{ID: "quick-fix", Version: "3.0"}
 
-	state, err := store.Create(ctx, info, "task", domain.RunSettings{}, time.Now(), "")
+	state, err := store.Create(ctx, info, "task", domain.RunSettings{}, time.Now(), testRunID)
 	if err != nil {
 		t.Fatalf("Create: unexpected error: %v", err)
 	}
@@ -199,7 +199,7 @@ func TestCreate_ExecutionLog_Empty(t *testing.T) {
 	ctx := context.Background()
 	info := domain.WorkflowInfo{ID: "quick-fix", Version: "3.0"}
 
-	state, err := store.Create(ctx, info, "task", domain.RunSettings{}, time.Now(), "")
+	state, err := store.Create(ctx, info, "task", domain.RunSettings{}, time.Now(), testRunID)
 	if err != nil {
 		t.Fatalf("Create: unexpected error: %v", err)
 	}
@@ -215,7 +215,7 @@ func TestCreate_ArtifactRegistry_Empty(t *testing.T) {
 	ctx := context.Background()
 	info := domain.WorkflowInfo{ID: "quick-fix", Version: "3.0"}
 
-	state, err := store.Create(ctx, info, "task", domain.RunSettings{}, time.Now(), "")
+	state, err := store.Create(ctx, info, "task", domain.RunSettings{}, time.Now(), testRunID)
 	if err != nil {
 		t.Fatalf("Create: unexpected error: %v", err)
 	}
@@ -233,12 +233,12 @@ func TestCreate_FailsIfFileAlreadyExists(t *testing.T) {
 	info := domain.WorkflowInfo{ID: "quick-fix", Version: "3.0"}
 
 	// Create the file once.
-	if _, err := store.Create(ctx, info, "first", domain.RunSettings{}, time.Now(), ""); err != nil {
+	if _, err := store.Create(ctx, info, "first", domain.RunSettings{}, time.Now(), testRunID); err != nil {
 		t.Fatalf("first Create: unexpected error: %v", err)
 	}
 
 	// A second Create on the same path must fail.
-	_, err := store.Create(ctx, info, "second", domain.RunSettings{}, time.Now(), "")
+	_, err := store.Create(ctx, info, "second", domain.RunSettings{}, time.Now(), testRunID)
 	if err == nil {
 		t.Fatal("second Create: want error because file already exists, got nil")
 	}
@@ -253,7 +253,7 @@ func TestCreate_FileReadableAfterCreate(t *testing.T) {
 	now := time.Date(2026, 1, 29, 9, 0, 0, 0, time.UTC)
 	info := domain.WorkflowInfo{ID: "quick-fix", Version: "3.0"}
 
-	created, err := store.Create(ctx, info, "Fix something", domain.RunSettings{}, now, "")
+	created, err := store.Create(ctx, info, "Fix something", domain.RunSettings{}, now, testRunID)
 	if err != nil {
 		t.Fatalf("Create: unexpected error: %v", err)
 	}
@@ -297,11 +297,115 @@ func TestCreate_RunID_PersistedToFrontmatter(t *testing.T) {
 	}
 }
 
-func TestCreate_RunID_EmptyRunID_NotInFrontmatter(t *testing.T) {
-	_, state := newTestFixtureWithRunID(t, "")
+func TestCreate_EmptyOrMalformedRunID_ReturnsRefusalErrorAndWritesNothing(t *testing.T) {
+	cases := map[string]string{
+		"empty":          "",
+		"no suffix":      "20260727T170000Z",
+		"uppercase hex":  "20260727T170000Z-A3F9",
+		"short suffix":   "20260727T170000Z-a3f",
+		"free text":      "not-a-run-id",
+		"lowercase t/z":  "20260727t170000z-a3f9",
+		"trailing space": "20260727T170000Z-a3f9 ",
+	}
+	for name, runID := range cases {
+		t.Run(name, func(t *testing.T) {
+			path := filepath.Join(t.TempDir(), "Orchestration.md")
+			store := artifact.NewFileStore(path)
+			info := domain.WorkflowInfo{ID: "quick-fix", Version: "3.0"}
 
-	if state.RunID != "" {
-		t.Errorf("state.RunID: want empty string when runID param is empty, got %q", state.RunID)
+			_, err := store.Create(context.Background(), info, "task", domain.RunSettings{}, time.Now(), runID)
+
+			if err == nil {
+				t.Fatalf("Create with run_id %q: want error, got nil", runID)
+			}
+			asRefusalError(t, err)
+			if _, statErr := os.Stat(path); statErr == nil {
+				t.Errorf("Create with run_id %q wrote a file; want nothing written", runID)
+			}
+		})
+	}
+}
+
+func TestCreate_InvalidRunID_CauseIsRunIdentityError(t *testing.T) {
+	for _, runID := range []string{"", "not-a-run-id"} {
+		t.Run(runID, func(t *testing.T) {
+			store := artifact.NewFileStore(filepath.Join(t.TempDir(), "Orchestration.md"))
+			info := domain.WorkflowInfo{ID: "quick-fix", Version: "3.0"}
+
+			_, err := store.Create(context.Background(), info, "task", domain.RunSettings{}, time.Now(), runID)
+
+			re := asRefusalError(t, err)
+			var idErr *domain.RunIdentityError
+			if !errors.As(re.Cause, &idErr) {
+				t.Fatalf("RefusalError.Cause: want *domain.RunIdentityError, got %T (%v)", re.Cause, re.Cause)
+			}
+		})
+	}
+}
+
+func TestCreate_AlwaysWritesRunIDLineToFile(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "Orchestration.md")
+	store := artifact.NewFileStore(path)
+	info := domain.WorkflowInfo{ID: "quick-fix", Version: "3.0"}
+	if _, err := store.Create(context.Background(), info, "task", domain.RunSettings{}, time.Now(), testRunID); err != nil {
+		t.Fatalf("Create: %v", err)
+	}
+
+	raw, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatalf("reading created file: %v", err)
+	}
+
+	if !strings.Contains(string(raw), "run_id: "+testRunID) && !strings.Contains(string(raw), "run_id: \""+testRunID+"\"") {
+		t.Errorf("created file must carry the run_id line, got:\n%s", raw)
+	}
+}
+
+func TestCreate_ReviewLoopLimitAndSelections_PersistedToFile(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "Orchestration.md")
+	store := artifact.NewFileStore(path)
+	info := domain.WorkflowInfo{ID: "quick-fix", Version: "3.0"}
+	settings := domain.RunSettings{
+		Mode:            domain.ExecutionModeAutoReview,
+		ReviewLoopLimit: 3,
+		InfraClassSelections: map[string]string{
+			"checkpoint": "checkpoint-manager-git",
+			"commit":     "commit-manager-git",
+		},
+	}
+	if _, err := store.Create(context.Background(), info, "task", settings, time.Now(), testRunID); err != nil {
+		t.Fatalf("Create: %v", err)
+	}
+
+	onDisk, err := store.Read(context.Background())
+	if err != nil {
+		t.Fatalf("Read after Create: %v", err)
+	}
+
+	if onDisk.ReviewLoopLimit != 3 {
+		t.Errorf("ReviewLoopLimit: want 3, got %d", onDisk.ReviewLoopLimit)
+	}
+	if onDisk.InfraClassSelections["checkpoint"] != "checkpoint-manager-git" ||
+		onDisk.InfraClassSelections["commit"] != "commit-manager-git" ||
+		len(onDisk.InfraClassSelections) != 2 {
+		t.Errorf("InfraClassSelections: got %v", onDisk.InfraClassSelections)
+	}
+}
+
+func TestCreate_WithoutLimitOrSelections_OmitsKeys(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "Orchestration.md")
+	store := artifact.NewFileStore(path)
+	info := domain.WorkflowInfo{ID: "quick-fix", Version: "3.0"}
+	if _, err := store.Create(context.Background(), info, "task", domain.RunSettings{Mode: domain.ExecutionModeAuto}, time.Now(), testRunID); err != nil {
+		t.Fatalf("Create: %v", err)
+	}
+
+	raw, _ := os.ReadFile(path)
+
+	for _, key := range []string{"review_loop_limit", "infrastructure_selections", "commit_branch_variant"} {
+		if strings.Contains(string(raw), key) {
+			t.Errorf("created file must not contain %q, got:\n%s", key, raw)
+		}
 	}
 }
 
@@ -369,7 +473,7 @@ func TestCreate_AllRunSettings_PersistedToFile(t *testing.T) {
 		ManualResolution:    true,
 	}
 
-	if _, err := store.Create(ctx, info, "persisted settings task", settings, time.Now(), ""); err != nil {
+	if _, err := store.Create(ctx, info, "persisted settings task", settings, time.Now(), testRunID); err != nil {
 		t.Fatalf("Create: unexpected error: %v", err)
 	}
 
@@ -412,7 +516,7 @@ func TestCreate_RelativePath_ReturnsError(t *testing.T) {
 	ctx := context.Background()
 	info := domain.WorkflowInfo{ID: "quick-fix", Version: "1.0"}
 
-	_, err := store.Create(ctx, info, "task", domain.RunSettings{}, time.Now(), "")
+	_, err := store.Create(ctx, info, "task", domain.RunSettings{}, time.Now(), testRunID)
 
 	// Defensive cleanup: in the RED phase Create may succeed and write the file.
 	// Remove it so subsequent test runs are not affected by a leftover artifact.
@@ -445,7 +549,7 @@ func TestCreate_RelativePath_WritesNoFile(t *testing.T) {
 		t.Fatalf("os.Getwd: %v", err)
 	}
 
-	_, _ = store.Create(ctx, info, "task", domain.RunSettings{}, time.Now(), "") // error expected; ignore
+	_, _ = store.Create(ctx, info, "task", domain.RunSettings{}, time.Now(), testRunID) // error expected; ignore
 
 	// Verify no file was written at the relative path (resolved against the test's CWD).
 	candidate := filepath.Join(wd, relativePath)
@@ -462,7 +566,7 @@ func TestCreate_AbsoluteNonRunScopedPath_Succeeds(t *testing.T) {
 	ctx := context.Background()
 	info := domain.WorkflowInfo{ID: "quick-fix", Version: "1.0"}
 
-	_, err := store.Create(ctx, info, "regression guard task", domain.RunSettings{}, time.Now(), "")
+	_, err := store.Create(ctx, info, "regression guard task", domain.RunSettings{}, time.Now(), testRunID)
 
 	if err != nil {
 		t.Errorf("Create with absolute non-run-scoped path: unexpected error: %v", err)

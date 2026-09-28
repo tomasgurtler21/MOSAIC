@@ -72,6 +72,14 @@ func (s *tuiSpyStore) SetPhase(_ context.Context, state domain.ArtifactState, ph
 	return state, nil
 }
 
+func (s *tuiSpyStore) SetCommitBranch(_ context.Context, _ string, _ time.Time) (domain.ArtifactState, error) {
+	panic("tuiSpyStore.SetCommitBranch: unexpected call in TUI completion tests")
+}
+
+func (s *tuiSpyStore) AdoptRunnerSettings(_ context.Context, _ domain.ExecutionMode, _, _ bool, _ time.Time) (domain.ArtifactState, error) {
+	panic("tuiSpyStore.AdoptRunnerSettings: unexpected call in TUI completion tests")
+}
+
 // fixedClock implements domain.Clock and always returns the same instant, so
 // tests can assert on the exact timestamp passed to SetPhase.
 type fixedClock struct{ t time.Time }
@@ -337,7 +345,7 @@ func TestCompletedMarker_DefaultFactory_WritesFileToRunFolder(t *testing.T) {
 		"test task",
 		domain.RunSettings{},
 		time.Now(),
-		"test-run-id",
+		"20260727T170000Z-a3f9",
 	); err != nil {
 		t.Fatalf("seeding Orchestration.md: %v", err)
 	}

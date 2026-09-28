@@ -1,22 +1,6 @@
 package session
 
-import (
-	"fmt"
-
-	"mosaic-run/internal/domain"
-)
-
-// gatedInfraClasses is the set of infrastructure agent class names that are
-// subject to at-most-one-per-class enforcement at run start. Non-gated classes
-// (e.g. "review") have all declared agents active unconditionally.
-// Note: isGatedInfraClass() in Tools/Runner/internal/tui/screens/setup.go
-// maintains an equivalent set for the TUI layer. Keep both in sync when adding
-// new gated classes.
-var gatedInfraClasses = map[string]bool{
-	"checkpoint": true,
-	"commit":     true,
-	"restore":    true,
-}
+import "mosaic-run/internal/domain"
 
 // buildActiveAgentsFilter constructs the activeAgents map from the per-class
 // selection in RunConfig and the declared infrastructure agents.
@@ -44,7 +28,7 @@ func buildActiveAgentsFilter(
 	// Count agents per gated class to determine whether filtering is needed.
 	classCount := make(map[string]int)
 	for _, a := range declared {
-		if gatedInfraClasses[a.Class] {
+		if domain.IsGatedInfraClass(a.Class) {
 			classCount[a.Class]++
 		}
 	}
@@ -64,7 +48,7 @@ func buildActiveAgentsFilter(
 	// Build the active agents map.
 	active := make(map[string]bool)
 	for _, a := range declared {
-		if !gatedInfraClasses[a.Class] {
+		if !domain.IsGatedInfraClass(a.Class) {
 			// Non-gated classes (e.g. "review") are always included.
 			active[a.Name] = true
 			continue
@@ -82,32 +66,4 @@ func buildActiveAgentsFilter(
 	}
 
 	return active
-}
-
-// validateClassSelections checks that for every gated class with multiple
-// declared agents, a selection entry exists in the selections map. Returns a
-// non-nil error (suitable for use as a run-start refusal message) when any
-// gated class has multiple agents and no selection is provided.
-//
-// Non-interactive CLI runs must supply --infra-class mappings for all such
-// classes. The TUI wizard ensures the user selects before proceeding.
-func validateClassSelections(declared []domain.DeclaredInfraAgent, selections map[string]string) error {
-	classCount := make(map[string]int)
-	for _, a := range declared {
-		if gatedInfraClasses[a.Class] {
-			classCount[a.Class]++
-		}
-	}
-	for class, count := range classCount {
-		if count > 1 {
-			if _, ok := selections[class]; !ok {
-				return fmt.Errorf(
-					"multiple %s-class agents declared but no agent selected for this run; "+
-						"use --infra-class %s=<agent> to specify which one to use",
-					class, class,
-				)
-			}
-		}
-	}
-	return nil
 }

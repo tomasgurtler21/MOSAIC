@@ -38,13 +38,16 @@ func TestIntegration_InterruptedRun_ResumesFromRerunLast(t *testing.T) {
 	// than advancing to the next row.
 	const interruptedArtifact = `---
 type: orchestration-artifact
+run_id: 20260727T170000Z-a3f9
 workflow: linear
 workflow_version: "1.0"
 task: "test task"
 started: 2026-01-01T00:00:00Z
 last_updated: 2026-01-01T00:00:00Z
 global_sequence: 1
-mode: auto
+runner_mode: auto
+runner_pre_consultation: disabled
+runner_manual_resolution: disabled
 checkpoints: disabled
 current_state:
   phase: PLANNING
@@ -71,7 +74,8 @@ current_state:
 | --- | ---- |
 </WorkflowNotes>
 `
-	artifactPath := filepath.Join(dir, "Orchestration.md")
+	runFolder := scopedRunFolder(t, dir)
+	artifactPath := filepath.Join(runFolder, "Orchestration.md")
 	if err := os.WriteFile(artifactPath, []byte(interruptedArtifact), 0600); err != nil {
 		t.Fatalf("write interrupted artifact: %v", err)
 	}
@@ -91,10 +95,12 @@ current_state:
 
 	sess := newSession(f, artifactPath)
 	cfg := domain.RunConfig{
+		RunID: integrationRunID,
 		OrchestratorFilePath: orchPath,
 		WorkflowID:           "linear",
 		Task:                 "test task",
 		IsNewRun:             false, // resume: interrupted artifact already written
+		RunFolder:            runFolder,
 
 	}
 
@@ -136,17 +142,18 @@ func TestIntegration_Resume_ConfigFromFrontmatterNothingReAsked(t *testing.T) {
 	// Artifact: agent-a already completed, mode=auto in frontmatter.
 	const resumeArtifact = `---
 type: orchestration-artifact
+run_id: 20260727T170000Z-a3f9
 workflow: linear
 workflow_version: "1.0"
 task: "resume task"
 started: 2026-01-01T00:00:00Z
 last_updated: 2026-01-01T00:00:00Z
 global_sequence: 1
-mode: auto
+runner_mode: auto
+runner_pre_consultation: disabled
+runner_manual_resolution: disabled
 checkpoints: disabled
 commits: disabled
-pre_consultation: disabled
-manual_resolution: disabled
 current_state:
   phase: PLANNING
   stage: null
@@ -172,7 +179,8 @@ current_state:
 | --- | ---- |
 </WorkflowNotes>
 `
-	artifactPath := filepath.Join(dir, "Orchestration.md")
+	runFolder := scopedRunFolder(t, dir)
+	artifactPath := filepath.Join(runFolder, "Orchestration.md")
 	if err := os.WriteFile(artifactPath, []byte(resumeArtifact), 0600); err != nil {
 		t.Fatalf("write resume artifact: %v", err)
 	}
@@ -192,10 +200,12 @@ current_state:
 	sess := newSession(f, artifactPath)
 
 	cfg := domain.RunConfig{
+		RunID: integrationRunID,
 		OrchestratorFilePath: orchPath,
 		WorkflowID:           "linear",
 		Task:                 "resume task",
 		IsNewRun:             false, // resume: artifact already on disk
+		RunFolder:            runFolder,
 		// RunSettings intentionally empty: frontmatter value must take precedence.
 	}
 
@@ -231,17 +241,18 @@ func TestIntegration_Resume_InterruptedStep_ReDispatched(t *testing.T) {
 
 	const interruptedArtifact = `---
 type: orchestration-artifact
+run_id: 20260727T170000Z-a3f9
 workflow: linear
 workflow_version: "1.0"
 task: "interrupted task"
 started: 2026-01-01T00:00:00Z
 last_updated: 2026-01-01T00:00:00Z
 global_sequence: 1
-mode: auto
+runner_mode: auto
+runner_pre_consultation: disabled
+runner_manual_resolution: disabled
 checkpoints: disabled
 commits: disabled
-pre_consultation: disabled
-manual_resolution: disabled
 current_state:
   phase: PLANNING
   stage: null
@@ -267,7 +278,8 @@ current_state:
 | --- | ---- |
 </WorkflowNotes>
 `
-	artifactPath := filepath.Join(dir, "Orchestration.md")
+	runFolder := scopedRunFolder(t, dir)
+	artifactPath := filepath.Join(runFolder, "Orchestration.md")
 	if err := os.WriteFile(artifactPath, []byte(interruptedArtifact), 0600); err != nil {
 		t.Fatalf("write interrupted artifact: %v", err)
 	}
@@ -291,10 +303,12 @@ current_state:
 	sess := newSession(f, artifactPath)
 
 	cfg := domain.RunConfig{
+		RunID: integrationRunID,
 		OrchestratorFilePath: orchPath,
 		WorkflowID:           "linear",
 		Task:                 "interrupted task",
 		IsNewRun:             false, // resume: interrupted artifact on disk
+		RunFolder:            runFolder,
 	}
 
 	got, err := sess.Start(context.Background(), cfg)

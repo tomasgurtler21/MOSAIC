@@ -23,6 +23,14 @@ type autoHITLResult struct {
 	hitlStep       domain.DispatchStep
 	hitlResponse   domain.ProtocolResponse
 	hitlAttemptSeq int
+	written        []string
+
+	// routed is the original attempt's status and error code when a
+	// gate-discharging re-dispatch returned SUCCESS; nil otherwise.
+	// routedResp is that original response, which routing and the
+	// consultation's last status message follow.
+	routed     *domain.RoutedOutcome
+	routedResp *domain.ProtocolResponse
 }
 
 // runAutoDispatchHITL runs the HITL compliance check loop for an auto-routed
@@ -33,6 +41,7 @@ func (s *sessionImpl) runAutoDispatchHITL(ctx context.Context, rs *runStartCtx, 
 	hitlRedispatchUsed := false
 	hitlStep := step
 	hitlResponse := response
+	var original *domain.ProtocolResponse
 
 	// Pre-HITL stage set re-derivation for self-referential rows.
 	if rs.stages == nil && hasStageStarArtifact(hitlStep.Request.OutputArtifacts) {
@@ -50,32 +59,39 @@ func (s *sessionImpl) runAutoDispatchHITL(ctx context.Context, rs *runStartCtx, 
 	}
 
 	for {
-		var approvals []domain.ArtifactApproval
-		expandedPaths := expandStageGlobs(hitlStep.Request.OutputArtifacts, rs.stages)
-		for _, path := range expandedPaths {
-			approvals = append(approvals, domain.ArtifactApproval{
-				Path:     path,
-				Approval: s.deps.Approvals.ReadApproval(ctx, path),
-			})
-		}
+		written := s.writtenOutputs(ctx, rs.stages)
+		approvals := s.readApprovals(ctx, written)
 		hitlDec := domain.DecideHITLCompliance(domain.HITLComplianceInput{
 			EffectiveHITL:  hitlStep.EffectiveHITL,
 			Status:         hitlResponse.StatusCode,
+			ErrorCode:      hitlResponse.ErrorCode,
 			Approvals:      approvals,
 			RedispatchUsed: hitlRedispatchUsed,
 		})
 
 		switch hitlDec.Outcome {
 		case domain.HITLAccept:
-			return autoHITLResult{
+			res := autoHITLResult{
 				accepted:       true,
 				hitlStep:       hitlStep,
 				hitlResponse:   hitlResponse,
 				hitlAttemptSeq: hitlAttemptSeq,
+				written:        written,
 			}
+			if original != nil {
+				if routed := routedAfterRedispatch(*original, hitlResponse); routed != nil {
+					res.routed = routed
+					res.routedResp = original
+				}
+			}
+			return res
 
 		case domain.HITLRedispatch:
 			hitlRedispatchUsed = true
+			if original == nil {
+				first := hitlResponse
+				original = &first
+			}
 			updated, rdDone, rdCont, rdOut, rdErr := s.handleAutoHITLRedispatch(ctx, rs, hitlStep, hitlResponse, hitlAttemptSeq)
 			if rdErr != nil || rdDone {
 				return autoHITLResult{done: true, outcome: rdOut, err: rdErr}
@@ -199,10 +215,10 @@ func (s *sessionImpl) handleAutoHITLRedispatchError(ctx context.Context, rs *run
 		Phase:            hitlStep.Phase,
 		Stage:            hitlStep.Stage,
 		Status:           domain.StatusBLOCKED,
+		ErrorCode:        domain.ErrorTOOL_UNAVAILABLE,
 		Summary:          rdErr.Error(),
 		Timestamp:        s.deps.Clock.Now(),
 		Inputs:           formatInputs(hitlStep.Request.InputArtifacts),
-		IsInfrastructure: true,
 	}
 	newState, applyErr := s.deps.Store.Apply(ctx, rs.state, rdFailedStep)
 	if applyErr != nil {
@@ -221,10 +237,10 @@ func (s *sessionImpl) handleAutoHITLRedispatchError(ctx context.Context, rs *run
 			return hitlRedispatchState{step: hitlStep, response: bypassResp, hitlAttemptSeq: bypassSeq}, false, false, domain.RunOutcome{}, nil
 		}
 	}
+	rdResp := domain.HarnessErrorResponse(hitlStep.Request.AgentInstanceID, rs.config.RunID, rdErr)
 	rdDevInfo := domain.DeviationInfo{
-		Kind: domain.DeviationHarnessError,
-		Response: domain.ProtocolResponse{AgentInstanceID: hitlStep.Request.AgentInstanceID,
-			StatusCode: domain.StatusBLOCKED, StatusMessage: rdErr.Error()},
+		Kind:     domain.DeviationNonSuccess,
+		Response: rdResp,
 		CurrentRow: hitlStep.RowIndex, CurrentPhase: hitlStep.Phase, CurrentStage: hitlStep.Stage,
 		ArtifactState: rs.state,
 	}
@@ -233,6 +249,7 @@ func (s *sessionImpl) handleAutoHITLRedispatchError(ctx context.Context, rs *run
 		s.deps.Debug.Log(domain.EventSessionDeviationUnresolved, rdMsg)
 		return hitlRedispatchState{}, true, false, domain.RunOutcome{Status: domain.RunDeviationUnresolved, Message: rdMsg}, nil
 	}
+	rs.lastResponse = &rdResp
 	done, out, outErr := s.consultRoute(ctx, &rdDevInfo, &rs.state, &rs.seq,
 		&rs.lastResponse, &rs.prevWorkflowStep, &rs.refreshedStages, &rs.stages,
 		rs.table, rs.agents, rs.config, rs.declaredInfraAgents, rs.admitted, &rs.antiLoop)

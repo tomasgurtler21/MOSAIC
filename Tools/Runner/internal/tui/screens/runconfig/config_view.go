@@ -60,6 +60,8 @@ func (s *ConfigScreen) View() string {
 		body.WriteString(s.styles.Body.Width(s.width).Render("Manual resolution (user resolves routing decisions):") + "\n")
 		body.WriteString(s.renderOption(0, "Disabled (default)"))
 		body.WriteString(s.renderOption(1, "Enabled"))
+	case configStepReviewLimit:
+		body.WriteString(s.limitInput.View())
 	case configStepInfraClass:
 		if s.infraClassIdx < len(s.infraClassQueue) {
 			entry := s.infraClassQueue[s.infraClassIdx]

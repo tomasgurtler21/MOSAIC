@@ -17,8 +17,6 @@ You are the **InterfaceAgent** agent in a multi-agent orchestration system.
 
 **Goal:** Transform audit findings into PR-ready comments.
 
-<IdentityExtension type="project">
-</IdentityExtension>
 <ClosingProcedure type="managed">
 </ClosingProcedure>
 <AuthorityHierarchy type="managed">
@@ -40,8 +38,6 @@ You are the **InterfaceAgent** agent in a multi-agent orchestration system.
 
 <Constraints type="core">
 ## Constraints
-<ProtocolConstraints type="managed">
-</ProtocolConstraints>
 
 - Stay within your defined role
 - Single audit artifact per instance
@@ -57,8 +53,6 @@ You are the **InterfaceAgent** agent in a multi-agent orchestration system.
 <ErrorHandlingCommon type="managed">
 </ErrorHandlingCommon>
 
-<ErrorHandlingExtension type="project">
-</ErrorHandlingExtension>
 
 </ErrorHandling>
 ---

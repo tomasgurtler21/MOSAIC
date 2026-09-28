@@ -3,7 +3,6 @@ package artifact
 import (
 	"bytes"
 	"strconv"
-	"strings"
 	"time"
 
 	"mosaic-common/docformat"
@@ -35,6 +34,7 @@ func Parse(data []byte) (domain.ArtifactState, error) {
 	}
 
 	// Parse frontmatter key-value pairs.
+	entries := parseFrontmatterEntries(fmContent)
 	topLevel, currentState, err := parseFrontmatter(fmContent)
 	if err != nil {
 		return refuse("failed to parse frontmatter: " + err.Error())
@@ -52,7 +52,7 @@ func Parse(data []byte) (domain.ArtifactState, error) {
 	}
 
 	// Build ArtifactState from frontmatter.
-	state, err := buildStateFromFrontmatter(fmContent, topLevel, currentState)
+	state, err := buildStateFromFrontmatter(fmContent, entries, topLevel, currentState)
 	if err != nil {
 		return domain.ArtifactState{}, err
 	}
@@ -69,6 +69,14 @@ func Parse(data []byte) (domain.ArtifactState, error) {
 		return refuse("failed to parse execution log: " + err.Error())
 	}
 	state.ExecutionLog = logEntries
+
+	// A lagging global_sequence (an interrupted write) is corrected to the
+	// highest logged Seq; a higher stored value (an interrupted allocation) is kept.
+	for _, e := range logEntries {
+		if e.Seq > state.GlobalSequence {
+			state.GlobalSequence = e.Seq
+		}
+	}
 
 	artsContent, ok := extractSectionContent(body, "Artifacts")
 	if !ok {
@@ -131,7 +139,7 @@ func checkRequiredSections(data []byte) error {
 // buildStateFromFrontmatter constructs an ArtifactState from the parsed
 // frontmatter maps. All field parsing and validation is done here so that
 // Parse itself stays short.
-func buildStateFromFrontmatter(fmContent string, topLevel, currentState map[string]string) (domain.ArtifactState, error) {
+func buildStateFromFrontmatter(fmContent string, entries []domain.FrontmatterEntry, topLevel, currentState map[string]string) (domain.ArtifactState, error) {
 	refuse := func(reason string) (domain.ArtifactState, error) {
 		return domain.ArtifactState{}, &domain.RefusalError{
 			Component: "artifact",
@@ -143,9 +151,11 @@ func buildStateFromFrontmatter(fmContent string, topLevel, currentState map[stri
 		Type: "orchestration-artifact",
 	}
 
-	if v, ok := topLevel["run_id"]; ok {
-		state.RunID = v
+	runID, err := parseRunID(topLevel)
+	if err != nil {
+		return domain.ArtifactState{}, err
 	}
+	state.RunID = runID
 	if v, ok := topLevel["workflow"]; ok {
 		state.Workflow = domain.WorkflowID(v)
 	}
@@ -176,13 +186,6 @@ func buildStateFromFrontmatter(fmContent string, topLevel, currentState map[stri
 		}
 		state.GlobalSequence = n
 	}
-	if v, ok := topLevel["mode"]; ok {
-		mode, err := domain.ParseExecutionMode(v)
-		if err != nil {
-			return refuse("invalid 'mode' value: " + err.Error())
-		}
-		state.Mode = mode
-	}
 	if v, ok := topLevel["checkpoints"]; ok {
 		switch v {
 		case "enabled":
@@ -203,42 +206,32 @@ func buildStateFromFrontmatter(fmContent string, topLevel, currentState map[stri
 			return refuse("invalid 'commits' value " + `"` + v + `"` + "; valid values: enabled, disabled")
 		}
 	}
-	if v, ok := topLevel["commit_branch_variant"]; ok {
-		variant, err := domain.ParseCommitBranchVariant(v)
-		if err != nil {
-			return refuse("invalid 'commit_branch_variant' value: " + err.Error())
-		}
-		state.CommitBranchVariant = variant
-	} else if state.Commits {
-		// When commits are enabled and the key is absent, default to the
-		// recommended variant (preserves behavior for pre-fix artifacts).
-		state.CommitBranchVariant = domain.CommitBranchMOSAICOwned
-	}
-	// When commits are disabled and the key is absent, CommitBranchVariant
-	// remains its zero value (empty string), as it is meaningless in that case.
 	if v, ok := topLevel["commit_branch"]; ok {
 		state.CommitBranch = v
 	}
-	if v, ok := topLevel["pre_consultation"]; ok {
-		switch v {
-		case "enabled":
-			state.PreConsultation = true
-		case "disabled":
-			state.PreConsultation = false
-		default:
-			return refuse("invalid 'pre_consultation' value " + `"` + v + `"` + "; valid values: enabled, disabled")
-		}
+	// The variant is never stored: it is derived from commit_branch. A legacy
+	// commit_branch_variant key is consumed and ignored.
+	state.CommitBranchVariant = domain.DeriveCommitBranchVariant(state.CommitBranch, state.RunID)
+
+	if err := parseRunnerSettings(topLevel, &state.RunSettings); err != nil {
+		return domain.ArtifactState{}, err
 	}
-	if v, ok := topLevel["manual_resolution"]; ok {
-		switch v {
-		case "enabled":
-			state.ManualResolution = true
-		case "disabled":
-			state.ManualResolution = false
-		default:
-			return refuse("invalid 'manual_resolution' value " + `"` + v + `"` + "; valid values: enabled, disabled")
+
+	if v, ok := topLevel["review_loop_limit"]; ok {
+		n, convErr := strconv.Atoi(v)
+		if convErr != nil || n <= 0 {
+			return refuse("invalid 'review_loop_limit' value " + `"` + v + `"` + "; must be a positive integer")
 		}
+		state.ReviewLoopLimit = n
 	}
+
+	selections, err := parseInfrastructureSelections(entries)
+	if err != nil {
+		return domain.ArtifactState{}, err
+	}
+	state.InfraClassSelections = selections
+
+	state.UnknownFrontmatter = unknownEntries(entries)
 
 	// Parse infrastructure_overrides block (optional; nil when absent).
 	overrides := parseInfrastructureOverrides(fmContent)
@@ -291,200 +284,4 @@ func splitDocument(data []byte) (fmContent string, bodyContent string, hasFM boo
 	fmContent = string(rest[:idx+1])  // include the \n before the closing ---
 	bodyContent = string(rest[idx+5:]) // skip \n---\n
 	return fmContent, bodyContent, true
-}
-
-// parseFrontmatter parses the YAML frontmatter content into top-level key-value
-// pairs, the nested current_state pairs, and the infrastructure_overrides block.
-// This minimal parser handles only the subset used by orchestration artifacts.
-func parseFrontmatter(content string) (topLevel map[string]string, currentState map[string]string, err error) {
-	topLevel = make(map[string]string)
-	currentState = make(map[string]string)
-
-	lines := strings.Split(content, "\n")
-	inCurrentState := false
-	inInfraOverrides := false
-
-	for i := 0; i < len(lines); i++ {
-		line := lines[i]
-		trimmed := strings.TrimRight(line, "\r")
-
-		if trimmed == "" {
-			continue
-		}
-
-		// Detect the infrastructure_overrides block header.
-		if trimmed == "infrastructure_overrides:" {
-			inInfraOverrides = true
-			inCurrentState = false
-			continue
-		}
-
-		// Detect the current_state block header.
-		if trimmed == "current_state:" {
-			inCurrentState = true
-			inInfraOverrides = false
-			continue
-		}
-
-		// Skip lines that are part of the infrastructure_overrides block
-		// (they are parsed separately by parseInfrastructureOverrides).
-		if inInfraOverrides {
-			if strings.HasPrefix(line, "  ") {
-				// Still inside the block.
-				continue
-			}
-			// No longer in the infra overrides block.
-			inInfraOverrides = false
-		}
-
-		if inCurrentState {
-			if strings.HasPrefix(line, "  ") {
-				// Nested current_state key.
-				nestedTrimmed := line[2:]
-				key, value := parseYAMLLine(nestedTrimmed)
-				if key != "" {
-					currentState[key] = value
-				}
-				continue
-			}
-			// No longer in nested block.
-			inCurrentState = false
-		}
-
-		key, value := parseYAMLLine(trimmed)
-		if key != "" {
-			topLevel[key] = value
-		}
-	}
-
-	return topLevel, currentState, nil
-}
-
-// parseInfrastructureOverrides parses the infrastructure_overrides block from
-// frontmatter content. The block format is:
-//
-//	infrastructure_overrides:
-//	  agent-name:
-//	    triggers:
-//	      - trigger: STAGE_END
-//	      - trigger: INVOCATION_INTERVAL
-//	        trigger_param: 10
-//
-// Returns nil when the block is absent.
-func parseInfrastructureOverrides(content string) []domain.InfrastructureOverride {
-	lines := strings.Split(content, "\n")
-	inBlock := false
-
-	var overrides []domain.InfrastructureOverride
-	var currentAgent *domain.InfrastructureOverride
-	var currentTrigger *domain.DeclaredInfraTrigger
-
-	for _, rawLine := range lines {
-		line := strings.TrimRight(rawLine, "\r")
-
-		if line == "infrastructure_overrides:" {
-			inBlock = true
-			continue
-		}
-
-		if !inBlock {
-			continue
-		}
-
-		// Check if we've left the block (non-indented line).
-		if len(line) > 0 && !strings.HasPrefix(line, " ") {
-			break
-		}
-
-		// 2-space indent: agent name (e.g., "  checkpoint-manager-git:")
-		if strings.HasPrefix(line, "  ") && !strings.HasPrefix(line, "   ") {
-			trimmed := strings.TrimSpace(line)
-			if strings.HasSuffix(trimmed, ":") {
-				// Save previous trigger if any
-				if currentTrigger != nil && currentAgent != nil {
-					currentAgent.Triggers = append(currentAgent.Triggers, *currentTrigger)
-					currentTrigger = nil
-				}
-				// Save previous agent if any
-				if currentAgent != nil {
-					overrides = append(overrides, *currentAgent)
-				}
-				agentName := strings.TrimSuffix(trimmed, ":")
-				currentAgent = &domain.InfrastructureOverride{AgentName: agentName}
-			}
-			continue
-		}
-
-		// 4-space or more indent: triggers, trigger items
-		if strings.HasPrefix(line, "    ") {
-			trimmed := strings.TrimSpace(line)
-
-			// Trigger list item start (e.g., "      - trigger: STAGE_END")
-			if strings.HasPrefix(trimmed, "- trigger:") {
-				// Save previous trigger if any
-				if currentTrigger != nil && currentAgent != nil {
-					currentAgent.Triggers = append(currentAgent.Triggers, *currentTrigger)
-				}
-				triggerVal := strings.TrimSpace(strings.TrimPrefix(trimmed, "- trigger:"))
-				currentTrigger = &domain.DeclaredInfraTrigger{Trigger: triggerVal}
-				continue
-			}
-
-			// Trigger param (e.g., "        trigger_param: 10")
-			if strings.HasPrefix(trimmed, "trigger_param:") && currentTrigger != nil {
-				paramVal := strings.TrimSpace(strings.TrimPrefix(trimmed, "trigger_param:"))
-				currentTrigger.Param = paramVal
-				continue
-			}
-
-			// Ignore "triggers:" line and other structural lines.
-			continue
-		}
-	}
-
-	// Flush trailing trigger and agent.
-	if currentTrigger != nil && currentAgent != nil {
-		currentAgent.Triggers = append(currentAgent.Triggers, *currentTrigger)
-	}
-	if currentAgent != nil {
-		overrides = append(overrides, *currentAgent)
-	}
-
-	return overrides
-}
-
-// parseYAMLLine parses a single YAML line of the form "key: value" or "key: \"value\"".
-// Returns ("", "") for blank lines and lines without a colon-space separator.
-// Double-quoted values have their quotes stripped. "null" values become "".
-func parseYAMLLine(line string) (key, value string) {
-	line = strings.TrimRight(line, "\r")
-
-	colonSpaceIdx := strings.Index(line, ": ")
-	if colonSpaceIdx > 0 {
-		key = line[:colonSpaceIdx]
-		raw := line[colonSpaceIdx+2:]
-		value = parseYAMLScalar(raw)
-		return key, value
-	}
-
-	// Handle "key:" with no value (like "current_state:").
-	if strings.HasSuffix(line, ":") {
-		key = line[:len(line)-1]
-		return key, ""
-	}
-
-	return "", ""
-}
-
-// parseYAMLScalar converts a raw YAML scalar string to a Go string.
-// Strips double quotes and converts "null" to "".
-func parseYAMLScalar(raw string) string {
-	raw = strings.TrimSpace(raw)
-	if raw == "null" {
-		return ""
-	}
-	if len(raw) >= 2 && raw[0] == '"' && raw[len(raw)-1] == '"' {
-		return raw[1 : len(raw)-1]
-	}
-	return raw
 }

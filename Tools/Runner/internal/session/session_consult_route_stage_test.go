@@ -83,7 +83,7 @@ func newConsultStagedSession(t *testing.T, consultant domain.RoutingConsultant) 
 	ses session.Session, f *harness.MockAdapter, store *memStore, orchPath string, runFolder string,
 ) {
 	t.Helper()
-	dir := t.TempDir()
+	dir := scopedTempDir(t)
 	orchPath = copyOrchestratorFile(t, dir, "consult-staged-orch.md")
 	writeAgentFile(t, dir, "agent-a")
 	writeAgentFile(t, dir, "agent-b")
@@ -112,6 +112,7 @@ func baseConsultStagedConfig(orchPath, runFolder string) domain.RunConfig {
 		WorkflowID:           "consult-staged",
 		Task:                 "test task",
 		IsNewRun:             false, // resume: store is pre-seeded with Stage-2 state
+		RunID:               testRunID,
 		RunFolder:            runFolder,
 		RunSettings: domain.RunSettings{
 			Mode: domain.ExecutionModeOrchestrated,
@@ -173,7 +174,7 @@ func TestSession_ConsultRoute_PreservesCurrentStateStage(t *testing.T) {
 
 	notices := &noticeCapturingInteraction{}
 
-	dir := t.TempDir()
+	dir := scopedTempDir(t)
 	orchPath := copyOrchestratorFile(t, dir, "consult-staged-orch.md")
 	writeAgentFile(t, dir, "agent-a")
 	writeAgentFile(t, dir, "agent-b")
@@ -266,8 +267,8 @@ func TestSession_ConsultRoute_PreservesCurrentStateStage(t *testing.T) {
 // itself with a deviation; the recursive call dispatches agent-b (row 3), which
 // succeeds. The CompletedStep applied by the recursive call must carry
 // Stage="Stage-2" because state.CurrentState.Stage was "Stage-2" at the
-// recursive entry (the parent's consultStep Apply is infrastructure and does
-// not modify CurrentState).
+// recursive entry (the failed attempt's row records no position change and the
+// consultation itself writes nothing).
 //
 // This guards against an implementation where the recursive call might receive
 // a stale or zero stage value instead of reading from the current state at its
@@ -293,7 +294,7 @@ func TestSession_ConsultRoute_RecursiveCall_UsesOwnEntryStage(t *testing.T) {
 	f.Queue("agent-a", harness.ScriptedEntry{Err: errors.New("simulated harness failure in Stage-2")})
 	// agent-b: dispatched by the recursive consultRoute, returns SUCCESS.
 	f.Queue("agent-b", harness.ScriptedEntry{Response: &domain.ProtocolResponse{
-		AgentInstanceID: "agent-b#4",
+		AgentInstanceID: "agent-b#5",
 		StatusCode:      domain.StatusSUCCESS,
 		StatusMessage:   "Stage-2 recovered",
 	}})
@@ -303,20 +304,19 @@ func TestSession_ConsultRoute_RecursiveCall_UsesOwnEntryStage(t *testing.T) {
 		t.Fatalf("want nil error (harness error is a deviation, not a crash), got %v", err)
 	}
 
-	// The recursive consultRoute applied a CompletedStep for agent-b#4.
+	// The recursive consultRoute applied a CompletedStep for agent-b#5.
 	// Its Stage field must be "Stage-2" because state.CurrentState.Stage was
-	// "Stage-2" when the recursive call entered consultRoute (the parent's
-	// consultStep is IsInfrastructure=true and does not update CurrentState).
+	// "Stage-2" when the recursive call entered consultRoute.
 	// Without the fix, the recursive call also omits Stage, setting it to "".
 	var workflowStep *domain.CompletedStep
 	for i := range store.Applied {
 		s := &store.Applied[i]
-		if !s.IsInfrastructure && !s.HITLRejected && s.AgentInstance == "agent-b#4" {
+		if !s.IsInfrastructure && !s.HITLRejected && s.AgentInstance == "agent-b#5" {
 			workflowStep = s
 		}
 	}
 	if workflowStep == nil {
-		t.Fatal("want agent-b#4 CompletedStep in store.Applied (applied by recursive consultRoute), " +
+		t.Fatal("want agent-b#5 CompletedStep in store.Applied (applied by recursive consultRoute), " +
 			"got none; the recursive consultRoute must apply its accepted step via Store.Apply")
 	}
 	if workflowStep.Stage != "Stage-2" {
@@ -371,7 +371,7 @@ func TestSession_ConsultRoute_HITLRejection_InfrastructureStepsCarryStage(t *tes
 	// Call 3: outer dispatch loop resumes after the recursive call returns.
 	consultant.queueStop("Stage-2 HITL recovery complete")
 
-	dir := t.TempDir()
+	dir := scopedTempDir(t)
 	orchPath := copyOrchestratorFile(t, dir, "consult-staged-orch.md")
 	writeAgentFile(t, dir, "agent-a")
 	writeAgentFile(t, dir, "agent-b")
@@ -408,7 +408,7 @@ func TestSession_ConsultRoute_HITLRejection_InfrastructureStepsCarryStage(t *tes
 		StatusMessage:   "done (HITL redispatch, HITL will escalate)",
 	}})
 	f.Queue("agent-b", harness.ScriptedEntry{Response: &domain.ProtocolResponse{
-		AgentInstanceID: "agent-b#7",
+		AgentInstanceID: "agent-b#5",
 		StatusCode:      domain.StatusSUCCESS,
 		StatusMessage:   "done (recursive dispatch after escalation, accepted)",
 	}})

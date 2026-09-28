@@ -54,8 +54,8 @@ func TestProtocolRequest_WithRunID_MarshalIncludesRunIDKey(t *testing.T) {
 
 // TestProtocolRequest_EmptyRunID_MarshalOmitsRunIDKey verifies that when
 // ProtocolRequest.RunID is empty, the marshalled JSON output does NOT contain
-// the "run_id" key. This is the omitempty behaviour that lets pre-v1.8 consumers
-// send clean JSON without the field.
+// the "run_id" key. This is the omitempty behaviour that lets older consumers
+// predating the run_id field send clean JSON without it.
 func TestProtocolRequest_EmptyRunID_MarshalOmitsRunIDKey(t *testing.T) {
 	req := domain.ProtocolRequest{
 		AgentInstanceID: "test-agent#1",
@@ -104,7 +104,8 @@ func TestProtocolRequest_UnmarshalWithRunID_PopulatesRunIDField(t *testing.T) {
 
 // TestProtocolRequest_UnmarshalWithoutRunID_RunIDIsEmpty verifies that a JSON
 // object without "run_id" unmarshals successfully and leaves ProtocolRequest.RunID
-// as the empty string (no error, no panics). This handles pre-v1.8 payloads.
+// as the empty string (no error, no panics). This handles payloads that
+// predate the run_id field.
 func TestProtocolRequest_UnmarshalWithoutRunID_RunIDIsEmpty(t *testing.T) {
 	const raw = `{
 		"agent_instance_id": "test-agent#1",
@@ -304,7 +305,7 @@ func TestProtocolResponse_RunID_RoundTrip(t *testing.T) {
 
 // TestProtocolRequest_RunID_PositionedAfterAgentInstanceID verifies that the
 // "run_id" key appears in the JSON output between "agent_instance_id" and
-// "task_description". This validates the field ordering matches the v1.8
+// "task_description". This validates the field ordering matches the v1.12
 // protocol specification (run_id placed immediately after agent_instance_id).
 func TestProtocolRequest_RunID_PositionedAfterAgentInstanceID(t *testing.T) {
 	req := domain.ProtocolRequest{

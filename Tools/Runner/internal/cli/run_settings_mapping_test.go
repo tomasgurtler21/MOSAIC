@@ -19,6 +19,7 @@ func TestModeFlag_Orchestrated_ReachesRunSettings(t *testing.T) {
 		"--task", "do work",
 		"--mode", "orchestrated",
 		"--new-run",
+		"--review-loop-limit", "3",
 	}
 	_, _, _ = runCLI(t, args, sess)
 	if !sess.called {
@@ -40,6 +41,7 @@ func TestModeFlag_Auto_ReachesRunSettings(t *testing.T) {
 		"--task", "do work",
 		"--mode", "auto",
 		"--new-run",
+		"--review-loop-limit", "3",
 	}
 	_, _, _ = runCLI(t, args, sess)
 	if !sess.called {
@@ -61,6 +63,7 @@ func TestModeFlag_AutoReview_ReachesRunSettings(t *testing.T) {
 		"--task", "do work",
 		"--mode", "auto-review",
 		"--new-run",
+		"--review-loop-limit", "3",
 	}
 	_, _, _ = runCLI(t, args, sess)
 	if !sess.called {

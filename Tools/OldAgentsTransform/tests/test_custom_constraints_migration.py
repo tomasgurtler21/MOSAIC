@@ -173,11 +173,13 @@ class TestCustomConstraintsMigrationCustomTagRoundTrips:
         output = output_path.read_text(encoding="utf-8")
         # The fixture carries harness_constraints → HarnessConstraints which is a
         # tool-managed DEPLOYED region, not an injection. But it also carries other
-        # injection markers like identity_extension. Check that the generic injection
-        # output is not accidentally changed to CUSTOM.
-        # <IdentityExtension type="custom"> must not appear.
-        assert '<IdentityExtension type="custom">' not in output, (
-            '<IdentityExtension type="custom"> must NOT appear in the output — '
+        # injection markers like identity_extension. The retired identity_extension
+        # marker is recognised as legacy input but produces no region at all, and
+        # no other marker may be changed to CUSTOM.
+        assert "IdentityExtension" not in output, (
+            "IdentityExtension is retired: the legacy marker must produce no region of any type"
+        )
+        assert '<CodebaseContext type="custom">' not in output, (
             'only custom_constraints maps to <Name type="custom">; all other markers remain <Name type="project">.'
         )
 

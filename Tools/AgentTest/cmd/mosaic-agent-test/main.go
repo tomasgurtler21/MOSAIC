@@ -51,7 +51,7 @@ import (
 	"mosaic-agent-test/internal/tui"
 )
 
-const ToolVersion = "1.0.0"
+const ToolVersion = "1.0.1"
 
 func main() {
 	args := os.Args[1:]

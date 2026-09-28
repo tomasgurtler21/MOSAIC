@@ -91,6 +91,7 @@ func TestIntegration_IncompatibleWorkflow_RefusedFR18a(t *testing.T) {
 			sess := newSession(f, artifactPath)
 
 			cfg := domain.RunConfig{
+				RunID: integrationRunID,
 				OrchestratorFilePath: orchPath,
 				WorkflowID:           domain.WorkflowID(tc.workflowID),
 				Task:                 "task",
@@ -134,7 +135,8 @@ func TestIntegration_NonCanonicalArtifact_Refused_FR7a(t *testing.T) {
 	// Write a file at the artifact path that is NOT in the canonical format:
 	// no YAML frontmatter, no <SectionName type="..."> tags. The real FileStore calls
 	// artifact.Parse which returns *domain.RefusalError for this content.
-	artifactPath := filepath.Join(dir, "Orchestration.md")
+	runFolder := scopedRunFolder(t, dir)
+	artifactPath := filepath.Join(runFolder, "Orchestration.md")
 	const nonCanonicalContent = `# Orchestration
 
 This file exists but is not in the canonical orchestration-artifact format.
@@ -148,10 +150,12 @@ It has no YAML frontmatter and no SECTION boundary tags.
 	sess := newSession(f, artifactPath)
 
 	cfg := domain.RunConfig{
+		RunID: integrationRunID,
 		OrchestratorFilePath: orchPath,
 		WorkflowID:           "linear",
 		Task:                 "test task",
 		IsNewRun:             false, // resume: non-canonical artifact already written
+		RunFolder:            runFolder,
 	}
 
 	got, err := sess.Start(context.Background(), cfg)
@@ -168,5 +172,103 @@ It has no YAML frontmatter and no SECTION boundary tags.
 	// read step (step 3) before any agent is dispatched.
 	if len(f.Invocations()) > 0 {
 		t.Error("want no harness invocations when artifact is non-canonical, but got some")
+	}
+}
+
+// ===== Run identity =====
+
+// TestIntegration_Resume_InvalidRunIdentity_RefusedBeforeAnyInvocation verifies,
+// through the real file store, that a resume whose artifact has an absent,
+// empty, malformed or folder-mismatched run_id is refused before any agent is
+// invoked, that the refusal names the problem, and that the artifact on disk
+// is left exactly as it was (no replacement identity is minted or written).
+func TestIntegration_Resume_InvalidRunIdentity_RefusedBeforeAnyInvocation(t *testing.T) {
+	const otherRunID = "20260101T000000Z-abcd"
+	tests := []struct {
+		name      string
+		runIDLine string // "" omits the key
+		mentions  string
+	}{
+		{"run_id key absent", "", "run_id"},
+		{"run_id empty", `run_id: ""`, "run_id"},
+		{"run_id malformed", "run_id: not-a-run-id", "malformed"},
+		{"run_id names a different folder", "run_id: " + otherRunID, otherRunID},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			// Arrange
+			dir := t.TempDir()
+			orchPath := copyFile(t, dir, "orchestrator.md",
+				filepath.Join(sessionTestdataDir, "linear-orch.md"))
+			writeAgentFile(t, dir, "agent-a")
+			writeAgentFile(t, dir, "agent-b")
+			runFolder := scopedRunFolder(t, dir)
+			artifactPath := filepath.Join(runFolder, "Orchestration.md")
+			line := ""
+			if tc.runIDLine != "" {
+				line = tc.runIDLine + "\n"
+			}
+			content := "---\ntype: orchestration-artifact\n" + line + `workflow: linear
+workflow_version: "1.0"
+task: "test task"
+started: 2026-01-01T00:00:00Z
+last_updated: 2026-01-01T00:00:00Z
+global_sequence: 1
+runner_mode: auto
+runner_pre_consultation: disabled
+runner_manual_resolution: disabled
+checkpoints: disabled
+current_state:
+  phase: PLANNING
+  stage: null
+  last_status: SUCCESS
+  last_agent: "agent-a#1"
+  error_code: null
+---
+
+<ExecutionLog type="core">
+| Seq | Agent     | Phase    | Stage | Status  | Timestamp            | Summary       | Checkpoint |
+| --- | --------- | -------- | ----- | ------- | -------------------- | ------------- | ---------- |
+| 1   | agent-a#1 | PLANNING | -     | SUCCESS | 2026-01-01T00:00:00Z | planning done | -          |
+</ExecutionLog>
+
+<Artifacts type="core">
+| Artifact | Created In | Created By |
+| -------- | ---------- | ---------- |
+</Artifacts>
+`
+			if err := os.WriteFile(artifactPath, []byte(content), 0600); err != nil {
+				t.Fatalf("write artifact: %v", err)
+			}
+			f := harness.NewMockAdapter()
+			sess := newSession(f, artifactPath)
+			cfg := domain.RunConfig{
+				RunID:                integrationRunID,
+				OrchestratorFilePath: orchPath,
+				WorkflowID:           "linear",
+				Task:                 "test task",
+				IsNewRun:             false,
+				RunFolder:            runFolder,
+			}
+
+			// Act
+			got, err := sess.Start(context.Background(), cfg)
+
+			// Assert
+			msg := requireRefused(t, got, err)
+			if !strings.Contains(msg, tc.mentions) {
+				t.Errorf("refusal must name the problem (want it to mention %q), got %q", tc.mentions, msg)
+			}
+			if n := len(f.Invocations()); n != 0 {
+				t.Errorf("want no harness invocation before the refusal, got %d", n)
+			}
+			after, readErr := os.ReadFile(artifactPath)
+			if readErr != nil {
+				t.Fatalf("read artifact back: %v", readErr)
+			}
+			if string(after) != content {
+				t.Error("artifact on disk changed during a refused resume; no identity may be minted or repaired")
+			}
+		})
 	}
 }

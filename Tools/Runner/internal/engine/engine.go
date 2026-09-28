@@ -34,7 +34,10 @@ import (
 //	  StatusCOMPLETED_NEEDS_ACTION where the row's OnFindings hint is
 //	  unambiguous, returns a DispatchDecision targeting that agent's row,
 //	  with in.LastOutputArtifacts injected into the dispatched step's
-//	  Request.InputArtifacts (see review artifact injection below).
+//	  Request.InputArtifacts (see review artifact injection below). When the
+//	  reviewer's COMPLETED_NEEDS_ACTION count at the current phase and stage
+//	  reaches state.ReviewLoopLimit (0 = no limit), the engine returns a
+//	  DeviationReviewLoopLimit deviation instead of auto-routing.
 //
 // An unambiguous OnFindings hint is one where ColumnPresent is true, Value is
 // non-empty, and Value contains no space and no parenthesis.
@@ -130,7 +133,8 @@ func Next(in NextInput) domain.EngineDecision {
 		// This auto-route fires only in auto-review mode; in auto mode it deviates.
 		if in.Mode == domain.ExecutionModeAutoReview &&
 			status == domain.StatusCOMPLETED_NEEDS_ACTION &&
-			isUnambiguousHint(currentRow.OnFindings) {
+			isUnambiguousHint(currentRow.OnFindings) &&
+			!reviewLoopLimitReached(state) {
 			targetAgent := currentRow.OnFindings.Value
 			targetRowIdx := findFirstRowForAgent(workflow, targetAgent)
 			if targetRowIdx >= 0 {
@@ -175,6 +179,23 @@ func Next(in NextInput) domain.EngineDecision {
 					Steps: []domain.DispatchStep{step},
 				}}
 			}
+		}
+
+		// Review loop limit reached in auto-review mode: deviate instead of routing.
+		if in.Mode == domain.ExecutionModeAutoReview &&
+			status == domain.StatusCOMPLETED_NEEDS_ACTION &&
+			isUnambiguousHint(currentRow.OnFindings) &&
+			reviewLoopLimitReached(state) {
+			return domain.EngineDecision{Deviation: &domain.DeviationDecision{
+				Info: domain.DeviationInfo{
+					Kind:          domain.DeviationReviewLoopLimit,
+					Response:      resp,
+					CurrentRow:    currentRowIdx,
+					CurrentPhase:  currentRow.Phase,
+					CurrentStage:  state.CurrentState.Stage,
+					ArtifactState: state,
+				},
+			}}
 		}
 
 		// All other non-SUCCESS → Deviation.

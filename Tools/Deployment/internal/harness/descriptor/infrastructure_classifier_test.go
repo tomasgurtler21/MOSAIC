@@ -170,3 +170,41 @@ frontmatter:
 			"infrastructure", got, descriptor.ClassMosaic)
 	}
 }
+
+// ---------------------------------------------------------------------------
+// Harness drop list carrying the infrastructure fields
+// ---------------------------------------------------------------------------
+
+// TestClassify_InfrastructureFields_StayMosaicWhenHarnessDropsThem verifies that a
+// harness declaring the three infrastructure fields in frontmatter.drop (and in a plan's
+// Remove list) does not reclassify them: ClassMosaic takes precedence over ClassHarness,
+// so a harness-only deployed file is not mislabelled and promote treats them as MOSAIC keys.
+func TestClassify_InfrastructureFields_StayMosaicWhenHarnessDropsThem(t *testing.T) {
+	const yaml = `schema_version: "1"
+id: "infra-drop-harness"
+display_name: "Infra Drop Harness"
+tools:
+  shape: list
+  universe: []
+  mappings: []
+frontmatter:
+  model_key: "model"
+  tools_key: "tools"
+  drop:
+    - "recommended_tier"
+    - "tier_rationale"
+    - "required_skills"
+    - "infrastructure"
+    - "triggers"
+    - "on_failure"
+`
+	infraFields := []string{"infrastructure", "triggers", "on_failure"}
+	clf := buildClassifierWithPlan(t, yaml, domain.FrontmatterPlan{Remove: infraFields})
+
+	for _, key := range infraFields {
+		if got := clf.Classify(key); got != descriptor.ClassMosaic {
+			t.Errorf("Classify(%q) = %q, want %q; a harness dropping an infrastructure field must not capture it",
+				key, got, descriptor.ClassMosaic)
+		}
+	}
+}

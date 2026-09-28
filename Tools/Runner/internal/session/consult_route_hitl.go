@@ -14,11 +14,13 @@ import (
 // dispatch. It performs pre-HITL stage re-derivation, loops over compliance
 // checks, and calls consultHITLRedispatch or consultHITLEscalate as needed.
 //
-// Returns (finalResponse, finalSeq, cont, done, outcome, err):
+// Returns (finalResponse, finalSeq, routed, routedResp, cont, done, outcome, err):
 //   - cont=true: a recursive consultRoute call handled the result; propagate
 //     (done, outcome, err) without applying the response.
 //   - done=true or err!=nil: terminal outcome; return it.
 //   - otherwise: finalResponse and finalSeq carry the HITL-accepted result.
+//     When a gate-discharging re-dispatch returned SUCCESS, routed and
+//     routedResp carry the original attempt's outcome and response.
 func (s *sessionImpl) runConsultHITL(
 	ctx context.Context,
 	agentRef domain.AgentReference,
@@ -40,7 +42,7 @@ func (s *sessionImpl) runConsultHITL(
 	declaredInfraAgents []domain.DeclaredInfraAgent,
 	admitted domain.AdmittedWorkflow,
 	antiLoop *antiLoopState,
-) (finalResponse domain.ProtocolResponse, finalSeq int, cont bool, done bool, outcome domain.RunOutcome, err error) {
+) (finalResponse domain.ProtocolResponse, finalSeq int, routed *domain.RoutedOutcome, routedResp *domain.ProtocolResponse, cont bool, done bool, outcome domain.RunOutcome, err error) {
 	currentOutputArts := agentReq.OutputArtifacts
 	// Pre-HITL stage set re-derivation for self-referential rows.
 	if *stages == nil && hasStageStarArtifact(currentOutputArts) {
@@ -58,21 +60,17 @@ func (s *sessionImpl) runConsultHITL(
 	}
 
 	currentResp := response
+	var original *domain.ProtocolResponse
 	currentAttemptSeq := dispSeq
 	hitlRedispatchUsed := false
 
 hitlLoop:
 	for {
-		var approvals []domain.ArtifactApproval
-		for _, path := range expandStageGlobs(currentOutputArts, *stages) {
-			approvals = append(approvals, domain.ArtifactApproval{
-				Path:     path,
-				Approval: s.deps.Approvals.ReadApproval(ctx, path),
-			})
-		}
+		approvals := s.readApprovals(ctx, s.writtenOutputs(ctx, *stages))
 		hitlDec := domain.DecideHITLCompliance(domain.HITLComplianceInput{
 			EffectiveHITL:  effectiveHITL,
 			Status:         currentResp.StatusCode,
+			ErrorCode:      currentResp.ErrorCode,
 			Approvals:      approvals,
 			RedispatchUsed: hitlRedispatchUsed,
 		})
@@ -87,12 +85,16 @@ hitlLoop:
 				refreshedStages, stages, table, agents, config, declaredInfraAgents, admitted, antiLoop,
 			)
 			if rdDone || rdErr != nil {
-				return domain.ProtocolResponse{}, 0, false, rdDone, rdOut, rdErr
+				return domain.ProtocolResponse{}, 0, nil, nil, false, rdDone, rdOut, rdErr
 			}
 			if rdCont {
-				return domain.ProtocolResponse{}, 0, true, false, domain.RunOutcome{}, nil
+				return domain.ProtocolResponse{}, 0, nil, nil, true, false, domain.RunOutcome{}, nil
 			}
 			hitlRedispatchUsed = true
+			if original == nil {
+				first := currentResp
+				original = &first
+			}
 			currentResp = updResp
 			currentAttemptSeq = updSeq
 
@@ -102,10 +104,15 @@ hitlLoop:
 				effectiveStage, phase, dispInstr, state, seq, lastResponse, prevWorkflowStep,
 				refreshedStages, stages, table, agents, config, declaredInfraAgents, admitted, antiLoop,
 			)
-			return domain.ProtocolResponse{}, 0, true, escDone, escOut, escErr
+			return domain.ProtocolResponse{}, 0, nil, nil, true, escDone, escOut, escErr
 		}
 	}
-	return currentResp, currentAttemptSeq, false, false, domain.RunOutcome{}, nil
+	if original != nil {
+		if routed = routedAfterRedispatch(*original, currentResp); routed != nil {
+			routedResp = original
+		}
+	}
+	return currentResp, currentAttemptSeq, routed, routedResp, false, false, domain.RunOutcome{}, nil
 }
 
 // consultHITLRedispatch handles the HITLRedispatch case: persists the rejected
@@ -275,6 +282,8 @@ func (s *sessionImpl) applyConsultStep(
 	agentReq domain.ProtocolRequest,
 	finalResponse domain.ProtocolResponse,
 	currentAttemptSeq int,
+	routed *domain.RoutedOutcome,
+	routedResp *domain.ProtocolResponse,
 	phase, effectiveStage string,
 	dispInstr *domain.DispatchInstruction,
 	state *domain.ArtifactState,
@@ -293,6 +302,7 @@ func (s *sessionImpl) applyConsultStep(
 	workflowSeq := state.GlobalSequence + 1
 	finalAgentInstanceID := fmt.Sprintf("%s#%d", agentRef.Identifier, currentAttemptSeq)
 	currentOutputArts := agentReq.OutputArtifacts
+	written := s.writtenOutputs(ctx, *stages)
 	completedStep := domain.CompletedStep{
 		Seq:             workflowSeq,
 		AgentInstance:   finalAgentInstanceID,
@@ -303,7 +313,8 @@ func (s *sessionImpl) applyConsultStep(
 		Summary:         finalResponse.StatusMessage,
 		Timestamp:       s.deps.Clock.Now(),
 		Inputs:          formatInputs(agentReq.InputArtifacts),
-		OutputArtifacts: currentOutputArts,
+		WrittenArtifacts: written,
+		Routed:           routed,
 	}
 	*state, err = s.deps.Store.Apply(ctx, *state, completedStep)
 	if err != nil {
@@ -315,6 +326,10 @@ func (s *sessionImpl) applyConsultStep(
 	)
 	*seq = currentAttemptSeq
 	*lastResponse = &finalResponse
+	if routedResp != nil {
+		// Routing follows the original attempt, not the repairing re-dispatch.
+		*lastResponse = routedResp
+	}
 	s.deps.Interact.Notify(ctx, interaction.Notice{
 		Level:   interaction.NoticeInfo,
 		Title:   finalAgentInstanceID,
@@ -327,6 +342,7 @@ func (s *sessionImpl) applyConsultStep(
 			declaredInfraAgents, config,
 			buildActiveAgentsFilter(declaredInfraAgents, config.InfraClassSelections),
 			orchDir, dispInstr.RowIndex, admitted, *stages,
+			true, // only HITL-accepted steps reach trigger evaluation
 		)
 		if trigErr != nil {
 			if ctx.Err() != nil {
@@ -373,4 +389,16 @@ func (s *sessionImpl) applyConsultStep(
 		}
 	}
 	return false, domain.RunOutcome{}, nil
+}
+
+// routedAfterRedispatch returns the outcome a step is routed on after a
+// gate-discharging re-dispatch. When the re-dispatch returned SUCCESS but the
+// original attempt did not, the original status and error code stand in for
+// the step's routing and current_state. Otherwise the re-dispatch's own
+// response is authoritative and nil is returned.
+func routedAfterRedispatch(original, final domain.ProtocolResponse) *domain.RoutedOutcome {
+	if final.StatusCode != domain.StatusSUCCESS || original.StatusCode == domain.StatusSUCCESS {
+		return nil
+	}
+	return &domain.RoutedOutcome{Status: original.StatusCode, ErrorCode: original.ErrorCode}
 }

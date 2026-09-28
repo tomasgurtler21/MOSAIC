@@ -4,6 +4,7 @@ import (
 	"context"
 	"os"
 	"path/filepath"
+	"strconv"
 	"strings"
 	"testing"
 
@@ -47,6 +48,7 @@ func TestIntegration_HITL_NonCompliant_OneRedispatchThenDeviation(t *testing.T) 
 	sess := newSessionWithApprovals(f, artifactPath, approvals)
 
 	cfg := domain.RunConfig{
+		RunID: integrationRunID,
 		OrchestratorFilePath: orchPath,
 		WorkflowID:           "linear",
 		Task:                 "hitl task",
@@ -118,6 +120,7 @@ func TestIntegration_ConsultantStop_ArtifactResumable(t *testing.T) {
 	sess := newSessionWithRouting(f, artifactPath, consultant)
 
 	cfg := domain.RunConfig{
+		RunID: integrationRunID,
 		OrchestratorFilePath: orchPath,
 		WorkflowID:           "linear",
 		Task:                 "stop task",
@@ -137,6 +140,35 @@ func TestIntegration_ConsultantStop_ArtifactResumable(t *testing.T) {
 	if _, statErr := os.Stat(artifactPath); statErr != nil {
 		t.Errorf("want artifact file to exist after consultant stop (resumable state), got %v",
 			statErr)
+	}
+
+	// Neither consultation is recorded: the log holds agent-a alone at Seq 1.
+	requireOnlyWorkflowRows(t, artifactPath, "agent-a#1")
+}
+
+// requireOnlyWorkflowRows reads the artifact at path and fails unless its
+// Execution Log holds exactly the named agent instances, in order, at Seq
+// 1..n, with global_sequence n: consultations leave no row and use no slot.
+func requireOnlyWorkflowRows(t *testing.T, path string, wantAgents ...string) {
+	t.Helper()
+	data, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatalf("read artifact: %v", err)
+	}
+	state, err := artifact.Parse(data)
+	if err != nil {
+		t.Fatalf("parse artifact: %v", err)
+	}
+	if len(state.ExecutionLog) != len(wantAgents) {
+		t.Fatalf("want execution log %v, got %v", wantAgents, state.ExecutionLog)
+	}
+	for i, want := range wantAgents {
+		if e := state.ExecutionLog[i]; e.Agent != want || e.Seq != i+1 {
+			t.Errorf("execution log[%d]: want %s at Seq %d, got %q at Seq %d", i, want, i+1, e.Agent, e.Seq)
+		}
+	}
+	if state.GlobalSequence != len(wantAgents) {
+		t.Errorf("want global_sequence %d, got %d", len(wantAgents), state.GlobalSequence)
 	}
 }
 
@@ -168,6 +200,7 @@ func TestIntegration_ConsultantFailure_ArtifactResumable(t *testing.T) {
 	sess := newSessionWithRouting(f, artifactPath, consultant)
 
 	cfg := domain.RunConfig{
+		RunID: integrationRunID,
 		OrchestratorFilePath: orchPath,
 		WorkflowID:           "linear",
 		Task:                 "failure task",
@@ -188,4 +221,99 @@ func TestIntegration_ConsultantFailure_ArtifactResumable(t *testing.T) {
 	if _, parseErr := artifact.Parse(data); parseErr != nil {
 		t.Errorf("want artifact parseable after orchestrator failure, got %v", parseErr)
 	}
+
+	// Neither the successful nor the failed consultation is recorded.
+	requireOnlyWorkflowRows(t, artifactPath, "agent-a#1")
+}
+
+// ===== Workflow Notes appended by the script orchestrator =====
+
+// noteWritingConsultant wraps a scripted consultant and, on the given call
+// number, appends a Workflow Note row directly to the artifact file the way a
+// script orchestrator does during its deliberation. Seq is the artifact's
+// global_sequence at that moment.
+type noteWritingConsultant struct {
+	inner        *intScriptedRoutingConsultant
+	artifactPath string
+	onCall       int
+	seq          int
+	note         string
+	calls        int
+	t            *testing.T
+}
+
+func (c *noteWritingConsultant) ConsultRouting(ctx context.Context, req domain.ConsultationRequest) (domain.RoutingInstruction, error) {
+	c.calls++
+	if c.calls == c.onCall {
+		data, err := os.ReadFile(c.artifactPath)
+		if err != nil {
+			c.t.Fatalf("read artifact during consultation: %v", err)
+		}
+		row := "| " + strconv.Itoa(c.seq) + " | " + c.note + " |\n"
+		updated := strings.Replace(string(data), "</WorkflowNotes>", row+"</WorkflowNotes>", 1)
+		if err := os.WriteFile(c.artifactPath, []byte(updated), 0o600); err != nil {
+			c.t.Fatalf("write artifact during consultation: %v", err)
+		}
+	}
+	return c.inner.ConsultRouting(ctx, req)
+}
+
+// TestIntegration_ConsultantAppendedWorkflowNote_SurvivesLaterStateWrites
+// verifies, against the real file store, that a Workflow Note the script
+// orchestrator appends to Orchestration.md during a routing consultation is
+// still in the artifact after the Runner's later writes.
+func TestIntegration_ConsultantAppendedWorkflowNote_SurvivesLaterStateWrites(t *testing.T) {
+	dir := t.TempDir()
+	orchPath := copyFile(t, dir, "orchestrator.md",
+		filepath.Join(sessionTestdataDir, "linear-orch.md"))
+	writeAgentFile(t, dir, "agent-a")
+	writeAgentFile(t, dir, "agent-b")
+
+	f := harness.NewMockAdapter()
+	f.Queue("agent-a", harness.ScriptedEntry{Response: &domain.ProtocolResponse{
+		AgentInstanceID: "agent-a#1", StatusCode: domain.StatusSUCCESS, StatusMessage: "planning done",
+	}})
+	f.Queue("agent-b", harness.ScriptedEntry{Response: &domain.ProtocolResponse{
+		AgentInstanceID: "agent-b#2", StatusCode: domain.StatusSUCCESS, StatusMessage: "done",
+	}})
+
+	inner := &intScriptedRoutingConsultant{}
+	inner.queueDispatch("agent-a", "Proceed.", 0)
+	inner.queueDispatch("agent-b", "Proceed.", 1)
+	inner.queueStop("done")
+
+	artifactPath := filepath.Join(dir, "Orchestration.md")
+	// The second consultation runs after agent-a is recorded (global_sequence 1).
+	consultant := &noteWritingConsultant{
+		inner: inner, artifactPath: artifactPath, onCall: 2, seq: 1,
+		note: "orchestrator observed the planning output", t: t,
+	}
+	sess := newSessionWithRouting(f, artifactPath, consultant)
+
+	cfg := domain.RunConfig{
+		RunID:                integrationRunID,
+		OrchestratorFilePath: orchPath,
+		WorkflowID:           "linear",
+		Task:                 "notes task",
+		IsNewRun:             true,
+		RunSettings:          domain.RunSettings{Mode: domain.ExecutionModeOrchestrated},
+	}
+
+	got, err := sess.Start(context.Background(), cfg)
+	requireRunStatus(t, got, err, domain.RunStoppedByConsultant)
+
+	data, readErr := os.ReadFile(artifactPath)
+	if readErr != nil {
+		t.Fatalf("read artifact: %v", readErr)
+	}
+	state, parseErr := artifact.Parse(data)
+	if parseErr != nil {
+		t.Fatalf("parse artifact: %v", parseErr)
+	}
+	if len(state.WorkflowNotes) != 1 ||
+		state.WorkflowNotes[0].Seq != 1 ||
+		state.WorkflowNotes[0].Note != "orchestrator observed the planning output" {
+		t.Errorf("want the consultant's Workflow Note preserved after later writes, got %+v", state.WorkflowNotes)
+	}
+	requireOnlyWorkflowRows(t, artifactPath, "agent-a#1", "agent-b#2")
 }

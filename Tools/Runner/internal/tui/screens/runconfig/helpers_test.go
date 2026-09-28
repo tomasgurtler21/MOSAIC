@@ -4,6 +4,7 @@ package runconfig
 
 import (
 	"os"
+	"strings"
 	"path/filepath"
 	"testing"
 
@@ -113,4 +114,13 @@ func driveConfigScreenVersionDriftChoice(s *ConfigScreen, idx int) {
 		pressKey(s, tea.KeyDown)
 	}
 	pressKey(s, tea.KeyEnter)
+}
+
+// acceptReviewLoopLimitIfAsked accepts the suggested review loop limit when the
+// wizard is showing that prompt (new runs ask it as the last prompt), so flows
+// driven to completion do not depend on it.
+func acceptReviewLoopLimitIfAsked(s *ConfigScreen) {
+	if !s.Done() && containsSubstr(strings.ToLower(s.View()), "review loop limit") {
+		pressKey(s, tea.KeyEnter)
+	}
 }

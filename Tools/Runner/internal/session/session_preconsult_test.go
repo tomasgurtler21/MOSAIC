@@ -2,12 +2,15 @@ package session_test
 
 // Tests for pre-consultation at run start.
 // Covers: auto and auto-review modes call PreConsult, orchestrated mode does not,
-// advice is applied to the dispatch, and failure removes the run folder.
+// advice is applied to the dispatch, and a failure keeps the run state and is
+// retried on resume.
 
 import (
 	"context"
+	"errors"
 	"os"
 	"path/filepath"
+	"reflect"
 	"strings"
 	"testing"
 
@@ -279,32 +282,51 @@ func TestSession_Start_PreConsultation_AdviceAppliedToDispatch(t *testing.T) {
 	}
 }
 
-// TestSession_Start_PreConsultation_Failure_ReturnsRefusal verifies that when
-// the PreConsultant returns an error, the run is refused. A pre-consultation
-// failure prevents the run from starting — it occurs before the dispatch loop
-// begins, so no work has been done yet.
-func TestSession_Start_PreConsultation_Failure_ReturnsRefusal(t *testing.T) {
+// newPreConsultSession builds a session with the given pre-consultant wired,
+// backed by the named orchestrator fixture and the listed agent files.
+func newPreConsultSession(t *testing.T, fixture string, pc domain.PreConsultant, agents ...string) (session.Session, *harness.MockAdapter, *memStore, string) {
+	t.Helper()
 	dir := t.TempDir()
-	orchPath := copyOrchestratorFile(t, dir, "linear-orch.md")
-	writeAgentFile(t, dir, "agent-a")
-	writeAgentFile(t, dir, "agent-b")
-
+	orchPath := copyOrchestratorFile(t, dir, fixture)
+	for _, a := range agents {
+		writeAgentFile(t, dir, a)
+	}
 	f := harness.NewMockAdapter()
 	store := &memStore{}
-	preConsultant := &scriptedPreConsultant{
-		err: &domain.ConsultationError{
-			Failure: domain.ConsultFailTransport,
-			Detail:  "orchestrator agent timed out",
-		},
-	}
-
 	ses := session.New(session.Deps{
 		Harness:    f,
 		Store:      store,
 		Clock:      fixedClock{t: epoch},
 		Interact:   &noopInteraction{},
-		PreConsult: preConsultant,
+		PreConsult: pc,
 	})
+	return ses, f, store, orchPath
+}
+
+func failingPreConsultant() *scriptedPreConsultant {
+	return &scriptedPreConsultant{
+		err: &domain.ConsultationError{
+			Failure: domain.ConsultFailTransport,
+			Detail:  "orchestrator agent timed out",
+		},
+	}
+}
+
+func queueLinearSuccess(f *harness.MockAdapter) {
+	f.Queue("agent-a", harness.ScriptedEntry{Response: &domain.ProtocolResponse{
+		AgentInstanceID: "agent-a#x", StatusCode: domain.StatusSUCCESS, StatusMessage: "done",
+	}})
+	f.Queue("agent-b", harness.ScriptedEntry{Response: &domain.ProtocolResponse{
+		AgentInstanceID: "agent-b#x", StatusCode: domain.StatusSUCCESS, StatusMessage: "done",
+	}})
+}
+
+// TestSession_Start_PreConsultation_Failure_ReturnsStartFailed verifies that
+// when the PreConsultant returns an error on a new run, the outcome is a
+// resumable start failure carrying the underlying error, not a refusal.
+func TestSession_Start_PreConsultation_Failure_ReturnsStartFailed(t *testing.T) {
+	pc := failingPreConsultant()
+	ses, _, _, orchPath := newPreConsultSession(t, "linear-orch.md", pc, "agent-a", "agent-b")
 
 	cfg := baseLinearConfig(orchPath)
 	cfg.Mode = domain.ExecutionModeAuto
@@ -312,57 +334,230 @@ func TestSession_Start_PreConsultation_Failure_ReturnsRefusal(t *testing.T) {
 
 	got, err := ses.Start(context.Background(), cfg)
 
-	requireRefused(t, got, err)
+	requireStartFailed(t, got, err)
+	var ce *domain.ConsultationError
+	if !errors.As(got.Cause, &ce) {
+		t.Errorf("want outcome Cause to carry the *domain.ConsultationError, got %v", got.Cause)
+	}
 }
 
-// TestSession_Start_PreConsultation_Failure_NoArtifactCreated verifies that a
-// pre-consultation failure removes the run folder so that a refused run leaves no
-// trace. Per the ContractsDesign ordering (Create -> Apply(commit setup row) ->
-// pre-consultation -> dispatch loop), ArtifactStore.Create is called before
-// pre-consultation runs, so the artifact exists in the store at the point of
-// failure. The "no trace" guarantee is therefore about the run folder being
-// removed from the filesystem (os.RemoveAll(cfg.RunFolder)), not about Create
-// never having been called.
-func TestSession_Start_PreConsultation_Failure_NoArtifactCreated(t *testing.T) {
-	dir := t.TempDir()
-	orchPath := copyOrchestratorFile(t, dir, "linear-orch.md")
-	writeAgentFile(t, dir, "agent-a")
-	writeAgentFile(t, dir, "agent-b")
-
-	// Create a run folder that the session must remove on pre-consultation failure.
-	runFolder := filepath.Join(dir, "run")
+// TestSession_Start_PreConsultation_Failure_KeepsRunStateAndWritesNothing
+// verifies that a failed pre-consultation on a new run keeps the run folder and
+// the artifact, dispatches nothing, and records nothing: no Execution Log row,
+// no global_sequence, no current_state.
+func TestSession_Start_PreConsultation_Failure_KeepsRunStateAndWritesNothing(t *testing.T) {
+	pc := failingPreConsultant()
+	ses, f, store, orchPath := newPreConsultSession(t, "linear-orch.md", pc, "agent-a", "agent-b")
+	runFolder := filepath.Join(t.TempDir(), "run")
 	if err := os.MkdirAll(runFolder, 0o755); err != nil {
 		t.Fatalf("setup: failed to create run folder: %v", err)
 	}
-
-	f := harness.NewMockAdapter()
-	store := &memStore{}
-	preConsultant := &scriptedPreConsultant{
-		err: &domain.ConsultationError{
-			Failure: domain.ConsultFailTransport,
-			Detail:  "connection refused",
-		},
-	}
-
-	ses := session.New(session.Deps{
-		Harness:    f,
-		Store:      store,
-		Clock:      fixedClock{t: epoch},
-		Interact:   &noopInteraction{},
-		PreConsult: preConsultant,
-	})
 
 	cfg := baseLinearConfig(orchPath)
 	cfg.Mode = domain.ExecutionModeAuto
 	cfg.PreConsultation = true
 	cfg.RunFolder = runFolder
 
-	ses.Start(context.Background(), cfg) //nolint:errcheck
+	got, err := ses.Start(context.Background(), cfg)
 
-	// The session must remove the run folder on pre-consultation failure so that
-	// a refused run leaves no trace on disk. Store.Create was called (store.exists
-	// is true by design), but the filesystem run folder must be gone.
-	if _, statErr := os.Stat(runFolder); !os.IsNotExist(statErr) {
-		t.Error("want run folder removed when pre-consultation fails (failure must remove any run folder)")
+	requireStartFailed(t, got, err)
+	if !pc.Called {
+		t.Error("want PreConsult attempted before the failure, but it was not called")
+	}
+	if _, statErr := os.Stat(runFolder); statErr != nil {
+		t.Errorf("want run folder kept after a failed pre-consultation, stat error: %v", statErr)
+	}
+	if !store.exists {
+		t.Error("want the artifact kept after a failed pre-consultation")
+	}
+	if len(store.Applied) != 0 || len(store.state.ExecutionLog) != 0 {
+		t.Errorf("want no Execution Log row from pre-consultation, got %d applied, %d logged",
+			len(store.Applied), len(store.state.ExecutionLog))
+	}
+	if store.state.GlobalSequence != 0 {
+		t.Errorf("want global_sequence untouched (0), got %d", store.state.GlobalSequence)
+	}
+	if !reflect.DeepEqual(store.state.CurrentState, domain.CurrentState{}) {
+		t.Errorf("want current_state untouched, got %+v", store.state.CurrentState)
+	}
+	if n := len(f.Invocations()); n != 0 {
+		t.Errorf("want no harness dispatch after a failed pre-consultation, got %d", n)
+	}
+}
+
+// TestSession_Start_PreConsultation_Failure_AfterCommitSetup_KeepsSetupRow
+// verifies that when commit setup succeeded and pre-consultation then fails,
+// the setup row and commit_branch are kept as they were, and nothing else is
+// recorded.
+func TestSession_Start_PreConsultation_Failure_AfterCommitSetup_KeepsSetupRow(t *testing.T) {
+	pc := failingPreConsultant()
+	ses, f, store, orchPath := newPreConsultSession(t, "commit-agent-orch.md", pc,
+		"agent-a", "agent-b", "commit-manager-git")
+	const wantBranch = "mosaic/run/preconsult-after-setup"
+	f.Queue("commit-manager-git", harness.ScriptedEntry{Response: &domain.ProtocolResponse{
+		AgentInstanceID: "commit-manager-git#1", StatusCode: domain.StatusSUCCESS,
+		StatusMessage: "ready [branch:" + wantBranch + "]",
+	}})
+
+	cfg := baseCommitConfig(orchPath)
+	cfg.PreConsultation = true
+
+	got, err := ses.Start(context.Background(), cfg)
+
+	requireStartFailed(t, got, err)
+	if len(store.Applied) != 1 || store.Applied[0].Seq != 1 || !store.Applied[0].IsInfrastructure {
+		t.Fatalf("want exactly the setup row (Seq 1, infrastructure) recorded, got %d rows", len(store.Applied))
+	}
+	if store.state.CommitBranch != wantBranch {
+		t.Errorf("want commit_branch=%q kept, got %q", wantBranch, store.state.CommitBranch)
+	}
+	if store.state.GlobalSequence != 1 {
+		t.Errorf("want global_sequence=1 (setup only), got %d", store.state.GlobalSequence)
+	}
+	if !reflect.DeepEqual(store.state.CurrentState, domain.CurrentState{}) {
+		t.Errorf("want current_state untouched, got %+v", store.state.CurrentState)
+	}
+	for _, inv := range f.Invocations() {
+		if inv.Agent.Identifier != "commit-manager-git" {
+			t.Errorf("want no workflow dispatch after a failed pre-consultation, got %q", inv.Agent.Identifier)
+		}
+	}
+}
+
+// resumedAutoState returns the stored artifact of a run that completed
+// agent-a and is resumed in auto mode with pre-consultation enabled.
+func resumedAutoState() domain.ArtifactState {
+	return domain.ArtifactState{
+		RunID:           testRunID,
+		Workflow:        "linear",
+		WorkflowVersion: "1.0",
+		Task:            "test task",
+		GlobalSequence:  1,
+		RunSettings: domain.RunSettings{
+			Mode:            domain.ExecutionModeAuto,
+			PreConsultation: true,
+		},
+		CurrentState: domain.CurrentState{
+			Phase: "PLANNING", LastStatus: domain.StatusSUCCESS, LastAgent: "agent-a#1",
+		},
+		ExecutionLog: []domain.ExecutionLogEntry{
+			{Seq: 1, Agent: "agent-a#1", Phase: "PLANNING", Status: domain.StatusSUCCESS},
+		},
+	}
+}
+
+// TestSession_Start_PreConsultation_Failure_ResumedRun_PriorHistoryUnchanged
+// verifies that a failed pre-consultation on a resumed run leaves the stored
+// artifact state exactly as it was: no row, no sequence change, no
+// current_state change, and nothing dispatched.
+func TestSession_Start_PreConsultation_Failure_ResumedRun_PriorHistoryUnchanged(t *testing.T) {
+	pc := failingPreConsultant()
+	ses, f, store, orchPath := newPreConsultSession(t, "linear-orch.md", pc, "agent-a", "agent-b")
+	store.state = resumedAutoState()
+	store.exists = true
+
+	cfg := baseLinearConfig(orchPath)
+	markResume(&cfg)
+	cfg.Mode = domain.ExecutionModeAuto
+	cfg.PreConsultation = true
+
+	got, err := ses.Start(context.Background(), cfg)
+
+	requireStartFailed(t, got, err)
+	if !reflect.DeepEqual(store.state, resumedAutoState()) {
+		t.Errorf("want the stored artifact state unchanged by a failed pre-consultation, got %+v", store.state)
+	}
+	if len(store.Applied) != 0 {
+		t.Errorf("want no Apply call from a failed pre-consultation, got %d", len(store.Applied))
+	}
+	if n := len(f.Invocations()); n != 0 {
+		t.Errorf("want no harness dispatch after a failed pre-consultation, got %d", n)
+	}
+}
+
+// TestSession_Start_PreConsultation_Failure_ThenResume_RetriesPreConsultation
+// verifies that a run whose pre-consultation failed can be resumed: the resume
+// calls pre-consultation again, and once it succeeds the workflow runs with
+// sequences starting at 1, because pre-consultation never consumed one.
+func TestSession_Start_PreConsultation_Failure_ThenResume_RetriesPreConsultation(t *testing.T) {
+	pc := failingPreConsultant()
+	ses, f, store, orchPath := newPreConsultSession(t, "linear-orch.md", pc, "agent-a", "agent-b")
+
+	cfg := baseLinearConfig(orchPath)
+	cfg.Mode = domain.ExecutionModeAuto
+	cfg.PreConsultation = true
+
+	first, firstErr := ses.Start(context.Background(), cfg)
+	requireStartFailed(t, first, firstErr)
+
+	// The failure clears and the run is resumed against the same artifact.
+	pc.err = nil
+	pc.Called = false
+	queueLinearSuccess(f)
+	markResume(&cfg)
+
+	second, secondErr := ses.Start(context.Background(), cfg)
+
+	requireRunStatus(t, second, secondErr, domain.RunCompleted)
+	if !pc.Called {
+		t.Error("want PreConsult retried on resume, but it was not called")
+	}
+	if len(store.Applied) != 2 {
+		t.Fatalf("want 2 workflow rows after the resume, got %d", len(store.Applied))
+	}
+	if store.Applied[0].Seq != 1 || store.Applied[1].Seq != 2 {
+		t.Errorf("want workflow Seq 1 and 2 (pre-consultation consumed none), got %d and %d",
+			store.Applied[0].Seq, store.Applied[1].Seq)
+	}
+}
+
+// TestSession_Start_PreConsultation_Success_ConsumesNoSequenceAndWritesNothing
+// verifies the durable state at the first workflow dispatch after a successful
+// pre-consultation: global_sequence still 0, no rows, current_state untouched;
+// the first workflow row then takes Seq 1.
+func TestSession_Start_PreConsultation_Success_ConsumesNoSequenceAndWritesNothing(t *testing.T) {
+	dir := t.TempDir()
+	orchPath := copyOrchestratorFile(t, dir, "linear-orch.md")
+	writeAgentFile(t, dir, "agent-a")
+	writeAgentFile(t, dir, "agent-b")
+	f := harness.NewMockAdapter()
+	store := &memStore{}
+
+	var seen bool
+	var seq, rows int
+	var cur domain.CurrentState
+	hooked := &beforeInvokeHarness{delegate: f, before: func(agentID string) {
+		if agentID == "agent-a" && !seen {
+			seen = true
+			seq = store.state.GlobalSequence
+			rows = len(store.state.ExecutionLog)
+			cur = store.state.CurrentState
+		}
+	}}
+	ses := session.New(session.Deps{
+		Harness:    hooked,
+		Store:      store,
+		Clock:      fixedClock{t: epoch},
+		Interact:   &noopInteraction{},
+		PreConsult: &scriptedPreConsultant{advice: domain.PreConsultationAdvice{TaskDescription: "advice"}},
+	})
+	queueLinearSuccess(f)
+
+	cfg := baseLinearConfig(orchPath)
+	cfg.Mode = domain.ExecutionModeAuto
+	cfg.PreConsultation = true
+
+	got, err := ses.Start(context.Background(), cfg)
+
+	requireRunStatus(t, got, err, domain.RunCompleted)
+	if !seen {
+		t.Fatal("want agent-a dispatched, but it was not")
+	}
+	if seq != 0 || rows != 0 || !reflect.DeepEqual(cur, domain.CurrentState{}) {
+		t.Errorf("want nothing recorded by pre-consultation before the first dispatch, got seq=%d rows=%d current_state=%+v",
+			seq, rows, cur)
+	}
+	if len(store.Applied) == 0 || store.Applied[0].Seq != 1 {
+		t.Errorf("want the first workflow row to take Seq 1, got %+v", store.Applied)
 	}
 }

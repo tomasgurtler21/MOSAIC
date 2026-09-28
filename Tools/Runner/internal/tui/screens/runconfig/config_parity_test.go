@@ -3,6 +3,7 @@ package runconfig
 // config_parity_test.go verifies ConfigScreen settings parity with CLI flags and manual-resolution behavior.
 
 import (
+	"reflect"
 	"testing"
 
 	tea "github.com/charmbracelet/bubbletea"
@@ -43,6 +44,7 @@ func TestConfigScreen_Parity_OrchestratedMode_SettingsMatchCLIEquivalent(t *test
 	}
 	// No infra class step (no multiple same-class agents).
 
+	acceptReviewLoopLimitIfAsked(s)
 	if !s.Done() {
 		t.Fatal("ConfigScreen did not reach Done() after driving all steps")
 	}
@@ -59,10 +61,11 @@ func TestConfigScreen_Parity_OrchestratedMode_SettingsMatchCLIEquivalent(t *test
 		CommitBranchVariant: "", // zero value: commits disabled
 		PreConsultation:     false,
 		ManualResolution:    false,
+		ReviewLoopLimit:     3, // the accepted suggested limit
 	}
 
 	got := s.Selection().Settings
-	if got != wantSettings {
+	if !reflect.DeepEqual(got, wantSettings) {
 		t.Errorf("Settings mismatch:\n  got  = %+v\n  want = %+v\n"+
 			"ConfigSelection.Settings must equal the RunSettings the CLI produces from the equivalent flags",
 			got, wantSettings)
@@ -97,6 +100,7 @@ func TestConfigScreen_Parity_AutoModeWithPreConsult_SettingsMatchCLIEquivalent(t
 		pressKey(s, tea.KeyEnter) // disabled (default cursor position)
 	}
 
+	acceptReviewLoopLimitIfAsked(s)
 	if !s.Done() {
 		t.Fatal("ConfigScreen did not reach Done() after driving all steps")
 	}
@@ -111,10 +115,11 @@ func TestConfigScreen_Parity_AutoModeWithPreConsult_SettingsMatchCLIEquivalent(t
 		CommitBranchVariant: "", // zero value: commits disabled
 		PreConsultation:     true,
 		ManualResolution:    false,
+		ReviewLoopLimit:     3, // the accepted suggested limit
 	}
 
 	got := s.Selection().Settings
-	if got != wantSettings {
+	if !reflect.DeepEqual(got, wantSettings) {
 		t.Errorf("Settings mismatch:\n  got  = %+v\n  want = %+v",
 			got, wantSettings)
 	}
@@ -185,6 +190,7 @@ func TestConfigScreen_ManualResolutionStep_EnabledSetsManualResolutionTrue(t *te
 	pressKey(s, tea.KeyDown)  // move cursor to enabled (cursor 1)
 	pressKey(s, tea.KeyEnter) // select enabled
 
+	acceptReviewLoopLimitIfAsked(s)
 	if !s.Done() {
 		t.Fatal("ConfigScreen did not reach Done() after accepting manual-resolution step")
 	}
@@ -277,6 +283,7 @@ func TestConfigScreen_Parity_CommitsEnabledUserOwn_SettingsMatchCLIEquivalent(t 
 		pressKey(s, tea.KeyEnter) // manual resolution: disabled (default)
 	}
 
+	acceptReviewLoopLimitIfAsked(s)
 	if !s.Done() {
 		t.Fatal("ConfigScreen did not reach Done() after driving all steps")
 	}
@@ -288,10 +295,11 @@ func TestConfigScreen_Parity_CommitsEnabledUserOwn_SettingsMatchCLIEquivalent(t 
 		CommitBranchVariant: domain.CommitBranchUserOwn,
 		PreConsultation:     false,
 		ManualResolution:    false,
+		ReviewLoopLimit:     3, // the accepted suggested limit
 	}
 
 	got := s.Selection().Settings
-	if got != wantSettings {
+	if !reflect.DeepEqual(got, wantSettings) {
 		t.Errorf("Settings mismatch:\n  got  = %+v\n  want = %+v\n"+
 			"ConfigSelection.Settings must equal the RunSettings the CLI produces from the equivalent flags",
 			got, wantSettings)
@@ -320,6 +328,7 @@ func TestConfigScreen_Parity_ManualResolutionEnabled_SettingsMatchCLIEquivalent(
 		pressKey(s, tea.KeyEnter) // select enabled
 	}
 
+	acceptReviewLoopLimitIfAsked(s)
 	if !s.Done() {
 		t.Fatal("ConfigScreen did not reach Done() after accepting manual-resolution step")
 	}
@@ -334,10 +343,11 @@ func TestConfigScreen_Parity_ManualResolutionEnabled_SettingsMatchCLIEquivalent(
 		CommitBranchVariant: "", // zero value: commits disabled
 		PreConsultation:     false,
 		ManualResolution:    true,
+		ReviewLoopLimit:     3, // the accepted suggested limit
 	}
 
 	got := s.Selection().Settings
-	if got != wantSettings {
+	if !reflect.DeepEqual(got, wantSettings) {
 		t.Errorf("Settings mismatch:\n  got  = %+v\n  want = %+v\n"+
 			"ConfigSelection.Settings must equal the RunSettings the CLI produces from the equivalent flags",
 			got, wantSettings)
@@ -374,6 +384,7 @@ func TestConfigScreen_Parity_CommitsEnabledMOSAICOwned_SettingsMatchCLIEquivalen
 		pressKey(s, tea.KeyEnter) // manual resolution: disabled
 	}
 
+	acceptReviewLoopLimitIfAsked(s)
 	if !s.Done() {
 		t.Fatal("ConfigScreen did not reach Done() after driving all steps")
 	}
@@ -385,10 +396,11 @@ func TestConfigScreen_Parity_CommitsEnabledMOSAICOwned_SettingsMatchCLIEquivalen
 		CommitBranchVariant: domain.CommitBranchMOSAICOwned,
 		PreConsultation:     false,
 		ManualResolution:    false,
+		ReviewLoopLimit:     3, // the accepted suggested limit
 	}
 
 	got := s.Selection().Settings
-	if got != wantSettings {
+	if !reflect.DeepEqual(got, wantSettings) {
 		t.Errorf("Settings mismatch:\n  got  = %+v\n  want = %+v\n"+
 			"ConfigSelection.Settings must equal the RunSettings the CLI produces from the equivalent flags",
 			got, wantSettings)

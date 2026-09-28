@@ -2,7 +2,7 @@
 
 > **Status:** Draft
 > **Created:** 2026-08-17
-> **Scope:** How the `mosaic-run` end-to-end test suite works: what it tests, what stub agents it uses, how their behaviour is fixed by fixture files, which test workflows exist, and how a run is checked. Assumes the production defects in `Requirements.md` (RUN-1 … RUN-8, DEP-1) are fixed.
+> **Scope:** How the `mosaic-run` end-to-end test suite works: what it tests, what stub agents it uses, how their behaviour is fixed by fixture files, which test workflows exist, and how a run is checked. Assumes the production defects in `Requirements.md` (RUN-1 through RUN-8, DEP-1) are fixed.
 
 ---
 
@@ -191,7 +191,7 @@ Suppose the Runner has a bug and consults one extra time, or one time fewer. Wit
 
 With state matching, that same bug produces a state no rule covers, and the stub stops and reports it. **The bug becomes visible instead of being absorbed.**
 
-A useful side effect: the stub never has to recognise its own past invocations, so it does not care how consultation rows are labelled in the log. That removes a dependency on RUN-6.
+A useful side effect: the stub never has to recognise its own past invocations, and since a consultation leaves no row in the log at all, there is no labelling question to depend on. That removes a dependency on RUN-6.
 
 ### 5.4 What the Fixture Contains
 
@@ -522,7 +522,7 @@ Run the smoke set on any change to the Runner or an adapter. Run the full suite 
 
 ## 12. Decisions Worth Recording
 
-**Match fixtures on run state, not on invocation number.** A numbered list keeps answering plausibly when the Runner consults an unexpected number of times, so the exact bug we want to catch produces a green run. State matching stops loudly instead. It also means the stub does not care how consultation rows are labelled in the log.
+**Match fixtures on run state, not on invocation number.** A numbered list keeps answering plausibly when the Runner consults an unexpected number of times, so the exact bug we want to catch produces a green run. State matching stops loudly instead. It also means the stub reads only workflow rows: consultations leave no row in the log at all, so there is nothing to label.
 
 **A fixed filename for the routing fixture.** `mosaictest-scripted` finds its fixture through its input artifact paths. A consultation carries no artifact paths, so that trick is unavailable and a fixed filename in the run folder is the only option left.
 

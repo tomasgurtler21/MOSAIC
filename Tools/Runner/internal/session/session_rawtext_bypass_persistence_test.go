@@ -14,14 +14,14 @@ package session_test
 //     skipped and consultRoute is called instead (regression / AC4.5 guard).
 //
 //   Persistence before dispatch at consultRoute harness-error branch (AC4.6):
-//   - When a harness error occurs inside consultRoute (~line 1776), a
-//     CompletedStep with IsInfrastructure=true and Status=BLOCKED must be
-//     written to the store before any further dispatch.
+//   - When a harness error occurs inside consultRoute, a workflow
+//     CompletedStep with Status=BLOCKED and ErrorCode=E501 must be written to
+//     the store before any further dispatch.
 //
 //   Persistence before dispatch at HITL-redispatch fallback (AC4.6):
-//   - When a harness error occurs at the HITL-redispatch site (~line 1088),
-//     a CompletedStep with IsInfrastructure=true and Status=BLOCKED must be
-//     written to the store before calling consultRoute.
+//   - When a harness error occurs at the HITL-redispatch site, a workflow
+//     CompletedStep with Status=BLOCKED and ErrorCode=E501 must be written to
+//     the store before calling consultRoute.
 //
 // Sentinel classification cross-reference:
 //   ErrProtocolNotExtractable: TestSession_RawTextBypass_MainLoop_BypassSucceeds_RunCompletes
@@ -147,22 +147,13 @@ func TestSession_RawTextBypass_AntiLoopTrips_BypassSkipped(t *testing.T) {
 	}
 }
 
-// ===== (g) Persistence at consultRoute harness-error branch (AC4.6) =====
+// ===== (g) Persistence at consultRoute harness-error branch =====
 
 // TestSession_RawTextBypass_ConsultRoute_HarnessError_PersistenceBeforeDispatch
 // verifies that when a harness invocation fails at the consultant-routed
-// dispatch site (inside consultRoute, ~line 1776), a CompletedStep with
-// IsInfrastructure=true and a non-SUCCESS status is persisted to the store
-// before the recursive consultRoute or bypass redispatch. This follows the same
-// pattern already established at the main dispatch loop site.
-//
-// This persistence does NOT exist at the consultRoute harness-error branch
-// today. The test fails RED because store.Applied contains no
-// IsInfrastructure=true, non-SUCCESS step after a consultant-routed harness
-// failure.
-//
-// After I4.3 is implemented, the failed dispatch record is written at this site,
-// the assertion is satisfied, and the test turns GREEN.
+// dispatch site (inside consultRoute), a workflow CompletedStep with
+// Status=BLOCKED and ErrorCode=E501 is persisted to the store before the
+// recursive consultRoute or bypass redispatch.
 func TestSession_RawTextBypass_ConsultRoute_HarnessError_PersistenceBeforeDispatch(t *testing.T) {
 	const errMsg = "simulated consultant-routed harness failure for persistence check"
 
@@ -205,19 +196,11 @@ func TestSession_RawTextBypass_ConsultRoute_HarnessError_PersistenceBeforeDispat
 		t.Fatalf("want nil error, got %v", err)
 	}
 
-	// Primary assertion: store.Applied must contain a CompletedStep with
-	// IsInfrastructure=true and Status!=SUCCESS capturing the harness failure
-	// that occurred inside consultRoute (~line 1776).
-	//
-	// With the current code, no such step exists at this call site: the code
-	// goes straight from the harness error to recursive consultRoute with no
-	// Store.Apply in between. The main dispatch loop (~line 930-945) has this
-	// pattern, but consultRoute's own harness-error branch does not.
-	//
-	// After I4.3, the persistence is added at the consultRoute harness-error
-	// branch, and this assertion is satisfied.
-	step := requireInfrastructureFailedStep(t, store,
-		"consultant-routed harness error (inside consultRoute ~line 1776)")
+	// store.Applied must contain a workflow CompletedStep with Status=BLOCKED
+	// and ErrorCode=E501 capturing the harness failure that occurred inside
+	// consultRoute, recorded before any further dispatch.
+	step := requireHarnessErrorStep(t, store,
+		"consultant-routed harness error (inside consultRoute)")
 	if step.AgentInstance != "" && !strings.Contains(step.Summary, errMsg) {
 		t.Errorf("want step.Summary to contain the harness error message %q, got %q; "+
 			"the persisted record must capture the exact error that caused the failure",
@@ -225,25 +208,14 @@ func TestSession_RawTextBypass_ConsultRoute_HarnessError_PersistenceBeforeDispat
 	}
 }
 
-// ===== (g) Persistence at HITL-redispatch fallback (AC4.6) =====
+// ===== (g) Persistence at HITL-redispatch fallback =====
 
 // TestSession_RawTextBypass_HITLRedispatch_HarnessError_PersistenceBeforeDispatch
-// verifies that when a harness invocation fails at the HITL-redispatch site
-// (~line 1088 inside hitlCheckLoop), a CompletedStep with IsInfrastructure=true
-// and a non-SUCCESS status is persisted to the store before calling consultRoute
-// or performing the bypass redispatch.
-//
-// The Store.Apply at ~line 1039 persists the HITL-rejected attempt (the
-// rejection that triggered the redispatch), not the harness error that occurs
-// when the redispatch itself fails. There is no persistence of the failed
-// redispatch attempt at that site today.
-//
-// The test fails RED because store.Applied contains no IsInfrastructure=true,
-// non-SUCCESS step with a summary matching the harness error after the HITL
-// redispatch fails.
-//
-// After I4.4 is implemented, a failed-attempt record is written at the HITL
-// redispatch site, the assertion is satisfied, and the test turns GREEN.
+// verifies that when a harness invocation fails at the HITL-redispatch site,
+// a workflow CompletedStep with Status=BLOCKED and ErrorCode=E501 is persisted
+// to the store (no HITL gate applies to it) before calling consultRoute or
+// performing the bypass redispatch. The HITL-rejected initial attempt is
+// recorded separately.
 func TestSession_RawTextBypass_HITLRedispatch_HarnessError_PersistenceBeforeDispatch(t *testing.T) {
 	const errMsg = "simulated HITL-redispatch harness failure for persistence check"
 
@@ -293,30 +265,12 @@ func TestSession_RawTextBypass_HITLRedispatch_HarnessError_PersistenceBeforeDisp
 		t.Fatalf("want nil error, got %v", err)
 	}
 
-	// Primary assertion: store.Applied must contain at least one CompletedStep
-	// with IsInfrastructure=true and Status!=SUCCESS whose Summary contains the
-	// harness error message. This step represents the failed HITL redispatch
-	// attempt and must be persisted before consultRoute is called.
-	//
-	// With the current code, the Store.Apply at ~line 1039 records the
-	// HITLRejected=true step for the first rejected attempt; when the
-	// redispatch itself fails at ~line 1088, no additional Store.Apply is
-	// performed. The harness failure info is discarded.
-	//
-	// After I4.4, a new Store.Apply is added at the HITL-redispatch harness
-	// error site, writing an IsInfrastructure=true, non-SUCCESS step before
-	// any further dispatch or consultation.
-	var found bool
-	for _, s := range store.Applied {
-		if s.IsInfrastructure && s.Status != domain.StatusSUCCESS {
-			found = true
-			break
-		}
-	}
-	if !found {
-		t.Error("want a CompletedStep in store.Applied with IsInfrastructure=true and " +
-			"Status!=SUCCESS capturing the failed HITL-redispatch harness error, got none; " +
-			"the failed redispatch attempt must be persisted before the next dispatch " +
-			"so the execution log has a complete record of every attempt (I4.4 fix)")
+	// store.Applied must contain the initial HITL-rejected attempt and then an
+	// accepted workflow row (not HITL-gated) with Status=BLOCKED and
+	// ErrorCode=E501 whose Summary contains the harness error message.
+	step := requireHarnessErrorStep(t, store, "HITL-redispatch harness error")
+	if !strings.Contains(step.Summary, errMsg) {
+		t.Errorf("want step.Summary to contain the harness error message %q, got %q",
+			errMsg, step.Summary)
 	}
 }

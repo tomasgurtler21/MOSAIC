@@ -4,6 +4,7 @@ package invoker
 import (
 	"testing"
 
+	"mosaic-run/internal/domain"
 	"mosaic-run/internal/testrun"
 )
 
@@ -372,5 +373,33 @@ func TestBuildRunArgs_DevTestMode_PresentAlongsideInfrastructureKeys(t *testing.
 	}
 	if !containsArg(args, "--infrastructure=mosaictest-review") {
 		t.Errorf("buildRunArgs: missing --infrastructure=mosaictest-review in args %v", args)
+	}
+}
+
+// TestBuildRunArgs_ReviewLoopLimit_AlwaysPresentWithAcceptedValue verifies that
+// buildRunArgs passes --review-loop-limit, which the run subcommand requires
+// for a new run, with a value the flag accepts (a positive integer or none).
+func TestBuildRunArgs_ReviewLoopLimit_AlwaysPresentWithAcceptedValue(t *testing.T) {
+	inv := testrun.RunInvocation{
+		WorkflowID:  "smoke-single",
+		Mode:        "auto",
+		Harness:     "claude-code",
+		FixturePath: "/catalog/Fixtures/smoke-single",
+		Task:        "Test: smoke-single / auto / claude-code",
+	}
+
+	args := buildRunArgs(inv)
+
+	value := ""
+	for i, a := range args {
+		if a == "--review-loop-limit" && i+1 < len(args) {
+			value = args[i+1]
+		}
+	}
+	if value == "" {
+		t.Fatalf("--review-loop-limit missing from args; the run subcommand refuses a new run without it; full args: %v", args)
+	}
+	if _, err := domain.ParseReviewLoopLimit(value); err != nil {
+		t.Errorf("--review-loop-limit value %q is not accepted by the flag: %v", value, err)
 	}
 }

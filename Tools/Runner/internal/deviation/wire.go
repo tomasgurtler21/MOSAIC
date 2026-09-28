@@ -10,12 +10,14 @@ import (
 // ---- wire types for the two-action orchestrator consultation contract ----
 
 // wireRequest is the JSON payload the Runner sends to the orchestrator for both
-// routing and pre-consultation. All three fields are always present on the wire;
-// last_status_message is null (not absent) when the ConsultationRequest carries nil.
+// routing and pre-consultation. All four fields are always present on the wire;
+// last_status_message and last_error_reason are null (not absent) when the
+// ConsultationRequest carries nil.
 type wireRequest struct {
 	OrchestrationArtifact string  `json:"orchestration_artifact"`
 	Context               string  `json:"context"`
 	LastStatusMessage     *string `json:"last_status_message"` // no omitempty: null must be emitted
+	LastErrorReason       *string `json:"last_error_reason"`   // no omitempty: null must be emitted
 }
 
 // wireRoutingResponse is the JSON payload the orchestrator returns for a routing

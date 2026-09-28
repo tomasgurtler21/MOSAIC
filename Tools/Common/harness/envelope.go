@@ -36,10 +36,13 @@ type cliEnvelopeObject struct {
 // Protocol response object without decoding its full vocabulary. Ordinary
 // responses carry agent_instance_id and status_code. An E100 rejection may
 // lack agent_instance_id because the invalid invocation supplied none.
+// ErrorCode is kept raw so a mistyped (non-string) error_code does not stop an
+// otherwise recognisable response from being recognised; it is compared with
+// "E100" only when it is a JSON string.
 type protocolFields struct {
-	AgentInstanceID string `json:"agent_instance_id"`
-	StatusCode      string `json:"status_code"`
-	ErrorCode       string `json:"error_code"`
+	AgentInstanceID string          `json:"agent_instance_id"`
+	StatusCode      string          `json:"status_code"`
+	ErrorCode       json.RawMessage `json:"error_code"`
 }
 
 // ParseClaudeCodeEnvelope extracts the assistant text from the CLI's JSON
@@ -146,6 +149,10 @@ func looksLikeProtocolJSON(candidate string) bool {
 	if err := json.Unmarshal([]byte(candidate), &f); err != nil {
 		return false
 	}
+	var errorCode string
+	if err := json.Unmarshal(f.ErrorCode, &errorCode); err != nil {
+		errorCode = ""
+	}
 	return (f.AgentInstanceID != "" && f.StatusCode != "") ||
-		(f.StatusCode == "BLOCKED" && f.ErrorCode == "E100")
+		(f.StatusCode == "BLOCKED" && errorCode == "E100")
 }

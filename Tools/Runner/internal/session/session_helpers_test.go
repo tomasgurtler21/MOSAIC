@@ -15,7 +15,15 @@ import (
 
 // ---- test data paths ----
 
-const testdataDir = "../../testdata/session"
+// testdataDir is absolute so fixtures stay reachable from tests that change
+// the working directory.
+var testdataDir = func() string {
+	abs, err := filepath.Abs("../../testdata/session")
+	if err != nil {
+		panic(err)
+	}
+	return abs
+}()
 
 func orchFilePath(name string) string {
 	return filepath.Join(testdataDir, name)
@@ -86,6 +94,19 @@ func baseLinearConfig(orchPath string) domain.RunConfig {
 	}
 }
 
+// testRunID is the valid run identity that resume fixtures carry. The store
+// double reports it for any recorded state that names none, and markResume
+// scopes the run folder to it.
+const testRunID = "20260928T103906Z-d408"
+
+// markResume turns cfg into a resume request for a run whose folder is
+// Orchestration-{testRunID} beside the orchestrator file.
+func markResume(cfg *domain.RunConfig) {
+	cfg.IsNewRun = false
+	cfg.RunID = testRunID
+	cfg.RunFolder = filepath.Join(filepath.Dir(cfg.OrchestratorFilePath), domain.RunScopedFolder(testRunID))
+}
+
 // requireRunStatus asserts that the RunOutcome has the expected status and no
 // unexpected error.
 func requireRunStatus(t *testing.T, got domain.RunOutcome, err error, want domain.RunStatus) {
@@ -108,6 +129,24 @@ func requireRefused(t *testing.T, got domain.RunOutcome, err error) string {
 	}
 	if got.Status != domain.RunRefused {
 		t.Errorf("want RunRefused status, got %q (message: %q)", got.Status, got.Message)
+	}
+	return got.Message
+}
+
+// requireStartFailed asserts that Start returned a RunStartFailed outcome with
+// a nil error and a non-empty message. A start failure happens after the
+// artifact exists, so the failure is encoded in the RunOutcome for frontends
+// to present and the run stays resumable. Returns the outcome message.
+func requireStartFailed(t *testing.T, got domain.RunOutcome, err error) string {
+	t.Helper()
+	if err != nil {
+		t.Fatalf("want nil error for a start failure (encoded in RunOutcome), got %v", err)
+	}
+	if got.Status != domain.RunStartFailed {
+		t.Errorf("want RunStartFailed status, got %q (message: %q)", got.Status, got.Message)
+	}
+	if got.Message == "" {
+		t.Error("want a non-empty outcome message naming the failure, got empty")
 	}
 	return got.Message
 }
@@ -310,10 +349,10 @@ func requireHITLRejectedSteps(t *testing.T, store *memStore) {
 				"rejected steps must not update current_state.LastAgent",
 				s.AgentInstance)
 		}
-		if s.OutputArtifacts != nil {
-			t.Errorf("HITLRejected step %q: want OutputArtifacts=nil, got %v; "+
+		if s.WrittenArtifacts != nil {
+			t.Errorf("HITLRejected step %q: want WrittenArtifacts=nil, got %v; "+
 				"rejected steps must not pollute the artifact registry with non-compliant paths",
-				s.AgentInstance, s.OutputArtifacts)
+				s.AgentInstance, s.WrittenArtifacts)
 		}
 	}
 
@@ -337,4 +376,31 @@ func containsInput(paths []string, target string) bool {
 		}
 	}
 	return false
+}
+
+// scopedTempDir returns a fresh temporary directory named as the run-scoped
+// folder of testRunID, so it can serve as both a run folder and the place the
+// run's files live.
+func scopedTempDir(t *testing.T) string {
+	t.Helper()
+	dir := filepath.Join(t.TempDir(), domain.RunScopedFolder(testRunID))
+	if err := os.MkdirAll(dir, 0o700); err != nil {
+		t.Fatalf("scopedTempDir: %v", err)
+	}
+	return dir
+}
+
+// chdirWorkspace makes a fresh temporary workspace the working directory for
+// the test and returns its run-scoped folder, Orchestration-{testRunID}. The
+// session reads approvals from the paths it dispatches, which are relative to
+// the workspace root, so tests that read real artifacts run from there.
+func chdirWorkspace(t *testing.T) string {
+	t.Helper()
+	root := t.TempDir()
+	t.Chdir(root)
+	folder := filepath.Join(root, domain.RunScopedFolder(testRunID))
+	if err := os.MkdirAll(folder, 0o700); err != nil {
+		t.Fatalf("chdirWorkspace: %v", err)
+	}
+	return folder
 }

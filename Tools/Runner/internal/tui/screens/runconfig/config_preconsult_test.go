@@ -179,6 +179,7 @@ func TestConfigScreen_PreConsultStep_ConfirmWithoutMoving_EnablesPreConsultation
 	// Drive to completion so we can read the final Settings.
 	pressKey(s, tea.KeyEnter) // manual resolution (default disabled)
 
+	acceptReviewLoopLimitIfAsked(s)
 	if !s.Done() {
 		t.Fatal("ConfigScreen did not reach Done() after driving all remaining steps")
 	}

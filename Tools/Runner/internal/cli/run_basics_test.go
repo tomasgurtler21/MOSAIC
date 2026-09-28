@@ -58,6 +58,7 @@ func TestDefaultFlagValues(t *testing.T) {
 		"--task", "do the work",
 		"--mode", "auto",
 		"--new-run",
+		"--review-loop-limit", "3",
 	}, &spyStore{}, sess)
 
 	if code != cli.ExitSuccess {
@@ -96,6 +97,7 @@ func TestAllFlagsExplicitlySet(t *testing.T) {
 		"--checkpoints", "enabled",
 		"--mode", "auto",
 		"--new-run",
+		"--review-loop-limit", "3",
 	}, sess)
 
 	if code != cli.ExitSuccess {
@@ -124,6 +126,7 @@ func TestExitCodeMapping(t *testing.T) {
 		"--task", "t1",
 		"--mode", "auto",
 		"--new-run",
+		"--review-loop-limit", "3",
 	}
 
 	tests := []struct {
@@ -136,6 +139,7 @@ func TestExitCodeMapping(t *testing.T) {
 		{domain.RunRefused, cli.ExitRefused},
 		{domain.RunFailed, cli.ExitFailure},
 		{domain.RunStoppedByConsultant, cli.ExitStoppedByConsultant},
+		{domain.RunStartFailed, cli.ExitStartFailed},
 	}
 
 	for _, tt := range tests {
@@ -291,6 +295,7 @@ func TestSessionError(t *testing.T) {
 		"--task", "t1",
 		"--mode", "auto",
 		"--new-run",
+		"--review-loop-limit", "3",
 	}, sess)
 
 	if code != cli.ExitFailure {
@@ -315,6 +320,7 @@ func TestExitCodeConstants(t *testing.T) {
 		"ExitRefused":             cli.ExitRefused,
 		"ExitDeviationUnresolved": cli.ExitDeviationUnresolved,
 		"ExitStoppedByConsultant": cli.ExitStoppedByConsultant,
+		"ExitStartFailed":         cli.ExitStartFailed,
 	}
 
 	seen := make(map[int]string)

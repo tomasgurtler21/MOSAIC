@@ -155,7 +155,7 @@ func TestSession_Start_InfrastructureOverride_UnknownAgentName_ReturnsRefusal(t 
 	}})
 
 	cfg := baseLinearConfig(orchPath)
-	cfg.IsNewRun = false // resume: existing artifact has the override
+	markResume(&cfg)
 
 	got, err := ses.Start(context.Background(), cfg)
 
@@ -223,7 +223,7 @@ func TestSession_Start_InfrastructureOverride_ReplacementSemantics_OverrideRepla
 	}})
 
 	cfg := baseLinearConfig(orchPath)
-	cfg.IsNewRun = false // resume: load the override from the artifact state
+	markResume(&cfg)
 
 	got, err := ses.Start(context.Background(), cfg)
 
@@ -285,7 +285,7 @@ func TestSession_Start_InfrastructureOverride_ClassRestrictedTrigger_ReturnsRefu
 	}})
 
 	cfg := baseLinearConfig(orchPath)
-	cfg.IsNewRun = false // resume: load the override from the artifact state
+	markResume(&cfg)
 
 	got, err := ses.Start(context.Background(), cfg)
 
@@ -321,7 +321,7 @@ func TestSession_Start_InfrastructureOverride_EmptyOverrides_Proceeds(t *testing
 	}})
 
 	cfg := baseLinearConfig(orchPath)
-	cfg.IsNewRun = false // resume
+	markResume(&cfg)
 
 	got, err := ses.Start(context.Background(), cfg)
 

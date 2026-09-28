@@ -28,7 +28,7 @@ import (
 	"github.com/mattn/go-isatty"
 )
 
-const ToolVersion = "1.1.0"
+const ToolVersion = "1.2.0"
 
 // wantsTUI reports whether mosaic-run should launch the interactive TUI.
 // The TUI is launched when:
@@ -222,6 +222,7 @@ func runCLIMode(args, cobraArgs []string) int {
 		Manual:      routingDeps.Manual,
 		PreConsult:  routingDeps.PreConsult,
 		Approvals:   routingDeps.Approvals,
+		Outputs:     artifact.NewOutputWriteDetector(),
 	})
 
 	// Pass the pre-resolved store and identity so that cli.Run skips its own

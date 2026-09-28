@@ -2,8 +2,8 @@
 name: test-agent
 ---
 
-<Capabilities type="core">
-<IdentityExtension type="project">
+<Identity type="core">
+<CodebaseContext type="project">
 Injection in wrong parent section.
-</IdentityExtension>
-</Capabilities>
+</CodebaseContext>
+</Identity>

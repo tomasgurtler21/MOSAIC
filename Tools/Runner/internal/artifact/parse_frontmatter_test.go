@@ -3,7 +3,9 @@ package artifact_test
 // Tests for artifact.Parse: frontmatter happy path, refusal cases, and run_id handling.
 
 import (
+	"errors"
 	"os"
+	"strings"
 	"testing"
 	"time"
 
@@ -208,30 +210,64 @@ func TestParse_CanonicalFile_RunID(t *testing.T) {
 	}
 }
 
-func TestParse_RunIDAbsentFromFrontmatter_ReturnsEmptyString(t *testing.T) {
-	// When the frontmatter has no run_id field (pre-v1.8 artifact),
-	// ArtifactState.RunID must be "" — not an error.
+func TestParse_RunIDAbsentFromFrontmatter_ReturnsRefusalError(t *testing.T) {
+	// run_id is required. An artifact without one is invalid and must be refused
+	// rather than parsed with an empty identity.
 	data := minimalArtifactBytes("") // no run_id line
-
-	state, err := artifact.Parse(data)
-	if err != nil {
-		t.Fatalf("Parse: unexpected error: %v", err)
-	}
-
-	if state.RunID != "" {
-		t.Errorf("RunID: want %q (absent = empty), got %q", "", state.RunID)
-	}
-}
-
-func TestParse_RunIDAbsentFromFrontmatter_ReturnsNoError(t *testing.T) {
-	// Absence of run_id in frontmatter must not cause a parse error.
-	// Pre-v1.8 artifacts do not have this field and must parse successfully.
-	data := minimalArtifactBytes("")
 
 	_, err := artifact.Parse(data)
 
-	if err != nil {
-		t.Errorf("Parse: want no error when run_id absent, got %v", err)
+	if err == nil {
+		t.Fatal("Parse: want refusal when run_id is absent, got nil")
+	}
+	asRefusalError(t, err)
+}
+
+func TestParse_RunIDEmptyValue_ReturnsRefusalError(t *testing.T) {
+	for name, line := range map[string]string{
+		"bare":   "run_id:\n",
+		"quoted": "run_id: \"\"\n",
+		"null":   "run_id: null\n",
+	} {
+		t.Run(name, func(t *testing.T) {
+			data := strings.Replace(string(minimalArtifactBytes(testRunID)), "run_id: "+testRunID+"\n", line, 1)
+
+			_, err := artifact.Parse([]byte(data))
+
+			if err == nil {
+				t.Fatalf("Parse with %q: want refusal, got nil", strings.TrimSpace(line))
+			}
+			asRefusalError(t, err)
+		})
+	}
+}
+
+func TestParse_RunIDMalformed_ReturnsRefusalError(t *testing.T) {
+	for _, bad := range []string{
+		"not-a-run-id",
+		"20260727T170000Z",
+		"20260727T170000Z-A3F9",
+		"20260727T170000Z-a3f",
+		"20260727T170000Z-a3f9x",
+		"2026-07-27T17:00:00Z-a3f9",
+	} {
+		t.Run(bad, func(t *testing.T) {
+			_, err := artifact.Parse(minimalArtifactBytes(bad))
+
+			if err == nil {
+				t.Fatalf("Parse with run_id %q: want refusal, got nil", bad)
+			}
+			asRefusalError(t, err)
+		})
+	}
+}
+
+func TestParse_RunIDRefusal_ComponentIsArtifact(t *testing.T) {
+	_, err := artifact.Parse(minimalArtifactBytes(""))
+
+	re := asRefusalError(t, err)
+	if re.Component != "artifact" {
+		t.Errorf("RefusalError.Component: want %q, got %q", "artifact", re.Component)
 	}
 }
 
@@ -243,6 +279,7 @@ func TestParse_FrontmatterWithCommitsLine_DoesNotRefuse(t *testing.T) {
 	// tolerance is required.
 	data := []byte("---\n" +
 		"type: orchestration-artifact\n" +
+		"run_id: " + testRunID + "\n" +
 		"workflow: test\n" +
 		"workflow_version: \"1.0\"\n" +
 		"task: \"test\"\n" +
@@ -272,5 +309,26 @@ func TestParse_FrontmatterWithCommitsLine_DoesNotRefuse(t *testing.T) {
 
 	if err != nil {
 		t.Fatalf("Parse: want no error for a frontmatter carrying commits:, got: %v", err)
+	}
+}
+
+func TestParse_RunIDRefusal_CauseIsRunIdentityError(t *testing.T) {
+	cases := map[string][]byte{
+		"absent":    minimalArtifactBytes(""),
+		"malformed": minimalArtifactBytes("not-a-run-id"),
+	}
+	for name, data := range cases {
+		t.Run(name, func(t *testing.T) {
+			_, err := artifact.Parse(data)
+
+			re := asRefusalError(t, err)
+			var idErr *domain.RunIdentityError
+			if !errors.As(re.Cause, &idErr) {
+				t.Fatalf("RefusalError.Cause: want *domain.RunIdentityError, got %T (%v)", re.Cause, re.Cause)
+			}
+			if !errors.As(err, &idErr) {
+				t.Error("errors.As on the returned error must find *domain.RunIdentityError")
+			}
+		})
 	}
 }

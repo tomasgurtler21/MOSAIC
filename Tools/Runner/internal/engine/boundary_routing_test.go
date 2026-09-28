@@ -31,7 +31,7 @@ func TestNext_PreExecution_FreeFormOnSuccess_ReturnsDeviation(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Parse: %v", err)
 	}
-	aw, err := compat.Admit(table)
+	aw, err := compat.Admit(table, domain.ExecutionModeAuto)
 	if err != nil {
 		t.Fatalf("Admit: %v", err)
 	}
@@ -202,7 +202,7 @@ func TestNext_HITL_RowTrue_StageTrue_EffectiveTrue(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Parse: %v", err)
 	}
-	aw, err := compat.Admit(table)
+	aw, err := compat.Admit(table, domain.ExecutionModeAuto)
 	if err != nil {
 		t.Fatalf("Admit: %v", err)
 	}

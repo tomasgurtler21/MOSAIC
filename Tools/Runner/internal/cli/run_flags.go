@@ -29,6 +29,17 @@ type runFlags struct {
 	infrastructure        string
 	infrastructureChanged bool
 	devTestMode           bool
+
+	reviewLoopLimit string
+
+	// The *Changed fields record which flags the user actually gave, so a
+	// resume never mistakes a flag default for a supplied value.
+	modeChanged             bool
+	preConsultChanged       bool
+	manualResolutionChanged bool
+	reviewLoopLimitChanged  bool
+	infraClassChanged       bool
+	commitBranchChanged     bool
 }
 
 // readRunFlags reads all flag values from the parsed FlagSet. RegisterRunFlags
@@ -54,6 +65,13 @@ func readRunFlags(cmd *cobra.Command) runFlags {
 	f.harness, _ = cmd.Flags().GetString("harness")
 	f.timeout, _ = cmd.Flags().GetString("timeout")
 	f.infraClass, _ = cmd.Flags().GetString("infra-class")
+	f.reviewLoopLimit, _ = cmd.Flags().GetString("review-loop-limit")
+	f.modeChanged = cmd.Flags().Changed("mode")
+	f.preConsultChanged = cmd.Flags().Changed("pre-consult")
+	f.manualResolutionChanged = cmd.Flags().Changed("manual-resolution")
+	f.reviewLoopLimitChanged = cmd.Flags().Changed("review-loop-limit")
+	f.infraClassChanged = cmd.Flags().Changed("infra-class")
+	f.commitBranchChanged = cmd.Flags().Changed("commit-branch")
 
 	inputFlagsRaw, _ := cmd.Flags().GetStringArray("input")
 	// Preserve nil semantics: when --input is not supplied, SeedInputs must be

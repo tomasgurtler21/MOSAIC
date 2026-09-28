@@ -253,7 +253,7 @@ func mustParseAndAdmit(t *testing.T, content, id, version string) domain.Admitte
 	if err != nil {
 		t.Fatalf("workflow.Parse(%s): %v", id, err)
 	}
-	aw, err := compat.Admit(table)
+	aw, err := compat.Admit(table, domain.ExecutionModeAuto)
 	if err != nil {
 		t.Fatalf("compat.Admit(%s): %v", id, err)
 	}

@@ -107,6 +107,7 @@ func TestRunIdentity_NewRun_SelectionsUnchangedByConfigReconstruction(t *testing
 	m.Update(tea.KeyMsg{Type: tea.KeyEnter}) // version drift
 	m.Update(tea.KeyMsg{Type: tea.KeyEnter}) // checkpoints
 	m.Update(tea.KeyMsg{Type: tea.KeyEnter}) // manual-resolution (always shown; accept default disabled)
+	m.Update(tea.KeyMsg{Type: tea.KeyEnter}) // review loop limit: accept the suggested 3
 
 	if m.screen != screenProgress {
 		t.Fatalf("precondition: screen = %v after config, want screenProgress", m.screen)

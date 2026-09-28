@@ -13,7 +13,7 @@ import (
 	"mosaic-run/internal/harness"
 )
 
-// ===== T9.6: Commit setup — branch recorded, failed setup leaves no artifact =====
+// ===== Commit setup: branch recorded; a failed setup keeps the artifact and its row =====
 
 // TestIntegration_CommitSetup_BranchRecordedInArtifact verifies that when a
 // commits-enabled run starts and the commit-class agent reports a
@@ -51,6 +51,7 @@ func TestIntegration_CommitSetup_BranchRecordedInArtifact(t *testing.T) {
 	sess := newSession(f, artifactPath)
 
 	cfg := domain.RunConfig{
+		RunID: integrationRunID,
 		OrchestratorFilePath: orchPath,
 		WorkflowID:           "linear",
 		Task:                 "commit task",
@@ -95,167 +96,189 @@ func TestIntegration_CommitSetup_BranchRecordedInArtifact(t *testing.T) {
 	}
 }
 
-// TestIntegration_CommitSetup_FailedSetup_NoArtifactCreated verifies that when
-// the commit setup dispatch fails (harness-level error), the run is refused and
-// no orchestration artifact is left behind. A failed setup is terminal and
-// leaves no trace.
-func TestIntegration_CommitSetup_FailedSetup_NoArtifactCreated(t *testing.T) {
-	dir := t.TempDir()
-	orchPath := copyFile(t, dir, "orchestrator.md",
+// commitFailureConfig returns a new-run configuration with commits enabled.
+func commitFailureConfig(orchPath, task string) domain.RunConfig {
+	return domain.RunConfig{
+		RunID:                integrationRunID,
+		OrchestratorFilePath: orchPath,
+		WorkflowID:           "linear",
+		Task:                 task,
+		IsNewRun:             true,
+		RunSettings: domain.RunSettings{
+			Mode:                domain.ExecutionModeAuto,
+			Commits:             true,
+			CommitBranchVariant: domain.CommitBranchMOSAICOwned,
+		},
+	}
+}
+
+// requireFailedSetupKeptOnDisk asserts what a failed commit setup must leave on
+// disk: a start-failed outcome, the artifact with the setup row as its only
+// Execution Log row (Seq 1), no commit_branch, an untouched current_state, and
+// no workflow agent dispatched.
+func requireFailedSetupKeptOnDisk(t *testing.T, artifactPath string, got domain.RunOutcome, err error, f *harness.MockAdapter) domain.ArtifactState {
+	t.Helper()
+	requireStartFailed(t, got, err)
+
+	data, readErr := os.ReadFile(artifactPath)
+	if readErr != nil {
+		t.Fatalf("want the artifact kept after a failed commit setup, read error: %v", readErr)
+	}
+	state, parseErr := artifact.Parse(data)
+	if parseErr != nil {
+		t.Fatalf("parse artifact: %v", parseErr)
+	}
+	if state.CommitBranch != "" {
+		t.Errorf("want commit_branch absent after a failed setup, got %q", state.CommitBranch)
+	}
+	if len(state.ExecutionLog) != 1 {
+		t.Fatalf("want exactly the setup row in the Execution Log, got %d rows", len(state.ExecutionLog))
+	}
+	row := state.ExecutionLog[0]
+	if row.Seq != 1 || !strings.Contains(row.Agent, "commit-manager-git") {
+		t.Errorf("want setup row commit-manager-git with Seq=1, got %q Seq=%d", row.Agent, row.Seq)
+	}
+	if state.GlobalSequence != 1 {
+		t.Errorf("want global_sequence=1, got %d", state.GlobalSequence)
+	}
+	if state.CurrentState.LastAgent != "" {
+		t.Errorf("want current_state untouched by the setup row, got last_agent=%q", state.CurrentState.LastAgent)
+	}
+	for _, inv := range f.Invocations() {
+		if inv.Agent.Identifier != "commit-manager-git" {
+			t.Errorf("want no workflow agent dispatched after failed commit setup, got %q", inv.Agent.Identifier)
+		}
+	}
+	return state
+}
+
+func newCommitFailureDir(t *testing.T) (dir, orchPath string) {
+	t.Helper()
+	dir = t.TempDir()
+	orchPath = copyFile(t, dir, "orchestrator.md",
 		filepath.Join(sessionTestdataDir, "commit-agent-orch.md"))
 	writeAgentFile(t, dir, "agent-a")
 	writeAgentFile(t, dir, "agent-b")
 	writeAgentFile(t, dir, "commit-manager-git")
+	return dir, orchPath
+}
 
+// TestIntegration_CommitSetup_FailedSetup_KeepsArtifactAndRow verifies that when
+// the commit setup dispatch fails at the harness level, the run stops as a
+// resumable start failure: the artifact and the BLOCKED setup row stay on disk.
+func TestIntegration_CommitSetup_FailedSetup_KeepsArtifactAndRow(t *testing.T) {
+	dir, orchPath := newCommitFailureDir(t)
 	f := harness.NewMockAdapter()
-	// commit-manager-git fails at the harness level (e.g. agent process crashed).
 	f.Queue("commit-manager-git", harness.ScriptedEntry{
 		Err: errors.New("harness: commit setup agent crashed"),
 	})
-
 	artifactPath := filepath.Join(dir, "Orchestration.md")
 	sess := newSession(f, artifactPath)
 
-	cfg := domain.RunConfig{
-		OrchestratorFilePath: orchPath,
-		WorkflowID:           "linear",
-		Task:                 "commit-fail task",
-		IsNewRun:             true,
-		RunSettings: domain.RunSettings{
-			Mode:                domain.ExecutionModeAuto,
-			Commits:             true,
-			CommitBranchVariant: domain.CommitBranchMOSAICOwned,
-		},
-	}
+	got, err := sess.Start(context.Background(), commitFailureConfig(orchPath, "commit-fail task"))
 
-	got, err := sess.Start(context.Background(), cfg)
-	requireRefused(t, got, err)
-
-	// No artifact must be created: a failed commit setup leaves no trace.
-	if _, statErr := os.Stat(artifactPath); statErr == nil {
-		t.Errorf("want no artifact file after failed commit setup, but file exists at %s",
-			artifactPath)
-	}
-
-	// Only commit-manager-git may have been invoked; no workflow agents.
-	invs := f.Invocations()
-	for _, inv := range invs {
-		if inv.Agent.Identifier != "commit-manager-git" {
-			t.Errorf("want no workflow agent dispatched after failed commit setup, got %q",
-				inv.Agent.Identifier)
-		}
+	state := requireFailedSetupKeptOnDisk(t, artifactPath, got, err, f)
+	if len(state.ExecutionLog) == 1 && state.ExecutionLog[0].Status != domain.StatusBLOCKED {
+		t.Errorf("want the harness failure recorded as BLOCKED, got %q", state.ExecutionLog[0].Status)
 	}
 }
 
-// TestIntegration_CommitSetup_MarkerMissing_Refused verifies that when the
-// commit-class agent returns StatusSUCCESS but its status_message contains no
-// [branch:{name}] marker, the run is refused and no orchestration artifact is
-// left behind. This exercises the marker-parsing failure path (path (b)),
-// distinct from the harness-level crash covered by
-// TestIntegration_CommitSetup_FailedSetup_NoArtifactCreated.
-func TestIntegration_CommitSetup_MarkerMissing_Refused(t *testing.T) {
-	dir := t.TempDir()
-	orchPath := copyFile(t, dir, "orchestrator.md",
-		filepath.Join(sessionTestdataDir, "commit-agent-orch.md"))
-	writeAgentFile(t, dir, "agent-a")
-	writeAgentFile(t, dir, "agent-b")
-	writeAgentFile(t, dir, "commit-manager-git")
-
+// TestIntegration_CommitSetup_MarkerMissing_KeepsArtifactAndRow verifies that a
+// SUCCESS setup response without a [branch:{name}] marker keeps the artifact and
+// the setup row and dispatches no workflow step.
+func TestIntegration_CommitSetup_MarkerMissing_KeepsArtifactAndRow(t *testing.T) {
+	dir, orchPath := newCommitFailureDir(t)
 	f := harness.NewMockAdapter()
-	// Commit agent returns SUCCESS but omits the [branch:{name}] marker entirely.
-	// An absent marker must refuse the run.
 	f.Queue("commit-manager-git", harness.ScriptedEntry{Response: &domain.ProtocolResponse{
 		AgentInstanceID: "commit-manager-git#1",
 		StatusCode:      domain.StatusSUCCESS,
-		StatusMessage:   "commit setup complete — no branch marker here",
+		StatusMessage:   "commit setup complete - no branch marker here",
 	}})
-
 	artifactPath := filepath.Join(dir, "Orchestration.md")
 	sess := newSession(f, artifactPath)
 
-	cfg := domain.RunConfig{
-		OrchestratorFilePath: orchPath,
-		WorkflowID:           "linear",
-		Task:                 "marker-missing task",
-		IsNewRun:             true,
-		RunSettings: domain.RunSettings{
-			Mode:                domain.ExecutionModeAuto,
-			Commits:             true,
-			CommitBranchVariant: domain.CommitBranchMOSAICOwned,
-		},
-	}
+	got, err := sess.Start(context.Background(), commitFailureConfig(orchPath, "marker-missing task"))
 
-	got, err := sess.Start(context.Background(), cfg)
-	requireRefused(t, got, err)
-
-	// No artifact must be created: an absent branch marker refuses the run terminally.
-	if _, statErr := os.Stat(artifactPath); statErr == nil {
-		t.Errorf("want no artifact file when [branch:{name}] marker is absent, but file exists at %s",
-			artifactPath)
-	}
-
-	// No workflow agents must have been dispatched; only the commit setup agent.
-	invs := f.Invocations()
-	for _, inv := range invs {
-		if inv.Agent.Identifier != "commit-manager-git" {
-			t.Errorf("want no workflow agent dispatched after marker-missing refusal, got %q",
-				inv.Agent.Identifier)
-		}
-	}
+	requireFailedSetupKeptOnDisk(t, artifactPath, got, err, f)
 }
 
-// TestIntegration_CommitSetup_EmptyBranchName_Refused verifies that when the
-// commit-class agent returns StatusSUCCESS with a [branch:] marker whose branch
-// name is empty, the run is refused and no orchestration artifact is left behind.
-// An empty branch name is equivalent to an absent marker per the design contract:
-// "An absent marker or an empty name refuses the run."
-func TestIntegration_CommitSetup_EmptyBranchName_Refused(t *testing.T) {
-	dir := t.TempDir()
-	orchPath := copyFile(t, dir, "orchestrator.md",
-		filepath.Join(sessionTestdataDir, "commit-agent-orch.md"))
-	writeAgentFile(t, dir, "agent-a")
-	writeAgentFile(t, dir, "agent-b")
-	writeAgentFile(t, dir, "commit-manager-git")
-
+// TestIntegration_CommitSetup_EmptyBranchName_KeepsArtifactAndRow verifies that
+// a [branch:] marker with an empty name is treated like a missing marker.
+func TestIntegration_CommitSetup_EmptyBranchName_KeepsArtifactAndRow(t *testing.T) {
+	dir, orchPath := newCommitFailureDir(t)
 	f := harness.NewMockAdapter()
-	// Commit agent returns SUCCESS with a [branch:] marker but no branch name.
-	// An empty name must refuse the run.
 	f.Queue("commit-manager-git", harness.ScriptedEntry{Response: &domain.ProtocolResponse{
 		AgentInstanceID: "commit-manager-git#1",
 		StatusCode:      domain.StatusSUCCESS,
 		StatusMessage:   "commit setup complete [branch:]",
 	}})
-
 	artifactPath := filepath.Join(dir, "Orchestration.md")
 	sess := newSession(f, artifactPath)
 
-	cfg := domain.RunConfig{
-		OrchestratorFilePath: orchPath,
-		WorkflowID:           "linear",
-		Task:                 "empty-branch task",
-		IsNewRun:             true,
-		RunSettings: domain.RunSettings{
-			Mode:                domain.ExecutionModeAuto,
-			Commits:             true,
-			CommitBranchVariant: domain.CommitBranchMOSAICOwned,
-		},
+	got, err := sess.Start(context.Background(), commitFailureConfig(orchPath, "empty-branch task"))
+
+	requireFailedSetupKeptOnDisk(t, artifactPath, got, err, f)
+}
+
+// TestIntegration_CommitSetup_FailedSetup_ResumeRetriesSetupThenRuns verifies
+// the full recovery path on the real file store: after a failed setup, a resume
+// retries setup (next sequence, earlier row kept), records the branch, and runs
+// the workflow to completion with strictly increasing sequences.
+func TestIntegration_CommitSetup_FailedSetup_ResumeRetriesSetupThenRuns(t *testing.T) {
+	dir, orchPath := newCommitFailureDir(t)
+	artifactPath := filepath.Join(scopedRunFolder(t, dir), "Orchestration.md")
+
+	first := harness.NewMockAdapter()
+	first.Queue("commit-manager-git", harness.ScriptedEntry{Response: &domain.ProtocolResponse{
+		AgentInstanceID: "commit-manager-git#1",
+		StatusCode:      domain.StatusBLOCKED,
+		StatusMessage:   "dirty working tree",
+		ErrorCode:       domain.ErrorPERMISSION_DENIED,
+		ErrorReason:     "uncommitted changes",
+	}})
+	got, err := newSession(first, artifactPath).Start(context.Background(), commitFailureConfig(orchPath, "retry task"))
+	requireFailedSetupKeptOnDisk(t, artifactPath, got, err, first)
+
+	const wantBranch = "mosaic/run/retry-branch"
+	second := harness.NewMockAdapter()
+	second.Queue("commit-manager-git", harness.ScriptedEntry{Response: &domain.ProtocolResponse{
+		AgentInstanceID: "commit-manager-git#2", StatusCode: domain.StatusSUCCESS,
+		StatusMessage: "ready [branch:" + wantBranch + "]",
+	}})
+	second.Queue("agent-a", harness.ScriptedEntry{Response: &domain.ProtocolResponse{
+		AgentInstanceID: "agent-a#3", StatusCode: domain.StatusSUCCESS, StatusMessage: "done",
+	}})
+	second.Queue("agent-b", harness.ScriptedEntry{Response: &domain.ProtocolResponse{
+		AgentInstanceID: "agent-b#4", StatusCode: domain.StatusSUCCESS, StatusMessage: "done",
+	}})
+	resumeCfg := commitFailureConfig(orchPath, "retry task")
+	resumeCfg.IsNewRun = false
+	resumeCfg.RunFolder = filepath.Dir(artifactPath)
+	resumeCfg.Supplied.CommitBranchVariant = true // a pending setup retry needs the variant
+
+	got, err = newSession(second, artifactPath).Start(context.Background(), resumeCfg)
+
+	requireRunStatus(t, got, err, domain.RunCompleted)
+	data, readErr := os.ReadFile(artifactPath)
+	if readErr != nil {
+		t.Fatalf("read artifact: %v", readErr)
 	}
-
-	got, err := sess.Start(context.Background(), cfg)
-	requireRefused(t, got, err)
-
-	// No artifact must be created: an empty branch name refuses the run terminally.
-	if _, statErr := os.Stat(artifactPath); statErr == nil {
-		t.Errorf("want no artifact file when [branch:] has empty name, but file exists at %s",
-			artifactPath)
+	state, parseErr := artifact.Parse(data)
+	if parseErr != nil {
+		t.Fatalf("parse artifact: %v", parseErr)
 	}
-
-	// No workflow agents must have been dispatched; only the commit setup agent.
-	invs := f.Invocations()
-	for _, inv := range invs {
-		if inv.Agent.Identifier != "commit-manager-git" {
-			t.Errorf("want no workflow agent dispatched after empty-branch-name refusal, got %q",
-				inv.Agent.Identifier)
+	if state.CommitBranch != wantBranch {
+		t.Errorf("want commit_branch=%q after the retry, got %q", wantBranch, state.CommitBranch)
+	}
+	if len(state.ExecutionLog) != 4 {
+		t.Fatalf("want 4 rows (failed setup, retried setup, 2 workflow), got %d", len(state.ExecutionLog))
+	}
+	for i, row := range state.ExecutionLog {
+		if row.Seq != i+1 {
+			t.Errorf("row %d: want Seq=%d, got %d", i, i+1, row.Seq)
 		}
+	}
+	if state.ExecutionLog[0].Status != domain.StatusBLOCKED || !strings.Contains(state.ExecutionLog[1].Agent, "commit-manager-git") {
+		t.Errorf("want the failed row kept first and the retried setup second, got %+v", state.ExecutionLog[:2])
 	}
 }

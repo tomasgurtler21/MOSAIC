@@ -26,12 +26,6 @@ import (
 	"mosaic-agent-test/internal/workspace"
 )
 
-// protocolVersion is the Communication Protocol version evidence-building
-// checks messages against. Named rather than threaded through as a setting:
-// no test definition declares one, and protocolcheck's rules do not yet vary
-// by version.
-const protocolVersion protocolcheck.Version = "1.10"
-
 // Deps are the collaborators one attempt needs. Every one is a port or a
 // pure package: this package spawns nothing directly and names no harness.
 type Deps struct {
@@ -1027,7 +1021,7 @@ func collaboratorProtocolViolations(records []domain.LogRecord) map[domain.Viola
 			ctx = protocolcheck.ResponseContextFor(inv)
 		}
 
-		result := protocolcheck.CheckResponse(rec.Echo.Observed, protocolVersion, ctx)
+		result := protocolcheck.CheckResponse(rec.Echo.Observed, ctx)
 		for class, n := range result.CountByClass() {
 			counts[domain.ViolationClassKey(class)] += n
 		}
@@ -1047,13 +1041,13 @@ func subjectProtocolViolations(subject domain.SubjectUnderTest, res domain.Subje
 	}
 
 	ctx := protocolcheck.UnknownRequest
-	if protocolcheck.CheckInvocation(subject.OpeningMessage, protocolVersion).Parsed {
+	if protocolcheck.CheckInvocation(subject.OpeningMessage).Parsed {
 		if inv, ok := parseTaskMessage(subject.OpeningMessage); ok {
 			ctx = protocolcheck.ResponseContextFor(inv)
 		}
 	}
 
-	result := protocolcheck.CheckResponse(res.ProtocolMessage, protocolVersion, ctx)
+	result := protocolcheck.CheckResponse(res.ProtocolMessage, ctx)
 	counts := map[domain.ViolationClassKey]int{}
 	for class, n := range result.CountByClass() {
 		counts[domain.ViolationClassKey(class)] += n

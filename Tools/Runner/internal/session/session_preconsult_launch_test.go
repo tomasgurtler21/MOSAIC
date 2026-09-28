@@ -1,8 +1,8 @@
 package session_test
 
 // Tests for launch-failure preservation contracts at pre-consultation.
-// Covers: IsNewRun=false preserves run folder, IsNewRun=true removes it;
-// both carry HarnessLaunchError in outcome.Cause.
+// Covers: both IsNewRun=false and IsNewRun=true keep the run folder and return
+// a resumable start failure carrying HarnessLaunchError in outcome.Cause.
 
 import (
 	"context"
@@ -20,7 +20,7 @@ import (
 // TestSession_Start_PreConsultation_LaunchFailure_IsNewRunFalse_RunFolderPreserved
 // verifies that when a pre-consultation fails with a *domain.HarnessLaunchError
 // on a resumed run (IsNewRun=false), the session:
-//  1. Returns RunRefused,
+//  1. Returns RunStartFailed,
 //  2. Carries the HarnessLaunchError in outcome.Cause (so the TUI can detect
 //     the launch-failure identity without parsing the message), and
 //  3. Preserves the run folder and its Orchestration.md byte-for-byte.
@@ -29,8 +29,6 @@ import (
 // this test the destructive behavior (silently wiping a user's existing run
 // history on every launch failure during a resume) is invisible to the suite.
 //
-// RED: session.refusal does not set Cause, and the pre-consultation failure
-// handler removes the run folder unconditionally regardless of IsNewRun.
 func TestSession_Start_PreConsultation_LaunchFailure_IsNewRunFalse_RunFolderPreserved(t *testing.T) {
 	dir := t.TempDir()
 	orchPath := copyOrchestratorFile(t, dir, "linear-orch.md")
@@ -39,7 +37,7 @@ func TestSession_Start_PreConsultation_LaunchFailure_IsNewRunFalse_RunFolderPres
 
 	// Create the run folder and write a pre-existing Orchestration.md so the
 	// test can assert the file survives the pre-consultation failure.
-	runFolder := filepath.Join(dir, "Orchestration-20260817T140615Z-test")
+	runFolder := filepath.Join(dir, domain.RunScopedFolder(testRunID))
 	if err := os.MkdirAll(runFolder, 0o755); err != nil {
 		t.Fatalf("setup: create run folder: %v", err)
 	}
@@ -84,15 +82,15 @@ func TestSession_Start_PreConsultation_LaunchFailure_IsNewRunFalse_RunFolderPres
 	})
 
 	cfg := baseLinearConfig(orchPath)
-	cfg.IsNewRun = false
+	markResume(&cfg)
 	cfg.RunFolder = runFolder
 	cfg.Mode = domain.ExecutionModeAuto
 	cfg.PreConsultation = true
 
 	got, err := ses.Start(context.Background(), cfg)
 
-	// The run must be refused.
-	requireRefused(t, got, err)
+	// The run must stop as a resumable start failure.
+	requireStartFailed(t, got, err)
 
 	// The Cause field must carry the HarnessLaunchError so the TUI can detect
 	// a launch failure via errors.As without parsing the message text.
@@ -121,20 +119,14 @@ func TestSession_Start_PreConsultation_LaunchFailure_IsNewRunFalse_RunFolderPres
 	}
 }
 
-// TestSession_Start_PreConsultation_LaunchFailure_IsNewRunTrue_RunFolderRemoved
+// TestSession_Start_PreConsultation_LaunchFailure_IsNewRunTrue_RunFolderKept
 // verifies that when a pre-consultation fails with a *domain.HarnessLaunchError
 // on a new run (IsNewRun=true), the session:
-//  1. Returns RunRefused,
+//  1. Returns RunStartFailed,
 //  2. Carries the HarnessLaunchError in outcome.Cause, and
-//  3. Removes the run folder (the same "no trace remains" contract as for
-//     other pre-consultation failures on a new run).
-//
-// Together with the IsNewRunFalse counterpart above, this pins both rows of the
-// ContractsDesign run-folder-preservation table for the launch-failure cause.
-//
-// RED (Cause only): folder removal already happens unconditionally; the Cause
-// assertion will fail until session.refusal is made cause-carrying.
-func TestSession_Start_PreConsultation_LaunchFailure_IsNewRunTrue_RunFolderRemoved(t *testing.T) {
+//  3. Keeps the run folder and the artifact, so the failed start is resumable
+//     after the user fixes the launch problem.
+func TestSession_Start_PreConsultation_LaunchFailure_IsNewRunTrue_RunFolderKept(t *testing.T) {
 	dir := t.TempDir()
 	orchPath := copyOrchestratorFile(t, dir, "linear-orch.md")
 	writeAgentFile(t, dir, "agent-a")
@@ -171,8 +163,8 @@ func TestSession_Start_PreConsultation_LaunchFailure_IsNewRunTrue_RunFolderRemov
 
 	got, err := ses.Start(context.Background(), cfg)
 
-	// The run must be refused.
-	requireRefused(t, got, err)
+	// The run must stop as a resumable start failure.
+	requireStartFailed(t, got, err)
 
 	// The Cause field must carry the HarnessLaunchError so the TUI can display
 	// the override screen regardless of whether the failure was on a new or resumed run.
@@ -183,9 +175,13 @@ func TestSession_Start_PreConsultation_LaunchFailure_IsNewRunTrue_RunFolderRemov
 			"and must detect the launch-failure identity in both cases")
 	}
 
-	// On a new run, the folder must be removed — the "no trace remains" contract.
-	if _, statErr := os.Stat(runFolder); !os.IsNotExist(statErr) {
-		t.Error("run folder was not removed on IsNewRun=true pre-consultation failure; " +
-			"a failed new-run attempt must clean up its own folder")
+	// On a new run the folder must also be kept: the artifact exists and a
+	// resume retries pre-consultation.
+	if _, statErr := os.Stat(runFolder); statErr != nil {
+		t.Errorf("run folder was removed on IsNewRun=true pre-consultation failure; "+
+			"a failed start must keep its run folder so it can be resumed (stat error: %v)", statErr)
+	}
+	if !store.exists {
+		t.Error("artifact missing after IsNewRun=true pre-consultation failure; the artifact must be kept")
 	}
 }

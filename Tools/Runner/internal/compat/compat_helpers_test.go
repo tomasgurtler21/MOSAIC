@@ -188,7 +188,7 @@ func mustParseTable(t *testing.T, content string, id, version string) domain.Rou
 
 func mustAdmit(t *testing.T, table domain.RoutingTable) domain.AdmittedWorkflow {
 	t.Helper()
-	aw, err := compat.Admit(table)
+	aw, err := compat.Admit(table, domain.ExecutionModeAuto)
 	if err != nil {
 		t.Fatalf("Admit(%s): unexpected error: %v", table.Info.ID, err)
 	}

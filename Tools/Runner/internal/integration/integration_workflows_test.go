@@ -50,6 +50,7 @@ func newTestIntegrationRun(t *testing.T, tc integrationWorkflowCase) integration
 		sess:    newSession(f, filepath.Join(dir, "Orchestration.md")),
 		adapter: f,
 		cfg: domain.RunConfig{
+			RunID: integrationRunID,
 			OrchestratorFilePath: orchPath,
 			WorkflowID:           domain.WorkflowID(tc.workflowID),
 			Task:                 tc.name + " task",

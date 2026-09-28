@@ -265,7 +265,7 @@ func TestMockAdapter_CancelledContext_DoesNotConsumeEntry(t *testing.T) {
 // ===== Protocol serialisation =====
 
 // TestMarshalRequest_ProducesExpectedFieldNames verifies that MarshalRequest
-// produces JSON with the Communication Protocol v1.7 snake_case field names.
+// produces JSON with the Communication Protocol v1.12 snake_case field names.
 func TestMarshalRequest_ProducesExpectedFieldNames(t *testing.T) {
 	req := domain.ProtocolRequest{
 		AgentInstanceID:      "writer#1",
@@ -389,6 +389,30 @@ func TestUnmarshalResponse_ReturnsErrorOnInvalidJSON(t *testing.T) {
 	_, err := harness.UnmarshalResponse([]byte(`not json`))
 	if err == nil {
 		t.Fatal("want error for invalid JSON, got nil")
+	}
+}
+
+// TestUnmarshalResponse_E100OmittingAgentInstanceID_StillParses verifies the
+// one tolerance response parsing keeps: an invalid-invocation response whose
+// cause is an unusable identifier cannot echo that identifier, so it omits it
+// and must still be understood. Artifacts get no such tolerance (an artifact
+// without a usable run_id is refused when parsed).
+func TestUnmarshalResponse_E100OmittingAgentInstanceID_StillParses(t *testing.T) {
+	raw := `{"status_code":"BLOCKED","status_message":"invalid invocation","error_code":"E100","error_reason":"agent_instance_id is absent"}`
+
+	resp, err := harness.UnmarshalResponse([]byte(raw))
+
+	if err != nil {
+		t.Fatalf("UnmarshalResponse: want an E100 response without agent_instance_id to parse, got %v", err)
+	}
+	if resp.StatusCode != domain.StatusBLOCKED {
+		t.Errorf("want StatusCode=BLOCKED, got %q", resp.StatusCode)
+	}
+	if resp.ErrorCode != domain.ErrorINVALID_INVOCATION {
+		t.Errorf("want ErrorCode=E100, got %q", resp.ErrorCode)
+	}
+	if resp.AgentInstanceID != "" {
+		t.Errorf("want no AgentInstanceID invented for the response, got %q", resp.AgentInstanceID)
 	}
 }
 

@@ -31,6 +31,12 @@ type ConsultationRequest struct {
 	// Runner-constructed error description rather than an agent message.
 	LastStatusMessage *string
 
+	// LastErrorReason is the error_reason of a triggering BLOCKED response, or
+	// the Runner-constructed description for a harness error. Nil - serialised
+	// as JSON null - for every other status, on the first step of a new run and
+	// for every pre-consultation. Always encoded on the wire.
+	LastErrorReason *string
+
 	// Deviation carries the engine's reason for consulting, for the benefit of
 	// the ManualResolver's prompt only. It is NEVER serialised onto the wire:
 	// the orchestrator derives its own context from the artifact. Nil when the
@@ -84,8 +90,8 @@ type DispatchInstruction struct {
 // remains resumable.
 type StopInstruction struct {
 	// Reason is human-readable and non-empty. It is surfaced in the CLI exit
-	// message and the TUI stop screen, and recorded as the consultation row's
-	// Execution Log summary.
+	// message and the TUI stop screen. The consultation itself writes no
+	// Execution Log row, so Reason is never persisted to the artifact.
 	Reason string
 }
 

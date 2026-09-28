@@ -64,6 +64,7 @@ func TestIntegration_OptionalRow_IsDispatchedAndContributesToDeviation(t *testin
 	}})
 
 	cfg := domain.RunConfig{
+		RunID: integrationRunID,
 		OrchestratorFilePath: orchPath,
 		WorkflowID:           "optional-row",
 		Task:                 "task",
@@ -164,6 +165,7 @@ func TestIntegration_BuildReview_OnFindings_LoopBack_NoDev(t *testing.T) {
 	}})
 
 	cfg := domain.RunConfig{
+		RunID: integrationRunID,
 		OrchestratorFilePath: orchPath,
 		WorkflowID:           "build-review-loop",
 		Task:                 "task",
@@ -227,6 +229,7 @@ func TestIntegration_Deviation_NoConsultant_ReturnsUnresolved(t *testing.T) {
 	}})
 
 	cfg := domain.RunConfig{
+		RunID: integrationRunID,
 		OrchestratorFilePath: orchPath,
 		WorkflowID:           "deviation-resume",
 		Task:                 "task",

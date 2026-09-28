@@ -31,7 +31,7 @@ func TestSession_HITL_FilesystemApprovalReader_Approved_PassesWithoutRedispatch(
 	// Write an approved artifact file at an absolute path in a temp directory.
 	// The consultant will override the table row output artifacts to point here,
 	// giving the approval reader a deterministic, absolute path to check.
-	tmpDir := t.TempDir()
+	tmpDir := chdirWorkspace(t)
 	approvedPath := filepath.Join(tmpDir, "plan.md")
 	approvedContent := "---\nhuman_approved: true\n---\n# Plan\n"
 	if err := os.WriteFile(approvedPath, []byte(approvedContent), 0600); err != nil {
@@ -39,7 +39,7 @@ func TestSession_HITL_FilesystemApprovalReader_Approved_PassesWithoutRedispatch(
 	}
 
 	consultant := &scriptedRoutingConsultant{}
-	approvedPaths := []string{approvedPath}
+	approvedPaths := []string{"plan.md"}
 	consultant.queueDispatchWithOutputs("agent-a", "do the work", 0, &approvedPaths)
 	consultant.queueDispatch("agent-b", "continue", 1)
 	consultant.queueStop("done")
@@ -79,7 +79,7 @@ func TestSession_HITL_FilesystemApprovalReader_Approved_PassesWithoutRedispatch(
 // deviation — the same re-dispatch-then-escalate path as the non-interactive
 // frontend.
 func TestSession_HITL_FilesystemApprovalReader_Unapproved_RedispatchesThenEscalates(t *testing.T) {
-	tmpDir := t.TempDir()
+	tmpDir := chdirWorkspace(t)
 	unapprovedPath := filepath.Join(tmpDir, "plan.md")
 	unapprovedContent := "---\nhuman_approved: false\n---\n# Plan\n"
 	if err := os.WriteFile(unapprovedPath, []byte(unapprovedContent), 0600); err != nil {
@@ -87,7 +87,7 @@ func TestSession_HITL_FilesystemApprovalReader_Unapproved_RedispatchesThenEscala
 	}
 
 	consultant := &scriptedRoutingConsultant{}
-	unapprovedPaths := []string{unapprovedPath}
+	unapprovedPaths := []string{"plan.md"}
 	// First dispatch: agent-a with the unapproved artifact.
 	consultant.queueDispatchWithOutputs("agent-a", "do the work", 0, &unapprovedPaths)
 	// After HITL escalation the consultant is invoked to resolve the deviation.

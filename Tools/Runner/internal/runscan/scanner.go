@@ -3,6 +3,8 @@
 package runscan
 
 import (
+	"errors"
+	"fmt"
 	"os"
 	"path/filepath"
 	"sort"
@@ -81,6 +83,15 @@ type RunInfo struct {
 
 	// LastAgent is current_state.last_agent. Empty before any invocation.
 	LastAgent string
+
+	// RunnerSettingsRecorded is true when the artifact records runner_mode
+	// (and its two siblings). False for a native-created artifact that the
+	// Runner has not yet adopted, and for unparseable artifacts.
+	RunnerSettingsRecorded bool
+
+	// CommitSetupPending is true when the artifact enables commits but records
+	// no commit_branch, so a resume must retry the commit setup dispatch.
+	CommitSetupPending bool
 }
 
 // RunCandidate represents one resumable run folder found during scanning.
@@ -99,6 +110,10 @@ type UnresumableRun struct {
 
 	// Reason states why the run cannot be resumed. Always set.
 	Reason UnresumableReason
+
+	// Detail is the refusal reason text. Set for ReasonInvalidRunIdentity,
+	// empty otherwise.
+	Detail string
 }
 
 // UnresumableReason is why a run folder is not offered for resumption.
@@ -108,6 +123,11 @@ type UnresumableReason string
 // current_state.phase is COMPLETED.
 const ReasonCompleted UnresumableReason = "completed"
 
+// ReasonInvalidRunIdentity marks a run folder whose artifact has an absent,
+// empty, malformed or folder-mismatched run_id. It is shown as refused and is
+// never offered for resumption.
+const ReasonInvalidRunIdentity UnresumableReason = "invalid-run-identity"
+
 // Description returns a human-readable phrase for display next to the run,
 // suitable for both a TUI list row and a CLI line. Never empty, including
 // for an unrecognised value.
@@ -115,6 +135,8 @@ func (r UnresumableReason) Description() string {
 	switch r {
 	case ReasonCompleted:
 		return "completed"
+	case ReasonInvalidRunIdentity:
+		return "invalid run identity"
 	default:
 		return "unresumable"
 	}
@@ -177,8 +199,18 @@ func (s *dirScanner) Scan(rootDir string) (ScanResult, error) {
 		// Try to parse the artifact.
 		state, parseErr := artifact.Parse(data)
 		if parseErr != nil {
+			if detail, refused := identityRefusalDetail(parseErr); refused {
+				result.Unresumable = append(result.Unresumable, refusedRun(runID, folderPath, detail))
+				continue
+			}
 			candidate.ParseError = parseErr
 			result.Candidates = append(result.Candidates, candidate)
+			continue
+		}
+
+		if state.RunID != runID {
+			detail := fmt.Sprintf("the artifact's run_id %q does not match its run folder %q", state.RunID, entry.Name())
+			result.Unresumable = append(result.Unresumable, refusedRun(runID, folderPath, detail))
 			continue
 		}
 
@@ -208,6 +240,8 @@ func (s *dirScanner) Scan(rootDir string) (ScanResult, error) {
 		candidate.Phase = state.CurrentState.Phase
 		candidate.Stage = state.CurrentState.Stage
 		candidate.LastAgent = state.CurrentState.LastAgent
+		candidate.RunnerSettingsRecorded = state.Mode != domain.ExecutionModeUnset
+		candidate.CommitSetupPending = state.Commits && state.CommitBranch == ""
 		result.Candidates = append(result.Candidates, candidate)
 	}
 
@@ -224,4 +258,28 @@ func (s *dirScanner) Scan(rootDir string) (ScanResult, error) {
 	})
 
 	return result, nil
+}
+
+// identityRefusalDetail reports whether a parse failure is an unusable run
+// identity (absent, empty or malformed run_id) and, if so, the reason text.
+func identityRefusalDetail(parseErr error) (string, bool) {
+	var idErr *domain.RunIdentityError
+	if !errors.As(parseErr, &idErr) {
+		return "", false
+	}
+	var refErr *domain.RefusalError
+	if errors.As(parseErr, &refErr) {
+		return refErr.Reason, true
+	}
+	return idErr.Error(), true
+}
+
+// refusedRun builds the entry for a run folder whose run identity is unusable.
+// The folder's own run_id names the run, since the artifact's cannot be trusted.
+func refusedRun(runID, folderPath, detail string) UnresumableRun {
+	return UnresumableRun{
+		RunInfo: RunInfo{RunID: runID, FolderPath: folderPath},
+		Reason:  ReasonInvalidRunIdentity,
+		Detail:  detail,
+	}
 }

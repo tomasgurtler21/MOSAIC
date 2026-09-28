@@ -77,6 +77,9 @@ frontmatter:
     - tier_rationale
     - required_skills
     - tools
+    - infrastructure
+    - triggers
+    - on_failure
   key_order:
     - id
     - version

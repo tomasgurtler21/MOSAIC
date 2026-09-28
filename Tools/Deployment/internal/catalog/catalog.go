@@ -101,8 +101,9 @@ type Catalog interface {
 	// Agent looks up any agent by key, regardless of role.
 	Agent(key string) (domain.Agent, bool)
 
-	// Orchestrator returns the single orchestrator agent. The orchestrator is identified by
-	// the file at Orchestrator/orchestrator.md.
+	// Orchestrator returns the native orchestrator agent, one of the two orchestrator
+	// sources. It is identified by the file at Orchestrator/orchestrator.md; the other
+	// source is the script-mode orchestrator returned by OrchestratorScript.
 	Orchestrator() domain.Agent
 
 	// OrchestratorScript returns the script-mode orchestrator agent, loaded from

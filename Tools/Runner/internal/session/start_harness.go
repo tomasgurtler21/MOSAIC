@@ -122,14 +122,23 @@ func (s *sessionImpl) setupInfraAndStages(ctx context.Context, rs *runStartCtx) 
 		declaredInfraAgents = s.applyInfraFilter(rs.config.InfrastructureFilter, declaredInfraAgents)
 	}
 
-	// Step 6c: validate per-class agent selection.
-	if err := validateClassSelections(declaredInfraAgents, rs.config.InfraClassSelections); err != nil {
-		return s.refusal(err.Error()), true, nil
+	// Step 6c: on resume, settle the run settings against the artifact. Values
+	// the frontend supplied are compared with the recorded ones; a native-created
+	// artifact without runner settings takes the supplied ones (recorded below).
+	adoptRunnerSettings := false
+	if !rs.config.IsNewRun {
+		effective, adopt, err := domain.ReconcileResumeSettings(rs.existingState.RunSettings, rs.config.RunSettings, rs.config.Supplied)
+		if err != nil {
+			return s.refusal(err.Error()), true, nil
+		}
+		rs.config.RunSettings = effective
+		adoptRunnerSettings = adopt
 	}
 
-	// Step 6d: on resume, read RunSettings from the existing artifact.
-	if !rs.config.IsNewRun {
-		rs.config.RunSettings = rs.existingState.RunSettings
+	// Step 6d: validate per-class agent selection against the effective map
+	// (the caller's for a new run, the persisted one for a resume).
+	if err := domain.ValidateInfraSelections(declaredInfraAgents, rs.config.InfraClassSelections); err != nil {
+		return s.refusal(err.Error()), true, nil
 	}
 
 	// Step 7: settle checkpoints.
@@ -147,6 +156,15 @@ func (s *sessionImpl) setupInfraAndStages(ctx context.Context, rs *runStartCtx) 
 		if !hasCommitClassAgent(declaredInfraAgents) {
 			return s.refusal("commits enabled but no commit-class infrastructure agent is declared"), true, nil
 		}
+	}
+
+	// Record adopted runner settings once, before any dispatch.
+	if adoptRunnerSettings {
+		adopted, err := s.deps.Store.AdoptRunnerSettings(ctx, rs.config.Mode, rs.config.PreConsultation, rs.config.ManualResolution, s.deps.Clock.Now())
+		if err != nil {
+			return domain.RunOutcome{Status: domain.RunFailed, Message: err.Error()}, true, err
+		}
+		rs.existingState = adopted
 	}
 
 	rs.declaredInfraAgents = declaredInfraAgents
@@ -185,9 +203,13 @@ func (s *sessionImpl) applyInfraFilter(filter []string, declared []domain.Declar
 	return filtered
 }
 
-// createOrResumeArtifact handles steps 7a, 7.9, and 8 of the run-start
-// sequence: build and validate the seed plan, dispatch commit setup (new runs
-// with commits enabled), and create or resume the run artifact.
+// createOrResumeArtifact handles steps 7a through 8 of the run-start
+// sequence: build and validate the seed plan, create or resume the run
+// artifact, and dispatch commit setup when commits are enabled and no
+// commit_branch is recorded yet.
+//
+// The artifact always exists before commit setup is dispatched, so a failed
+// setup leaves the artifact and the setup row behind and a resume retries it.
 func (s *sessionImpl) createOrResumeArtifact(ctx context.Context, rs *runStartCtx) (domain.RunOutcome, bool, error) {
 	// Step 7a: build and validate the seed plan.
 	if rs.config.IsNewRun && len(rs.config.SeedInputs) > 0 {
@@ -198,19 +220,41 @@ func (s *sessionImpl) createOrResumeArtifact(ctx context.Context, rs *runStartCt
 		rs.seedPlan = p
 	}
 
-	// Step 7.9: commit setup dispatch (new runs with commits enabled).
-	if rs.config.IsNewRun && rs.config.Commits {
-		cs, refusalMsg := s.doCommitSetupDispatch(ctx, rs.declaredInfraAgents, rs.config, rs.orchDir)
+	// Step 7.9: resolve the commit setup agent before anything is written, so
+	// an unresolvable agent is a refusal that leaves no artifact.
+	var setupAgent domain.AgentReference
+	if rs.config.Commits && (rs.config.IsNewRun || needsCommitSetup(rs.existingState)) {
+		ref, refusalMsg := resolveCommitSetupAgent(rs.declaredInfraAgents, rs.orchDir)
 		if refusalMsg != "" {
 			return s.refusal(refusalMsg), true, nil
 		}
-		rs.config.RunSettings.CommitBranch = cs.branchName
-		rs.commitSetup = cs
+		setupAgent = ref
 	}
 
 	if rs.config.IsNewRun {
-		return s.createNewRunArtifact(ctx, rs)
+		if outcome, done, err := s.createNewRunArtifact(ctx, rs); done {
+			return outcome, done, err
+		}
+	} else {
+		rs.state = rs.existingState
 	}
+
+	// Step 8b: commit setup (new runs with commits enabled, and resumed runs
+	// with commits enabled and no commit_branch).
+	if rs.config.Commits && needsCommitSetup(rs.state) {
+		state, outcome, done, err := s.runCommitSetup(ctx, setupAgent, rs.state, rs.config.RunID)
+		rs.state = state
+		if done {
+			return outcome, true, err
+		}
+		rs.config.RunSettings.CommitBranch = state.CommitBranch
+	}
+
+	if rs.config.IsNewRun {
+		rs.seq = rs.state.GlobalSequence
+		return domain.RunOutcome{}, false, nil
+	}
+	rs.existingState = rs.state
 	return s.resumeRunArtifact(ctx, rs)
 }
 
@@ -244,31 +288,12 @@ func (s *sessionImpl) createNewRunArtifact(ctx context.Context, rs *runStartCtx)
 		rs.stages = &ss
 	}
 
-	rs.seq = 0
-
-	// Apply the commit setup row as the first Execution Log entry.
-	if rs.commitSetup != nil {
-		commitStep := domain.CompletedStep{
-			Seq:              state.GlobalSequence + 1,
-			AgentInstance:    rs.commitSetup.agentInstance,
-			Status:           rs.commitSetup.status,
-			Summary:          rs.commitSetup.summary,
-			Timestamp:        rs.commitSetup.completedAt,
-			IsInfrastructure: true,
-		}
-		state, err = s.deps.Store.Apply(ctx, state, commitStep)
-		if err != nil {
-			_ = os.RemoveAll(rs.config.RunFolder)
-			return s.refusal("commit setup row apply failed: " + err.Error()), true, nil
-		}
-		rs.seq = 1
-	}
-
 	rs.state = state
 	return domain.RunOutcome{}, false, nil
 }
 
-// resumeRunArtifact resumes a run from its existing artifact.
+// resumeRunArtifact resumes a run from its existing artifact (rs.existingState,
+// which already includes any retried commit setup row).
 // Called by createOrResumeArtifact on the resume path.
 func (s *sessionImpl) resumeRunArtifact(ctx context.Context, rs *runStartCtx) (domain.RunOutcome, bool, error) {
 	state := rs.existingState
@@ -276,7 +301,10 @@ func (s *sessionImpl) resumeRunArtifact(ctx context.Context, rs *runStartCtx) (d
 	if resumeErr != nil {
 		return domain.RunOutcome{Status: domain.RunFailed, Message: resumeErr.Error()}, true, resumeErr
 	}
-	rs.seq = resume.Seq
+	// Sequences already allocated to infrastructure rows (a commit setup row
+	// from an earlier attempt) are never reused, even when no workflow step
+	// has run yet and the resume point reports a fresh start.
+	rs.seq = max(resume.Seq, state.GlobalSequence)
 
 	if resume.RerunLast {
 		state = rewindStateForRerun(rs.admitted.Table, domain.NewInfraAgentSet(rs.declaredInfraAgents, s.orchRef.Identifier), state)
@@ -314,10 +342,9 @@ func (s *sessionImpl) applyOverridesAndPreConsult(ctx context.Context, rs *runSt
 		OrchestrationArtifact: filepath.Join(rs.config.RunFolder, "Orchestration.md"),
 	})
 	if pcErr != nil {
-		if rs.config.IsNewRun && rs.config.RunFolder != "" {
-			_ = os.RemoveAll(rs.config.RunFolder)
-		}
-		return s.refusalCaused("pre-consultation failed: "+pcErr.Error(), pcErr), true, nil
+		// The run folder, artifact and any setup row are kept; pre-consultation
+		// writes nothing to the artifact, and a resume retries it.
+		return s.startFailed("pre-consultation failed: "+pcErr.Error(), pcErr), true, nil
 	}
 	rs.preConsultAdvice = advice
 	return domain.RunOutcome{}, false, nil

@@ -213,6 +213,20 @@ type memStore struct {
 	// commit setup row recording failure path (Plan Risks §1).
 	applyErrOnFirst bool
 	applyFirstErr   error
+
+	// BranchCalls records every branch name passed to SetCommitBranch.
+	BranchCalls []string
+
+	// AdoptCalls records every AdoptRunnerSettings call; AdoptWrites counts the
+	// ones that changed the stored artifact.
+	AdoptCalls  []adoptCall
+	AdoptWrites int
+
+	// keepRecordedIdentity, when true, makes Read report state.RunID exactly
+	// as recorded, including an absent one. By default a recorded state that
+	// names no run_id is reported under testRunID, standing in for a
+	// well-formed artifact.
+	keepRecordedIdentity bool
 }
 
 func (m *memStore) Read(_ context.Context) (domain.ArtifactState, error) {
@@ -223,11 +237,18 @@ func (m *memStore) Read(_ context.Context) (domain.ArtifactState, error) {
 	if !m.exists {
 		return domain.ArtifactState{}, os.ErrNotExist
 	}
-	return m.state, nil
+	st := m.state
+	if st.RunID == "" && !m.keepRecordedIdentity {
+		st.RunID = testRunID
+	}
+	return st, nil
 }
 
 func (m *memStore) Create(_ context.Context, info domain.WorkflowInfo, task string, settings domain.RunSettings, now time.Time, runID string) (domain.ArtifactState, error) {
 	m.CreatedRunID = runID // record for AC7.7 assertion
+	if runID == "" {
+		runID = testRunID // frontends always supply an identity; the double stands in for one
+	}
 	m.state = domain.ArtifactState{
 		Type:            "orchestration-artifact",
 		RunID:           runID,
@@ -252,12 +273,13 @@ func (m *memStore) Apply(_ context.Context, state domain.ArtifactState, step dom
 	// current_state is updated only for workflow steps, matching the real
 	// fileStore's contract (ContractsDesign.md, domain.ArtifactStore.Apply):
 	// an infrastructure step must not move the recorded workflow position.
-	if !step.IsInfrastructure {
+	if !step.IsInfrastructure && !step.HITLRejected {
 		state.CurrentState = domain.CurrentState{
 			Phase:      step.Phase,
 			Stage:      step.Stage,
-			LastStatus: step.Status,
+			LastStatus: step.RoutedStatus(),
 			LastAgent:  step.AgentInstance,
+			ErrorCode:  step.RoutedErrorCode(),
 		}
 	}
 	state.ExecutionLog = append(state.ExecutionLog, domain.ExecutionLogEntry{
@@ -273,6 +295,51 @@ func (m *memStore) Apply(_ context.Context, state domain.ArtifactState, step dom
 
 func (m *memStore) SetPhase(_ context.Context, _ domain.ArtifactState, _ string, _ time.Time) (domain.ArtifactState, error) {
 	return domain.ArtifactState{}, fmt.Errorf("memStore.SetPhase: not implemented (session tests do not exercise SetPhase)")
+}
+
+// SetCommitBranch mirrors the store contract: set-once, refused when commits
+// are disabled in the artifact or when the branch is empty.
+func (m *memStore) SetCommitBranch(_ context.Context, branch string, now time.Time) (domain.ArtifactState, error) {
+	m.BranchCalls = append(m.BranchCalls, branch)
+	if !m.state.RunSettings.Commits || m.state.CommitBranch != "" || branch == "" {
+		return domain.ArtifactState{}, &domain.RefusalError{
+			Component: "artifact",
+			Resource:  "commit_branch",
+			Reason:    "commit_branch cannot be set",
+		}
+	}
+	m.state.CommitBranch = branch
+	m.state.LastUpdated = now
+	return m.state, nil
+}
+
+// AdoptRunnerSettings mirrors the store contract: it records the three
+// runner-owned settings once and refuses when they are already recorded or when
+// mode is unset. It never touches review_loop_limit, infrastructure_selections
+// or commit_branch. Every call is recorded in AdoptCalls (also refused ones),
+// and the artifact write count is tracked in AdoptWrites.
+func (m *memStore) AdoptRunnerSettings(_ context.Context, mode domain.ExecutionMode, pre, manual bool, now time.Time) (domain.ArtifactState, error) {
+	m.AdoptCalls = append(m.AdoptCalls, adoptCall{Mode: mode, PreConsultation: pre, ManualResolution: manual})
+	if m.state.Mode != domain.ExecutionModeUnset || mode == domain.ExecutionModeUnset {
+		return domain.ArtifactState{}, &domain.RefusalError{
+			Component: "artifact",
+			Resource:  "runner_mode",
+			Reason:    "runner settings cannot be adopted",
+		}
+	}
+	m.state.Mode = mode
+	m.state.PreConsultation = pre
+	m.state.ManualResolution = manual
+	m.state.LastUpdated = now
+	m.AdoptWrites++
+	return m.state, nil
+}
+
+// adoptCall is one recorded AdoptRunnerSettings invocation.
+type adoptCall struct {
+	Mode             domain.ExecutionMode
+	PreConsultation  bool
+	ManualResolution bool
 }
 
 // ---- fixed-time Clock ----
@@ -319,6 +386,23 @@ func (h *callbackHarness) Invoke(ctx context.Context, agent domain.AgentReferenc
 		h.onInvoke(agent.Identifier)
 	}
 	return resp, err
+}
+
+// ---- beforeInvokeHarness ----
+
+// beforeInvokeHarness wraps a HarnessAdapter and calls before immediately
+// before delegating each Invoke, so a test can observe the durable state at
+// the moment a given agent is dispatched.
+type beforeInvokeHarness struct {
+	delegate domain.HarnessAdapter
+	before   func(agentID string)
+}
+
+func (h *beforeInvokeHarness) Invoke(ctx context.Context, agent domain.AgentReference, request domain.ProtocolRequest) (domain.ProtocolResponse, error) {
+	if h.before != nil {
+		h.before(agent.Identifier)
+	}
+	return h.delegate.Invoke(ctx, agent, request)
 }
 
 // ---- orchRefCaptureConsultant ----

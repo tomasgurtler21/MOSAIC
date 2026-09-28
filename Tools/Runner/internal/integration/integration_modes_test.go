@@ -4,6 +4,7 @@ import (
 	"context"
 	"os"
 	"path/filepath"
+	"strconv"
 	"strings"
 	"testing"
 
@@ -57,6 +58,7 @@ func TestIntegration_OrchestratedMode_AllRoutingFromConsultant(t *testing.T) {
 	sess := newSessionWithRouting(f, artifactPath, consultant)
 
 	cfg := domain.RunConfig{
+		RunID: integrationRunID,
 		OrchestratorFilePath: orchPath,
 		WorkflowID:           "linear",
 		Task:                 "orchestrated task",
@@ -77,11 +79,11 @@ func TestIntegration_OrchestratedMode_AllRoutingFromConsultant(t *testing.T) {
 			consultant.CallCount)
 	}
 
-	// AC9.2: The orchestrated-mode run records a consultation for every routing
-	// decision. Read back the produced artifact and confirm the execution log
-	// contains entries beyond the two workflow agents, proving the consultant
-	// stop (and any consultation rows the session writes per decision) are
-	// durably recorded — not just counted in memory.
+	// Consultations are visible through the consultant (three calls above) and
+	// the diagnostic logs, not in the artifact. Read back the produced artifact
+	// and confirm the Execution Log holds only the two workflow agents, with
+	// consecutive Seq values and instance suffixes equal to their Seq: the
+	// consultations consume no sequence slot and write no row.
 	artifactData, readErr := os.ReadFile(artifactPath)
 	if readErr != nil {
 		t.Fatalf("read produced artifact: %v", readErr)
@@ -91,37 +93,27 @@ func TestIntegration_OrchestratedMode_AllRoutingFromConsultant(t *testing.T) {
 		t.Fatalf("parse produced artifact: %v", parseErr)
 	}
 
-	// The execution log must contain at least the two workflow agents.
-	if len(state.ExecutionLog) < 2 {
-		t.Fatalf("want at least 2 execution log entries (workflow agents), got %d", len(state.ExecutionLog))
+	wantLog := []struct {
+		agent string
+		seq   int
+	}{
+		{"agent-a#1", 1}, {"agent-b#2", 2},
 	}
-
-	// Verify both workflow agent entries appear in the log.
-	agentSeen := map[string]bool{}
-	for _, entry := range state.ExecutionLog {
-		if strings.Contains(entry.Agent, "agent-a") || strings.Contains(entry.Agent, "agent-b") {
-			agentSeen[entry.Agent] = true
+	if len(state.ExecutionLog) != len(wantLog) {
+		t.Fatalf("want exactly %d execution log entries (workflow agents only), got %d: %v",
+			len(wantLog), len(state.ExecutionLog), state.ExecutionLog)
+	}
+	for i, w := range wantLog {
+		e := state.ExecutionLog[i]
+		if e.Agent != w.agent || e.Seq != w.seq {
+			t.Errorf("execution log[%d]: want %s with Seq %d, got %q Seq %d", i, w.agent, w.seq, e.Agent, e.Seq)
 		}
 	}
-	if !agentSeen["agent-a#1"] {
-		t.Errorf("want agent-a#1 in execution log; log = %v", state.ExecutionLog)
+	if state.GlobalSequence != 2 {
+		t.Errorf("want global_sequence 2 (workflow agents only), got %d", state.GlobalSequence)
 	}
-	if !agentSeen["agent-b#2"] {
-		t.Errorf("want agent-b#2 in execution log; log = %v", state.ExecutionLog)
-	}
-
-	// There must be at least one execution log entry that is not one of the two
-	// workflow agents. This entry is the consultation row the session records for
-	// the consultant's stop instruction, fulfilling AC9.2's "records a consultation
-	// for every routing decision" requirement at the artifact level.
-	nonWorkflowEntries := 0
-	for _, entry := range state.ExecutionLog {
-		if !strings.Contains(entry.Agent, "agent-a") && !strings.Contains(entry.Agent, "agent-b") {
-			nonWorkflowEntries++
-		}
-	}
-	if nonWorkflowEntries == 0 {
-		t.Errorf("want at least one consultation row in execution log beyond the two workflow agents, got none (total entries: %d)", len(state.ExecutionLog))
+	if state.CurrentState.LastAgent != "agent-b#2" {
+		t.Errorf("want current_state.last_agent agent-b#2, got %q", state.CurrentState.LastAgent)
 	}
 
 	// Both workflow agents must have been dispatched, in order.
@@ -173,6 +165,7 @@ func TestIntegration_AutoMode_AllSuccess_ZeroConsultations(t *testing.T) {
 			artifactPath := filepath.Join(dir, "Orchestration.md")
 			sess := newSession(f, artifactPath)
 			cfg := domain.RunConfig{
+				RunID: integrationRunID,
 				OrchestratorFilePath: orchPath,
 				WorkflowID:           "linear",
 				Task:                 "all-success task",
@@ -217,6 +210,7 @@ func TestIntegration_AutoMode_Deviation_ConsultCalledOnce(t *testing.T) {
 			artifactPath := filepath.Join(dir, "Orchestration.md")
 			sess := newSessionWithRouting(f, artifactPath, consultant)
 			cfg := domain.RunConfig{
+				RunID: integrationRunID,
 				OrchestratorFilePath: orchPath,
 				WorkflowID:           "linear",
 				Task:                 "deviation task",
@@ -305,6 +299,7 @@ func TestIntegration_AutoReview_CNA_AutoRouteBack_NoConsultAndArtifactInjected(t
 	sess := newSessionWithRouting(f, artifactPath, consultant)
 
 	cfg := domain.RunConfig{
+		RunID: integrationRunID,
 		OrchestratorFilePath: orchPath,
 		WorkflowID:           "cna-review",
 		Task:                 "cna auto-review task",
@@ -389,6 +384,7 @@ func TestIntegration_Auto_CNA_ConsultsForDeviation(t *testing.T) {
 	sess := newSessionWithRouting(f, artifactPath, consultant)
 
 	cfg := domain.RunConfig{
+		RunID: integrationRunID,
 		OrchestratorFilePath: orchPath,
 		WorkflowID:           "cna-auto",
 		Task:                 "cna auto task",
@@ -403,5 +399,210 @@ func TestIntegration_Auto_CNA_ConsultsForDeviation(t *testing.T) {
 	if consultant.CallCount != 1 {
 		t.Errorf("want 1 consultant call when CNA deviates in auto mode, got %d",
 			consultant.CallCount)
+	}
+}
+
+// TestIntegration_AutoReview_ReviewLoopLimit_AutoRoutesUntilLimitThenDeviates
+// verifies that in auto-review mode a reviewer that keeps returning
+// COMPLETED_NEEDS_ACTION is auto-routed back to its On Findings target until
+// review_loop_limit is reached, after which the run produces a deviation
+// (routing consultation) instead of another auto-route.
+func TestIntegration_AutoReview_ReviewLoopLimit_AutoRoutesUntilLimitThenDeviates(t *testing.T) {
+	dir := t.TempDir()
+
+	const orchContent = `<Workflow type="core" name="loop-limit" version="1.0">
+## Loop Limit Workflow
+
+| Phase | Subagent          | HITL | On Success  | On Findings      | Input    | Output   |
+|-------|-------------------|:----:|-------------|------------------|----------|----------|
+| PLANNING | test-writer-tdd | FALSE | build-review | -               | -        | tests.md |
+| PLANNING | build-review    | FALSE | impl-tdd    | test-writer-tdd  | tests.md | build.md |
+| PLANNING | impl-tdd        | FALSE | COMPLETE    | -                | tests.md | impl.md  |
+</Workflow>
+`
+	orchPath := writeOrchFile(t, dir, "orchestrator.md", orchContent)
+	writeAgentFile(t, dir, "test-writer-tdd")
+	writeAgentFile(t, dir, "build-review")
+	writeAgentFile(t, dir, "impl-tdd")
+
+	f := harness.NewMockAdapter()
+	queue := func(agent string, seq int, status domain.StatusCode, msg string) {
+		f.Queue(agent, harness.ScriptedEntry{Response: &domain.ProtocolResponse{
+			AgentInstanceID: agent + "#" + strconv.Itoa(seq),
+			StatusCode:      status,
+			StatusMessage:   msg,
+		}})
+	}
+	queue("test-writer-tdd", 1, domain.StatusSUCCESS, "tests written")
+	queue("build-review", 2, domain.StatusCOMPLETED_NEEDS_ACTION, "findings 1") // count 1 < 2: auto-routed
+	queue("test-writer-tdd", 3, domain.StatusSUCCESS, "tests fixed")
+	queue("build-review", 4, domain.StatusCOMPLETED_NEEDS_ACTION, "findings 2") // count 2 == limit: deviation
+
+	consultant := &intScriptedRoutingConsultant{}
+	consultant.queueStop("review loop limit reached - stopping")
+
+	artifactPath := filepath.Join(dir, "Orchestration.md")
+	sess := newSessionWithRouting(f, artifactPath, consultant)
+
+	cfg := domain.RunConfig{
+		RunID:                integrationRunID,
+		OrchestratorFilePath: orchPath,
+		WorkflowID:           "loop-limit",
+		Task:                 "review loop limit task",
+		IsNewRun:             true,
+		RunSettings: domain.RunSettings{
+			Mode:            domain.ExecutionModeAutoReview,
+			ReviewLoopLimit: 2,
+		},
+	}
+
+	got, err := sess.Start(context.Background(), cfg)
+	requireRunStatus(t, got, err, domain.RunStoppedByConsultant)
+
+	// Exactly one consultation: the deviation at the limit. The first CNA was
+	// auto-routed without consulting.
+	if consultant.CallCount != 1 {
+		t.Errorf("want exactly 1 consultation (the limit deviation), got %d", consultant.CallCount)
+	}
+
+	invs := f.Invocations()
+	wantOrder := []string{"test-writer-tdd", "build-review", "test-writer-tdd", "build-review"}
+	if len(invs) != len(wantOrder) {
+		t.Fatalf("want %d harness invocations (no auto-route after the limit), got %d", len(wantOrder), len(invs))
+	}
+	for i, want := range wantOrder {
+		if invs[i].Agent.Identifier != want {
+			t.Errorf("invocation[%d]: want %q, got %q", i, want, invs[i].Agent.Identifier)
+		}
+	}
+}
+
+// ===== Fork/join tables: admitted in orchestrated mode, refused when the engine routes =====
+
+// forkJoinResponse builds a SUCCESS response for the given instance ID.
+func forkJoinResponse(id string) *domain.ProtocolResponse {
+	return &domain.ProtocolResponse{
+		AgentInstanceID: id,
+		StatusCode:      domain.StatusSUCCESS,
+		StatusMessage:   "done",
+	}
+}
+
+// TestIntegration_OrchestratedMode_ForkJoinTable_DispatchesBranchesSequentiallyJoinLast
+// verifies that an orchestrated run over a fork/join table invokes every fork
+// branch one after another and the join target last.
+func TestIntegration_OrchestratedMode_ForkJoinTable_DispatchesBranchesSequentiallyJoinLast(t *testing.T) {
+	dir := t.TempDir()
+	orchPath := copyFile(t, dir, "orchestrator.md",
+		filepath.Join(sessionTestdataDir, "fork-join-orch.md"))
+	for _, a := range []string{"agent-a", "agent-b", "agent-c", "agent-d"} {
+		writeAgentFile(t, dir, a)
+	}
+
+	f := harness.NewMockAdapter()
+	// Each consultation takes one Seq and the agent it dispatches the next.
+	f.Queue("agent-a", harness.ScriptedEntry{Response: forkJoinResponse("agent-a#2")})
+	f.Queue("agent-b", harness.ScriptedEntry{Response: forkJoinResponse("agent-b#4")})
+	f.Queue("agent-c", harness.ScriptedEntry{Response: forkJoinResponse("agent-c#6")})
+	f.Queue("agent-d", harness.ScriptedEntry{Response: forkJoinResponse("agent-d#8")})
+
+	consultant := &intScriptedRoutingConsultant{}
+	consultant.queueDispatch("agent-a", "Proceed.", 0)
+	consultant.queueDispatch("agent-b", "Proceed.", 1)
+	consultant.queueDispatch("agent-c", "Proceed.", 2)
+	consultant.queueDispatch("agent-d", "Proceed.", 3)
+	consultant.queueStop("all workflow steps completed")
+
+	artifactPath := filepath.Join(dir, "Orchestration.md")
+	sess := newSessionWithRouting(f, artifactPath, consultant)
+
+	got, err := sess.Start(context.Background(), domain.RunConfig{
+		RunID:                integrationRunID,
+		OrchestratorFilePath: orchPath,
+		WorkflowID:           "fork-join",
+		Task:                 "fork join task",
+		IsNewRun:             true,
+		RunSettings:          domain.RunSettings{Mode: domain.ExecutionModeOrchestrated},
+	})
+
+	requireRunStatus(t, got, err, domain.RunStoppedByConsultant)
+
+	data, readErr := os.ReadFile(artifactPath)
+	if readErr != nil {
+		t.Fatalf("read produced artifact: %v", readErr)
+	}
+	state, parseErr := artifact.Parse(data)
+	if parseErr != nil {
+		t.Fatalf("parse produced artifact: %v", parseErr)
+	}
+	var order []string
+	for _, e := range state.ExecutionLog {
+		if strings.HasPrefix(e.Agent, "agent-") {
+			order = append(order, strings.SplitN(e.Agent, "#", 2)[0])
+		}
+	}
+	want := []string{"agent-a", "agent-b", "agent-c", "agent-d"}
+	if strings.Join(order, ",") != strings.Join(want, ",") {
+		t.Errorf("workflow agents must run one at a time with the join last: want %v, got %v", want, order)
+	}
+}
+
+// TestIntegration_EngineRoutedModes_ForkJoinTable_RefusedAtStart verifies that
+// the same fork/join table is refused before any invocation when the engine
+// routes (auto and auto-review).
+func TestIntegration_EngineRoutedModes_ForkJoinTable_RefusedAtStart(t *testing.T) {
+	for _, mode := range []domain.ExecutionMode{domain.ExecutionModeAuto, domain.ExecutionModeAutoReview} {
+		t.Run(string(mode), func(t *testing.T) {
+			dir := t.TempDir()
+			orchPath := copyFile(t, dir, "orchestrator.md",
+				filepath.Join(sessionTestdataDir, "fork-join-orch.md"))
+			for _, a := range []string{"agent-a", "agent-b", "agent-c", "agent-d"} {
+				writeAgentFile(t, dir, a)
+			}
+			f := harness.NewMockAdapter()
+			sess := newSession(f, filepath.Join(dir, "Orchestration.md"))
+
+			got, err := sess.Start(context.Background(), domain.RunConfig{
+				RunID:                integrationRunID,
+				OrchestratorFilePath: orchPath,
+				WorkflowID:           "fork-join",
+				Task:                 "fork join task",
+				IsNewRun:             true,
+				RunSettings:          domain.RunSettings{Mode: mode},
+			})
+
+			msg := requireRefused(t, got, err)
+			if !strings.Contains(msg, "parallel") {
+				t.Errorf("refusal must keep the parallel-dispatch message; got %q", msg)
+			}
+		})
+	}
+}
+
+// TestIntegration_OrchestratedMode_ForkBranchEndsPhase_RefusedAtStart verifies
+// that a fork branch that ends its phase without a join is refused at start in
+// orchestrated mode, naming the agent.
+func TestIntegration_OrchestratedMode_ForkBranchEndsPhase_RefusedAtStart(t *testing.T) {
+	dir := t.TempDir()
+	orchPath := copyFile(t, dir, "orchestrator.md",
+		filepath.Join(sessionTestdataDir, "fork-branch-ends-phase-orch.md"))
+	for _, a := range []string{"agent-a", "agent-b", "agent-c"} {
+		writeAgentFile(t, dir, a)
+	}
+	f := harness.NewMockAdapter()
+	sess := newSessionWithRouting(f, filepath.Join(dir, "Orchestration.md"), &intScriptedRoutingConsultant{})
+
+	got, err := sess.Start(context.Background(), domain.RunConfig{
+		RunID:                integrationRunID,
+		OrchestratorFilePath: orchPath,
+		WorkflowID:           "fork-branch-ends-phase",
+		Task:                 "fork task",
+		IsNewRun:             true,
+		RunSettings:          domain.RunSettings{Mode: domain.ExecutionModeOrchestrated},
+	})
+
+	msg := requireRefused(t, got, err)
+	if !strings.Contains(msg, "agent-c") || !strings.Contains(msg, "fork branch") {
+		t.Errorf("refusal must name the fork branch shape and agent agent-c; got %q", msg)
 	}
 }

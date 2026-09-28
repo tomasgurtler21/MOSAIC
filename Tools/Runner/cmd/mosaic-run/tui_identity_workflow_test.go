@@ -34,6 +34,7 @@ func writeRunArtifactRecordingWorkflow(t *testing.T, workDir, runID, workflow st
 	}
 	content := fmt.Sprintf(`---
 type: orchestration-artifact
+run_id: %s
 workflow: %s
 workflow_version: "1.0"
 task: "test task"
@@ -59,7 +60,7 @@ current_state:
 | Artifact | Created In | Created By |
 | -------- | ---------- | ---------- |
 </Artifacts>
-`, workflow)
+`, runID, workflow)
 	if err := os.WriteFile(filepath.Join(folder, "Orchestration.md"), []byte(content), 0o600); err != nil {
 		t.Fatalf("write run artifact: %v", err)
 	}

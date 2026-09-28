@@ -7,7 +7,7 @@
 | EXECUTION.[StageNumber] | implementation-review | FALSE | COMPLETE | implementation-tdd | Stage-{StageNumber}/Plan.md | Stage-{StageNumber}/implementation-review.md |
 </Workflow>
 
-<InfrastructureAgents type="project">
+<InfrastructureAgents type="managed">
 <InfrastructureAgent type="core" name="commit-manager-git" version="1.0.0">
 | Class | Trigger | Param | On Failure | Description |
 |-------|---------|-------|------------|-------------|

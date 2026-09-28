@@ -41,8 +41,15 @@ import (
 //  6. Agent-with-mode notation ("agent-name(mode)").
 //  7. EXECUTION rows that cannot be resolved into contiguous execution groups.
 //
+// Conditions 1-4, 6 and 7 build dispatch requests and apply in every run mode.
+// Condition 5 is an engine-routing shape check and applies only when the engine
+// routes (auto, auto-review, and the unset sentinel). In orchestrated mode it is
+// replaced by a fork-branch boundary check: a fork branch may not be the last
+// row of its phase or execution group, because the last-row helpers answer by
+// table position and a branch has no join to end on.
+//
 // Duplicate agent identifiers in different rows are allowed (FR-26a).
-func Admit(table domain.RoutingTable) (domain.AdmittedWorkflow, error) {
+func Admit(table domain.RoutingTable, mode domain.ExecutionMode) (domain.AdmittedWorkflow, error) {
 	wfID := string(table.Info.ID)
 	resource := fmt.Sprintf("workflow %q", wfID)
 
@@ -63,7 +70,14 @@ func Admit(table domain.RoutingTable) (domain.AdmittedWorkflow, error) {
 		return refuse(reason)
 	}
 
-	if reason, failed := checkParallelDispatch(table.Rows); failed {
+	// Engine-routing shape checks apply only where the engine routes On Success
+	// itself. In orchestrated mode the consultant dispatches one agent at a
+	// time, so a fork/join table is admitted, subject to its boundary shape.
+	if mode == domain.ExecutionModeOrchestrated {
+		if reason, failed := checkForkBranchBoundary(table.Rows); failed {
+			return refuse(reason)
+		}
+	} else if reason, failed := checkParallelDispatch(table.Rows); failed {
 		return refuse(reason)
 	}
 
@@ -163,6 +177,32 @@ func checkParallelDispatch(rows []domain.RoutingRow) (reason string, failed bool
 				"parallel dispatch is not supported: row %d has OnSuccess %q (comma-separated agents indicate parallel routing)",
 				row.Index, row.OnSuccess.Value,
 			), true
+		}
+	}
+	return "", false
+}
+
+// checkForkBranchBoundary refuses a fork branch row that is the last row of its
+// phase. A branch is a row named in the multi-target On Success of an earlier row
+// of the same phase. Execution groups carry distinct Phase values, so this also
+// covers the last row of an execution group.
+func checkForkBranchBoundary(rows []domain.RoutingRow) (reason string, failed bool) {
+	for i, row := range rows {
+		if !row.OnSuccess.ColumnPresent || !strings.Contains(row.OnSuccess.Value, ",") {
+			continue
+		}
+		targets := map[string]bool{}
+		for _, t := range strings.Split(row.OnSuccess.Value, ",") {
+			targets[strings.TrimSpace(t)] = true
+		}
+		for j := i + 1; j < len(rows) && rows[j].Phase == row.Phase; j++ {
+			endsPhase := j+1 == len(rows) || rows[j+1].Phase != row.Phase
+			if endsPhase && targets[rows[j].Agent] {
+				return fmt.Sprintf(
+					"fork branch %q at row %d is the last row of its phase %q: a fork branch must be followed by a join row",
+					rows[j].Agent, rows[j].Index, rows[j].Phase,
+				), true
+			}
 		}
 	}
 	return "", false

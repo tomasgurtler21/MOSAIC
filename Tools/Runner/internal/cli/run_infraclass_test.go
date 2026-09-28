@@ -109,6 +109,7 @@ func TestInputFlag_ZeroOccurrences_SeedInputsIsNil(t *testing.T) {
 		"--task", "do work",
 		"--mode", "auto",
 		"--new-run",
+		"--review-loop-limit", "3",
 	}, &spyStore{}, sess)
 
 	if code != cli.ExitSuccess {
@@ -134,6 +135,7 @@ func TestInputFlag_OneOccurrence_SingleValueReachesSeedInputs(t *testing.T) {
 		"--task", "do work",
 		"--mode", "auto",
 		"--new-run",
+		"--review-loop-limit", "3",
 		"--input", "/path/to/seed.md",
 	}, &spyStore{}, sess)
 
@@ -162,6 +164,7 @@ func TestInputFlag_MultipleOccurrences_AllValuesReachSeedInputsInOrder(t *testin
 		"--task", "do work",
 		"--mode", "auto",
 		"--new-run",
+		"--review-loop-limit", "3",
 		"--input", "/alpha/first.md",
 		"--input", "/beta/second.md",
 		"--input", "/gamma/third.md",
@@ -197,6 +200,7 @@ func TestInputFlag_PathWithSpaces_PreservedVerbatim(t *testing.T) {
 		"--task", "do work",
 		"--mode", "auto",
 		"--new-run",
+		"--review-loop-limit", "3",
 		"--input", pathWithSpaces,
 	}, &spyStore{}, sess)
 
@@ -226,6 +230,7 @@ func TestInputFlag_PathWithComma_PreservedVerbatim(t *testing.T) {
 		"--task", "do work",
 		"--mode", "auto",
 		"--new-run",
+		"--review-loop-limit", "3",
 		"--input", pathWithComma,
 	}, &spyStore{}, sess)
 

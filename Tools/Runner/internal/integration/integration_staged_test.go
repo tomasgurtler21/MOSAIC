@@ -66,6 +66,7 @@ func TestIntegration_StagedWorkflow_TwoStages_Completes(t *testing.T) {
 
 	sess := newSession(f, artifactPath)
 	cfg := domain.RunConfig{
+		RunID: integrationRunID,
 		OrchestratorFilePath: orchPath,
 		WorkflowID:           "staged",
 		Task:                 "two-stage task",
@@ -123,6 +124,7 @@ func TestIntegration_StagedWorkflow_NoPlanMd_StopsCleanlyAtExecution(t *testing.
 	sess := newSession(harness.NewMockAdapter(), artifactPath)
 
 	cfg := domain.RunConfig{
+		RunID: integrationRunID,
 		OrchestratorFilePath: orchPath,
 		WorkflowID:           "staged",
 		Task:                 "task",
@@ -225,6 +227,7 @@ func TestIntegration_StageWildcardResolution_NonExecutionRow(t *testing.T) {
 
 	sess := newSession(f, artifactPath)
 	cfg := domain.RunConfig{
+		RunID: integrationRunID,
 		OrchestratorFilePath: orchPath,
 		WorkflowID:           "wildcard-resolve",
 		Task:                 "task",

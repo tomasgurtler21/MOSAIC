@@ -156,8 +156,8 @@ func TestValidate_SectionNestedInsideSection_ReportsWrongNestingIssue(t *testing
 // --- Injection in wrong parent section ---
 
 func TestValidate_InjectionInWrongParent_ReportsWrongParentIssue(t *testing.T) {
-	// IdentityExtension is listed in InjectionParent with parent "Identity".
-	// Placing it inside Capabilities violates the advisory parent constraint.
+	// CodebaseContext is listed in InjectionParent with parent "Capabilities".
+	// Placing it inside Identity violates the advisory parent constraint.
 	doc := boundaryMalformedFixture(t, "wrong-parent.md")
 
 	issues := docformat.Validate(doc, docformat.ValidateOptions{
@@ -165,7 +165,7 @@ func TestValidate_InjectionInWrongParent_ReportsWrongParentIssue(t *testing.T) {
 	})
 
 	if !hasIssueWithCode(issues, "wrong-parent") {
-		t.Errorf("expected a \"wrong-parent\" issue for IdentityExtension inside Capabilities, got issues: %v", issues)
+		t.Errorf("expected a \"wrong-parent\" issue for CodebaseContext inside Identity, got issues: %v", issues)
 	}
 }
 
@@ -254,12 +254,10 @@ func TestInjectionParent_MapsEachAdvisoryInjectionToItsParent(t *testing.T) {
 	// InjectionParent. ProtocolExtension is removed from the advisory map — projects use
 	// <ProtocolExtension type="custom"> instead. The map is now advisory only.
 	wantMap := map[string]string{
-		"IdentityExtension":      "Identity",
 		"CodebaseContext":        "Capabilities",
 		"OutputArtifactTemplate": "Capabilities",
 		"SeverityThresholds":     "Capabilities",
 		"SeverityDefinitions":    "Capabilities",
-		"ErrorHandlingExtension": "ErrorHandling",
 		"ContextLimits":          "ExecutionPhilosophy",
 	}
 
@@ -379,7 +377,7 @@ func TestValidate_MismatchedTagNames_IssueNodeIsSet(t *testing.T) {
 // --- Injection at body top level with RequireInjectionParents ---
 
 func TestValidate_InjectionAtTopLevel_WrongParentWhenParentsRequired(t *testing.T) {
-	// IdentityExtension inside no section but required to be inside Identity.
+	// CodebaseContext inside no section but required to be inside Capabilities.
 	doc := boundaryMalformedFixture(t, "injection-outside-section.md")
 
 	issues := docformat.Validate(doc, docformat.ValidateOptions{

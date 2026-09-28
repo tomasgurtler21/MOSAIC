@@ -48,6 +48,7 @@ func (c *OrchestratorConsultant) ConsultRouting(ctx context.Context, req domain.
 		OrchestrationArtifact: req.OrchestrationArtifact,
 		Context:               string(req.Context),
 		LastStatusMessage:     req.LastStatusMessage,
+		LastErrorReason:       req.LastErrorReason,
 	}
 	payload, err := json.Marshal(wr)
 	if err != nil {
@@ -186,6 +187,7 @@ func (c *OrchestratorConsultant) PreConsult(ctx context.Context, req domain.Cons
 		OrchestrationArtifact: req.OrchestrationArtifact,
 		Context:               string(domain.ConsultContextPreConsultation),
 		LastStatusMessage:     nil, // always null for pre-consultation, per the contract
+		LastErrorReason:       nil, // always null for pre-consultation, per the contract
 	}
 	payload, err := json.Marshal(wr)
 	if err != nil {

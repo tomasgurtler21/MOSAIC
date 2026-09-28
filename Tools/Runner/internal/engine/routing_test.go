@@ -81,7 +81,7 @@ func TestNext_PreExecution_AbsentOnSuccess_ReturnsDeviation(t *testing.T) {
 	}
 	// Admit will fail for no Stage-*/Plan.md but this workflow has no EXECUTION rows,
 	// so HasStagedPhase=false and compat allows it.
-	aw, err := compat.Admit(table)
+	aw, err := compat.Admit(table, domain.ExecutionModeAuto)
 	if err != nil {
 		t.Fatalf("Admit: %v", err)
 	}
@@ -253,7 +253,7 @@ func TestNext_OnFindings_AbsentColumn_CNA_ReturnsDeviation(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Parse: %v", err)
 	}
-	aw, err := compat.Admit(table)
+	aw, err := compat.Admit(table, domain.ExecutionModeAuto)
 	if err != nil {
 		t.Fatalf("Admit: %v", err)
 	}

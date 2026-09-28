@@ -29,10 +29,15 @@ func TestSetPhase_UpdatesPhaseInReturnedState(t *testing.T) {
 	}
 }
 
-func TestSetPhase_BumpsGlobalSequence(t *testing.T) {
-	// SetPhase must increment global_sequence by one from the supplied state.
+func TestSetPhase_LeavesGlobalSequenceUnchanged(t *testing.T) {
+	// global_sequence holds the last allocated invocation number. A phase
+	// change allocates no invocation, so SetPhase must not touch it.
 	store, state := setPhaseFixture(t)
 	ctx := context.Background()
+	state, err := store.Apply(ctx, state, newTestStep(1, "planner#1", "PLANNING", "", domain.StatusSUCCESS, time.Date(2026, 1, 1, 1, 0, 0, 0, time.UTC), nil))
+	if err != nil {
+		t.Fatalf("Apply: %v", err)
+	}
 	beforeSeq := state.GlobalSequence
 	now := time.Date(2026, 1, 2, 0, 0, 0, 0, time.UTC)
 
@@ -41,8 +46,28 @@ func TestSetPhase_BumpsGlobalSequence(t *testing.T) {
 	if err != nil {
 		t.Fatalf("SetPhase: unexpected error: %v", err)
 	}
-	if updated.GlobalSequence != beforeSeq+1 {
-		t.Errorf("GlobalSequence = %d, want %d (incremented by 1)", updated.GlobalSequence, beforeSeq+1)
+	if updated.GlobalSequence != beforeSeq {
+		t.Errorf("returned GlobalSequence = %d, want %d (unchanged)", updated.GlobalSequence, beforeSeq)
+	}
+	readBack, err := store.Read(ctx)
+	if err != nil {
+		t.Fatalf("Read after SetPhase: %v", err)
+	}
+	if readBack.GlobalSequence != beforeSeq {
+		t.Errorf("on-disk GlobalSequence = %d, want %d (unchanged)", readBack.GlobalSequence, beforeSeq)
+	}
+}
+
+func TestSetPhase_OnNewArtifact_GlobalSequenceStaysZero(t *testing.T) {
+	store, state := setPhaseFixture(t)
+
+	updated, err := store.SetPhase(context.Background(), state, "PLANNING", time.Date(2026, 1, 2, 0, 0, 0, 0, time.UTC))
+
+	if err != nil {
+		t.Fatalf("SetPhase: unexpected error: %v", err)
+	}
+	if updated.GlobalSequence != 0 {
+		t.Errorf("GlobalSequence = %d, want 0 (no invocation allocated yet)", updated.GlobalSequence)
 	}
 }
 
@@ -99,7 +124,7 @@ func TestSetPhase_DoesNotModifyArtifactRegistry(t *testing.T) {
 		Phase:           "EXECUTION",
 		Status:          "SUCCESS",
 		Timestamp:       time.Date(2026, 1, 1, 1, 0, 0, 0, time.UTC),
-		OutputArtifacts: []string{"Plan.md"},
+		WrittenArtifacts: []string{"Plan.md"},
 	})
 	if err != nil {
 		t.Fatalf("Apply: %v", err)

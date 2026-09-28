@@ -9,8 +9,8 @@ import (
 	"mosaic-run/internal/domain"
 )
 
-// SetPhase updates only current_state.phase (and bumps last_updated and
-// global_sequence) without appending an execution log entry or modifying
+// SetPhase updates only current_state.phase (and last_updated; global_sequence
+// is left unchanged) without appending an execution log entry or modifying
 // the artifact registry. The write is atomic (write-temp-then-rename).
 //
 // This is the designated path for writing the COMPLETED phase marker after
@@ -36,7 +36,6 @@ func (f *fileStore) SetPhase(_ context.Context, _ domain.ArtifactState, phase st
 
 	// Apply the phase update.
 	current.CurrentState.Phase = phase
-	current.GlobalSequence++
 	current.LastUpdated = now.UTC()
 
 	// Render and write atomically.

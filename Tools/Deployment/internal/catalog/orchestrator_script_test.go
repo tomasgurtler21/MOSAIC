@@ -138,7 +138,7 @@ func TestOrchestratorScript_WhenFilePresent_ReturnsAgentAndTrue(t *testing.T) {
 	agent, ok := cat.OrchestratorScript()
 	if !ok {
 		t.Fatal("OrchestratorScript() returned false; expected the script file to be loaded when present; " +
-			"I7.2 (loading the second orchestrator-role file) has not been implemented yet")
+			"the catalog loader must load the second (script) orchestrator-role file")
 	}
 	_ = agent
 }
@@ -157,7 +157,7 @@ func TestOrchestratorScript_WhenFilePresent_KeyIsOrchestratorScript(t *testing.T
 
 	agent, ok := cat.OrchestratorScript()
 	if !ok {
-		t.Skip("OrchestratorScript() returned false; I7.2 not yet implemented — cannot check key")
+		t.Skip("OrchestratorScript() returned false; the script orchestrator source is absent from this catalog - cannot check key")
 	}
 	if agent.Key != "orchestrator-script" {
 		t.Errorf("OrchestratorScript().Key = %q, want %q", agent.Key, "orchestrator-script")
@@ -179,7 +179,7 @@ func TestOrchestratorScript_WhenFilePresent_RoleIsOrchestrator(t *testing.T) {
 
 	agent, ok := cat.OrchestratorScript()
 	if !ok {
-		t.Skip("OrchestratorScript() returned false; I7.2 not yet implemented — cannot check role")
+		t.Skip("OrchestratorScript() returned false; the script orchestrator source is absent from this catalog - cannot check role")
 	}
 	if agent.Role != domain.RoleOrchestrator {
 		t.Errorf("OrchestratorScript().Role = %q, want RoleOrchestrator", agent.Role)
@@ -201,7 +201,7 @@ func TestOrchestratorScript_WhenFilePresent_HasRealToolsList(t *testing.T) {
 
 	agent, ok := cat.OrchestratorScript()
 	if !ok {
-		t.Skip("OrchestratorScript() returned false; I7.2 not yet implemented — cannot check tools")
+		t.Skip("OrchestratorScript() returned false; the script orchestrator source is absent from this catalog - cannot check tools")
 	}
 	if agent.Tools == nil {
 		t.Error("OrchestratorScript().Tools is nil; script file uses a real tools list, not a placeholder")
@@ -225,12 +225,12 @@ func TestOrchestratorScript_WhenFilePresent_ReachableByAgentKey(t *testing.T) {
 		t.Fatalf("catalog.Load: %v", err)
 	}
 
-	// This lookup must succeed when I7.2 is implemented.
+	// This lookup must succeed whenever the script orchestrator source is loaded.
 	_, ok := cat.Agent("orchestrator-script")
 	if !ok {
 		t.Error("Agent(\"orchestrator-script\") returned false; " +
 			"the script file must be indexed under its key so Agent(key) works; " +
-			"I7.2 has not been implemented yet")
+			"the script orchestrator source is loaded by the catalog loader")
 	}
 }
 
@@ -272,7 +272,7 @@ func TestOrchestratorScript_ScriptFileDistinctKeyFromMainOrchestrator(t *testing
 
 	agent, ok := cat.OrchestratorScript()
 	if !ok {
-		t.Skip("OrchestratorScript() returned false; I7.2 not yet implemented")
+		t.Skip("OrchestratorScript() returned false; the script orchestrator source is absent from this catalog")
 	}
 	orc := cat.Orchestrator()
 	if agent.Key == orc.Key {

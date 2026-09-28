@@ -25,6 +25,11 @@ type ConfigSelection struct {
 	// parity a single struct comparison rather than a field-by-field audit.
 	Settings domain.RunSettings
 
+	// Supplied records which of the settings the user answered explicitly in
+	// this wizard pass. On a resume only supplied values are compared against
+	// the artifact.
+	Supplied domain.SuppliedSettings
+
 	AllowVersionDrift bool
 
 	// Harness names the harness adapter. The TUI produces any CLI-backed
@@ -90,6 +95,11 @@ const (
 	configStepManualResolution
 
 	configStepInfraClass // agent-per-class selection (only when multiple same-class gated agents)
+
+	// configStepReviewLimit is the last prompt of a new run: the review loop
+	// limit, suggested as 3, accepting a positive integer or "no limit".
+	configStepReviewLimit
+
 	configStepDone
 )
 
@@ -120,6 +130,7 @@ type ConfigScreen struct {
 	height             int
 	styles             screens.Styles
 	timeoutInput       *widgets.TextInput
+	limitInput         *widgets.TextInput
 	declaredAgents     []domain.DeclaredInfraAgent // populated by SetDeclaredAgents
 	harnessPreselected bool                        // true when harness was selected before config wizard
 
@@ -135,7 +146,19 @@ type ConfigScreen struct {
 	recordedVersion  string // workflow version from artifact frontmatter (empty if not available)
 	currentVersion   string // workflow version from current orchestrator file (empty if not available)
 	versionsInjected bool   // true once SetVersionDriftInfo has supplied both versions
+
+	// needsAdoption is true for a resumed run whose artifact records no runner
+	// settings (a native-created artifact): the mode, pre-consultation and
+	// manual-resolution prompts are asked once so the Runner can record them.
+	needsAdoption bool
+
+	// commitSetupPending is true for a resumed run that enables commits but
+	// records no commit branch, so the variant must be chosen explicitly.
+	commitSetupPending bool
 }
+
+// suggestedReviewLoopLimit is the value the review loop limit prompt suggests.
+const suggestedReviewLoopLimit = "3"
 
 // NewConfigScreen creates the configuration screen.
 func NewConfigScreen(width, height int, styles screens.Styles) *ConfigScreen {
@@ -164,7 +187,21 @@ func NewConfigScreen(width, height int, styles screens.Styles) *ConfigScreen {
 		}
 		return nil
 	})
+	limitInput := widgets.NewTextInput(
+		"Review loop limit (a positive integer or \"no limit\"; suggested "+suggestedReviewLoopLimit+"):",
+		suggestedReviewLoopLimit,
+		width,
+		inputStyles,
+	)
+	limitInput.SetValidate(func(v string) error {
+		if _, err := domain.ParseReviewLoopLimit(v); err != nil {
+			return errors.New("enter a positive integer, or \"no limit\"")
+		}
+		return nil
+	})
+	limitInput.SetValue(suggestedReviewLoopLimit)
 	return &ConfigScreen{
+		limitInput:      limitInput,
 		step:            configStepMode,
 		cursor:          -1, // mode step starts with no option preselected
 		sel:             ConfigSelection{},
@@ -185,7 +222,9 @@ func (s *ConfigScreen) Update(msg tea.Msg) tea.Cmd {
 		cmd := s.timeoutInput.Update(msg)
 		if s.timeoutInput.Back() {
 			s.timeoutInput.Reset()
-			if s.harnessPreselected {
+			if s.firstStep() == configStepHarnessTimeout {
+				s.back = true
+			} else if s.harnessPreselected {
 				s.step = configStepMode
 				s.cursor = s.modeIndex()
 			} else {
@@ -208,6 +247,31 @@ func (s *ConfigScreen) Update(msg tea.Msg) tea.Cmd {
 				s.step = configStepCheckpoints
 			}
 			s.cursor = 0
+			return nil
+		}
+		return cmd
+	}
+
+	// The review loop limit step delegates key handling to its text input.
+	if s.step == configStepReviewLimit {
+		cmd := s.limitInput.Update(msg)
+		if s.limitInput.Back() {
+			s.limitInput.Reset()
+			if len(s.infraClassQueue) > 0 {
+				s.infraClassIdx = len(s.infraClassQueue) - 1
+				s.step = configStepInfraClass
+			} else {
+				s.step = configStepManualResolution
+			}
+			s.cursor = 0
+			return nil
+		}
+		if s.limitInput.Done() {
+			limit, _ := domain.ParseReviewLoopLimit(s.limitInput.Value())
+			s.sel.Settings.ReviewLoopLimit = limit
+			s.sel.Supplied.ReviewLoopLimit = true
+			s.limitInput.Reset()
+			s.step = configStepDone
 			return nil
 		}
 		return cmd
@@ -250,7 +314,7 @@ func (s *ConfigScreen) Update(msg tea.Msg) tea.Cmd {
 	case "enter":
 		return s.advance()
 	case "esc":
-		if s.step == configStepMode {
+		if s.step == s.firstStep() {
 			s.back = true
 		} else {
 			prev, prevCursor := s.prevStepAndCursor()
@@ -267,6 +331,17 @@ func (s *ConfigScreen) Update(msg tea.Msg) tea.Cmd {
 // advance commits the current selection and moves to the next step.
 // It returns a tea.Cmd when the harness timeout text input needs to start blinking.
 func (s *ConfigScreen) advance() tea.Cmd {
+	before := s.step
+	cmd := s.advanceStep()
+	if s.step == configStepReviewLimit && before != configStepReviewLimit {
+		s.limitInput.SetValue(suggestedReviewLoopLimit)
+		s.limitInput.Reset()
+	}
+	return cmd
+}
+
+// advanceStep commits the current selection and moves to the next step.
+func (s *ConfigScreen) advanceStep() tea.Cmd {
 	switch s.step {
 	case configStepMode:
 		// Require an explicit cursor movement before Enter is accepted.
@@ -276,6 +351,7 @@ func (s *ConfigScreen) advance() tea.Cmd {
 		modes := domain.ExecutionModes()
 		if s.cursor < len(modes) {
 			s.sel.Settings.Mode = modes[s.cursor]
+			s.sel.Supplied.Mode = true
 		}
 		if s.harnessPreselected {
 			// Harness was selected on the dedicated harness screen; skip the
@@ -324,9 +400,15 @@ func (s *ConfigScreen) advance() tea.Cmd {
 			}
 		}
 	case configStepCommitBranch:
+		// A commit-setup retry has no preselected variant: require an
+		// explicit cursor movement before Enter is accepted.
+		if s.cursor < 0 {
+			return nil
+		}
 		variants := domain.CommitBranchVariants()
 		if s.cursor < len(variants) {
 			s.sel.Settings.CommitBranchVariant = variants[s.cursor]
+			s.sel.Supplied.CommitBranchVariant = true
 		}
 		s.cursor = 0
 		s.step = s.nextAfterCommitSection()
@@ -335,16 +417,14 @@ func (s *ConfigScreen) advance() tea.Cmd {
 		}
 	case configStepPreConsult:
 		s.sel.Settings.PreConsultation = s.cursor == 1
+		s.sel.Supplied.PreConsultation = true
 		s.step = configStepManualResolution
 		s.cursor = 0
 	case configStepManualResolution:
 		s.sel.Settings.ManualResolution = s.cursor == 1
+		s.sel.Supplied.ManualResolution = true
 		s.cursor = 0
-		if len(s.infraClassQueue) > 0 {
-			s.step = configStepInfraClass
-		} else {
-			s.step = configStepDone
-		}
+		s.step = s.nextAfterRunnerSettings()
 	case configStepInfraClass:
 		entry := s.infraClassQueue[s.infraClassIdx]
 		selected := entry.agents[s.cursor]
@@ -352,10 +432,11 @@ func (s *ConfigScreen) advance() tea.Cmd {
 			s.sel.InfraClassSelections = make(map[string]string)
 		}
 		s.sel.InfraClassSelections[entry.class] = selected
+		s.sel.Supplied.InfraClassSelections = true
 		s.infraClassIdx++
 		s.cursor = 0
 		if s.infraClassIdx >= len(s.infraClassQueue) {
-			s.step = configStepDone
+			s.step = s.nextAfterInfraClass()
 		}
 	}
 	return nil
@@ -372,11 +453,12 @@ func (s *ConfigScreen) Selection() ConfigSelection { return s.sel }
 
 // Reset clears the done, back flags and returns to the first step.
 func (s *ConfigScreen) Reset() {
-	s.step = configStepMode
-	s.back = false
-	s.cursor = -1 // mode step starts with no option preselected
 	s.sel = ConfigSelection{}
+	s.back = false
+	s.moveToFirstStep()
 	s.timeoutInput.Reset()
+	s.limitInput.Reset()
+	s.limitInput.SetValue(suggestedReviewLoopLimit)
 	s.infraClassQueue = nil
 	s.infraClassIdx = 0
 }
@@ -386,6 +468,7 @@ func (s *ConfigScreen) Resize(width, height int) {
 	s.width = width
 	s.height = height
 	s.timeoutInput.Resize(width)
+	s.limitInput.Resize(width)
 }
 
 // SetDeclaredAgents injects the declared infrastructure agents into the
@@ -407,6 +490,7 @@ func (s *ConfigScreen) SetDeclaredAgents(agents []domain.DeclaredInfraAgent) {
 func (s *ConfigScreen) SetPreselectedHarness(id string) {
 	s.sel.Harness = id
 	s.harnessPreselected = true
+	s.moveToFirstStep()
 }
 
 // SetIsNewRun injects the run-mode flag before setup wizard begins.
@@ -414,6 +498,23 @@ func (s *ConfigScreen) SetPreselectedHarness(id string) {
 // isNew=true indicates a new run; false indicates a resumed run.
 func (s *ConfigScreen) SetIsNewRun(isNew bool) {
 	s.isNewRun = isNew
+	s.moveToFirstStep()
+}
+
+// SetNeedsRunnerAdoption tells the wizard that the resumed run records no
+// runner settings (a native-created artifact). Must be called with
+// SetIsNewRun before the screen shows.
+func (s *ConfigScreen) SetNeedsRunnerAdoption(needs bool) {
+	s.needsAdoption = needs
+	s.moveToFirstStep()
+}
+
+// SetCommitSetupPending tells the wizard that the resumed run will retry
+// commit setup, so the commit-branch variant must be chosen explicitly. Must
+// be called with SetIsNewRun before the screen shows.
+func (s *ConfigScreen) SetCommitSetupPending(pending bool) {
+	s.commitSetupPending = pending
+	s.moveToFirstStep()
 }
 
 // SetVersionDriftInfo injects version information before setup wizard begins.

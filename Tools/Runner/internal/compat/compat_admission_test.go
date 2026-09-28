@@ -6,13 +6,14 @@ import (
 	"testing"
 
 	"mosaic-run/internal/compat"
+	"mosaic-run/internal/domain"
 )
 
 // ---- Admission success ----
 
 func TestAdmit_BrownfieldTDDBuildVerified_Succeeds(t *testing.T) {
 	table := mustParseTable(t, brownfieldBuildVerifiedContent, "brownfield-tdd-build-verified", "2.0")
-	_, err := compat.Admit(table)
+	_, err := compat.Admit(table, domain.ExecutionModeAuto)
 	if err != nil {
 		t.Errorf("Admit(brownfield-tdd-build-verified): unexpected error: %v", err)
 	}
@@ -20,7 +21,7 @@ func TestAdmit_BrownfieldTDDBuildVerified_Succeeds(t *testing.T) {
 
 func TestAdmit_GreenFieldTDD_Succeeds(t *testing.T) {
 	table := mustParseTable(t, greenFieldTDDContent, "greenfield-tdd", "3.3")
-	_, err := compat.Admit(table)
+	_, err := compat.Admit(table, domain.ExecutionModeAuto)
 	if err != nil {
 		t.Errorf("Admit(greenfield-tdd): unexpected error: %v", err)
 	}
@@ -28,7 +29,7 @@ func TestAdmit_GreenFieldTDD_Succeeds(t *testing.T) {
 
 func TestAdmit_BrownfieldTDD_Succeeds(t *testing.T) {
 	table := mustParseTable(t, brownfieldTDDContent, "brownfield-tdd", "3.4")
-	_, err := compat.Admit(table)
+	_, err := compat.Admit(table, domain.ExecutionModeAuto)
 	if err != nil {
 		t.Errorf("Admit(brownfield-tdd): unexpected error: %v", err)
 	}
@@ -36,7 +37,7 @@ func TestAdmit_BrownfieldTDD_Succeeds(t *testing.T) {
 
 func TestAdmit_QuickFix_Succeeds(t *testing.T) {
 	table := mustParseTable(t, quickFixContent, "quick-fix", "3.0")
-	_, err := compat.Admit(table)
+	_, err := compat.Admit(table, domain.ExecutionModeAuto)
 	if err != nil {
 		t.Errorf("Admit(quick-fix): unexpected error: %v", err)
 	}
@@ -44,7 +45,7 @@ func TestAdmit_QuickFix_Succeeds(t *testing.T) {
 
 func TestAdmit_ImplementationOnly_Succeeds(t *testing.T) {
 	table := mustParseTable(t, implOnlyContent, "implementation-only", "3.1")
-	_, err := compat.Admit(table)
+	_, err := compat.Admit(table, domain.ExecutionModeAuto)
 	if err != nil {
 		t.Errorf("Admit(implementation-only): unexpected error: %v", err)
 	}

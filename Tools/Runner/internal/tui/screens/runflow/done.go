@@ -80,6 +80,9 @@ func (s *DoneScreen) View() string {
 		case domain.RunFailed:
 			titleText = "Run Failed"
 			titleStyle = s.styles.Error
+		case domain.RunStartFailed:
+			titleText = "Run Start Failed (resumable)"
+			titleStyle = s.styles.Error
 		default:
 			titleText = "Run Complete"
 		}
@@ -92,6 +95,11 @@ func (s *DoneScreen) View() string {
 		}
 		msg := msgStyle.Width(s.width).Render(s.outcome.Message)
 		lines = []string{title, border, msg}
+		if s.outcome.Status == domain.RunStartFailed {
+			note := s.styles.Body.Width(s.width).Render(
+				"The run was kept. Resume it from run selection to retry the failed step.")
+			lines = append(lines, "", note)
+		}
 	}
 
 	helpText := "q/enter/esc  exit"

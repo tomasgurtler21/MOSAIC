@@ -95,13 +95,13 @@ func TestSession_Start_StageStarOutput_TriggersStageSetRederivation(t *testing.T
 	reviewerReq := invs[1].Request
 	// The reviewer's input should contain expanded stage-specific paths, not
 	// the literal Stage-*/Plan.md wildcard.
-	if containsInput(reviewerReq.InputArtifacts, "Stage-*/Plan.md") {
+	if containsInput(reviewerReq.InputArtifacts, domain.RunScopedFolder(testRunID)+"/Stage-*/Plan.md") {
 		t.Error("want Stage-*/Plan.md expanded to per-stage paths in reviewer input, but got literal wildcard")
 	}
-	if !containsInput(reviewerReq.InputArtifacts, "Stage-1/Plan.md") {
+	if !containsInput(reviewerReq.InputArtifacts, domain.RunScopedFolder(testRunID)+"/Stage-1/Plan.md") {
 		t.Error("want Stage-1/Plan.md in reviewer input after stage-set re-derivation with 2 stages")
 	}
-	if !containsInput(reviewerReq.InputArtifacts, "Stage-2/Plan.md") {
+	if !containsInput(reviewerReq.InputArtifacts, domain.RunScopedFolder(testRunID)+"/Stage-2/Plan.md") {
 		t.Error("want Stage-2/Plan.md in reviewer input after stage-set re-derivation with 2 stages")
 	}
 }
@@ -172,13 +172,13 @@ func TestSession_Start_StageStarRederivation_ResolvesFromRunFolder(t *testing.T)
 		t.Fatalf("want 2 harness invocations, got %d", len(invs))
 	}
 	reviewerReq := invs[1].Request
-	if containsInput(reviewerReq.InputArtifacts, "Stage-*/Plan.md") {
+	if containsInput(reviewerReq.InputArtifacts, domain.RunScopedFolder(testRunID)+"/Stage-*/Plan.md") {
 		t.Error("want Stage-*/Plan.md expanded to per-stage paths in reviewer input, but got literal wildcard")
 	}
-	if !containsInput(reviewerReq.InputArtifacts, "Stage-1/Plan.md") {
+	if !containsInput(reviewerReq.InputArtifacts, domain.RunScopedFolder(testRunID)+"/Stage-1/Plan.md") {
 		t.Error("want Stage-1/Plan.md in reviewer input after run-folder-based stage-set re-derivation")
 	}
-	if !containsInput(reviewerReq.InputArtifacts, "Stage-2/Plan.md") {
+	if !containsInput(reviewerReq.InputArtifacts, domain.RunScopedFolder(testRunID)+"/Stage-2/Plan.md") {
 		t.Error("want Stage-2/Plan.md in reviewer input after run-folder-based stage-set re-derivation")
 	}
 }

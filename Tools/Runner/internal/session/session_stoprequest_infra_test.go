@@ -7,7 +7,7 @@ package session_test
 //   - The evaluateTriggers per-iteration checkpoint honours the between-agents
 //     stop-request boundary for declared infrastructure agents.
 //   - The consultRoute-reachable invocation site honours the between-steps
-//     stop-request boundary, applied between the consultation record and the
+//     stop-request boundary, applied between the consultation and the
 //     consultant-routed agent's dispatch.
 //   - The top-level (primary auto-routed dispatch) HITL-redispatch invocation
 //     site honours the same between-steps stop-request boundary.
@@ -91,14 +91,13 @@ func TestSession_EvaluateTriggers_StopRequest_BetweenAgents_StopsBeforeSecondDis
 	}
 }
 
-// TestSession_ConsultRoute_StopRequest_BetweenConsultationRecordAndDispatch_StopsBeforeInvocation
-// covers the invokeAndLog call site reachable from consultRoute (session.go's
-// orchestrated-mode routing-consultation dispatch): a stop request observed
-// after the consultation itself has been recorded as an infrastructure
-// Execution Log row (Store.Apply for the consultation record) -- but before
-// the consultant-routed agent is dispatched -- must stop the run before that
-// invocation, with no Apply for the routed agent.
-func TestSession_ConsultRoute_StopRequest_BetweenConsultationRecordAndDispatch_StopsBeforeInvocation(t *testing.T) {
+// TestSession_ConsultRoute_StopRequest_BetweenConsultationAndDispatch_StopsBeforeInvocation
+// covers the invokeAndLog call site reachable from consultRoute (orchestrated
+// mode's routing-consultation dispatch): a stop request observed after the
+// consultation has returned -- but before the consultant-routed agent is
+// dispatched -- must stop the run before that invocation. The consultation
+// itself is not recorded in the artifact, so nothing at all is applied.
+func TestSession_ConsultRoute_StopRequest_BetweenConsultationAndDispatch_StopsBeforeInvocation(t *testing.T) {
 	dir := t.TempDir()
 	orchPath := copyOrchestratorFile(t, dir, "linear-orch.md")
 	writeAgentFile(t, dir, "agent-a")
@@ -115,10 +114,10 @@ func TestSession_ConsultRoute_StopRequest_BetweenConsultationRecordAndDispatch_S
 		Routing:  consultant,
 		Clock:    fixedClock{t: epoch},
 		Interact: &noopInteraction{},
-		// True only once the consultation's own infrastructure-flagged Apply
-		// has happened -- not before -- modelling a stop confirmed strictly
-		// between the consultation record and the routed agent's dispatch.
-		StopRequested: func() bool { return len(store.Applied) >= 1 },
+		// True only once the consultation has been made -- not before --
+		// modelling a stop confirmed strictly between the consultation and the
+		// routed agent's dispatch.
+		StopRequested: func() bool { return consultant.CallCount >= 1 },
 	})
 
 	// No scripted entry for agent-a: if the session incorrectly dispatched it
@@ -133,12 +132,13 @@ func TestSession_ConsultRoute_StopRequest_BetweenConsultationRecordAndDispatch_S
 	if got.Status != domain.RunStopped {
 		t.Errorf("want RunStopped before the consultant-routed dispatch, got %q (message: %q)", got.Status, got.Message)
 	}
-	if len(store.Applied) != 1 || !store.Applied[0].IsInfrastructure {
-		t.Fatalf("want exactly 1 Apply call for the consultation record (IsInfrastructure=true), got %+v", store.Applied)
+	if len(store.Applied) != 0 || store.state.GlobalSequence != 0 {
+		t.Errorf("want nothing recorded for the consultation, got %d applied, global_sequence %d",
+			len(store.Applied), store.state.GlobalSequence)
 	}
 	for _, inv := range f.Invocations() {
 		if inv.Agent.Identifier == "agent-a" {
-			t.Errorf("want agent-a never dispatched once a stop was requested after the consultation record, but it was invoked")
+			t.Errorf("want agent-a never dispatched once a stop was requested after the consultation, but it was invoked")
 		}
 	}
 }

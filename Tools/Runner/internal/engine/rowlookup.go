@@ -250,3 +250,36 @@ func findGroupIndexInWorkflow(workflow domain.AdmittedWorkflow, rowIdx int) int 
 	}
 	return -1
 }
+
+// reviewLoopLimitReached reports whether the reviewer at the current position
+// has produced as many COMPLETED_NEEDS_ACTION iterations at the current phase
+// and stage as the review loop limit allows. A limit of 0 means no limit.
+//
+// A CNA row directly following a CNA row of the same agent is a re-dispatch of
+// the same iteration (for example after a rejected result) and is not counted
+// again.
+func reviewLoopLimitReached(state domain.ArtifactState) bool {
+	limit := state.ReviewLoopLimit
+	if limit <= 0 {
+		return false
+	}
+	reviewer := extractAgentName(state.CurrentState.LastAgent)
+	count := 0
+	for i, e := range state.ExecutionLog {
+		if e.Status != domain.StatusCOMPLETED_NEEDS_ACTION ||
+			e.Phase != state.CurrentState.Phase ||
+			e.Stage != state.CurrentState.Stage ||
+			extractAgentName(e.Agent) != reviewer {
+			continue
+		}
+		if i > 0 {
+			prev := state.ExecutionLog[i-1]
+			if prev.Status == domain.StatusCOMPLETED_NEEDS_ACTION &&
+				extractAgentName(prev.Agent) == reviewer {
+				continue
+			}
+		}
+		count++
+	}
+	return count >= limit
+}

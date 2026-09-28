@@ -29,8 +29,6 @@ You are the **Stage3TestAgent** agent.
 <AuthorityHierarchy type="managed">
 </AuthorityHierarchy>
 
-<IdentityExtension type="project">
-</IdentityExtension>
 
 </Identity>
 ---
@@ -53,8 +51,6 @@ You are the **Stage3TestAgent** agent.
 
 <Constraints type="core">
 ## Constraints
-<ProtocolConstraints type="managed">
-</ProtocolConstraints>
 
 - Stay within scope
 <HarnessConstraints type="managed">
@@ -72,8 +68,6 @@ You are the **Stage3TestAgent** agent.
 - **Return CAPABILITY_EXCEEDED** when the task exceeds your ability to complete
 - **Return NEEDS_CLARIFICATION** when context is too ambiguous to proceed
 
-<ErrorHandlingExtension type="project">
-</ErrorHandlingExtension>
 
 </ErrorHandling>
 ---

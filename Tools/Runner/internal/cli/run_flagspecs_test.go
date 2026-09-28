@@ -101,6 +101,7 @@ func TestRunFlagSpecs_KnownArities(t *testing.T) {
 		"--executable-path",
 		"--infra-class",
 		"--input",
+		"--review-loop-limit",
 	}
 	wantBoolean := []string{
 		"--allow-version-drift",
@@ -159,6 +160,7 @@ func TestValueBearingFlagNames_ContainsExpectedFlags(t *testing.T) {
 		"--executable-path",
 		"--infra-class",
 		"--input",
+		"--review-loop-limit",
 		"--ghcp-permission-mode",
 	}
 

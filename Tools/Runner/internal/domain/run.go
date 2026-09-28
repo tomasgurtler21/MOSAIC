@@ -5,7 +5,7 @@ type RunConfig struct {
 	OrchestratorFilePath string        // path to the orchestrator agent file
 	WorkflowID           WorkflowID    // selected workflow identifier
 	Task                 string        // task description
-	RunID                string        // resolved run_id (minted or from scan); empty triggers minting
+	RunID                string        // resolved run_id (minted or from scan); always a valid run_id, the session never mints one
 	RunFolder            string        // resolved run-scoped folder path (absolute, e.g. "/workspace/Orchestration-20260727T170000Z-a3f9")
 	AllowVersionDrift    bool          // override version check
 	IsNewRun             bool          // true = create new artifact; false = resume existing
@@ -20,21 +20,16 @@ type RunConfig struct {
 	// RunSettings holds every run-configuration decision that is settled at run
 	// start, immutable for the run, and persisted in the artifact frontmatter so
 	// a resumed run reads it back instead of re-asking. Embedding promotes all
-	// seven fields (Mode, Checkpoints, Commits, CommitBranchVariant, CommitBranch,
-	// PreConsultation, ManualResolution) directly onto RunConfig.
+	// fields (Mode, Checkpoints, Commits, CommitBranchVariant, CommitBranch,
+	// PreConsultation, ManualResolution, ReviewLoopLimit, InfraClassSelections)
+	// directly onto RunConfig.
 	RunSettings
 
-	// InfraClassSelections maps gated infrastructure class names to the selected
-	// agent name for this run. Only populated when multiple agents of the same
-	// gated class are declared. The TUI ConfigScreen wizard step and the CLI
-	// --infra-class flag both populate this before calling session.Start.
-	//
-	// When a gated class has exactly one declared agent, that agent is auto-
-	// selected and does not appear in this map.
-	//
-	// Non-gated classes (e.g. "review") are never in this map; all declared
-	// agents of non-gated classes have their triggers evaluated unconditionally.
-	InfraClassSelections map[string]string
+	// Supplied records which run-configuration values the frontend received
+	// explicitly for this Start call (CLI: flag Changed(); TUI: prompt
+	// answered). On a resume, only supplied values are compared against the
+	// artifact.
+	Supplied SuppliedSettings
 
 	// SeedInputs holds user-supplied seed source paths, each naming a file or a
 	// directory, in the order the user gave them. They are copied into the run
@@ -71,7 +66,7 @@ type RunConfig struct {
 // start, immutable for the run, and persisted in the artifact frontmatter so a
 // resumed run reads it back instead of re-asking.
 //
-// It is passed to ArtifactStore.Create so all six decisions are recorded in
+// It is passed to ArtifactStore.Create so every decision is recorded in
 // the Orchestration.md frontmatter on run creation.
 type RunSettings struct {
 	// Mode is required. ExecutionModeUnset is a refusal at run start, both for
@@ -85,7 +80,8 @@ type RunSettings struct {
 	Commits bool
 
 	// CommitBranchVariant selects which branch a commits-enabled run commits to.
-	// Defaults to CommitBranchMOSAICOwned.
+	// In-memory only: it is never written to the artifact. Parse derives it
+	// from CommitBranch and the run id; a frontend supplies it for a new run.
 	CommitBranchVariant CommitBranchVariant
 
 	// CommitBranch is the branch name the commit setup dispatch reported.
@@ -97,6 +93,29 @@ type RunSettings struct {
 
 	// ManualResolution puts the user in the resolver's place.
 	ManualResolution bool
+
+	// ReviewLoopLimit is the review_loop_limit frontmatter value. 0 means no
+	// limit (the key is absent).
+	ReviewLoopLimit int
+
+	// InfraClassSelections is the infrastructure_selections frontmatter map:
+	// gated class (checkpoint, commit, restore) to selected declared agent name.
+	// Nil or empty when absent.
+	InfraClassSelections map[string]string
+}
+
+// SuppliedSettings records which run-configuration values the frontend
+// received explicitly for this Start call. Each bool is the sole "supplied"
+// signal for its value: the content of the corresponding RunSettings field
+// (for example an empty selections map) never changes whether it counts as
+// supplied.
+type SuppliedSettings struct {
+	Mode                 bool
+	PreConsultation      bool
+	ManualResolution     bool
+	ReviewLoopLimit      bool
+	InfraClassSelections bool
+	CommitBranchVariant  bool
 }
 
 // RunOutcome is the result of a session run.
@@ -141,4 +160,9 @@ const (
 	// The CLI prints StopReason and exits non-zero; the TUI presents StopReason
 	// with retry and manual-dispatch recovery.
 	RunStoppedByConsultant RunStatus = "stopped-by-consultant"
+
+	// RunStartFailed: commit setup or pre-consultation failed after the
+	// artifact was created. The artifact and any commit setup row are kept and
+	// a resume retries the failed step.
+	RunStartFailed RunStatus = "start-failed"
 )

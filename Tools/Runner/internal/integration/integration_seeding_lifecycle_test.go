@@ -28,19 +28,22 @@ func TestIntegration_Seeding_Resume_ExistingFilesPreservedByteIdentical(t *testi
 
 	// Pre-create the run folder with a valid Orchestration.md that encodes a
 	// partially completed run: agent-a done (seq=1), agent-b pending.
-	runDir := filepath.Join(dir, "run")
+	runDir := filepath.Join(dir, "Orchestration-"+integrationRunID)
 	if err := os.MkdirAll(runDir, 0700); err != nil {
 		t.Fatalf("mkdir runDir: %v", err)
 	}
 	const seedingResumeArtifact = `---
 type: orchestration-artifact
+run_id: 20260727T170000Z-a3f9
 workflow: linear
 workflow_version: "1.0"
 task: "test task"
 started: 2026-01-01T00:00:00Z
 last_updated: 2026-01-01T00:00:00Z
 global_sequence: 1
-mode: auto
+runner_mode: auto
+runner_pre_consultation: disabled
+runner_manual_resolution: disabled
 checkpoints: disabled
 current_state:
   phase: PLANNING
@@ -102,6 +105,7 @@ current_state:
 	})
 
 	cfg := domain.RunConfig{
+		RunID: integrationRunID,
 		OrchestratorFilePath: orchPath,
 		WorkflowID:           "linear",
 		Task:                 "test task",
@@ -195,6 +199,7 @@ func TestIntegration_Seeding_MidCopyFailure_RunFolderCompletelyRemoved(t *testin
 	})
 
 	cfg := domain.RunConfig{
+		RunID: integrationRunID,
 		OrchestratorFilePath: orchPath,
 		WorkflowID:           "linear",
 		Task:                 "test task",
@@ -267,6 +272,7 @@ func TestIntegration_Seeding_InvalidSeedSet_NoRunFolderLeftBehind(t *testing.T) 
 	})
 
 	cfg := domain.RunConfig{
+		RunID: integrationRunID,
 		OrchestratorFilePath: orchPath,
 		WorkflowID:           "linear",
 		Task:                 "test task",

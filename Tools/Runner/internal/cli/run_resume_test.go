@@ -168,7 +168,7 @@ func TestCOMPLETEDMarker_WrittenWhenRunCompleted(t *testing.T) {
 	spy := &spyStore{}
 	sess := &scriptedSession{
 		outcome: domain.RunOutcome{
-			Status: domain.RunCompleted,
+			Status:  domain.RunCompleted,
 			Message: "run finished",
 		},
 	}
@@ -179,6 +179,7 @@ func TestCOMPLETEDMarker_WrittenWhenRunCompleted(t *testing.T) {
 		"--task", "do work",
 		"--mode", "auto",
 		"--new-run",
+		"--review-loop-limit", "3",
 	}, spy, sess)
 
 	if code != cli.ExitSuccess {
@@ -300,6 +301,7 @@ func TestAnnouncement_NewRun_StatedBeforeDispatch(t *testing.T) {
 		"--task", "do work",
 		"--mode", "auto",
 		"--new-run",
+		"--review-loop-limit", "3",
 	}, &spyStore{}, sess)
 
 	if code != cli.ExitSuccess {

@@ -126,7 +126,7 @@ func TestAdmit_GreenFieldTDD_PostExecutionEndRow(t *testing.T) {
 
 func TestAdmit_ThreeGroups_Succeeds(t *testing.T) {
 	table := mustParseTable(t, threeGroupsContent, "three-groups", "1.0")
-	_, err := compat.Admit(table)
+	_, err := compat.Admit(table, domain.ExecutionModeAuto)
 	if err != nil {
 		t.Errorf("Admit(three-groups): unexpected error: %v", err)
 	}
@@ -194,7 +194,7 @@ func TestAdmit_ThreeGroups_ContiguousRanges(t *testing.T) {
 
 func TestAdmit_GenericAgents_WithGroupNotation_Succeeds(t *testing.T) {
 	table := mustParseTable(t, genericAgentGroupsContent, "generic-agent-groups", "1.0")
-	_, err := compat.Admit(table)
+	_, err := compat.Admit(table, domain.ExecutionModeAuto)
 	if err != nil {
 		t.Errorf("Admit: generic agents with group notation must be admitted: %v", err)
 	}
@@ -302,7 +302,7 @@ func TestAdmit_BareRowsMixedAgents_SingleImplicitGroup(t *testing.T) {
 		},
 	}
 
-	aw, err := compat.Admit(table)
+	aw, err := compat.Admit(table, domain.ExecutionModeAuto)
 	if err != nil {
 		t.Fatalf("Admit: bare rows with mixed agents must be admitted: %v", err)
 	}
@@ -326,7 +326,7 @@ func TestAdmit_BareRowsMixedKnownUnknownAgents_Succeeds(t *testing.T) {
 		},
 	}
 
-	_, err := compat.Admit(table)
+	_, err := compat.Admit(table, domain.ExecutionModeAuto)
 
 	if err != nil {
 		t.Errorf("Admit must admit bare EXECUTION rows with any agent identifiers: %v", err)
@@ -344,7 +344,7 @@ func TestAdmit_BareRowsAlternatingAgents_Succeeds(t *testing.T) {
 		},
 	}
 
-	_, err := compat.Admit(table)
+	_, err := compat.Admit(table, domain.ExecutionModeAuto)
 
 	if err != nil {
 		t.Errorf("Admit must admit bare rows with alternating agent identifiers: %v", err)

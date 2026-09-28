@@ -48,12 +48,13 @@ func (c *catalogImpl) Agent(key string) (domain.Agent, bool) {
 	return a, ok
 }
 
-// Orchestrator returns the single orchestrator agent.
+// Orchestrator returns the native orchestrator agent, one of two orchestrator sources
+// (the other is the script orchestrator returned by OrchestratorScript).
 func (c *catalogImpl) Orchestrator() domain.Agent { return c.orchestr }
 
 // OrchestratorScript returns the script-mode orchestrator agent when present.
 // Returns (domain.Agent{}, false) when the catalog root has no orchestrator-script.md.
-// This is a stub that always returns false until I7.2 is implemented.
+// The script orchestrator is loaded at catalog load time; the bool reports whether it was found.
 func (c *catalogImpl) OrchestratorScript() (domain.Agent, bool) {
 	return c.orchScript, c.orchScriptOK
 }

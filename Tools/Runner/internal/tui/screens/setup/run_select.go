@@ -93,11 +93,15 @@ func NewRunSelectScreen(question runselect.Question, width, height int, styles s
 
 	// Append each unresumable choice, disabled, with its reason shown.
 	for _, c := range unresumable {
+		why := c.Reason.Description()
+		if c.Detail != "" {
+			why += ": " + c.Detail
+		}
 		items = append(items, widgets.ListItem{
 			ID:             c.ID,
 			Label:          c.Run.RunID,
 			Disabled:       true,
-			DisabledReason: c.Reason.Description(),
+			DisabledReason: why,
 		})
 	}
 

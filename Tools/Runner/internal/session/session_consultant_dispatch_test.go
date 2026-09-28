@@ -241,11 +241,11 @@ func TestSession_SequenceNumber_AlwaysRunnerAssigned(t *testing.T) {
 	if len(invs) < 2 {
 		t.Fatalf("want 2 harness invocations, got %d", len(invs))
 	}
-	// agent-a: seq must be 1.
+	// agent-a takes the first slot: the consultation that chose it consumes none.
 	if invs[0].Request.AgentInstanceID != "agent-a#1" {
 		t.Errorf("want agent-a#1, got %q", invs[0].Request.AgentInstanceID)
 	}
-	// agent-b: seq must be 2 (monotonically after agent-a's seq of 1).
+	// agent-b takes the next slot directly.
 	if invs[1].Request.AgentInstanceID != "agent-b#2" {
 		t.Errorf("want agent-b#2, got %q", invs[1].Request.AgentInstanceID)
 	}

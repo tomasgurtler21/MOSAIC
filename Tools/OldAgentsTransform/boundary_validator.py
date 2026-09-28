@@ -25,6 +25,7 @@ from boundary_constants import (
     EXPECTED_MARKER,
     FRONTMATTER_KEYS_BY_KIND,
     INJECTION_PARENT_MAP,
+    LEGACY_INPUT_NAMES,
     KNOWN_FRONTMATTER_KEYS,
     TAG_PATTERN,
     BoundaryKind,
@@ -267,6 +268,21 @@ def validate_file(file_path: pathlib.Path) -> list[ValidationError]:
                 # --- Opening tag ---
                 # For open tags, kind_str is always populated ("SECTION", "DEPLOYED", etc.).
                 kind = BoundaryKind(kind_str)
+
+                # Retired names are legacy migration INPUT only; a region carrying
+                # one is rejected in output whatever its type attribute. A managed
+                # region is already reported by the unrecognised-name check below.
+                if (not is_bundle and name in LEGACY_INPUT_NAMES
+                        and kind != BoundaryKind.DEPLOYED):
+                    errors.append(ValidationError(
+                        file_path=file_path,
+                        line_number=line_num,
+                        error_code="E011",
+                        message=(
+                            f"Retired boundary name {name!r} is not allowed in "
+                            f"output (recognised on migration input only)"
+                        ),
+                    ))
 
                 # Check whether the name is canonical for its type attribute (E004/E010/E011).
                 # Bundle documents skip these checks.

@@ -55,7 +55,7 @@ func newTestStep(seq int, agent, phase, stage string, status domain.StatusCode, 
 		Status:          status,
 		Timestamp:       ts,
 		Summary:         "step summary",
-		OutputArtifacts: artifacts,
+		WrittenArtifacts: artifacts,
 	}
 }
 
@@ -66,7 +66,7 @@ func mustCreateStore(t *testing.T) (domain.ArtifactStore, domain.ArtifactState) 
 	store := artifact.NewFileStore(filepath.Join(dir, "Orchestration.md"))
 	ctx := context.Background()
 	info := domain.WorkflowInfo{ID: "quick-fix", Version: "3.0"}
-	state, err := store.Create(ctx, info, "test task", domain.RunSettings{}, time.Now(), "")
+	state, err := store.Create(ctx, info, "test task", domain.RunSettings{}, time.Now(), testRunID)
 	if err != nil {
 		t.Fatalf("Create: %v", err)
 	}
@@ -81,7 +81,7 @@ func setPhaseFixture(t *testing.T) (domain.ArtifactStore, domain.ArtifactState) 
 	store := artifact.NewFileStore(filepath.Join(dir, "Orchestration.md"))
 	ctx := context.Background()
 	info := domain.WorkflowInfo{ID: "quick-fix", Version: "3.0"}
-	state, err := store.Create(ctx, info, "test task", domain.RunSettings{}, time.Date(2026, 1, 1, 0, 0, 0, 0, time.UTC), "")
+	state, err := store.Create(ctx, info, "test task", domain.RunSettings{}, time.Date(2026, 1, 1, 0, 0, 0, 0, time.UTC), testRunID)
 	if err != nil {
 		t.Fatalf("setPhaseFixture: Create: %v", err)
 	}
@@ -106,7 +106,8 @@ func newTestFixtureWithRunID(t *testing.T, runID string) (domain.ArtifactStore, 
 // minimalArtifactBytes builds the minimal valid artifact bytes for use in
 // inline parse tests. When runID is non-empty, it is placed after "type:" and
 // before "workflow:" in the frontmatter. When runID is empty, the run_id line
-// is omitted entirely (simulating a pre-v1.8 artifact).
+// is omitted entirely (simulating an older artifact that predates the run_id
+// field).
 func minimalArtifactBytes(runID string) []byte {
 	runIDLine := ""
 	if runID != "" {
@@ -150,6 +151,7 @@ func minimalArtifactWithExecutionRow(inputs string) []byte {
 	}
 	return []byte("---\n" +
 		"type: orchestration-artifact\n" +
+		"run_id: " + testRunID + "\n" +
 		"workflow: test\n" +
 		"workflow_version: \"1.0\"\n" +
 		"task: \"test\"\n" +
@@ -188,6 +190,7 @@ func minimalArtifactWithExecutionRow(inputs string) []byte {
 func minimalArtifactWithSingleOverrideBytes() []byte {
 	return []byte("---\n" +
 		"type: orchestration-artifact\n" +
+		"run_id: " + testRunID + "\n" +
 		"workflow: test\n" +
 		"workflow_version: \"1.0\"\n" +
 		"task: \"test\"\n" +
@@ -223,6 +226,7 @@ func minimalArtifactWithSingleOverrideBytes() []byte {
 func minimalArtifactWithMultiTriggerOverrideBytes() []byte {
 	return []byte("---\n" +
 		"type: orchestration-artifact\n" +
+		"run_id: " + testRunID + "\n" +
 		"workflow: test\n" +
 		"workflow_version: \"1.0\"\n" +
 		"task: \"test\"\n" +
@@ -261,6 +265,7 @@ func minimalArtifactWithMultiTriggerOverrideBytes() []byte {
 func minimalArtifactWithConfigBytes(configLines string) []byte {
 	return []byte("---\n" +
 		"type: orchestration-artifact\n" +
+		"run_id: " + testRunID + "\n" +
 		"workflow: test\n" +
 		"workflow_version: \"1.0\"\n" +
 		"task: \"test task\"\n" +
@@ -294,3 +299,7 @@ const standardConfigLines = "checkpoints: disabled\ncommits: disabled\n"
 // mustBeAbsoluteSubstring is the stable substring asserted in the error message
 // from Create when given a non-absolute store path.
 const mustBeAbsoluteSubstring = "must be absolute"
+
+// testRunID is a valid run_id used by every fixture builder and by tests that
+// need any valid run identity.
+const testRunID = "20260727T170000Z-a3f9"

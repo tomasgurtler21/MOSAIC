@@ -4,7 +4,7 @@ name: test-agent
 
 <Identity type="core">
 Identity content.
-<ProtocolConstraints type="managed">
-Protocol constraints content.
-</ProtocolConstraints>
+<HarnessConstraints type="managed">
+Harness constraints content.
+</HarnessConstraints>
 </Identity>

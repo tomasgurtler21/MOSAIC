@@ -142,12 +142,29 @@ func requireRefused(t *testing.T, got domain.RunOutcome, err error) string {
 	return got.Message
 }
 
+// requireStartFailed asserts that the outcome is RunStartFailed with a nil
+// error and a non-empty message.
+func requireStartFailed(t *testing.T, got domain.RunOutcome, err error) string {
+	t.Helper()
+	if err != nil {
+		t.Fatalf("want nil error for a start failure, got %v", err)
+	}
+	if got.Status != domain.RunStartFailed {
+		t.Errorf("want RunStartFailed, got %q (message: %q)", got.Status, got.Message)
+	}
+	if got.Message == "" {
+		t.Error("want a non-empty outcome message for a start failure")
+	}
+	return got.Message
+}
+
 // ---- small utilities ----
 
-// containsArtifact reports whether the slice contains the given artifact path.
+// containsArtifact reports whether the slice contains the given artifact path,
+// either as written or under the run-scoped folder prefix of the run.
 func containsArtifact(arts []string, target string) bool {
 	for _, a := range arts {
-		if a == target {
+		if a == target || a == domain.RunScopedFolder(integrationRunID)+"/"+target {
 			return true
 		}
 	}
@@ -189,7 +206,8 @@ func containsArtifact(arts []string, target string) bool {
 //   Commit setup (T9.6):
 //   - A commits-enabled run records the branch name in the artifact frontmatter
 //     and adds the commit setup dispatch as the first execution log row.
-//   - A failed commit setup refuses the run and leaves no artifact.
+//   - A failed commit setup stops the run as a resumable start failure that
+//     keeps the artifact and the setup row; a resume retries setup.
 //
 //   Resume (T9.7):
 //   - A resumed run reads its mode and all other settings from the artifact
@@ -329,4 +347,20 @@ func assertGoldenMatches(t *testing.T, artifactPath, goldenName string) {
 		t.Errorf("produced artifact does not match golden file\n\nProduced:\n%s\n\nGolden:\n%s",
 			string(produced), string(golden))
 	}
+}
+
+// integrationRunID is the valid run_id carried by every run configuration and
+// pre-written artifact in the integration tests.
+const integrationRunID = "20260727T170000Z-a3f9"
+
+// scopedRunFolder creates and returns the run-scoped folder
+// Orchestration-{integrationRunID} inside dir, where a resumed run's artifact
+// must live.
+func scopedRunFolder(t *testing.T, dir string) string {
+	t.Helper()
+	folder := filepath.Join(dir, domain.RunScopedFolder(integrationRunID))
+	if err := os.MkdirAll(folder, 0o700); err != nil {
+		t.Fatalf("scopedRunFolder: %v", err)
+	}
+	return folder
 }

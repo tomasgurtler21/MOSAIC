@@ -10,9 +10,10 @@ import (
 //
 // deploy-managed.md is a snapshot of what mosaic-deploy produces: workflow regions carry
 // type="managed" (NodeDeployed) nested inside <AvailableWorkflows type="managed">.
-// The current implementation uses SectionsDeep(), which only visits NodeSection nodes and
-// therefore misses these regions entirely.  Every test in this group must fail (RED) until
-// the traversal is made kind-agnostic.
+// The traversal used by EnumerateWorkflows (collectWorkflowNodes) is already kind-agnostic:
+// it walks both NodeSection and NodeDeployed nodes by depth-first document order. Every test
+// in this group verifies that this kind-agnostic behavior holds and guards against a future
+// regression that reintroduces a kind-specific (NodeSection-only) traversal.
 
 func TestEnumerateWorkflows_DeployManaged_ReturnsBothWorkflows(t *testing.T) {
 	// deploy-managed.md declares two workflows: quick-fix and greenfield-tdd.
@@ -166,8 +167,8 @@ func TestGetWorkflow_DeployManaged_SelectSecondByID_ReturnsRegion(t *testing.T) 
 
 func TestEnumerateWorkflows_MixedTypes_ReturnsBothWorkflows(t *testing.T) {
 	// A file containing one authored (type="core") and one managed (type="managed") workflow
-	// must enumerate both.  The current SectionsDeep() traversal misses the managed one,
-	// returning only 1 region instead of 2.
+	// must enumerate both, since the kind-agnostic traversal visits both NodeSection and
+	// NodeDeployed nodes.
 	regions, err := orchfile.EnumerateWorkflows(orchfileFixture("mixed-workflows.md"))
 
 	if err != nil {
@@ -201,16 +202,10 @@ func TestEnumerateWorkflows_MixedTypes_PreservesDocumentOrder(t *testing.T) {
 
 func TestEnumerateWorkflows_MixedTypes_NoDuplicates(t *testing.T) {
 	// The kind-agnostic traversal must not emit either region twice.
-	// A naive merge of SectionsDeep() and DeployedRegions() could produce duplicates
-	// when both lists are walked and the same node appears in both.
-	//
-	// NOTE: This test passes trivially in the RED phase. The broken SectionsDeep()
-	// traversal returns only 1 region (the authored type="core" workflow; the managed
-	// one is missed), so no identifier can appear more than once in a 1-element slice.
-	// The sibling test TestEnumerateWorkflows_MixedTypes_ReturnsBothWorkflows is what
-	// correctly fails RED and guards the prerequisite. This test becomes meaningful only
-	// after the kind-agnostic traversal fix lands, at which point it verifies that both
-	// regions appear exactly once rather than twice.
+	// A naive merge of a NodeSection-only pass and a NodeDeployed-only pass could produce
+	// duplicates if the same node were ever visited by both. This test guards against that
+	// regression: it verifies that the single depth-first traversal used by
+	// collectWorkflowNodes returns each of the two mixed-fixture regions exactly once.
 	regions, err := orchfile.EnumerateWorkflows(orchfileFixture("mixed-workflows.md"))
 	if err != nil {
 		t.Fatalf("EnumerateWorkflows: %v", err)

@@ -12,8 +12,6 @@ required_skills: [lean-tdd]
 
 You are the **HarnessGenericOnlyKeyTest** agent.
 
-<IdentityExtension type="project">
-</IdentityExtension>
 
 </Identity>
 ---
@@ -33,8 +31,6 @@ Fixture content.
 
 <Constraints type="core">
 ## Constraints
-<ProtocolConstraints type="managed">
-</ProtocolConstraints>
 
 <HarnessConstraints type="managed">
 </HarnessConstraints>

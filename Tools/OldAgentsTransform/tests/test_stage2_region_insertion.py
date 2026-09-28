@@ -1254,6 +1254,9 @@ class TestDriftedRulePatterns:
     PC-bullet-1 and PC-bullet-2 tests are RED until I4.3 widens their patterns and
     changes their kind to REGEX_BULLET.  EH-retry and EP-context tests are GREEN
     because those patterns were already widened in the implementation.
+
+    The legacy conduct-bullet rules are exercised through a stand-in HarnessConstraints
+    spec: ProtocolConstraints is retired and no spec here may emit it.
     """
 
     # --- PC-bullet-1: Orchestration Artifacts drifted wording (RED) ---
@@ -1273,11 +1276,11 @@ class TestDriftedRulePatterns:
         )
         sections = {"Constraints": _constraints_span(lines)}
         pc_spec = _minimal_spec(
-            "ProtocolConstraints",
+            "HarnessConstraints",
             supersedes=(_PC_BULLET_1,),
         )
         pc_spec = RegionSpec(
-            name="ProtocolConstraints",
+            name="HarnessConstraints",
             parent_section="Constraints",
             anchor=Anchor.SECTION_START,
             supersedes=(_PC_BULLET_1,),
@@ -1306,7 +1309,7 @@ class TestDriftedRulePatterns:
         )
         sections = {"Constraints": _constraints_span(lines)}
         pc_spec = RegionSpec(
-            name="ProtocolConstraints",
+            name="HarnessConstraints",
             parent_section="Constraints",
             anchor=Anchor.SECTION_START,
             supersedes=(_PC_BULLET_1,),
@@ -1332,7 +1335,7 @@ class TestDriftedRulePatterns:
         )
         sections = {"Constraints": _constraints_span(lines)}
         pc_spec = RegionSpec(
-            name="ProtocolConstraints",
+            name="HarnessConstraints",
             parent_section="Constraints",
             anchor=Anchor.SECTION_START,
             supersedes=(_PC_BULLET_1,),
@@ -1364,7 +1367,7 @@ class TestDriftedRulePatterns:
         )
         sections = {"Constraints": _constraints_span(lines)}
         pc_spec = RegionSpec(
-            name="ProtocolConstraints",
+            name="HarnessConstraints",
             parent_section="Constraints",
             anchor=Anchor.SECTION_START,
             supersedes=(_PC_BULLET_2,),
@@ -1391,7 +1394,7 @@ class TestDriftedRulePatterns:
         )
         sections = {"Constraints": _constraints_span(lines)}
         pc_spec = RegionSpec(
-            name="ProtocolConstraints",
+            name="HarnessConstraints",
             parent_section="Constraints",
             anchor=Anchor.SECTION_START,
             supersedes=(_PC_BULLET_2,),
@@ -1531,7 +1534,7 @@ class TestPCBullet5AbsentIsNoOp:
         )
         sections = {"Constraints": _constraints_span(lines)}
         pc_spec = RegionSpec(
-            name="ProtocolConstraints",
+            name="HarnessConstraints",
             parent_section="Constraints",
             anchor=Anchor.SECTION_START,
             supersedes=(_PC_BULLET_5,),
@@ -1552,7 +1555,7 @@ class TestPCBullet5AbsentIsNoOp:
         )
         sections = {"Constraints": _constraints_span(lines)}
         pc_spec = RegionSpec(
-            name="ProtocolConstraints",
+            name="HarnessConstraints",
             parent_section="Constraints",
             anchor=Anchor.SECTION_START,
             supersedes=(_PC_BULLET_5,),
@@ -1575,7 +1578,7 @@ class TestPCBullet5AbsentIsNoOp:
         )
         sections = {"Constraints": _constraints_span(lines)}
         pc_spec = RegionSpec(
-            name="ProtocolConstraints",
+            name="HarnessConstraints",
             parent_section="Constraints",
             anchor=Anchor.SECTION_START,
             supersedes=(_PC_BULLET_5,),
@@ -1608,3 +1611,67 @@ class TestAllConductRegionsRulesHaveDriftProbe:
             f"Rules with drift_probe=None violate the ContractsDesign.md invariant "
             f"(every rule must have a probe so drifted wording is reported): {missing}"
         )
+
+
+# ---------------------------------------------------------------------------
+# Constraints section: HarnessConstraints placement in the real table
+# ---------------------------------------------------------------------------
+
+class TestHarnessConstraintsPlacementInConductTable:
+    """With ProtocolConstraints retired, the real CONDUCT_REGIONS table anchors
+    HarnessConstraints at the start of the Constraints section and never emits a
+    ProtocolConstraints region."""
+
+    def _constraints_lines(self, *bullets: str) -> tuple[list[str], dict[str, SectionSpan]]:
+        lines = _L("## Constraints", *bullets)
+        return lines, {"Constraints": _constraints_span(lines)}
+
+    def test_harness_constraints_lands_directly_after_the_heading(self):
+        lines, sections = self._constraints_lines("", "- Stay within scope", "")
+
+        result = apply_conduct_regions(lines, sections)
+
+        out = [ln.strip() for ln in result.lines]
+        assert out[1] == '<HarnessConstraints type="managed">'
+        assert out[2] == "</HarnessConstraints>"
+        assert "HarnessConstraints" in result.deployed_added
+
+    def test_no_protocol_constraints_region_is_emitted(self):
+        lines, sections = self._constraints_lines("", "- Stay within scope", "")
+
+        result = apply_conduct_regions(lines, sections)
+
+        assert "ProtocolConstraints" not in "".join(result.lines)
+        assert "ProtocolConstraints" not in result.deployed_added
+
+    def test_legacy_conduct_bullets_are_still_removed(self):
+        lines, sections = self._constraints_lines(
+            "",
+            "- **Orchestration Artifacts:** NEVER access an orchestration artifact that is "
+            "not named in your `input_artifacts`/`output_artifacts`",
+            "- NEVER skip the JSON response block",
+            "- NEVER invent status codes",
+            "- Stay within scope",
+            "",
+        )
+
+        result = apply_conduct_regions(lines, sections)
+
+        out_text = "".join(result.lines)
+        assert "NEVER skip the JSON response block" not in out_text
+        assert "NEVER invent status codes" not in out_text
+        assert "NEVER access an orchestration artifact" not in out_text
+        assert "- Stay within scope" in out_text
+
+    def test_harness_constraints_not_duplicated_when_already_present(self):
+        lines, sections = self._constraints_lines(
+            "",
+            '<HarnessConstraints type="managed">',
+            "</HarnessConstraints>",
+            "- Stay within scope",
+            "",
+        )
+
+        result = apply_conduct_regions(lines, sections)
+
+        assert "".join(result.lines).count('<HarnessConstraints type="managed">') == 1

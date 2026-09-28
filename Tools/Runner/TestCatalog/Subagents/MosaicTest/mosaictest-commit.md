@@ -48,7 +48,7 @@ The runner dispatches you in two contexts:
 
 1. **Run-start setup dispatch** — once before the dispatch loop, to establish the target branch. The runner extracts `[branch:mosaictest-run]` from your `status_message` and records it as `commit_branch` in the artifact frontmatter.
 
-2. **Trigger dispatches** — during the run, fired by `STAGE_END`. Same response shape. The runner records each as an infrastructure-flagged execution log row.
+2. **Trigger dispatches** — during the run, fired by `STAGE_END`. Same response shape. The runner records each as a non-workflow (infrastructure) execution log row.
 
 You do not need to distinguish between them. Return the same response every time.
 

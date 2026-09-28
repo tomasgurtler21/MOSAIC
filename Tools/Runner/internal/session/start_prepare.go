@@ -19,7 +19,7 @@ import (
 
 // runStartCtx holds all state built up during the run-start sequence
 // (Steps 1-8c) and consumed by the dispatch loop. The config field is
-// mutable: step 6d overwrites RunSettings and step 7.9 overwrites
+// mutable: step 6d overwrites RunSettings and commit setup (step 8b) overwrites
 // CommitBranch, so callers must use rs.config rather than the original
 // domain.RunConfig value after this struct is created.
 type runStartCtx struct {
@@ -54,8 +54,6 @@ type runStartCtx struct {
 	preConsultAdvice domain.PreConsultationAdvice
 	// Seed inputs applied at step 8 (new-run only).
 	seedPlan seed.Plan
-	// Commit setup record held in memory until artifact is created (step 7.9).
-	commitSetup *commitSetupRecord
 	// Stage source descriptor for engine error messages.
 	stageSource domain.StageSource
 }
@@ -154,6 +152,14 @@ func (s *sessionImpl) readArtifact(ctx context.Context, rs *runStartCtx) (domain
 		}
 	}
 
+	// A resumed artifact must carry a valid run_id matching its run folder.
+	// It is refused before any invocation; the identity is never repaired.
+	if !rs.config.IsNewRun {
+		if idErr := checkResumeRunIdentity(existingState.RunID, rs.config); idErr != nil {
+			return s.runIdentityRefusal(idErr, rs.config), true, nil
+		}
+	}
+
 	// FR-7b: version check for resume mode.
 	if !rs.config.IsNewRun && !rs.config.AllowVersionDrift {
 		if existingState.WorkflowVersion != rs.region.Info.Version {
@@ -173,7 +179,7 @@ func (s *sessionImpl) readArtifact(ctx context.Context, rs *runStartCtx) (domain
 // harnesses, and resolve all agent identifiers to definition files.
 func (s *sessionImpl) admitAndResolveAgents(ctx context.Context, rs *runStartCtx) (domain.RunOutcome, bool, error) {
 	// Step 4: admit the workflow.
-	admitted, err := compat.Admit(rs.table)
+	admitted, err := compat.Admit(rs.table, rs.config.RunSettings.Mode)
 	if err != nil {
 		return s.refusal(err.Error()), true, nil
 	}

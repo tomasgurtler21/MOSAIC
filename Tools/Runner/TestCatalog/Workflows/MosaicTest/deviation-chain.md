@@ -52,29 +52,26 @@ Pass 1 must return BLOCKED (first deviation trigger). Pass 3 must return SUCCESS
 
 ### Why occurrence counting matters
 
-The routing fixture uses `after mosaictest-scripted BLOCKED` for the first BLOCKED and `after mosaictest-scripted BLOCKED #2` for the second. The `#2` selector is what makes the two consultations route differently. If the orchestrator miscounts occurrences (e.g. counting infrastructure rows or consultation rows as workflow rows), the wrong rule fires and the run either loops or stops unexpectedly.
+The routing fixture uses `after mosaictest-scripted BLOCKED` for the first BLOCKED and `after mosaictest-scripted BLOCKED #2` for the second. The `#2` selector is what makes the two consultations route differently. If the orchestrator miscounts occurrences (e.g. counting infrastructure rows as workflow rows), the wrong rule fires and the run either loops or stops unexpectedly.
 
 ---
 
 ## Expected Run
 
-Six Orchestration.md log rows.
+Three Orchestration.md log rows. Pre-run consultation and both deviation-routing consultations dispatch to the orchestrator, but none of them allocate a `Seq` or leave a row in `Orchestration.md`.
 
-| Log `Seq` | `Agent` | Kind | `Phase` | `Status` | `Summary` shows |
-|:---:|---|---|---|---|---|
-| 0 | `orchestrator-script#pre_consultation#1` | consultation | -- | "" | pre-run consultation response |
-| 1 | `mosaictest-scripted#1` | workflow step | RESEARCH | BLOCKED | chain-first / marker absent / wrote marker / BLOCKED E401 |
-| 2 | `orchestrator-script#2` | consultation | -- | "" | dispatch with input_artifacts override to chain-second.md |
-| 3 | `mosaictest-scripted#3` | workflow step | RESEARCH | BLOCKED | chain-second / unconditional BLOCKED E401 |
-| 4 | `orchestrator-script#4` | consultation | -- | "" | dispatch with input_artifacts override to chain-first.md |
-| 5 | `mosaictest-scripted#5` | workflow step | RESEARCH | SUCCESS | chain-first / marker present / SUCCESS |
+| Log `Seq` | `Agent` | `Phase` | `Status` | `Summary` shows |
+|:---:|---|---|---|---|
+| 1 | `mosaictest-scripted#1` | RESEARCH | BLOCKED | chain-first / marker absent / wrote marker / BLOCKED E401 |
+| 2 | `mosaictest-scripted#2` | RESEARCH | BLOCKED | chain-second / unconditional BLOCKED E401 |
+| 3 | `mosaictest-scripted#3` | RESEARCH | SUCCESS | chain-first / marker present / SUCCESS |
 
 **Run outcome:** COMPLETE. The engine routes `SUCCESS` via `On Success = COMPLETE`.
 
 **Key observations:**
-- Two consultation rows (Seq 2 and Seq 4) prove two separate deviation-to-orchestrator round trips.
+- The dispatch log shows two separate `orchestrator-script` consultations, between row 1 and row 2 and between row 2 and row 3, proving two separate deviation-to-orchestrator round trips. Neither consultation leaves an `Orchestration.md` row or consumes a `Seq` — the three workflow rows are numbered consecutively.
 - The second consultation dispatches back to chain-first.md, proving the orchestrator can redirect to a previously-failed script.
-- SUCCESS on row 5 proves the marker persisted across the intervening dispatches and the marker gate resolved correctly.
+- SUCCESS on row 3 proves the marker persisted across the intervening dispatches and the marker gate resolved correctly.
 
 ---
 
@@ -84,10 +81,11 @@ Six Orchestration.md log rows.
 |---|---|
 | Run stops after row 1 with `RunDeviationUnresolved` | No routing consultant configured — the harness adapter's `InvokeRaw` path is missing (RUN-4) |
 | First consultation works but second fails to parse | The harness adapter leaks state between consecutive `InvokeRaw` calls — session isolation defect |
-| Row 3 shows SUCCESS instead of BLOCKED | The input_artifacts override from the first consultation did not reach the stub, or reached it pointing at chain-first.md instead of chain-second.md |
-| Row 5 shows BLOCKED again instead of SUCCESS | The marker was not written on pass 1, or the input_artifacts override from the second consultation pointed at chain-second.md instead of chain-first.md |
+| Row 2 shows SUCCESS instead of BLOCKED | The input_artifacts override from the first consultation did not reach the stub, or reached it pointing at chain-first.md instead of chain-second.md |
+| Row 3 shows BLOCKED again instead of SUCCESS | The marker was not written on pass 1, or the input_artifacts override from the second consultation pointed at chain-second.md instead of chain-first.md |
 | The stub stops with "no matching rule" after the second BLOCKED | The routing fixture's `#2` selector did not match — the orchestrator may be counting non-workflow rows as occurrences |
-| The routing fixture's `#2` rule fires on the first consultation | The occurrence count includes something unexpected — infrastructure rows, consultation rows, or a stale count from a previous run |
+| The routing fixture's `#2` rule fires on the first consultation | The occurrence count includes something unexpected — infrastructure rows or a stale count from a previous run |
+| An `orchestrator-script` row appears in `Orchestration.md` | Consultations must leave no row in the artifact; a routing consultation wrongly called `Store.Apply` or allocated a `Seq` |
 
 ---
 

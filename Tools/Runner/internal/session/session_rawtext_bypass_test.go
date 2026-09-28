@@ -78,18 +78,20 @@ func countInvocationsFor(invs []harness.Invocation, agentID string) int {
 	return n
 }
 
-// requireInfrastructureFailedStep asserts that store.Applied contains at least
-// one CompletedStep with IsInfrastructure=true and Status!=SUCCESS. Returns the
-// first such step. Fails the test if none is found.
-func requireInfrastructureFailedStep(t *testing.T, store *memStore, context string) domain.CompletedStep {
+// requireHarnessErrorStep asserts that store.Applied contains at least one
+// accepted workflow CompletedStep (neither infrastructure nor HITL rejected)
+// with Status BLOCKED and ErrorCode E501 recording the failed harness attempt.
+// Returns the first such step. Fails the test if none is found.
+func requireHarnessErrorStep(t *testing.T, store *memStore, context string) domain.CompletedStep {
 	t.Helper()
 	for _, s := range store.Applied {
-		if s.IsInfrastructure && s.Status != domain.StatusSUCCESS {
+		if !s.IsInfrastructure && !s.HITLRejected &&
+			s.Status == domain.StatusBLOCKED && s.ErrorCode == domain.ErrorTOOL_UNAVAILABLE {
 			return s
 		}
 	}
-	t.Errorf("%s: want a CompletedStep in store.Applied with IsInfrastructure=true and "+
-		"Status!=SUCCESS recording the failed harness attempt, got none; "+
+	t.Errorf("%s: want a workflow CompletedStep in store.Applied with Status=BLOCKED and "+
+		"ErrorCode=E501 recording the failed harness attempt, got none; "+
 		"the failed attempt must be persisted before the next dispatch so the "+
 		"execution log has a complete record of every dispatch attempt", context)
 	return domain.CompletedStep{}
@@ -157,11 +159,9 @@ func TestSession_RawTextBypass_MainLoop_BypassSucceeds_RunCompletes(t *testing.T
 			"bypass must invoke the same agent exactly once before proceeding",
 			n)
 	}
-	// The main dispatch loop already persists infrastructure-failed steps today.
-	// Asserting this here ensures Stage 4 changes do not accidentally remove that
-	// existing persistence (AC4.6 regression guard for the main-loop site).
-	requireInfrastructureFailedStep(t, store,
-		"main-loop site: existing persistence must survive Stage 4 changes (AC4.6)")
+	// The failed first attempt is persisted as a BLOCKED/E501 workflow row even
+	// though the bypass retry then succeeds.
+	requireHarnessErrorStep(t, store, "main-loop site")
 }
 
 // ===== (b) Main dispatch loop: bypass fails, falls back to consultRoute =====
@@ -310,7 +310,7 @@ func TestSession_RawTextBypass_HITLRedispatch_BypassSucceeds_ThreeInvocations(t 
 	// The consultant terminates the run here.
 	//
 	// Without bypass: the HITL-redispatch raw-text error calls consultRoute
-	// directly with a DeviationHarnessError, also reaching this stop.
+	// directly with a BLOCKED/E501 deviation, also reaching this stop.
 	consultant.queueStop("run stopped after HITL bypass attempt")
 
 	// Use newHITLLinearSession (hitl-linear-orch.md, HITL=TRUE for agent-a) in

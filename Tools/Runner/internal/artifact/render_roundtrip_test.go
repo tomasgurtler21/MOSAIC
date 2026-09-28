@@ -18,6 +18,7 @@ func TestRoundTrip_AllConfigFields_ParsedBack(t *testing.T) {
 	// and be read back with their original values.
 	original := domain.ArtifactState{
 		Type:            "orchestration-artifact",
+		RunID:           testRunID,
 		Workflow:        "test",
 		WorkflowVersion: "1.0",
 		Task:            "round-trip task",
@@ -70,9 +71,9 @@ func TestRoundTrip_CommitsDisabled_CommitBranchVariantPreservedAsEmpty(t *testin
 	// then Parse the output back. CommitBranchVariant must come back as empty
 	// (not defaulted to mosaic-owned). This validates the resumed-run scenario
 	// where a commits-disabled orchestration file is re-parsed.
-	// RED: current Parse defaults absent key to mosaic-owned regardless of Commits.
 	original := domain.ArtifactState{
 		Type:     "orchestration-artifact",
+		RunID:    testRunID,
 		Workflow: "test",
 		RunSettings: domain.RunSettings{
 			Commits:             false,
@@ -103,6 +104,7 @@ func TestRoundTrip_CommitBranch_Empty_SurvivesRoundTrip(t *testing.T) {
 	// commit_branch is omitted when empty; re-parsing must yield "" not an error.
 	original := domain.ArtifactState{
 		Type:        "orchestration-artifact",
+		RunID:       testRunID,
 		Workflow:    "test",
 		RunSettings: domain.RunSettings{CommitBranch: ""},
 	}

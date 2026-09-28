@@ -20,6 +20,7 @@ func TestNewRunFlag_SetsIsNewRunTrue(t *testing.T) {
 		"--task", "do work",
 		"--mode", "auto",
 		"--new-run",
+		"--review-loop-limit", "3",
 	}, sess)
 
 	if !sess.called {
@@ -144,6 +145,7 @@ func TestRunAndNewRunFlags_MutuallyExclusive(t *testing.T) {
 		"--task", "do work",
 		"--run", testRunID,
 		"--new-run",
+		"--review-loop-limit", "3",
 	}, sess)
 
 	if code != cli.ExitUsage {
@@ -213,6 +215,7 @@ func TestHarnessID_InRunConfig(t *testing.T) {
 		"--task", "do work",
 		"--mode", "auto",
 		"--new-run",
+		"--review-loop-limit", "3",
 		"--harness", "fake",
 	}, &spyStore{}, sess)
 

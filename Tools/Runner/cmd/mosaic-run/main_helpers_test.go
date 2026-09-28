@@ -88,6 +88,18 @@ func (m *mainTestMemStore) SetPhase(_ context.Context, _ domain.ArtifactState, _
 	return domain.ArtifactState{}, fmt.Errorf("mainTestMemStore.SetPhase: not implemented in cmd/mosaic-run session tests")
 }
 
+func (m *mainTestMemStore) SetCommitBranch(_ context.Context, branch string, _ time.Time) (domain.ArtifactState, error) {
+	m.state.CommitBranch = branch
+	return m.state, nil
+}
+
+func (m *mainTestMemStore) AdoptRunnerSettings(_ context.Context, mode domain.ExecutionMode, pre, manual bool, _ time.Time) (domain.ArtifactState, error) {
+	m.state.Mode = mode
+	m.state.PreConsultation = pre
+	m.state.ManualResolution = manual
+	return m.state, nil
+}
+
 // mainTestClock is a fixed-time domain.Clock for use in cmd/mosaic-run
 // behavioural session tests.
 type mainTestClock struct{ t time.Time }

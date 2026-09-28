@@ -67,38 +67,35 @@ In Auto-review mode, the engine's findings auto-route adds the CNA row's output 
 
 ## Expected Run: Auto Mode
 
-Four Orchestration.md log rows. The engine cannot route CNA, so it deviates to the orchestrator.
+Two Orchestration.md log rows. The engine cannot route CNA, so it deviates to the orchestrator, but neither the pre-run consultation nor the deviation-routing consultation allocates a `Seq` or leaves a row in `Orchestration.md`.
 
-| Log `Seq` | `Agent` | Kind | `Phase` | `Status` | `Summary` shows |
-|:---:|---|---|---|---|---|
-| 0 | `orchestrator-script#pre_consultation#1` | consultation | — | "" | pre-run consultation response |
-| 1 | `mosaictest-scripted#1` | workflow step | RESEARCH | COMPLETED_NEEDS_ACTION | marker absent, writing marker, returning CNA |
-| 2 | `orchestrator-script#2` | consultation | — | "" | dispatch instruction for the re-dispatch |
-| 3 | `mosaictest-scripted#3` | workflow step | RESEARCH | SUCCESS | marker present, returning SUCCESS |
+| Log `Seq` | `Agent` | `Phase` | `Status` | `Summary` shows |
+|:---:|---|---|---|---|
+| 1 | `mosaictest-scripted#1` | RESEARCH | COMPLETED_NEEDS_ACTION | marker absent, writing marker, returning CNA |
+| 2 | `mosaictest-scripted#2` | RESEARCH | SUCCESS | marker present, returning SUCCESS |
 
 **Run outcome:** COMPLETE. The engine routes `SUCCESS` via `On Success = COMPLETE`.
 
-**Key observation:** A consultation row (Seq 2) appears between the two workflow steps. This is what proves Auto mode consulted the orchestrator on CNA.
+**Key observation:** The dispatch log shows an `orchestrator-script` consultation between the two workflow steps. This is what proves Auto mode consulted the orchestrator on CNA — but the consultation leaves no `Orchestration.md` row, so the re-dispatch is recorded as `mosaictest-scripted#2`, immediately following `#1`.
 
 ---
 
 ## Expected Run: Auto-review Mode
 
-Three Orchestration.md log rows. The engine routes CNA automatically via `On Findings`.
+Two Orchestration.md log rows. The engine routes CNA automatically via `On Findings`.
 
-| Log `Seq` | `Agent` | Kind | `Phase` | `Status` | `Summary` shows |
-|:---:|---|---|---|---|---|
-| 0 | `orchestrator-script#pre_consultation#1` | consultation | — | "" | pre-run consultation response |
-| 1 | `mosaictest-scripted#1` | workflow step | RESEARCH | COMPLETED_NEEDS_ACTION | marker absent, writing marker, returning CNA |
-| 2 | `mosaictest-scripted#2` | workflow step | RESEARCH | SUCCESS | marker present, returning SUCCESS |
+| Log `Seq` | `Agent` | `Phase` | `Status` | `Summary` shows |
+|:---:|---|---|---|---|
+| 1 | `mosaictest-scripted#1` | RESEARCH | COMPLETED_NEEDS_ACTION | marker absent, writing marker, returning CNA |
+| 2 | `mosaictest-scripted#2` | RESEARCH | SUCCESS | marker present, returning SUCCESS |
 
 **Run outcome:** COMPLETE. Same as Auto.
 
-**Key observation:** No consultation row. The engine routed CNA to the findings target and re-dispatched without asking anyone.
+**Key observation:** No consultation appears in the dispatch log at all. The engine routed CNA to the findings target and re-dispatched without asking anyone. The Auto and Auto-review Execution Logs are therefore identical in shape (both two rows); the difference is only in whether the dispatch log shows an intervening `orchestrator-script` consultation.
 
 **Inputs column check (Auto-review only):** Row 2 should show both `MosaicTestScript/findings-loop.md` AND `MosaicTestMarker.md`. The second path is the review artifact injection — the engine added the CNA row's output to the re-dispatch's inputs.
 
-**Inputs column check (Auto):** Row 3's inputs depend on whether the orchestrator's dispatch overrides `input_artifacts`. The routing fixture does not override them (`none`), so the table defaults apply — only `MosaicTestScript/findings-loop.md`.
+**Inputs column check (Auto):** Row 2's inputs depend on whether the orchestrator's dispatch overrides `input_artifacts`. The routing fixture does not override them (`none`), so the table defaults apply — only `MosaicTestScript/findings-loop.md`.
 
 ---
 
@@ -106,12 +103,13 @@ Three Orchestration.md log rows. The engine routes CNA automatically via `On Fin
 
 | Observation | Where to look |
 |---|---|
-| Auto-review run has a consultation row | The engine treated CNA as a deviation instead of auto-routing via On Findings — mode logic broken |
-| Auto run has NO consultation row | The engine auto-routed CNA in Auto mode — it should not; only Auto-review does this |
+| Auto-review run shows a consultation in the dispatch log | The engine treated CNA as a deviation instead of auto-routing via On Findings — mode logic broken |
+| Auto run shows NO consultation in the dispatch log | The engine auto-routed CNA in Auto mode — it should not; only Auto-review does this |
 | Second invocation returns CNA again instead of SUCCESS | The marker was not written on the first pass, or the marker check is broken |
 | Auto-review row 2 Inputs shows only the script (no marker) | Review artifact injection failed — the engine did not add the CNA output to the re-dispatch |
 | The run never completes, loops indefinitely | The marker is being reset between invocations, or On Success = COMPLETE is not being evaluated |
 | The stub stops with "no matching rule" (Auto mode) | The routing fixture does not cover the state the orchestrator was consulted in |
+| An `orchestrator-script` row appears in `Orchestration.md` (either mode) | Consultations must leave no row in the artifact; a routing consultation wrongly called `Store.Apply` or allocated a `Seq` |
 
 ---
 

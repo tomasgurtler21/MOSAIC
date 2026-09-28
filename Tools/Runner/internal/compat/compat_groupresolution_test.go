@@ -8,6 +8,7 @@ import (
 	"testing"
 
 	"mosaic-run/internal/compat"
+	"mosaic-run/internal/domain"
 )
 
 // ---- Execution group resolution: brownfield-tdd-build-verified ----
@@ -113,7 +114,7 @@ func TestAdmit_BrownfieldTDDBuildVerified_GroupsCoverAllExecutionRows(t *testing
 func TestAdmit_BrownfieldTDDBuildVerified_DuplicateAgent_Allowed(t *testing.T) {
 	table := mustParseTable(t, brownfieldBuildVerifiedContent, "brownfield-tdd-build-verified", "2.0")
 
-	_, err := compat.Admit(table)
+	_, err := compat.Admit(table, domain.ExecutionModeAuto)
 
 	if err != nil {
 		t.Errorf("Admit must allow duplicate agent identifiers (build-review appears twice): %v", err)

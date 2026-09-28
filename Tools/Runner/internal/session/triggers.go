@@ -55,6 +55,10 @@ func lastInfraSeqInLog(agentName string, log []domain.ExecutionLogEntry) int {
 // rowIdx is the routing table row index of the completed step. admitted and
 // stages are the admitted workflow and stage set, used for prospective look-ahead
 // in STAGE_END and PHASE_END evaluation.
+//
+// STAGE_END and PHASE_END additionally require that the completed step returned
+// SUCCESS and that hitlAccepted is true (the step passed HITL verification
+// where HITL applies). Interval and manual triggers ignore both conditions.
 func infraTriggerFires(
 	trigger domain.DeclaredInfraTrigger,
 	currentSeq int,
@@ -64,6 +68,7 @@ func infraTriggerFires(
 	rowIdx int,
 	admitted domain.AdmittedWorkflow,
 	stages *domain.StageSet,
+	hitlAccepted bool,
 ) bool {
 	switch trigger.Trigger {
 	case "INVOCATION_INTERVAL":
@@ -79,6 +84,9 @@ func infraTriggerFires(
 		return (currentSeq - lastSeq) >= param
 
 	case "STAGE_END":
+		if !boundaryConditionsMet(completedStep, hitlAccepted) {
+			return false
+		}
 		// Prospective semantics: fires when the completed step is the last
 		// step of its stage (look-ahead), not by comparing against a prior step.
 		// STAGE_END only applies to EXECUTION-phase steps (Stage != "").
@@ -92,6 +100,9 @@ func infraTriggerFires(
 		return engine.IsLastRowOfStage(admitted, stages, rowIdx, stageNum)
 
 	case "PHASE_END":
+		if !boundaryConditionsMet(completedStep, hitlAccepted) {
+			return false
+		}
 		// Prospective semantics: fires when the completed step is the last
 		// step of its phase (look-ahead), not by comparing against a prior step.
 		_, stageNum, _ := domain.ParseStageValue(completedStep.Stage)
@@ -106,10 +117,22 @@ func infraTriggerFires(
 	}
 }
 
+// boundaryConditionsMet reports whether a completed step qualifies to fire
+// STAGE_END or PHASE_END: its routed status must be SUCCESS and it must have
+// been accepted by HITL verification. Rejected attempts and non-SUCCESS
+// routed outcomes never fire; a gate-discharging re-dispatch is judged by the
+// original attempt's status.
+func boundaryConditionsMet(step domain.CompletedStep, hitlAccepted bool) bool {
+	return hitlAccepted && step.RoutedStatus() == domain.StatusSUCCESS
+}
+
 // evaluateTriggers checks all declared infrastructure agent triggers against
 // the current artifact state after a workflow step completes. Agents are
 // evaluated in declaration order; each agent fires at most once per
 // evaluation even if multiple triggers match.
+//
+// hitlAccepted carries the HITL verification outcome of completedStep; it gates
+// STAGE_END and PHASE_END only.
 //
 // Dispatch is performed synchronously: each matching agent's invocation
 // completes (including its Execution Log row via Store.Apply) before the
@@ -136,6 +159,7 @@ func (s *sessionImpl) evaluateTriggers(
 	rowIdx int,
 	admitted domain.AdmittedWorkflow,
 	stages *domain.StageSet,
+	hitlAccepted bool,
 ) (haltRun bool, stopRequested bool, reviewConsult *reviewConsultSignal, err error) {
 	var reviewSignal *reviewConsultSignal
 	for _, agent := range declared {
@@ -163,7 +187,7 @@ func (s *sessionImpl) evaluateTriggers(
 		// per evaluation pass even if multiple triggers match.
 		fired := false
 		for _, trigger := range agent.Triggers {
-			if infraTriggerFires(trigger, *seq, state.ExecutionLog, agent.Name, completedStep, rowIdx, admitted, stages) {
+			if infraTriggerFires(trigger, *seq, state.ExecutionLog, agent.Name, completedStep, rowIdx, admitted, stages, hitlAccepted) {
 				fired = true
 				break
 			}

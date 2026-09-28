@@ -67,7 +67,12 @@ func executeRun(ctx context.Context, cmd *cobra.Command, store domain.ArtifactSt
 	// new or resumed, and for a resumed run its recorded position.
 	fmt.Fprintln(out, runselect.Announce(announceIdentity(resolvedRunID, resolvedRunFolder, resolvedIsNewRun, resolvedPosition)))
 
-	parsedMode, code, ok := parseModeFlag(f.mode, errOut)
+	parsedMode, code, ok := parseModeForRun(f, resolvedIsNewRun, needsRunnerAdoption(resolvedRunFolder, resolvedIsNewRun), errOut)
+	if !ok {
+		return code
+	}
+
+	reviewLoopLimit, code, ok := parseReviewLoopLimitFlag(f, resolvedIsNewRun, errOut)
 	if !ok {
 		return code
 	}
@@ -80,6 +85,11 @@ func executeRun(ctx context.Context, cmd *cobra.Command, store domain.ArtifactSt
 	parsedCommitBranch, code, ok := parseCommitBranchFlag(f.commitBranch, commitsEnabled, errOut)
 	if !ok {
 		return code
+	}
+
+	if commitSetupPending(resolvedRunFolder, resolvedIsNewRun) && !f.commitBranchChanged {
+		fmt.Fprintln(errOut, "error: --commit-branch is required to retry commit setup on this run (mosaic-owned|user-own)")
+		return ExitUsage
 	}
 
 	infraClassSelections, code, ok := parseInfraClassFlag(f.infraClass, errOut)
@@ -105,6 +115,15 @@ func executeRun(ctx context.Context, cmd *cobra.Command, store domain.ArtifactSt
 		parsedCommitBranch:   parsedCommitBranch,
 		infraClassSelections: infraClassSelections,
 		infrastructureFilter: infrastructureFilter,
+		reviewLoopLimit:      reviewLoopLimit,
+		supplied: domain.SuppliedSettings{
+			Mode:                 f.modeChanged,
+			PreConsultation:      f.preConsultChanged,
+			ManualResolution:     f.manualResolutionChanged,
+			ReviewLoopLimit:      f.reviewLoopLimitChanged,
+			InfraClassSelections: f.infraClassChanged,
+			CommitBranchVariant:  f.commitBranchChanged,
+		},
 	})
 
 	return runSessionAndReport(ctx, config, store, sess, out, errOut, resolvedRunFolder)

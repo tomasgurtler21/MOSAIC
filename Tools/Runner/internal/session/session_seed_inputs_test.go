@@ -156,7 +156,7 @@ func TestSession_Start_Resume_SeedInputsPopulated_ValidationAndCopySkipped(t *te
 	}})
 
 	cfg := baseLinearConfig(orchPath)
-	cfg.IsNewRun = false
+	markResume(&cfg)
 	// A non-existent path: would refuse the run if validation ran on resume.
 	cfg.SeedInputs = []string{filepath.Join(t.TempDir(), "does-not-exist.md")}
 

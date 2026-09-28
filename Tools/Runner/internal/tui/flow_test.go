@@ -6,6 +6,7 @@ package tui
 // These tests use the model/update cycle with no real terminal.
 
 import (
+	"strings"
 	"context"
 	"testing"
 
@@ -374,6 +375,7 @@ func TestFlow_ConfigScreen_InfraClassStep_PopulatesInfraClassSelections(t *testi
 		driveConfigStepEnter(s) // infra-class: select first option
 	}
 
+	acceptReviewLoopLimitIfAsked(s)
 	if !s.Done() {
 		t.Fatal("ConfigScreen did not reach Done() after driving through all expected steps")
 	}
@@ -430,6 +432,7 @@ func TestFlow_ConfigScreen_InfraClassStep_SkippedWhenSingleAgentPerClass(t *test
 	driveConfigStepEnter(s)   // checkpoints
 	driveConfigStepEnter(s)   // manual-resolution (always shown; accept default disabled)
 
+	acceptReviewLoopLimitIfAsked(s)
 	if !s.Done() {
 		t.Error("ConfigScreen did not reach Done() after the standard steps; configStepInfraClass must be skipped when only one agent per gated class is declared")
 	}
@@ -445,6 +448,15 @@ func TestFlow_ConfigScreen_InfraClassStep_SkippedWhenSingleAgentPerClass(t *test
 // driveConfigStepEnter sends one Enter key press to the ConfigScreen.
 func driveConfigStepEnter(s *runconfig.ConfigScreen) {
 	s.Update(tea.KeyMsg{Type: tea.KeyEnter})
+}
+
+// acceptReviewLoopLimitIfAsked accepts the suggested review loop limit when the
+// wizard is showing that prompt (a new run asks it as its last prompt), so
+// flows driven to completion do not depend on it.
+func acceptReviewLoopLimitIfAsked(s *runconfig.ConfigScreen) {
+	if !s.Done() && strings.Contains(strings.ToLower(s.View()), "review loop limit") {
+		driveConfigStepEnter(s)
+	}
 }
 
 // driveConfigStepTimeout types a valid invocation timeout ("30m") into the

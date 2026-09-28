@@ -77,13 +77,13 @@ Auto mode with all-SUCCESS workflow steps needs no orchestrator consultation (ex
 > (after stage 2's step) and the second never fires at all. Do not "fix" this file to match the
 > current output; the gap it exposes is the point.
 
-Eight dispatches total. Infrastructure agents fire in catalog order (alphabetical by key):
-checkpoint before commit.
+Seven Orchestration.md log rows plus one pre-run consultation. Infrastructure agents fire in
+catalog order (alphabetical by key): checkpoint before commit. Pre-consultation dispatches to the
+orchestrator but allocates no `Seq` and leaves no row — it surfaces only in the dispatch log.
 
 | Log `Seq` | `Agent` | Kind | `Phase` | `Status` | `Summary` shows |
 |:---:|---|---|---|---|---|
-| 0 | `mosaictest-commit#1` | commit setup | -- | SUCCESS | `[branch:mosaictest-run]` marker |
-| 1 | `orchestrator-script#pre_consultation#1` | consultation | -- | "" | pre-run consultation response |
+| 1 | `mosaictest-commit#1` | commit setup | -- | SUCCESS | `[branch:mosaictest-run]` marker |
 | 2 | `mosaictest-scripted#2` | workflow step | EXECUTION.1 | SUCCESS | stage 1 row, wrote Stage-1/MosaicTestStage.md |
 | 3 | `mosaictest-checkpoint#3` | infra trigger | -- | SUCCESS | STAGE_END at end of stage 1, `[checkpoint:...]` marker |
 | 4 | `mosaictest-commit#4` | infra trigger | -- | SUCCESS | STAGE_END at end of stage 1, `[branch:mosaictest-run]` marker |
@@ -94,11 +94,12 @@ checkpoint before commit.
 **Run outcome:** COMPLETE. All workflow steps succeed, both STAGE_END boundaries fire.
 
 **Key observations:**
-- Seq 0 is the commit setup dispatch — before any workflow step *and* before pre-consultation.
+- Seq 1 is the commit setup dispatch — before any workflow step *and* before pre-consultation.
   Per Design.md §4.2 the setup dispatch is run-start step 7a, while pre-consultation follows
   artifact creation (step 8) because its request carries the artifact path. This ordering is
   correct today and is **not** part of the pending fix. The artifact's `commit_branch` field
-  should read `mosaictest-run`.
+  should read `mosaictest-run`. Pre-consultation itself allocates no `Seq` and leaves no row, so
+  the first workflow step is `mosaictest-scripted#2`, immediately following the commit setup row.
 - **Each infra pair straddles a stage boundary.** Seq 3/4 fire after stage 1's step and before
   stage 2's step; Seq 6/7 fire after stage 2's step. This is what makes per-stage commits
   meaningful: the commit at Seq 4 sees only stage 1's files, and the commit at Seq 7 sees only
@@ -121,7 +122,8 @@ checkpoint before commit.
 |---|---|
 | Run refuses to start with "no commit-class infrastructure agent" | Infrastructure agents were not deployed — check deploy tool output for silent infra agent skip (ToolingGaps.md GAP-1) |
 | Run refuses with "checkpoints requested but no checkpoint provider" | Same as above — checkpoint agent missing from deployment |
-| Seq 0 missing (no commit setup row) | The commit setup dispatch did not fire; check `session.go` doCommitSetupDispatch |
+| Seq 1 missing (no commit setup row) | The commit setup dispatch did not fire; check `session.go` doCommitSetupDispatch |
+| An `orchestrator-script` row appears in `Orchestration.md` | Consultations must leave no row in the artifact; pre-consultation wrongly called `Store.Apply` or allocated a `Seq` |
 | Commit setup fires but `commit_branch` is empty | The `[branch:mosaictest-run]` marker was not extracted from the stub's response |
 | Only one infra pair, firing after stage 2's step | **The known gap this fixture exposes.** `STAGE_END` still compares backwards against the previous step's stage. See `Issue-Runner-TerminalStageEndTrigger.md` |
 | Two pairs, but both after stage 2's step | A terminal evaluation was added without fixing the timing — the last stage now fires, but the first commit still sweeps up both stages' files. Half a fix |

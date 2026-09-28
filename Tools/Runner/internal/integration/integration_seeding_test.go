@@ -97,6 +97,7 @@ func TestIntegration_Seeding_SingleFile_PresentBeforeFirstDispatch(t *testing.T)
 	})
 
 	cfg := domain.RunConfig{
+		RunID: integrationRunID,
 		OrchestratorFilePath: orchPath,
 		WorkflowID:           "linear",
 		Task:                 "test task",
@@ -180,6 +181,7 @@ func TestIntegration_Seeding_DirectorySource_FilesAtCorrectRelativePaths(t *test
 	})
 
 	cfg := domain.RunConfig{
+		RunID: integrationRunID,
 		OrchestratorFilePath: orchPath,
 		WorkflowID:           "linear",
 		Task:                 "test task",
@@ -273,6 +275,7 @@ func TestIntegration_Seeding_MultipleSources_AllFilesPresent(t *testing.T) {
 	})
 
 	cfg := domain.RunConfig{
+		RunID: integrationRunID,
 		OrchestratorFilePath: orchPath,
 		WorkflowID:           "linear",
 		Task:                 "test task",
@@ -373,6 +376,7 @@ func TestIntegration_Seeding_StagedWorkflow_SeededStageTable_DispatchesFirstAtte
 	})
 
 	cfg := domain.RunConfig{
+		RunID: integrationRunID,
 		OrchestratorFilePath: orchPath,
 		WorkflowID:           "staged",
 		Task:                 "task",

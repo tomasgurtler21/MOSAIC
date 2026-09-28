@@ -249,8 +249,8 @@ func TestValidate_InjectionInWrongParent_IssueSeverityIsAdvice(t *testing.T) {
 	// Stage 2. A misplaced injection harms nobody and destroys nothing; it must not
 	// fail validation.
 	//
-	// Fixture: wrong-parent.md has [[INJECTION:IdentityExtension]] inside Capabilities
-	// (advisory parent is Identity).
+	// Fixture: wrong-parent.md has [[INJECTION:CodebaseContext]] inside Identity
+	// (advisory parent is Capabilities).
 	doc := boundaryMalformedFixture(t, "wrong-parent.md")
 
 	issues := docformat.Validate(doc, docformat.ValidateOptions{
@@ -292,10 +292,10 @@ func TestValidate_InjectionInWrongParent_NoSeverityErrorIssueProduced(t *testing
 }
 
 func TestValidate_InjectionAtTopLevel_WrongParent_IssueSeverityIsAdvice(t *testing.T) {
-	// An advisory injection (IdentityExtension) appearing at body top level instead of
-	// inside Identity produces "wrong-parent" at SeverityAdvice, never SeverityError.
+	// An advisory injection (CodebaseContext) appearing at body top level instead of
+	// inside Capabilities produces "wrong-parent" at SeverityAdvice, never SeverityError.
 	//
-	// Fixture: injection-outside-section.md has [[INJECTION:IdentityExtension]] with no
+	// Fixture: injection-outside-section.md has [[INJECTION:CodebaseContext]] with no
 	// enclosing section.
 	doc := boundaryMalformedFixture(t, "injection-outside-section.md")
 
@@ -318,7 +318,7 @@ func TestValidate_DeployedInWrongParent_StillReportsSeverityError(t *testing.T) 
 	// A misplaced [[DEPLOYED:]] region must still produce "wrong-parent" at SeverityError.
 	// The advisory downgrade in Stage 3 applies only to [[INJECTION:]] regions.
 	//
-	// Fixture: deployed-outside-required-parent.md has [[DEPLOYED:ProtocolConstraints]]
+	// Fixture: deployed-outside-required-parent.md has [[DEPLOYED:HarnessConstraints]]
 	// inside Identity (requires Constraints parent).
 	doc := parsedBoundaryFixture(t, "malformed/deployed-outside-required-parent.md")
 

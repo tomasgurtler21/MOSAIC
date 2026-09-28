@@ -52,6 +52,32 @@ type RefusalError struct {
 	Component string // which component refused (e.g. "orchfile", "compat", "artifact")
 	Resource  string // what was being examined (file path, workflow id, row index)
 	Reason    string // specific condition (e.g. "no version comment", "forward dependency")
+	Cause     error  // optional underlying cause; exposed through Unwrap
+}
+
+// Unwrap returns the optional underlying cause.
+func (e *RefusalError) Unwrap() error { return e.Cause }
+
+// RunIdentityProblem names why an artifact's run identity is unusable.
+type RunIdentityProblem string
+
+const (
+	RunIdentityAbsent         RunIdentityProblem = "absent"
+	RunIdentityEmpty          RunIdentityProblem = "empty"
+	RunIdentityMalformed      RunIdentityProblem = "malformed"
+	RunIdentityFolderMismatch RunIdentityProblem = "folder-mismatch"
+)
+
+// RunIdentityError names why an artifact's run identity is unusable. It is
+// carried as the Cause of a *RefusalError.
+type RunIdentityError struct {
+	Problem RunIdentityProblem
+	RunID   string // as found ("" when absent/empty)
+	Folder  string // enclosing folder base name; set for folder-mismatch
+}
+
+func (e *RunIdentityError) Error() string {
+	return fmt.Sprintf("run identity %s: %q", e.Problem, e.RunID)
 }
 
 func (e *RefusalError) Error() string {

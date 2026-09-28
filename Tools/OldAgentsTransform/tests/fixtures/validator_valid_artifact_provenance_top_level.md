@@ -10,8 +10,6 @@ description: Valid file - ArtifactProvenance as top-level DEPLOYED boundary with
 
 You are the TestAgent agent.
 
-<IdentityExtension type="project">
-</IdentityExtension>
 
 </Identity>
 

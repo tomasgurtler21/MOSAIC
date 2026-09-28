@@ -1,6 +1,5 @@
 // Package protocolcheck validates Communication Protocol messages —
-// invocations and responses — against a targeted protocol version and
-// counts violations by class.
+// invocations and responses — and counts violations by class.
 //
 // Pure — no I/O. Applicable both to collaborator messages and to the
 // subject's own final message, since the subagent layer's validation rule
@@ -14,10 +13,6 @@ import (
 
 	"mosaic-agent-test/internal/domain"
 )
-
-// Version identifies the Communication Protocol version being validated
-// against, so a protocol revision is a parameter rather than a rewrite.
-type Version string
 
 // validStatusCodes are the status codes the Communication Protocol defines.
 // A status code outside this set is ViolationInventedStatusCode.
@@ -51,7 +46,7 @@ var requiredInvocationFields = []string{"agent_instance_id", "run_id", "task_des
 var requiredResponseFields = []string{"agent_instance_id", "run_id", "status_code", "status_message"}
 
 // CheckInvocation validates a task invocation message.
-func CheckInvocation(raw string, v Version) Result {
+func CheckInvocation(raw string) Result {
 	fields, bare, err := extractMessage(raw)
 	if err != nil {
 		return Result{Parsed: false, Violations: []Violation{{Class: ViolationUnparseable, Detail: err.Error()}}}
@@ -72,7 +67,7 @@ func CheckInvocation(raw string, v Version) Result {
 // protocol rule — result_data may appear only when it was requested — is
 // not decidable from the response text alone. A response cannot
 // self-report whether it was asked for a summary.
-func CheckResponse(raw string, v Version, req ResponseContext) Result {
+func CheckResponse(raw string, req ResponseContext) Result {
 	fields, bare, err := extractMessage(raw)
 	if err != nil {
 		return Result{Parsed: false, Violations: []Violation{{Class: ViolationUnparseable, Detail: err.Error()}}}

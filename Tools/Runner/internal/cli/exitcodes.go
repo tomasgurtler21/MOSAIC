@@ -29,4 +29,8 @@ const (
 	// instruction, or an orchestrator failure ended the run. The artifact is left
 	// resumable; the caller may retry with --run <run_id>.
 	ExitStoppedByConsultant = 6
+
+	// ExitStartFailed indicates commit setup or pre-consultation failed after
+	// the artifact was created. The artifact is kept; resuming retries the step.
+	ExitStartFailed = 7
 )

@@ -217,6 +217,9 @@ func TestResolve_Question_UnresumableRunsShownButNotSelectable(t *testing.T) {
 	if found.Reason != runscan.ReasonCompleted {
 		t.Errorf("Reason = %q, want %q", found.Reason, runscan.ReasonCompleted)
 	}
+	if found.Detail != "" {
+		t.Errorf("Detail = %q, want empty for a reason other than invalid run identity", found.Detail)
+	}
 }
 
 // ---------------------------------------------------------------------------
@@ -401,5 +404,102 @@ func TestResolve_NewRun_LeavesExistingRunFoldersUntouched(t *testing.T) {
 	}
 	if !infoBefore.ModTime().Equal(infoAfter.ModTime()) {
 		t.Errorf("existing artifact mtime changed: before=%v after=%v", infoBefore.ModTime(), infoAfter.ModTime())
+	}
+}
+
+// ---------------------------------------------------------------------------
+// Run identity: refused runs are shown and named, never offered or resolved
+// ---------------------------------------------------------------------------
+
+const invalidIdentityDetail = "run_id is malformed"
+
+func invalidIdentityRun(runID, folder string) runscan.UnresumableRun {
+	u := unresumable(runID, folder)
+	u.Phase = "EXECUTION"
+	u.Reason = runscan.ReasonInvalidRunIdentity
+	u.Detail = invalidIdentityDetail
+	return u
+}
+
+func TestResolve_Question_InvalidRunIdentityShownWithDetailAndNotSelectable(t *testing.T) {
+	const badID = "20260601T090000Z-1234"
+	mint, _ := countingMinter()
+	dec, err := runselect.Resolve(runselect.Request{
+		Scan: runscan.ScanResult{
+			Unresumable: []runscan.UnresumableRun{
+				invalidIdentityRun(badID, "/work/Orchestration-"+badID),
+			},
+		},
+		WorkDir: testWorkDir,
+	}, mint)
+	if err != nil {
+		t.Fatalf("Resolve error = %v, want nil", err)
+	}
+	if dec.Question == nil {
+		t.Fatal("Decision.Question = nil, want non-nil")
+	}
+
+	var found *runselect.Choice
+	for i := range dec.Question.Choices {
+		if dec.Question.Choices[i].ID == badID {
+			found = &dec.Question.Choices[i]
+		}
+	}
+	if found == nil {
+		t.Fatal("run with an invalid identity is missing from Question.Choices; it must surface as refused, not disappear")
+	}
+	if found.Selectable {
+		t.Error("run with an invalid identity must not be Selectable")
+	}
+	if found.Reason != runscan.ReasonInvalidRunIdentity {
+		t.Errorf("Reason = %q, want %q", found.Reason, runscan.ReasonInvalidRunIdentity)
+	}
+	if found.Detail != invalidIdentityDetail {
+		t.Errorf("Detail = %q, want the refusal reason %q", found.Detail, invalidIdentityDetail)
+	}
+}
+
+func TestResolve_RunIDFlag_TargetingInvalidRunIdentity_UsageErrorNamesTheProblem(t *testing.T) {
+	const badID = "20260601T090000Z-1234"
+	mint, _ := countingMinter()
+	_, err := runselect.Resolve(runselect.Request{
+		Scan: runscan.ScanResult{
+			Unresumable: []runscan.UnresumableRun{
+				invalidIdentityRun(badID, filepath.Join(testWorkDir, domain.RunScopedFolder(badID))),
+			},
+		},
+		WorkDir:   testWorkDir,
+		RunIDFlag: badID,
+	}, mint)
+	if err == nil {
+		t.Fatal("Resolve(--run targeting a run with an invalid identity) returned nil error, want a usage error")
+	}
+	if !errors.Is(err, runselect.ErrUsage) {
+		t.Errorf("error %v does not wrap runselect.ErrUsage", err)
+	}
+	if !strings.Contains(err.Error(), invalidIdentityDetail) {
+		t.Errorf("error %q does not name the problem %q", err.Error(), invalidIdentityDetail)
+	}
+}
+
+func TestAnswer_InvalidRunIdentityChoice_IsNotResolved(t *testing.T) {
+	const badID = "20260601T090000Z-1234"
+	q := runselect.Question{Choices: []runselect.Choice{
+		{ID: runselect.NewRunChoiceID, Kind: runselect.ChoiceNewRun, Selectable: true},
+		{ID: badID, Kind: runselect.ChoiceUnresumable, Selectable: false,
+			Reason: runscan.ReasonInvalidRunIdentity, Detail: invalidIdentityDetail},
+	}}
+	mint, calls := countingMinter()
+
+	_, err := runselect.Answer(q, badID, mint)
+
+	if err == nil {
+		t.Fatal("Answer(choice with an invalid identity) returned nil error, want a refusal")
+	}
+	if !strings.Contains(err.Error(), invalidIdentityDetail) {
+		t.Errorf("error %q does not name the problem %q", err.Error(), invalidIdentityDetail)
+	}
+	if *calls != 0 {
+		t.Errorf("mint called %d times, want 0 (a refused run must never be replaced by a minted identity)", *calls)
 	}
 }

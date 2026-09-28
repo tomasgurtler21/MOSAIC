@@ -3,7 +3,8 @@ package session_test
 // Tests for HITL verification in the dispatch loop: accepted compliant results,
 // single automatic redispatch on first non-compliance, escalation to deviation
 // on second non-compliance, and the skip conditions (effective HITL false,
-// non-SUCCESS status, empty output artifact list).
+// empty output artifact list). The gate applies to every response status; the
+// non-SUCCESS and written-output cases live in session_written_outputs_test.go.
 
 import (
 	"context"
@@ -188,27 +189,12 @@ func TestSession_HITL_SkippedWhenEffectiveHITLFalse(t *testing.T) {
 	// ApprovalReader that always returns ApprovalFalse. If HITL were erroneously
 	// applied, the run would redispatch agent-a. With HITL=false, the run
 	// completes normally.
-	ses, f, _, orchPath := newLinearSession(t)
-
-	f.Queue("agent-a", harness.ScriptedEntry{Response: &domain.ProtocolResponse{
-		AgentInstanceID: "agent-a#1",
-		StatusCode:      domain.StatusSUCCESS,
-		StatusMessage:   "done",
-	}})
-	f.Queue("agent-b", harness.ScriptedEntry{Response: &domain.ProtocolResponse{
-		AgentInstanceID: "agent-b#2",
-		StatusCode:      domain.StatusSUCCESS,
-		StatusMessage:   "done",
-	}})
-
 	// Build a session that would fail HITL if it were checked.
 	dir := t.TempDir()
 	orchPath2 := copyOrchestratorFile(t, dir, "linear-orch.md")
 	writeAgentFile(t, dir, "agent-a")
 	writeAgentFile(t, dir, "agent-b")
 	f2 := harness.NewMockAdapter()
-	_ = ses
-	_ = orchPath
 	ses2 := session.New(session.Deps{
 		Harness:   f2,
 		Store:     &memStore{},
@@ -245,98 +231,6 @@ func TestSession_HITL_SkippedWhenEffectiveHITLFalse(t *testing.T) {
 	if f2.RemainingQueueSize() != 0 {
 		t.Errorf("want all queued responses consumed (no HITL redispatch for HITL=false rows), "+
 			"got %d unconsumed entries", f2.RemainingQueueSize())
-	}
-}
-
-// TestSession_HITL_SkippedWhenStatusNotSuccess verifies that HITL compliance
-// verification is skipped for non-SUCCESS results. A BLOCKED result from an
-// agent whose HITL is true must not trigger a HITL redispatch.
-//
-// Correct sequence:
-//  1. Consultant dispatches agent-a "first" → BLOCKED → HITL skipped (non-SUCCESS) → deviation
-//  2. Consultant re-dispatches agent-a "retry after BLOCKED" → SUCCESS → HITL fires (correct:
-//     Status==SUCCESS, EffectiveHITL=true) → ApprovalFalse → one automatic redispatch
-//  3. HITL redispatch of "retry after BLOCKED" → SUCCESS → ApprovalFalse → second non-compliant
-//     → escalation treated as deviation → consultant dispatches agent-b
-//
-// The definitive signal that HITL was NOT applied to the BLOCKED result is the
-// task description carried by the 2nd agent-a invocation: it must be
-// "retry after BLOCKED" (the consultant's re-dispatch), not "first" (which would
-// indicate an intervening HITL-triggered redispatch of the BLOCKED result).
-func TestSession_HITL_SkippedWhenStatusNotSuccess(t *testing.T) {
-	consultant := &scriptedRoutingConsultant{}
-	// Consultant dispatches agent-a twice: original and retry after BLOCKED.
-	// After the retry's HITL-redispatch chain escalates to a deviation, the
-	// consultant dispatches agent-b and then stops.
-	consultant.queueDispatch("agent-a", "first", 0)
-	consultant.queueDispatch("agent-a", "retry after BLOCKED", 0)
-	consultant.queueDispatch("agent-b", "proceed", 1)
-	consultant.queueStop("done")
-
-	// ApprovalFalse for all artifacts. If HITL incorrectly fires on the BLOCKED
-	// result it produces a same-task redispatch before the consultant's retry,
-	// making the 2nd agent-a invocation carry task "first" instead of
-	// "retry after BLOCKED".
-	ses, f, _, orchPath := newHITLLinearSession(t, consultant, &fixedApprovalReader{domain.ApprovalFalse})
-
-	// Call 1: BLOCKED (non-SUCCESS) — HITL must be skipped.
-	f.Queue("agent-a", harness.ScriptedEntry{Response: &domain.ProtocolResponse{
-		AgentInstanceID: "agent-a#1",
-		StatusCode:      domain.StatusBLOCKED,
-		StatusMessage:   "blocked",
-	}})
-	// Call 2 (consultant redispatch "retry after BLOCKED"): SUCCESS. HITL
-	// correctly fires here because Status==SUCCESS and EffectiveHITL=true.
-	f.Queue("agent-a", harness.ScriptedEntry{Response: &domain.ProtocolResponse{
-		AgentInstanceID: "agent-a#2",
-		StatusCode:      domain.StatusSUCCESS,
-		StatusMessage:   "done",
-	}})
-	// Call 3: automatic HITL redispatch of the "retry after BLOCKED" SUCCESS
-	// (one allowed redispatch per step). ApprovalFalse again → second
-	// non-compliant → escalation to deviation → consultant dispatches agent-b.
-	f.Queue("agent-a", harness.ScriptedEntry{Response: &domain.ProtocolResponse{
-		AgentInstanceID: "agent-a#3",
-		StatusCode:      domain.StatusSUCCESS,
-		StatusMessage:   "done again",
-	}})
-	f.Queue("agent-b", harness.ScriptedEntry{Response: &domain.ProtocolResponse{
-		AgentInstanceID: "agent-b#4",
-		StatusCode:      domain.StatusSUCCESS,
-		StatusMessage:   "done",
-	}})
-
-	ses.Start(context.Background(), baseOrchestratedConfig(orchPath)) //nolint:errcheck
-
-	// Collect agent-a invocations in call order.
-	var agentAInvocations []harness.Invocation
-	for _, inv := range f.Invocations() {
-		if inv.Agent.Identifier == "agent-a" {
-			agentAInvocations = append(agentAInvocations, inv)
-		}
-	}
-
-	// Exactly 3 agent-a invocations are expected: the BLOCKED original, the
-	// consultant's "retry after BLOCKED", and the automatic HITL redispatch of
-	// that retry. A count of 4+ indicates HITL incorrectly fired on the BLOCKED
-	// result (producing an extra same-task redispatch before the consultant's retry).
-	if got := len(agentAInvocations); got != 3 {
-		t.Errorf("want exactly 3 agent-a dispatches "+
-			"(BLOCKED original + consultant retry + HITL-redispatch-of-retry), got %d", got)
-	}
-
-	// The 2nd agent-a invocation must carry the consultant's task description,
-	// not the original "first". If HITL incorrectly fired on the BLOCKED result,
-	// it would insert a same-task redispatch ("first") as invocation #2, pushing
-	// the consultant's retry to #3.
-	if len(agentAInvocations) >= 2 {
-		const wantTask = "retry after BLOCKED"
-		if got := agentAInvocations[1].Request.TaskDescription; got != wantTask {
-			t.Errorf("want 2nd agent-a invocation to carry consultant task %q "+
-				"(HITL was skipped for BLOCKED → deviation routed through consultant), "+
-				"got %q — HITL may have incorrectly fired on the BLOCKED result",
-				wantTask, got)
-		}
 	}
 }
 

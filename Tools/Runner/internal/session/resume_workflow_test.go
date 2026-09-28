@@ -173,6 +173,7 @@ func TestSession_Start_Resume_RecordedWorkflowResolves_IsNotRefused(t *testing.T
 	store := &memStore{
 		exists: true,
 		state: domain.ArtifactState{
+			RunID:           resumedRunID,
 			Workflow:        resolvableWorkflowID,
 			WorkflowVersion: "1.0", // matches the version linear-orch.md declares: no drift
 			Task:            "test task",

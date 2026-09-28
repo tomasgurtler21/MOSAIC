@@ -71,7 +71,7 @@ func TestSession_ConsultRoute_FallbackArtifacts_ResolvesTemplateTokens(t *testin
 	consultant.queueDispatch("agent-a", "re-route Stage-2/agent-a", 1)
 	consultant.queueStop("Stage-2/agent-a completed")
 
-	dir := t.TempDir()
+	dir := scopedTempDir(t)
 	orchPath := copyOrchestratorFile(t, dir, "consult-staged-artifacts-orch.md")
 	writeAgentFile(t, dir, "agent-a")
 	writeConsultStagedPlan(t, dir)
@@ -105,6 +105,7 @@ func TestSession_ConsultRoute_FallbackArtifacts_ResolvesTemplateTokens(t *testin
 		WorkflowID:           consultStagedArtsOrchName,
 		Task:                 "test task",
 		IsNewRun:             false,
+		RunID:               testRunID,
 		RunFolder:            dir,
 		RunSettings:          domain.RunSettings{Mode: domain.ExecutionModeAuto},
 	}
@@ -154,9 +155,9 @@ func TestSession_ConsultRoute_FallbackArtifacts_ResolvesTemplateTokens(t *testin
 		if s.IsInfrastructure || s.HITLRejected {
 			continue
 		}
-		for _, art := range s.OutputArtifacts {
+		for _, art := range s.WrittenArtifacts {
 			if strings.Contains(art, unresolved) {
-				t.Errorf("CompletedStep.OutputArtifacts[%q] contains unresolved "+
+				t.Errorf("CompletedStep.WrittenArtifacts[%q] contains unresolved "+
 					"template token %q; the CompletedStep must carry resolved artifact paths",
 					art, unresolved)
 			}
@@ -165,21 +166,11 @@ func TestSession_ConsultRoute_FallbackArtifacts_ResolvesTemplateTokens(t *testin
 }
 
 // TestSession_ConsultRoute_HarnessFailure_PersistsFailedAttemptRecord verifies
-// that when a harness invocation failure triggers a consultation (deviation path),
-// a CompletedStep capturing the failure's status and message is persisted to the
-// store before or around the consultation. This ensures the execution log always
-// has a record of every dispatch attempt, including those that fail before a
-// response is returned.
-//
-// With the current code, consultRoute's consultation record (consultStep)
-// hardcodes Status = domain.StatusSUCCESS and uses the outgoing task description
-// as Summary, discarding the failure information entirely. No separate record
-// of the failed attempt exists in store.Applied.
-//
-// After the D4 fix, a CompletedStep recording the failed attempt is persisted
-// (using the existing HITL-rejected-attempt pattern: IsInfrastructure=true,
-// Status from the deviation's response status, Summary from the deviation's
-// response message) so the execution log has a complete record.
+// that when a harness invocation failure triggers a consultation (deviation
+// path), a workflow CompletedStep with Status=BLOCKED and ErrorCode=E501 whose
+// Summary carries the failure message is persisted to the store. The execution
+// log therefore always has a record of every dispatch attempt, including those
+// that fail before a response is returned.
 func TestSession_ConsultRoute_HarnessFailure_PersistsFailedAttemptRecord(t *testing.T) {
 	const errMsg = "simulated invocation failure to verify D4 cause capture"
 
@@ -189,7 +180,7 @@ func TestSession_ConsultRoute_HarnessFailure_PersistsFailedAttemptRecord(t *test
 	consultant.queueDispatch("agent-a", "retry planning after harness failure", 0)
 	consultant.queueStop("planning complete")
 
-	dir := t.TempDir()
+	dir := scopedTempDir(t)
 	orchPath := copyOrchestratorFile(t, dir, "linear-orch.md")
 	writeAgentFile(t, dir, "agent-a")
 	writeAgentFile(t, dir, "agent-b")
@@ -226,30 +217,24 @@ func TestSession_ConsultRoute_HarnessFailure_PersistsFailedAttemptRecord(t *test
 		t.Fatalf("want nil error (harness error is a handled deviation), got %v", err)
 	}
 
-	// Primary assertion: store.Applied must contain at least one CompletedStep
-	// that captures the harness failure. This step must have:
-	//   - IsInfrastructure = true (so current_state is not updated by the failed attempt)
-	//   - Status != domain.StatusSUCCESS (the failure status, e.g. BLOCKED)
-	//   - Summary containing the error message (for traceability)
-	//
-	// With the current code, no such step exists: consultRoute writes only a
-	// consultStep with Status=SUCCESS and Summary=task description, discarding
-	// the failure info. The test fails (RED) because the infrastructure step
-	// with non-SUCCESS status is absent from store.Applied.
+	// store.Applied must contain a workflow CompletedStep (neither
+	// infrastructure nor HITL rejected) with Status BLOCKED and ErrorCode E501
+	// whose Summary contains the error message (for traceability).
 	var failedAttemptStep *domain.CompletedStep
 	for i := range store.Applied {
 		s := &store.Applied[i]
-		if s.IsInfrastructure && s.Status != domain.StatusSUCCESS {
+		if !s.IsInfrastructure && !s.HITLRejected &&
+			s.Status == domain.StatusBLOCKED && s.ErrorCode == domain.ErrorTOOL_UNAVAILABLE {
 			cp := *s
 			failedAttemptStep = &cp
 			break
 		}
 	}
 	if failedAttemptStep == nil {
-		t.Error("want a CompletedStep in store.Applied with IsInfrastructure=true and " +
-			"Status != SUCCESS capturing the harness failure, got none; " +
-			"D4 fix must persist a record of the failed dispatch attempt before consultation " +
-			"so the execution log has a complete history of every dispatch attempt")
+		t.Error("want a workflow CompletedStep in store.Applied with Status=BLOCKED and " +
+			"ErrorCode=E501 capturing the harness failure, got none; " +
+			"a record of the failed dispatch attempt must be persisted so the " +
+			"execution log has a complete history of every dispatch attempt")
 	} else {
 		if !strings.Contains(failedAttemptStep.Summary, errMsg) {
 			t.Errorf("failed-attempt CompletedStep.Summary = %q; want it to contain "+

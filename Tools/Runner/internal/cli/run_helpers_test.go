@@ -5,6 +5,7 @@ import (
 	"context"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 	"time"
 
@@ -67,6 +68,14 @@ func (s *spyStore) SetPhase(_ context.Context, state domain.ArtifactState, phase
 	return state, nil
 }
 
+func (s *spyStore) SetCommitBranch(_ context.Context, _ string, _ time.Time) (domain.ArtifactState, error) {
+	panic("spyStore.SetCommitBranch: unexpected call in CLI tests")
+}
+
+func (s *spyStore) AdoptRunnerSettings(_ context.Context, _ domain.ExecutionMode, _, _ bool, _ time.Time) (domain.ArtifactState, error) {
+	panic("spyStore.AdoptRunnerSettings: unexpected call in CLI tests")
+}
+
 // runCLIWithStore is like runCLI but injects a real store (for T5.3 tests).
 func runCLIWithStore(t *testing.T, args []string, store domain.ArtifactStore, sess *scriptedSession) (exitCode int, stdout, stderr string) {
 	t.Helper()
@@ -85,6 +94,7 @@ func writeCompletedRunArtifact(t *testing.T, rootDir, runID string) string {
 	}
 	artifactContent := `---
 type: orchestration-artifact
+run_id: 20260727T170000Z-a3f9
 workflow: test-workflow
 workflow_version: "1.0"
 task: "test task"
@@ -111,6 +121,7 @@ current_state:
 | -------- | ---------- | ---------- |
 </Artifacts>
 `
+	artifactContent = strings.Replace(artifactContent, "run_id: 20260727T170000Z-a3f9", "run_id: "+runID, 1)
 	artifactPath := filepath.Join(folderPath, "Orchestration.md")
 	if err := os.WriteFile(artifactPath, []byte(artifactContent), 0600); err != nil {
 		t.Fatalf("writeCompletedRunArtifact: %v", err)
@@ -137,6 +148,7 @@ func writeResumableRunArtifact(t *testing.T, rootDir, runID string) string {
 	}
 	artifactContent := `---
 type: orchestration-artifact
+run_id: 20260727T170000Z-a3f9
 workflow: test-workflow
 workflow_version: "1.0"
 task: "test task"
@@ -163,6 +175,7 @@ current_state:
 | -------- | ---------- | ---------- |
 </Artifacts>
 `
+	artifactContent = strings.Replace(artifactContent, "run_id: 20260727T170000Z-a3f9", "run_id: "+runID, 1)
 	artifactPath := filepath.Join(folderPath, "Orchestration.md")
 	if err := os.WriteFile(artifactPath, []byte(artifactContent), 0600); err != nil {
 		t.Fatalf("writeResumableRunArtifact: %v", err)
@@ -181,6 +194,7 @@ func baseHarnessArgs() []string {
 		"--task", "do work",
 		"--mode", "auto",
 		"--new-run",
+		"--review-loop-limit", "3",
 	}
 }
 
@@ -225,5 +239,30 @@ func newStage7BaseArgs() []string {
 		"--task", "do work",
 		"--mode", "auto",
 		"--new-run",
+		"--review-loop-limit", "3",
 	}
+}
+
+// writeRunArtifactWithRunIDLine creates a resumable run folder for folderRunID
+// whose artifact carries exactly runIDLine as its run_id line ("" omits the
+// key), so identity problems can be authored directly. Returns the folder path.
+func writeRunArtifactWithRunIDLine(t *testing.T, rootDir, folderRunID, runIDLine string) string {
+	t.Helper()
+	path := writeResumableRunArtifact(t, rootDir, folderRunID)
+	data, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatalf("writeRunArtifactWithRunIDLine: %v", err)
+	}
+	replacement := runIDLine
+	if replacement != "" {
+		replacement += "\n"
+	}
+	edited := strings.Replace(string(data), "run_id: "+folderRunID+"\n", replacement, 1)
+	if edited == string(data) {
+		t.Fatalf("writeRunArtifactWithRunIDLine: run_id line not found in fixture")
+	}
+	if err := os.WriteFile(path, []byte(edited), 0600); err != nil {
+		t.Fatalf("writeRunArtifactWithRunIDLine: %v", err)
+	}
+	return filepath.Dir(path)
 }

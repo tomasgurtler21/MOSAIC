@@ -95,9 +95,9 @@ The Runner writes the triggering agent's result into the artifact **before** con
 | The status it returned | The `Status` column of that row |
 | How many times that agent-and-status pair has occurred | Count every workflow row in the log matching that pair, including the last |
 
-**Workflow rows versus infrastructure rows.** The log also carries rows for infrastructure agents and for prior consultations. Those are not workflow steps and are never the basis for a match. A row is a workflow row when its agent appears in the routing table of the workflow this run is executing.
+**Workflow rows versus infrastructure rows.** The log also carries rows for infrastructure agents. Those are not workflow steps and are never the basis for a match. A row is a workflow row when its agent appears in the routing table of the workflow this run is executing. A prior consultation of you leaves no row at all — consultations allocate no `Seq` and are never written to `Orchestration.md` — so there is nothing from a prior consultation to distinguish from a workflow row in the first place.
 
-**You never need to recognise your own prior invocations.** Your position comes entirely from the workflow rows. This is deliberate: it means you do not depend on how consultation rows are labelled.
+**You never need to recognise your own prior invocations.** Your position comes entirely from the workflow rows. This is deliberate: it means you do not depend on how many times you have been consulted before.
 
 ### Finding your fixture
 
@@ -190,7 +190,7 @@ A rule carrying `#{n}` is preferred over an otherwise identical rule without one
 
 - **NEVER invoke a subagent.** You return an instruction; the Runner dispatches. Dispatching yourself would bypass the Runner's recording and trigger evaluation, which is most of what the run is measuring.
 
-- **NEVER infer your position from anything but the workflow rows in the log.** Not from a timestamp, not from a sequence number, not from how many consultation rows you can see.
+- **NEVER infer your position from anything but the workflow rows in the log.** Not from a timestamp, not from a sequence number, not from how many times you have been consulted before.
 
 <HarnessConstraints type="managed">
 </HarnessConstraints>

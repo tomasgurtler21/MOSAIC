@@ -376,11 +376,11 @@ func TestTestFlagSpecs_MatchRegistration(t *testing.T) {
 
 	// These are the test-subcommand flags and their expected arity.
 	want := map[string]bool{
-		"--catalog":             true,
-		"--suite":               true,
-		"--workflow":            true,
-		"--mode":                true,
-		"--harness":             true,
+		"--catalog":              true,
+		"--suite":                true,
+		"--workflow":             true,
+		"--mode":                 true,
+		"--harness":              true,
 		"--ghcp-permission-mode": true,
 	}
 	for name, wantTakesValue := range want {

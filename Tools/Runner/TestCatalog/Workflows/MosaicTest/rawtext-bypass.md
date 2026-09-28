@@ -26,7 +26,7 @@ modes:
 - `mosaictest-wronganswer` has no Communication Protocol injection. It returns raw text, which the harness adapter cannot parse as a protocol response.
 - The harness error triggers the Runner's direct-redispatch bypass (FR-13). The same agent is redispatched once without consulting the orchestrator.
 - The bypass redispatch also returns raw text (the agent is structurally incapable of producing a valid response). The Runner then falls back to orchestrator consultation (FR-16).
-- The routing fixture matches `run-start` (no workflow rows exist, since neither invocation produced a parseable protocol response) and stops the run.
+- The routing fixture matches `after mosaictest-wronganswer BLOCKED #1` (the bypass redispatch's harness error is recorded as an accepted `BLOCKED`/`E501` workflow row) and stops the run.
 - Seed `Fixtures/rawtext-bypass` — the whole directory, not anything inside it.
 
 </Workflow>
@@ -47,29 +47,27 @@ The agent cannot read artifacts meaningfully (no protocol knowledge), and it nev
 
 After the bypass and its fallback both fail, the orchestrator is consulted. The agent is structurally incapable of producing valid output, so re-dispatching it from the routing fixture would create an infinite loop. Stopping is the only sensible fixture response, and it still proves the full path: harness error → bypass redispatch → bypass failure → consultation → stop.
 
-### Why run-start is the matching selector
+### Why the BLOCKED occurrence selector is the matching rule
 
-Neither the original dispatch nor the bypass redispatch produce a workflow row — they both fail at the harness level before a protocol response is parsed. Failed attempts are persisted as infrastructure rows, which are invisible to the orchestrator-script's state model. The orchestrator sees no workflow rows and matches `run-start`.
+Both the original dispatch and the bypass redispatch fail at the harness level before a protocol response is parsed, but each is still recorded as its own accepted `BLOCKED`/`E501` workflow row (D1-D2: harness errors are ordinary accepted workflow outcomes, built by `domain.HarnessErrorResponse`). The orchestrator therefore sees `mosaictest-wronganswer` with `BLOCKED` status after the second attempt and matches `after mosaictest-wronganswer BLOCKED #1`, the same occurrence-counting mechanism `deviation-blocked` and `deviation-chain` use.
 
 ---
 
 ## Expected Run
 
-Four dispatch-log entries (requests and responses). Two `mosaictest-wronganswer` invocations, one consultation.
+Four dispatch-log entries (requests and responses): a pre-run consultation, two `mosaictest-wronganswer` invocations, and a stop consultation. Both consultations dispatch to the orchestrator but allocate no `Seq` and leave no `Orchestration.md` row — each is a harness error, recorded via `HarnessErrorResponse` as an accepted `BLOCKED`/`E501` workflow row, its own `Seq`.
 
 | Log `Seq` | `Agent` | Kind | `Phase` | `Status` | `Summary` shows |
 |:---:|---|---|---|---|---|
-| 0 | `orchestrator-script#pre_consultation#1` | consultation | -- | "" | pre-run consultation response |
-| 1 | `mosaictest-wronganswer#1` | harness error | RESEARCH | (error) | raw text, no protocol response extractable |
-| 2 | `mosaictest-wronganswer#2` | harness error (bypass) | RESEARCH | (error) | raw text again, bypass exhausted |
-| 3 | `orchestrator-script#3` | consultation | -- | "" | stop instruction, `run-start` rule matched |
+| 1 | `mosaictest-wronganswer#1` | harness error | RESEARCH | BLOCKED/E501 | raw text, no protocol response extractable |
+| 2 | `mosaictest-wronganswer#2` | harness error (bypass) | RESEARCH | BLOCKED/E501 | raw text again, bypass exhausted |
 
 **Run outcome:** `RunStoppedByConsultant`, exit code 6. The routing fixture stops the run because the agent is structurally unable to produce a valid response.
 
 **Key observations:**
-- Two `mosaictest-wronganswer` invocations (Seq 1 and 2) prove the bypass fired: the first is the original auto-routed dispatch, the second is the direct redispatch without an intervening consultation.
-- The consultation at Seq 3 proves the fallback from bypass to orchestrator consultation worked.
-- No consultation between Seq 1 and Seq 2 proves the bypass skipped the consultation round-trip.
+- Two `mosaictest-wronganswer` invocations (Seq 1 and 2) prove the bypass fired: the first is the original auto-routed dispatch, the second is the direct redispatch without an intervening consultation. Each harness error is recorded as its own accepted `BLOCKED`/`E501` row (D2), so `current_state` reflects the second attempt's failure.
+- The dispatch log shows an `orchestrator-script` consultation after Seq 2, proving the fallback from bypass to orchestrator consultation worked. It leaves no `Orchestration.md` row and consumes no `Seq`.
+- No consultation appears in the dispatch log between Seq 1 and Seq 2, proving the bypass skipped the consultation round-trip.
 
 ---
 
@@ -79,9 +77,10 @@ Four dispatch-log entries (requests and responses). Two `mosaictest-wronganswer`
 |---|---|
 | Only one `mosaictest-wronganswer` invocation, then consultation | The bypass did not fire — the harness error was not classified as a raw-text/no-protocol-reply failure, or the bypass code path is not wired in |
 | Three or more `mosaictest-wronganswer` invocations before consultation | The bypass is not bounded to one attempt (FR-16 violation) |
-| A consultation between the two `mosaictest-wronganswer` invocations | The bypass is not skipping the consultation round-trip — it is going through the existing deviation path instead of the direct-redispatch path |
+| A consultation appears in the dispatch log between the two `mosaictest-wronganswer` invocations | The bypass is not skipping the consultation round-trip — it is going through the existing deviation path instead of the direct-redispatch path |
 | Run completes with exit code 0 | `mosaictest-wronganswer` somehow produced valid protocol JSON — check the agent file for accidental protocol injection |
-| The stub orchestrator stops with "no matching rule" | The `run-start` selector did not match — the bypass failure may have been recorded as a workflow row instead of an infrastructure row, changing the state the orchestrator sees |
+| The stub orchestrator stops with "no matching rule" | The `run-start` selector did not match — the harness-error rows may have been recorded with a status other than `BLOCKED`/`E501`, changing the state the orchestrator sees |
+| An `orchestrator-script` row appears in `Orchestration.md` | Consultations must leave no row in the artifact; a consultation wrongly called `Store.Apply` or allocated a `Seq` |
 
 ---
 

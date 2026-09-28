@@ -326,13 +326,15 @@ func TestSession_HITL_Resume_AfterRejectedDispatch(t *testing.T) {
 		StatusMessage:   "done",
 	}})
 
-	got, err := ses2.Start(context.Background(), domain.RunConfig{
+	cfg2 := domain.RunConfig{
 		OrchestratorFilePath: resumeOrchPath,
 		WorkflowID:           "linear",
 		Task:                 "test task",
 		IsNewRun:             false, // resume: artifact pre-exists with rejected-step log entry
 		RunSettings:          domain.RunSettings{Mode: domain.ExecutionModeAuto},
-	})
+	}
+	markResume(&cfg2)
+	got, err := ses2.Start(context.Background(), cfg2)
 	if err != nil {
 		t.Fatalf("want nil error on resume, got %v", err)
 	}

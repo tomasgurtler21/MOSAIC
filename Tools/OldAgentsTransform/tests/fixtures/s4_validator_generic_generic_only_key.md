@@ -13,8 +13,6 @@ tier_rationale: A reasonable tier for a test agent
 
 You are the **GenericGenericOnlyKeyTest** agent.
 
-<IdentityExtension type="project">
-</IdentityExtension>
 
 </Identity>
 ---
@@ -34,8 +32,6 @@ Fixture content.
 
 <Constraints type="core">
 ## Constraints
-<ProtocolConstraints type="managed">
-</ProtocolConstraints>
 
 <HarnessConstraints type="managed">
 </HarnessConstraints>

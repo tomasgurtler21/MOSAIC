@@ -58,9 +58,9 @@ func writeBundleDoc(t *testing.T, root string, content []byte) {
 // wellFormedBundleDoc is a minimal but structurally valid bundle document used across
 // the T6.1 success tests. It includes:
 //   - A frontmatter `bundle_version` scalar
-//   - A `blocks` list with all five canonical block declarations
+//   - A `blocks` list with all four canonical block declarations
 //   - Outer maintainer prose that must NOT appear in any returned block payload
-//   - Five body sections with distinct inner content, one per declaration
+//   - Four body sections with distinct inner content, one per declaration
 //
 // The string "OUTER_BUNDLE_TEXT" is the exclusion marker: it appears in the surrounding
 // maintainer documentation but must never reach a caller through the returned Content bytes.
@@ -73,10 +73,6 @@ blocks:
     specified_in: Development/Designs/AgentTemplateArchitecture.md
   - name: "ClosingProcedure:Subagent"
     target: ClosingProcedure
-    applies_to: subagent
-    specified_in: Development/Designs/AgentTemplateArchitecture.md
-  - name: "ProtocolConstraints:Subagent"
-    target: ProtocolConstraints
     applies_to: subagent
     specified_in: Development/Designs/AgentTemplateArchitecture.md
   - name: "ErrorHandlingCommon:Subagent"
@@ -102,12 +98,6 @@ Authority hierarchy content for subagents.
 
 Closing procedure content for subagents.
 </ClosingProcedure>
-
-<ProtocolConstraints type="core" name="Subagent">
-### Protocol Constraints
-
-Protocol constraints content for subagents.
-</ProtocolConstraints>
 
 <ErrorHandlingCommon type="core" name="Subagent">
 ### Error Handling Common
@@ -157,9 +147,9 @@ func TestBundleLoader_WellFormedDoc_ReturnsBundleVersion(t *testing.T) {
 	}
 }
 
-// TestBundleLoader_WellFormedDoc_ReturnsFiveBlocks verifies that BundleContent.Blocks
-// contains exactly five entries — one per declaration in the fixture's `blocks` list.
-func TestBundleLoader_WellFormedDoc_ReturnsFiveBlocks(t *testing.T) {
+// TestBundleLoader_WellFormedDoc_ReturnsFourBlocks verifies that BundleContent.Blocks
+// contains exactly four entries — one per declaration in the fixture's `blocks` list.
+func TestBundleLoader_WellFormedDoc_ReturnsFourBlocks(t *testing.T) {
 	root := makeTempMosaicRoot(t)
 	writeBundleDoc(t, root, []byte(wellFormedBundleDoc))
 
@@ -168,8 +158,8 @@ func TestBundleLoader_WellFormedDoc_ReturnsFiveBlocks(t *testing.T) {
 		t.Fatalf("LoadBundle error: %v", err)
 	}
 
-	if len(content.Blocks) != 5 {
-		t.Errorf("BundleContent.Blocks length = %d, want 5; all five declared blocks must be returned",
+	if len(content.Blocks) != 4 {
+		t.Errorf("BundleContent.Blocks length = %d, want 4; all four declared blocks must be returned",
 			len(content.Blocks))
 	}
 }
@@ -226,9 +216,9 @@ func TestBundleLoader_WellFormedDoc_AllBlocksHaveNonEmptyContent(t *testing.T) {
 	}
 }
 
-// TestBundleLoader_WellFormedDoc_AllFiveTargetsPresent verifies that each of the five
+// TestBundleLoader_WellFormedDoc_AllFourTargetsPresent verifies that each of the four
 // canonical target names appears in at least one returned block.
-func TestBundleLoader_WellFormedDoc_AllFiveTargetsPresent(t *testing.T) {
+func TestBundleLoader_WellFormedDoc_AllFourTargetsPresent(t *testing.T) {
 	root := makeTempMosaicRoot(t)
 	writeBundleDoc(t, root, []byte(wellFormedBundleDoc))
 
@@ -240,7 +230,6 @@ func TestBundleLoader_WellFormedDoc_AllFiveTargetsPresent(t *testing.T) {
 	wantTargets := []string{
 		"AuthorityHierarchy",
 		"ClosingProcedure",
-		"ProtocolConstraints",
 		"ErrorHandlingCommon",
 		"ExecutionPhilosophyCommon",
 	}
@@ -250,7 +239,7 @@ func TestBundleLoader_WellFormedDoc_AllFiveTargetsPresent(t *testing.T) {
 	}
 	for _, target := range wantTargets {
 		if !targetSet[target] {
-			t.Errorf("BundleContent.Blocks has no block with Target %q; all five canonical targets must be present",
+			t.Errorf("BundleContent.Blocks has no block with Target %q; all four canonical targets must be present",
 				target)
 		}
 	}
@@ -637,13 +626,13 @@ func TestBundleLoader_RealBundleDocument_CanBeLoaded(t *testing.T) {
 		t.Error("BundleContent.Version is empty for the real bundle document; expected a non-empty version string")
 	}
 	if len(content.Blocks) == 0 {
-		t.Error("BundleContent.Blocks is empty for the real bundle document; expected all five blocks")
+		t.Error("BundleContent.Blocks is empty for the real bundle document; expected all four blocks")
 	}
 }
 
-// TestBundleLoader_RealBundleDocument_CarriesAllFiveBlocks verifies that the real bundle
-// document contains all five canonical target names.
-func TestBundleLoader_RealBundleDocument_CarriesAllFiveBlocks(t *testing.T) {
+// TestBundleLoader_RealBundleDocument_CarriesAllFourBlocks verifies that the real bundle
+// document contains all four canonical target names.
+func TestBundleLoader_RealBundleDocument_CarriesAllFourBlocks(t *testing.T) {
 	root, err := catalog.ResolveRoot(repoRoot())
 	if err != nil {
 		t.Fatalf("ResolveRoot: %v", err)
@@ -657,7 +646,6 @@ func TestBundleLoader_RealBundleDocument_CarriesAllFiveBlocks(t *testing.T) {
 	wantTargets := []string{
 		"AuthorityHierarchy",
 		"ClosingProcedure",
-		"ProtocolConstraints",
 		"ErrorHandlingCommon",
 		"ExecutionPhilosophyCommon",
 	}
@@ -667,7 +655,7 @@ func TestBundleLoader_RealBundleDocument_CarriesAllFiveBlocks(t *testing.T) {
 	}
 	for _, target := range wantTargets {
 		if !targetSet[target] {
-			t.Errorf("real bundle document is missing a block with Target %q; all five canonical blocks must be present",
+			t.Errorf("real bundle document is missing a block with Target %q; all four canonical blocks must be present",
 				target)
 		}
 	}

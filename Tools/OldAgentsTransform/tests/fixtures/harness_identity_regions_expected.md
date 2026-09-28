@@ -29,8 +29,6 @@ You are the **RegionTestAgent** agent in a multi-agent orchestration system.
 <AuthorityHierarchy type="managed">
 </AuthorityHierarchy>
 
-<IdentityExtension type="project">
-</IdentityExtension>
 
 </Identity>
 ---
@@ -53,8 +51,6 @@ You are the **RegionTestAgent** agent in a multi-agent orchestration system.
 
 <Constraints type="core">
 ## Constraints
-<ProtocolConstraints type="managed">
-</ProtocolConstraints>
 
 - Stay within scope
 <HarnessConstraints type="managed">
@@ -69,8 +65,6 @@ You are the **RegionTestAgent** agent in a multi-agent orchestration system.
 <ErrorHandlingCommon type="managed">
 </ErrorHandlingCommon>
 
-<ErrorHandlingExtension type="project">
-</ErrorHandlingExtension>
 
 </ErrorHandling>
 ---

@@ -4,7 +4,7 @@
 // (not panics), and handles context cancellation.
 //
 // Protocol serialisation helpers (MarshalRequest / UnmarshalResponse) encode
-// and decode Communication Protocol v1.8 JSON messages.
+// and decode Communication Protocol v1.12 JSON messages.
 package harness
 
 import (
@@ -12,6 +12,8 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"os"
+	"path/filepath"
 
 	"mosaic-run/internal/domain"
 )
@@ -30,6 +32,14 @@ type ScriptedEntry struct {
 	Response *domain.ProtocolResponse
 	Err      error
 	RawJSON  []byte
+	Writes   []ScriptedWrite // optional; applied in order, also for Err entries
+}
+
+// ScriptedWrite is a file the MockAdapter writes during Invoke, before
+// returning the scripted response or error.
+type ScriptedWrite struct {
+	Path    string // slash-separated, relative to the adapter's write root (dispatched form)
+	Content string // written verbatim; parent directories are created
 }
 
 // Invocation records one call to MockAdapter.Invoke.
@@ -47,6 +57,13 @@ type Invocation struct {
 type MockAdapter struct {
 	queue       map[string][]ScriptedEntry
 	invocations []Invocation
+	writeRoot   string
+}
+
+// SetWriteRoot sets the directory ScriptedWrite paths are resolved against.
+// Invoke with a non-empty Writes and no root set returns an error.
+func (f *MockAdapter) SetWriteRoot(root string) {
+	f.writeRoot = root
 }
 
 // NewMockAdapter returns a MockAdapter with an empty queue.
@@ -101,6 +118,21 @@ func (f *MockAdapter) Invoke(ctx context.Context, agent domain.AgentReference, r
 	entry := entries[0]
 	f.queue[agent.Identifier] = entries[1:]
 
+	if len(entry.Writes) > 0 {
+		if f.writeRoot == "" {
+			return domain.ProtocolResponse{}, fmt.Errorf("harness: scripted writes for agent %q but no write root set", agent.Identifier)
+		}
+		for _, w := range entry.Writes {
+			dst := filepath.Join(f.writeRoot, filepath.FromSlash(w.Path))
+			if err := os.MkdirAll(filepath.Dir(dst), 0o755); err != nil {
+				return domain.ProtocolResponse{}, fmt.Errorf("harness: scripted write %q: %w", w.Path, err)
+			}
+			if err := os.WriteFile(dst, []byte(w.Content), 0o644); err != nil {
+				return domain.ProtocolResponse{}, fmt.Errorf("harness: scripted write %q: %w", w.Path, err)
+			}
+		}
+	}
+
 	if entry.Err != nil {
 		return domain.ProtocolResponse{}, entry.Err
 	}
@@ -120,13 +152,13 @@ func (f *MockAdapter) Invoke(ctx context.Context, agent domain.AgentReference, r
 	return domain.ProtocolResponse{}, errors.New("harness: scripted entry has none of Response, Err, or RawJSON set")
 }
 
-// MarshalRequest serialises a ProtocolRequest to Communication Protocol v1.8
+// MarshalRequest serialises a ProtocolRequest to Communication Protocol v1.12
 // JSON. Field names follow the json struct tags on ProtocolRequest.
 func MarshalRequest(req domain.ProtocolRequest) ([]byte, error) {
 	return json.Marshal(req)
 }
 
-// UnmarshalResponse parses Communication Protocol v1.8 JSON bytes into a
+// UnmarshalResponse parses Communication Protocol v1.12 JSON bytes into a
 // ProtocolResponse. Returns an error if the bytes are not valid JSON.
 func UnmarshalResponse(data []byte) (domain.ProtocolResponse, error) {
 	var r domain.ProtocolResponse
