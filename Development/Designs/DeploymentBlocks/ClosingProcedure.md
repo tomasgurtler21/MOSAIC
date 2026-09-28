@@ -1,7 +1,7 @@
 ---
 id: block-closing-procedure
 type: specification
-version: "1.0"
+version: "1.1"
 name: "Block — ClosingProcedure"
 description: "The two steps that close every subagent task: the human-in-the-loop review gate and the protocol response. Why the gate left the Process list, and the defect that move fixes."
 author: MOSAIC

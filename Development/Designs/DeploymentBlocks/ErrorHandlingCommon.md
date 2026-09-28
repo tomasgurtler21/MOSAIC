@@ -31,7 +31,7 @@ Permission failures and known non-transient failures are not retried because rep
 
 ## 2. Why this rule has no other home
 
-`CommunicationProtocol.md` §10 lists retry policy, backoff timing, and escalation thresholds as an explicit protocol non-goal: the contract supplies the error code, and what happens next is policy. But it frames that policy as the *orchestrator's* — what a runner does with `E501` versus `E101`. The subagent side, what an agent does before it returns a code at all, is left unstated.
+`CommunicationProtocol.md` §11 lists retry policy, backoff timing, and escalation thresholds as an explicit protocol non-goal: the contract supplies the error code, and what happens next is policy. But it frames that policy as the *orchestrator's* — what a runner does with `E501` versus `E101`. The subagent side, what an agent does before it returns a code at all, is left unstated.
 
 That gap is why the rule existed as hand-copied text in the first place, and why it drifted to 35/42. It is genuinely shared, genuinely subagent-side, and genuinely absent from the contract. This block is its only canonical statement.
 
@@ -41,7 +41,7 @@ The rest of `ErrorHandling` is the agent's own mapping of status codes to its ow
 
 Two things that look like candidates are not:
 
-**The error code list.** The contract's deployed region carries the full `E100`/`E101`/`E401`/`E501`/`E502`/`E503` table with names and meanings, a few inches up the same file, plus its key rule directing `BLOCKED` + code for external blockers. A recall bullet here was a third statement of the same thing. Unlike `ProtocolConstraints`, which compresses rules into imperatives an agent can hold while working, a recall of a table adds no form the agent did not already have. It was removed at bundle 1.0.0 — see §4.
+**The error code list.** The contract's deployed region carries the full `E100`/`E101`/`E401`/`E501`/`E502`/`E503` table with names and meanings, a few inches up the same file, plus the key rule restricting `error_code` and `error_reason` to `BLOCKED` responses. A recall bullet here was a third statement of the same thing. Unlike `ProtocolConstraints`, which compressed rules into imperatives an agent could hold while working before its removal in v2.3, a recall of a table adds no form the agent did not already have. It was removed at bundle 1.0.0 — see §4.
 
 **The `BLOCKED` versus `CAPABILITY_EXCEEDED` distinction.** Worth stating, and already owned by the contract's status definitions. Each agent's mapping then grounds those definitions in its own work. Repeating the generic distinction here would create another statement that can drift.
 
@@ -51,5 +51,5 @@ Two things that look like candidates are not:
 
 | Bundle version | Date | Change |
 |----------------|------|--------|
-| 2.0.0 | 2026-09-26 | Defined safe retry behavior and replaced the ambiguous “escalate” boundary with `BLOCKED` plus the applicable error code. |
-| 1.0.0 | 2026-08-05 | Initial text: retry-once, consolidating measured fragment 7 (35/42, drifting) and taking the contract-correct variant rather than the most common one. An error-code recall bullet was drafted alongside it and removed before release — the contract's deployed region already carries the full table and Key Rule 15, so it was a third statement in one file (§3). |
+| 2.0.0 | 2026-09-26 | Defined safe retry behavior and replaced the ambiguous “escalate” boundary with `BLOCKED` plus the applicable error code. Rationale references corrected: protocol non-goals are §11, and `ProtocolConstraints` is described in the past tense after its v2.3 removal. |
+| 1.0.0 | 2026-08-05 | Initial text: retry-once, consolidating measured fragment 7 (35/42, drifting) and taking the contract-correct variant rather than the most common one. An error-code recall bullet was drafted alongside it and removed before release — the contract's deployed region already carries the full table and the key rule confining error fields to `BLOCKED`, so it was a third statement in one file (§3). |

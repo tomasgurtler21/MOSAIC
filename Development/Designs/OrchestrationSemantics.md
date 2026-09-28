@@ -1,9 +1,9 @@
 # Orchestration Semantics
 
 > **Status:** Draft
-> **Version:** 0.1
+> **Version:** 0.2
 > **Created:** 2026-08-15
-> **Last Updated:** 2026-08-15
+> **Last Updated:** 2026-09-27
 > **Scope:** The controlled vocabulary of the orchestration system — reserved keywords in artifact names, naming patterns for agents, and the semantic rules that govern how the orchestrator interprets them. Defines what names carry behavioral weight and how to introduce new names without colliding with existing semantics.
 
 ---
@@ -52,8 +52,8 @@ These keywords directly affect orchestrator behavior. The orchestrator reads art
 | Keyword | Semantic Role | Orchestrator Behavior | Examples |
 |---------|--------------|----------------------|----------|
 | **Plan** | Routing artifact — defines execution structure (stages, ordering, dependencies, HITL, approach) | Reads the master Plan to determine stage count, ordering, subagent sequence per stage, HITL resolution, and recovery state. Subagents read both master and per-stage Plans for task context. | `Plan.md`, `Stage-{N}/Plan.md`, `AuditPlan.md` |
-| **Progress** | Task-state tracking — mutable artifact tracking completion of work items within a plan's scope | Reads during EXECUTION phase for routing decisions (which items done/pending), stage advancement, and recovery | `PlanProgress.md`, `AuditProgress.md`, `HWResearchProgress.md`, `KBProgress.md` |
-| **Review** | Quality-gate feedback — output of a review agent evaluating another agent's work | Used in routing: presence of findings triggers `COMPLETED_NEEDS_ACTION` -> callback to creator. Always kebab-case. | `requirements-review.md`, `plan-review.md`, `contracts-review.md` |
+| **Progress** | Task-state tracking — mutable artifact tracking completion of work items within a plan's scope | Reads only during EXECUTION-phase recovery, to establish which items are done or pending after a restart. Ordinary routing and stage advancement use status codes | `PlanProgress.md`, `AuditProgress.md`, `HWResearchProgress.md`, `KBProgress.md` |
+| **Review** | Quality-gate feedback — output of a review agent evaluating another agent's work | Used in routing: the reviewer's configured action condition triggers `COMPLETED_NEEDS_ACTION` -> callback to creator. Below-threshold findings may remain recorded while the reviewer returns `SUCCESS`. Always kebab-case. | `requirements-review.md`, `plan-review.md`, `contracts-review.md` |
 
 ### 2.2 Convention Keywords
 
@@ -89,7 +89,7 @@ Any artifact containing "Plan" in its name defines execution structure — WHAT 
 Any artifact containing "Progress" in its name tracks completion state of work items. Progress artifacts are:
 - **Mutable** — checkboxes/status fields change as work completes
 - **Paired with a Plan** — every Progress artifact corresponds to a Plan artifact that defines the work being tracked
-- **Read by the orchestrator** for routing during EXECUTION phase (determining which stages/items are complete)
+- **Read by the orchestrator** only during EXECUTION-phase recovery, to determine which stages/items are complete
 - **Written by subagents** during task execution
 
 **R3: Progress requires a Plan.**
@@ -144,11 +144,11 @@ The `-review` suffix is the most semantically loaded pattern in the system. It s
 | `contracts-designer` | `contracts-review` | `ContractsDesign.md` |
 | `test-writer-tdd` | `tests-review-tdd` | `Stage-{N}/PlanProgress.md` |
 
-The full set of pairs is visible in workflow tables — the On Findings column is the definitive record of which reviewer routes back to which creator. This document does not maintain a complete registry to avoid maintenance burden; workflow tables are the source of truth for pair relationships.
+For table-backed runs, the full set of pairs is visible in workflow tables — the On Findings column is the definitive record of which reviewer routes back to which creator. This document does not maintain a complete registry to avoid maintenance burden; workflow tables are the source of truth for those runs, while the ad-hoc exception is defined below.
 
-**Naming flexibility:** Creator and reviewer names do not need to match exactly (e.g., `test-writer-tdd` / `tests-review-tdd`). The pairing is established by the workflow table's On Findings routing, not by name matching.
+**Naming flexibility:** Creator and reviewer names do not need to match exactly (e.g., `test-writer-tdd` / `tests-review-tdd`). In a table-backed run, the pairing is established by the workflow table's On Findings routing, not by name matching.
 
-**Ad-hoc orchestration (no workflow table):** When running without a predefined workflow, the orchestrator should recognize `-review` agents as having an implicit creator pairing. The orchestrator can infer the pair from the workflow registry or from the agent's own instructions (which describe what they review). If the pairing is ambiguous, the orchestrator should escalate to the user.
+**Ad-hoc orchestration (no governing workflow table):** The orchestrator may infer a `-review` agent's creator pairing from relevant rows in the available workflows and from the agent's stated review responsibility. It records the inferred pairing in Workflow Notes before relying on it. If more than one pairing remains plausible, it asks the user rather than choosing one silently.
 
 ### 3.3 The Audit Pattern (`*-audit`)
 
@@ -188,7 +188,7 @@ If your artifact name contains Requirements or Research, it should comply with t
 - `CamelCase.md` = Primary deliverable — a work product created by a planning, design, or creation agent (e.g., `Plan.md`, `ContractsDesign.md`, `SystemDesign.md`)
 - `kebab-case.md` = Review/validation output — quality-gate feedback named after the producing subagent (e.g., `plan-review.md`, `contracts-review.md`)
 
-The distinction matters: CamelCase artifacts are what downstream agents consume to do their work. Kebab-case artifacts are feedback loops — they exist to trigger correction routing. The orchestrator never reads kebab-case artifacts (routes based on status code instead). This naming split makes artifact purpose immediately recognizable.
+The distinction matters: CamelCase artifacts are what downstream agents consume to do their work. Kebab-case artifacts are feedback loops — they exist to trigger correction routing. The orchestrator never reads the content of kebab-case artifacts (routes based on status code instead); the HITL gate reads only their frontmatter. This naming split makes artifact purpose immediately recognizable.
 
 **N4: New Plan artifacts need Progress counterparts.**
 If you introduce a new Plan artifact (e.g., `MigrationPlan.md`), you should also define its corresponding Progress artifact (e.g., `MigrationProgress.md`), unless the plan is read-only and doesn't track execution state.
@@ -201,8 +201,8 @@ When a workflow needs specialized variants of a standard artifact type, use a do
 **A1: `-review` is reserved for creator/reviewer pairs.**
 Do not use `-review` in an agent name unless the agent is the reviewer half of a creator/reviewer pair. If you need a quality assessment agent that doesn't have a paired creator, use `-audit`, `-validator`, `-checker`, or another suffix.
 
-**A2: `-review` pairs must be visible in workflow tables.**
-When creating a new `-review` agent, ensure it appears in a workflow table with its On Findings column routing back to its paired creator. The workflow table is the source of truth for pair relationships.
+**A2: `-review` pairs must be explicit.**
+When creating a new `-review` agent, ensure it appears in a workflow table with its On Findings column routing back to its paired creator. That table is the source of truth for table-backed runs. An ad-hoc run may infer a pairing under §3.2, but must record the decision and ask the user when it is ambiguous.
 
 **A3: `-audit` signals assessment without a correction loop.**
 Use `-audit` when the agent assesses existing work (code, architecture, tests) that was not produced by a preceding subagent in the current workflow. The key behavioral difference from `-review`: audit findings may trigger downstream correction actions at the workflow level, but do not imply the tight creator/reviewer correction loop that `-review` does.
@@ -222,7 +222,7 @@ This section summarizes how the orchestrator's behavior changes based on artifac
 |-----------------|:-----------------------:|-----|
 | **Plan** (master) | Yes | Stage ordering, HITL resolution, approach, recovery |
 | **Plan** (per-stage) | No | Domain content for subagents — orchestrator protects context window |
-| **Progress** | Yes (EXECUTION phase) | Determine which stages/items are complete for routing |
+| **Progress** | Only during EXECUTION-phase recovery | Establish which stages/items are complete after a restart; ordinary routing uses status codes |
 | **Requirements** | No | Domain content — passes to subagents, doesn't interpret |
 | **Research** | No | Domain content — information asymmetry by design |
 | **Review** (kebab-case) | No | Routes based on status code, not artifact content |
@@ -244,13 +244,13 @@ This section summarizes how the orchestrator's behavior changes based on artifac
                                    |
          +-------------------------v-------------------------+
          |  EXECUTION: Per-stage loop                        |
-         |  1. Orchestrator reads PlanProgress               |
-         |     -> Determines pending items                   |
-         |  2. Dispatches subagent for stage                 |
-         |  3. Subagent updates PlanProgress                 |
+         |  1. Orchestrator dispatches subagent for stage    |
+         |  2. Subagent updates PlanProgress                 |
          |     -> Checks off completed items                 |
-         |  4. Orchestrator reads PlanProgress again          |
-         |     -> Stage complete? -> Next stage              |
+         |  3. Orchestrator routes on the status code        |
+         |     -> Stage's last agent SUCCESS -> Next stage   |
+         |  Recovery only: orchestrator reads PlanProgress   |
+         |     -> Validates position after a restart         |
          +---------------------------------------------------+
 ```
 
@@ -273,7 +273,7 @@ This section summarizes how the orchestrator's behavior changes based on artifac
                       |
             +---------+-----------+
             |                     |
-      No findings           Has findings
+  No action condition   Action condition met
       (SUCCESS)            (COMPLETED_NEEDS_ACTION)
             |                     |
       +-----v------+    +--------v-----------+
@@ -328,4 +328,5 @@ Use this checklist when creating new workflows, agents, or artifacts.
 
 | Version | Date | Summary |
 |---------|------|---------|
+| 0.2 | 2026-09-27 | Aligned review routing semantics with the current status model. Review artifacts may record below-threshold findings while the reviewer returns `SUCCESS`; `COMPLETED_NEEDS_ACTION` and the correction route apply only when the reviewer's configured agent-specific action condition is met. The orchestrator never reads kebab-case artifact content; the HITL gate reads only their frontmatter. The native orchestrator reads Progress artifacts only during EXECUTION-phase recovery. Ordinary routing and stage advancement use status codes, matching `orchestrator.md`'s Context Window Protection, so §2.1, R2, §5.1 and the §5.2 lifecycle no longer describe a Progress read around every dispatch (round-seven R7-06). Ad-hoc creator/reviewer pairing may be inferred from available workflow precedent and the review responsibility, but the native orchestrator records the decision and asks the user when more than one pairing remains plausible (round-eight R8-07). |
 | 0.1 | 2026-08-15 | Initial draft. Routing keywords (Plan, Progress, Review) and convention keywords (Requirements, Research) with tiered severity. Agent naming patterns (`*-review`, `*-audit`, `*-research`). All Plans semantically equal (no subtypes). Orchestrator reads master Plan only. Workflow tables are source of truth for creator/reviewer pairs. `-audit` reserved as agent suffix to distinguish from `-review` correction loops, but carries no artifact-level semantics. |

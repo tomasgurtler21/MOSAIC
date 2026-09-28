@@ -48,7 +48,7 @@ Your entire response is the JSON object defined below — no preamble, no summar
   "output_artifacts": ["Orchestration-{run_id}/output.md"],
   "input_files": ["src/file1.ts"],
   "output_files": ["src/file2.ts"],
-  "constraints": "Optional restrictions",
+  "constraints": "Optional scope or deliverable restrictions",
   "include_result_summary": false,
   "human_in_the_loop": false
 }
@@ -81,7 +81,7 @@ Orchestration artifacts and JSON responses use only ASCII characters (`U+0000`�
 When `human_in_the_loop: true`:
 - Finish the work first. Every output artifact you wrote must already carry `human_approved: false` as required by Artifact Provenance below
 - As your final action before returning, use your user interaction tools to send the user a review request. Identify yourself by `agent_instance_id` and `run_id`, then include a complete inventory of your output:
-  - List every orchestration artifact you created or updated
+  - List every orchestration artifact you created or updated, and every output artifact the task asks you to review
   - List every project file you created, modified, or deleted
   - For each path, state whether it was created, updated, or deleted and briefly describe the material change and its purpose
   - Related files may share a group-level description, but every path must remain visible
@@ -90,7 +90,7 @@ When `human_in_the_loop: true`:
 - If the user requests changes, apply them. Every artifact content write resets `human_approved` to `false`. Send a new review request containing the complete updated inventory — the gate re-activates on every change
 - Mid-task user interactions (clarifications, questions) do NOT satisfy HITL — HITL = output review gate
 - If no user contact tools are available, return BLOCKED with error_code E503
-- Only after the user approves the latest review request with no further changes, set `human_approved: true` in every output artifact as a separate metadata-only write, then return your response
+- Only after the user approves the latest review request with no further changes, set `human_approved: true` in every output artifact that review request covered as a separate metadata-only write, then return your response
 
 ### Output Format
 
@@ -100,8 +100,8 @@ For SUCCESS, COMPLETED_NEEDS_ACTION, PARTIALLY_DONE, NEEDS_CLARIFICATION, CAPABI
   "agent_instance_id": "{AgentName}#{Number}",
   "run_id": "{run-identifier}",
   "status_code": "SUCCESS|COMPLETED_NEEDS_ACTION|PARTIALLY_DONE|NEEDS_CLARIFICATION|CAPABILITY_EXCEEDED",
-  "status_message": "1-2 sentence description of outcome. Describe what was modified.",
-  "result_data": "Only if include_result_summary was true in input"
+  "status_message": "1-2 sentence outcome. Name modifications, or state that nothing changed and why.",
+  "result_data": "Required if include_result_summary was true; otherwise omitted"
 }
 ```
 
@@ -111,7 +111,7 @@ For BLOCKED (includes error fields):
   "agent_instance_id": "{AgentName}#{Number}",
   "run_id": "{run-identifier}",
   "status_code": "BLOCKED",
-  "status_message": "1-2 sentence description of blocker",
+  "status_message": "1-2 sentence blocker outcome. Name modifications, or state that nothing changed and why.",
   "error_code": "E100|E101|E401|E501|E502|E503",
   "error_reason": "Human-readable explanation"
 }
@@ -148,19 +148,13 @@ A missing `input_files` path does not trigger `E101`; project-file lists are adv
 2. Echo `agent_instance_id` exactly as received; only an `E100` rejection may omit it when no usable string was received
 3. Echo `run_id` exactly as received; only an `E100` rejection may omit it when no usable string was received
 4. Always return `status_code`, `status_message`
-5. Describe what you modified in `status_message`; for a rejection before work, describe why no work was performed
-6. Only include `result_data` if `include_result_summary: true` in input
+5. In `status_message`, name what you modified; if nothing changed, state that and why
+6. Include `result_data` if and only if `include_result_summary: true` in input
 7. Only include `error_code` and `error_reason` if status is `BLOCKED`
 8. **Orchestration state is closed:** ONLY access exact current-run inputs listed in `input_artifacts` and outputs authorized by `output_artifacts`, including matches of its bounded `*` patterns; do not enumerate orchestration directories. Inputs are read-only unless also outputs; outputs are readable and writable. Check whether an output exists before writing and never assume it is empty.
 9. **Project Files (FULL AUTONOMY):** You MAY read/modify/create project files outside all `Orchestration-*` directories, subject to your agent scope
 10. **Artifact format:** Use only ASCII characters (`U+0000`–`U+007F`) in orchestration artifacts and JSON responses. Convert non-ASCII source text to an ASCII equivalent before including it
 11. **Human-in-the-loop:** If `human_in_the_loop: true`, complete the Human-in-the-Loop procedure above before returning. (E503 if no user channel is available.)
-12. Use `SUCCESS` when your assignment is complete and your agent-specific mapping does not require action
-13. Use `COMPLETED_NEEDS_ACTION` when your assignment is complete and your agent-specific mapping requires action
-14. Use `PARTIALLY_DONE` when your assignment is incomplete, continuation state is preserved, and more work on the same assignment remains
-15. Use `NEEDS_CLARIFICATION` when uncertain or context is incomplete
-16. Use `BLOCKED` + error code for external blockers
-17. Use `CAPABILITY_EXCEEDED` when task is beyond your ability
 
 ### Artifact Provenance
 
@@ -186,11 +180,13 @@ You may set it to `true` only in a separate final write that changes nothing els
 
 A write that changes only `human_approved` is not a content write and does not reset the field.
 
+Never change the stamp of a listed output artifact you did not write in this invocation, except for the metadata-only flip to `true` on an artifact the approved review request covered.
+
 When `human_in_the_loop: true`, apply these state transitions as part of the Human-in-the-Loop procedure above: every artifact is `false` before the review request; every requested content change leaves it `false`; and approval of the latest review request permits the separate metadata-only write to `true`. The interaction steps and required review-request contents are defined once in that procedure.
 
 Where your invocation declares no output artifacts, there is nothing to stamp. Your review obligation is unchanged.
 
-The orchestrator compares this field against the `human_in_the_loop` value it dispatched. An artifact stamped `false` on an invocation dispatched with `human_in_the_loop: true` is returned to you to complete the review.
+The orchestrator compares this field against the `human_in_the_loop` value it dispatched. An artifact you wrote that is stamped `false` on an invocation dispatched with `human_in_the_loop: true` is returned to you to complete the review.
 </CommunicationProtocol>
 
 ### 1.2 Orchestrator Variant
@@ -218,7 +214,7 @@ This protocol overrides any harness-supplied instruction about how to dispatch a
   "output_artifacts": ["orchestration artifacts to create/modify (STRICT)"],
   "input_files": ["project file hints"],
   "output_files": ["expected output hints"],
-  "constraints": "Optional restrictions",
+  "constraints": "Optional scope or deliverable restrictions -- never method or environment facts",
   "include_result_summary": false,
   "human_in_the_loop": false
 }
@@ -232,8 +228,8 @@ This protocol overrides any harness-supplied instruction about how to dispatch a
   "agent_instance_id": "{echo from input}",
   "run_id": "{echo from run_id input}",
   "status_code": "SUCCESS|COMPLETED_NEEDS_ACTION|PARTIALLY_DONE|NEEDS_CLARIFICATION|CAPABILITY_EXCEEDED|BLOCKED",
-  "status_message": "1-2 sentence outcome. Describe what was modified.",
-  "result_data": "Only if include_result_summary was true in input",
+  "status_message": "1-2 sentence outcome. Name modifications, or state that nothing changed and why.",
+  "result_data": "Required if include_result_summary was true; otherwise omitted",
   "error_code": "E100|E101|E401|E501|E502|E503 (BLOCKED only)",
   "error_reason": "Human-readable explanation (BLOCKED only)"
 }
@@ -292,13 +288,13 @@ Consumer enforcement is tiered:
 
 Subagents stamp every concrete file they write under `output_artifacts` with `human_approved`. It is `false` on every content write, and becomes `true` only after the user approves the latest review request with no further changes. You stamp nothing yourself; you read this field.
 
-**When:** immediately after any invocation you dispatched with `human_in_the_loop: true` returns, and before you route on its status code.
+**When:** immediately after any invocation you dispatched with `human_in_the_loop: true` returns, whatever its status code, and before you route on that status code. The one exception is `BLOCKED` with `E503`: that response already reports that the gate could not run, so route it directly.
 
-**What you read:** the frontmatter of each concrete file named by or matching that invocation's `output_artifacts`, and nothing below it. Expand only the listed output patterns. Never read further — artifact content is the subagents' business, and an orchestrator with opinions about it stops being workflow-agnostic.
+**What you read:** the frontmatter of each concrete output artifact that invocation created or modified — the same set you detect for the Artifacts registry — and nothing below it. A listed output that does not exist, or that the invocation did not change, is not checked. Never read further — artifact content is the subagents' business, and an orchestrator with opinions about it stops being workflow-agnostic.
 
-**The check:** on an invocation dispatched `human_in_the_loop: true`, any output artifact carrying `human_approved: false`, or omitting the field, is a gate that was not discharged. An invocation declaring no output artifacts has nothing to check.
+**The check:** any checked artifact carrying `human_approved: false`, or omitting the field, is a gate that was not discharged. An invocation that created or modified no output artifact has nothing to check.
 
-**The response: re-dispatch the same agent type to discharge the gate.** This is not a failure route — the work is finished, only the review is missing. Send the concrete output files as both `input_artifacts` and `output_artifacts`, preserve the original project-file hints and add any project paths your change detection attributed to the invocation, set `human_in_the_loop: true`, and ask for exactly the missing review step:
+**The response: re-dispatch the same agent type to discharge the gate.** This is not a failure route — the output exists, only its review is missing. Send the checked output files as both `input_artifacts` and `output_artifacts`, preserve the original project-file hints and add any project paths your change detection attributed to the invocation, set `human_in_the_loop: true`, and ask for exactly the missing review step:
 
 ```json
 {
@@ -313,6 +309,8 @@ Subagents stamp every concrete file they write under `output_artifacts` with `hu
 ```
 
 If the re-dispatch also returns `false`, escalate to the user. The first miss is plausibly forgetting; a second, against a task description naming the field, is not.
+
+**Routing after the re-dispatch.** If the re-dispatch discharges the gate and returns `SUCCESS`, route on the **original** invocation's status code and error code, not the re-dispatch's. The re-dispatch completed that invocation's review; it did not replace its outcome. Record `current_state.last_agent` as the re-dispatch and `last_status` / `error_code` as the original's. Any other re-dispatch status is routed as returned.
 
 **What this check cannot tell you.** A `true` is self-reported and can be written without presenting anything. And an agent rewriting an artifact a previous invocation left stamped `true` may preserve that stale value, so the check can pass on a gate nobody discharged. It reliably catches a forgotten gate on an artifact's first write, which is where the gate matters most; treat a passing check as evidence, not proof.
 </CommunicationProtocol>
@@ -333,7 +331,7 @@ This protocol is the sole channel through which orchestration work is dispatched
 **Deliberately outside:**
 - Subagent-to-subagent messaging. There is none — the topology is hub-and-spoke, and every exchange goes through the orchestrator.
 - Human conversation. When an agent needs to talk to a person it uses whatever user-interaction tool its harness provides; that traffic never appears in protocol messages.
-- File-level metadata written *into* artifacts. The provenance stamp a subagent applies to the artifacts it produces is a separate canonical section with its own contract; this document governs the JSON envelope only.
+- Artifact content below the provenance frontmatter. This protocol governs the message envelope and provenance stamp, not an artifact's substantive content.
 
 ### 2.2 Machine-to-Machine, Not Conversational
 
@@ -386,7 +384,7 @@ So v1.9 states the precedence explicitly, in both variants: **MOSAIC-authored in
 | `output_artifacts` | array | Yes | Exact paths or bounded `*` patterns inside `Orchestration-{run_id}/` that the subagent may read, create, or update. `*` stays within one path segment. `[]` when there are none. |
 | `input_files` | array | No | Project files outside all `Orchestration-*` directories worth starting from. Advisory; the subagent may read any project file it judges relevant. |
 | `output_files` | array | No | Project files outside all `Orchestration-*` directories expected to change. Advisory; the subagent may write any project file it needs to. |
-| `constraints` | string | No | Boundaries on how the work is done. Omit when there are none. |
+| `constraints` | string | No | Restrictions on this assignment's scope or deliverable that neither the agent's own instructions nor its input artifacts state — e.g. "Phase 1 requirements only". Not for method, and not for environment facts such as paths, interpreter names, or harness quirks; those are appended to `task_description`. Omit when there are none. |
 | `include_result_summary` | boolean | No | When `true`, the response must carry `result_data`. Defaults to `false`. |
 | `human_in_the_loop` | boolean | No | When `true`, activates the output review gate (§3.6). Defaults to `false`. |
 
@@ -502,13 +500,13 @@ The rules:
 
 1. The gate fires **last**, after the work is finished and after every written output artifact carries `human_approved: false`.
 2. The agent uses its user interaction tools and begins by stating its `agent_instance_id` and `run_id`.
-3. The agent sends a review request that inventories every orchestration artifact created or updated and every project file created, modified, or deleted. Every path remains visible and carries its action plus a brief description of the material change and its purpose. Related paths may share a group-level description. There is no fixed length limit: the description is as detailed as the user needs to understand what changed without reproducing the file.
+3. The agent sends a review request that inventories every orchestration artifact created or updated, every output artifact the task asks it to review, and every project file created, modified, or deleted. Every path remains visible and carries its action plus a brief description of the material change and its purpose. Related paths may share a group-level description. There is no fixed length limit: the description is as detailed as the user needs to understand what changed without reproducing the file.
 4. Full contents and diffs are omitted unless the user asks for them. File size, encoding, and format do not change the review-request rule.
 5. The review request asks the user to approve the described output or request changes.
 6. If the user asks for changes, the agent makes them and sends a new review request containing the complete updated inventory. **The gate re-arms on every change**, and each artifact content write resets `human_approved` to `false`.
 7. **Mid-task interaction does not discharge the gate.** Asking a clarifying question halfway through is normal agent behaviour and satisfies nothing — HITL is specifically about reviewing finished output.
 8. If the agent has no way to reach a human at all, it returns `BLOCKED` with `E503` rather than silently proceeding unreviewed.
-9. Only after the user approves the latest review request with no further changes does the agent set `human_approved: true` in every output artifact through a metadata-only write and return its response.
+9. Only after the user approves the latest review request with no further changes does the agent set `human_approved: true` in every output artifact the approved review request covered, through a metadata-only write, and return its response. Coverage, not authorship, is the test: a gate-discharge re-dispatch (§9.7) writes no content, yet its review covers the artifacts it was sent to review. A listed output the request did not cover keeps whatever stamp its last writer left; flipping it would certify a review that never happened.
 
 Rule 7 is the one that needs stating explicitly, because without it "I consulted the user" becomes a claim an agent can satisfy by having asked anything at all, and the gate stops meaning what it was introduced to mean.
 
@@ -540,8 +538,8 @@ Rule 7 is the one that needs stating explicitly, because without it "I consulted
 | `agent_instance_id` | string | Yes, except unusable in an `E100` rejection | Echoed unchanged from the invocation. Omitted rather than invented when absent, empty, or wrongly typed in an invalid invocation. |
 | `run_id` | string | Yes, except unusable in an `E100` rejection | Echoed unchanged from the invocation. Omitted rather than invented when absent, empty, or wrongly typed in an invalid invocation. |
 | `status_code` | string | Yes | One of the six codes in §5. |
-| `status_message` | string | Yes | One or two sentences describing the outcome, naming what was created or changed. |
-| `result_data` | string | Conditional | Key findings, 200 words or fewer. Present **only** when the invocation set `include_result_summary: true`. |
+| `status_message` | string | Yes | One or two sentences describing the outcome and naming modifications, or stating that nothing changed and why. |
+| `result_data` | string | Conditional | Key findings. Present if and only if the invocation set `include_result_summary: true`. |
 | `error_code` | string | BLOCKED only | Machine-branchable blocker category, format `E{category}{number}`. Present **only** with `BLOCKED`. |
 | `error_reason` | string | BLOCKED only | Plain-language explanation of the blocker. Present **only** with `BLOCKED`. |
 
@@ -730,7 +728,8 @@ This is the code that makes incomplete but continuable work expressible. It cove
 | Assignment incomplete; continuation state preserved | `PARTIALLY_DONE` | Fresh invocation of the same workflow assignment |
 | Missing information or decision | `NEEDS_CLARIFICATION` | Supply context or escalate |
 | Inputs available, but agent cannot complete | `CAPABILITY_EXCEEDED` | Escalate; do not substitute an agent |
-| A prerequisite is missing | `BLOCKED` | Re-check dependencies |
+| An explicitly required resource is absent | `BLOCKED` (`E101`) | Supply the resource or route to its producer |
+| Explicit evidence that prerequisite work is incomplete | `BLOCKED` (`E401`) | Route to the prerequisite work |
 | The environment is uncooperative | `BLOCKED` | Retry or escalate by error policy |
 
 ---
@@ -806,7 +805,7 @@ This is the code that makes incomplete but continuable work expressible. It cove
   "output_artifacts": ["Orchestration-20260129T090000Z-a3f9/Stage-1/PlanProgress.md"],
   "input_files": ["src/interfaces/IUserService.ts"],
   "output_files": ["src/services/UserService.ts", "src/services/UserService.test.ts"],
-  "constraints": "Must achieve 80% code coverage",
+  "constraints": "Read operations only; account deletion is out of scope for this stage",
   "human_in_the_loop": false
 }
 ```
@@ -849,7 +848,7 @@ This is the code that makes incomplete but continuable work expressible. It cove
 }
 ```
 
-**Orchestrator:** dispatches `implementation-tdd#16` with the remaining three. The successor picks up continuation context from the artifact, not from the response.
+**Orchestrator:** dispatches `implementation-tdd#16`, a fresh invocation of the same assignment; the successor finds the remaining three in the artifact. The successor picks up continuation context from the artifact, not from the response.
 
 ### 6.5 Blocked on a missing required resource
 
@@ -909,7 +908,7 @@ This is the code that makes incomplete but continuable work expressible. It cove
 }
 ```
 
-**Orchestrator:** either re-dispatches without the HITL flag, or escalates so that a user channel is provided. Note what the agent did *not* do: proceed unreviewed and claim success.
+**Orchestrator:** escalates to the user. It re-dispatches without HITL only if the user explicitly waives the gate.
 
 ### 6.7 Invalid invocation is rejected before work
 
@@ -966,8 +965,8 @@ This is the code that makes incomplete but continuable work expressible. It cove
 | 2 | `agent_instance_id` identical to the invocation's; omitted only for `E100` when the invocation supplied no usable string | Conditional |
 | 3 | `run_id` identical to the invocation's; omitted only for `E100` when the invocation supplied no usable string | Conditional |
 | 4 | `status_code` is one of the six | Yes |
-| 5 | `status_message` present, one to two sentences, names what changed | Yes |
-| 6 | `result_data` present exactly when `include_result_summary: true` was sent; 200 words or fewer | Conditional |
+| 5 | `status_message` present, one to two sentences, names modifications or states that nothing changed and why | Yes |
+| 6 | `result_data` present exactly when `include_result_summary: true` was sent | Conditional |
 | 7 | `error_code` present when `BLOCKED` | Yes |
 | 8 | `error_reason` present when `BLOCKED` | Yes |
 | 9 | `error_code` and `error_reason` **absent** when not `BLOCKED` | Yes |
@@ -1149,7 +1148,7 @@ When an agent writes an artifact that already exists — a successor continuing 
 
 This costs something: original-creation provenance is lost. It is still right. The question a reader actually asks of a file is "is this current, and who is answerable for what I am reading now" — and the current writer answers that. The full write history is not lost; it is in the execution log, where a full history belongs. Keeping a `created_by` alongside a `modified_by` in the frontmatter would replicate a chronology in the one place least equipped to hold it: two fields cannot record three writes.
 
-The field name is admittedly a poor fit for last-writer semantics. It is retained because it is what forty-two agents already say, and renaming it is a change with a migration cost and no functional gain (§14).
+The field name is admittedly a poor fit for last-writer semantics. It is retained because it is what every agent in the catalogue already says, and renaming it is a change with a migration cost and no functional gain (§14).
 
 ### 9.4 Merging into existing frontmatter
 
@@ -1219,9 +1218,9 @@ The alignment is the argument: **the mechanism is strongest where the gate is mo
 
 The flag has no effect unless something reads it. **The orchestrator verifies it**, and that verification is what makes the stamp part of this contract rather than an audit convenience (§10.6).
 
-**When.** Immediately after an invocation dispatched with `human_in_the_loop: true` returns, and before routing on its status code.
+**When.** Immediately after an invocation dispatched with `human_in_the_loop: true` returns, whatever its status, and before routing on its status code. `BLOCKED` with `E503` is exempt. That response is the agent reporting that the gate could not run. Verifying it would only re-dispatch a review to an agent that has already said it cannot reach a human, and would delay the immediate escalation `E503` requires.
 
-**What is read.** The frontmatter of each artifact named in that invocation's `output_artifacts`, and nothing below it.
+**What is read.** The frontmatter of each concrete output artifact the invocation created or modified — including wildcard matches — and nothing below it. This is the same set the orchestrator already detects for the Artifacts registry. Expanding wildcards matters: a wildcard output is exactly where an unstamped artifact would otherwise go unchecked. A listed output that does not exist, or that the invocation left unchanged, is not checked: the subagent had nothing of its own to stamp there, and treating absence as a missed gate would re-dispatch a review of a file nobody wrote.
 
 Reading only the frontmatter is a deliberate narrowing, not a new permission. The orchestrator already reads certain artifacts for routing, so artifact access is established. What is at stake is context discipline: an orchestrator that reads plans and designs in full begins forming opinions about their content, and a workflow-agnostic router with opinions about domain content is on its way to making domain decisions. A frontmatter read costs a handful of lines and cannot produce an opinion about anything.
 
@@ -1232,6 +1231,8 @@ Reading only the frontmatter is a deliberate narrowing, not a new permission. Th
 The alternatives were weighed and rejected. Routing it as a failed invocation would discard work completed correctly apart from the gate. Escalating to the user spends a human interruption on something the re-dispatch resolves by itself — and spends it to ask permission for a review the user was already meant to be given. Recording the discrepancy and advancing turns the field into an audit trail with no enforcement, surfacing skipped gates after the run rather than during it.
 
 **A re-dispatch that comes back still `false` is a different problem.** The first miss is plausibly forgetting; the second, against a task description naming the flag explicitly, is not. That is the point to escalate, and the point at which the run has learned something about the agent rather than about the invocation.
+
+**Why routing uses the original status after a repaired gate.** The re-dispatch's assignment is only the review, so a clean review correctly returns `SUCCESS`. Routing on it would erase what the original invocation reported: a reviewer's `COMPLETED_NEEDS_ACTION` would open the quality gate on findings nobody fixed, and a `PARTIALLY_DONE` would skip its continuation. `last_agent` names the re-dispatch because it is the trailing workflow row, and recovery's row-versus-`last_agent` check must agree with it. `last_status` carries the original's code because that is what recovery routes on. The Execution Log keeps both rows exactly as returned. A non-`SUCCESS` re-dispatch reports something new about the review itself (no user channel, a question raised in review), so it is routed as returned.
 
 **Where this obligation is written.** In the orchestrator variant of §1, alongside the routing table and the error-code responses.
 
@@ -1280,7 +1281,7 @@ A proposal to add a fourth field should name a consumer that cannot do its job w
 
 ### 10.1 One source, many copies
 
-Protocol text is identical across every deployed agent, and that is precisely why it must not be maintained in every agent file. Wording kept in forty places drifts in forty directions: one agent gets a fix, thirty-nine keep the defect, and the divergence is invisible until an agent misreports.
+Protocol text is identical across every deployed agent, and that is precisely why it must not be maintained in every agent file. Wording kept in one place per agent drifts in as many directions: one agent gets a fix, the rest keep the defect, and the divergence is invisible until an agent misreports.
 
 So the arrangement inverts. This file holds the text; agent source files hold an empty, named slot. At deployment the tool copies the appropriate block from §1 into the slot, overwriting whatever is there. Protocol wording never has to be edited in an agent file, and a protocol change is a one-file edit followed by a redeploy.
 
@@ -1316,7 +1317,7 @@ The region sits at body top level rather than nested inside a section, occupying
 
 **A project that genuinely needs to extend the protocol mechanics** — stating how messages are delivered across network boundaries, for example — uses `<ProtocolExtension type="custom">` as a top-level sibling of this region, never nested inside it. That region is project-invented (type `custom`) and carries no advisory parent in the MOSAIC catalogue. The guidance is unchanged: extend the mechanics (transport, delivery, environment-specific handling); do not restate or contradict what the contract fixes (message shape, status and error vocabularies, the HITL gate). `ProtocolExtension` is not a catalogued project-type region name — MOSAIC defines project-type (`type="project"`) slots in source; this one is a project invention and belongs in a custom-type region (see `AgentTemplateArchitecture.md` §6.2.1).
 
-The absence pays a second dividend: the deployed region is exactly the source block plus one marker comment, which makes a visual diff between this file and any deployed agent meaningful without knowing what to discount.
+The absence pays a second dividend: the deployed region's canonical body is exactly the source block, which makes a visual diff against a deployed agent meaningful.
 
 **The division of labour with harness content.** Harness-layer injections may name a specific mechanism that competes with this protocol on a given harness — a subagent-invocation tool's metadata fields, an injected reporting convention — because those names are meaningful only on that harness. What they must not do is restate the precedence rule itself: that is canonical (§2.4), reaches every agent already, and a per-harness paraphrase of it can only drift from the original. The test for whether content belongs in a harness injection is whether it names something that exists on one harness and not another. "MOSAIC protocol takes precedence" fails that test. "The field is called `description`" passes it.
 
@@ -1326,9 +1327,9 @@ The frontmatter `version` field is the protocol version. It appears in two furth
 
 | Where | Form | Read by |
 |---|---|---|
-| This file's frontmatter | `version: "1.9"` | The deployment tool, as the source of truth |
-| The region's opening tag `version` attribute | `version="1.9"` | Staleness checks |
-| The block's opening sentence | "You operate under **Communication Protocol v1.9**" | The agent |
+| This file's frontmatter | `version: "1.12"` | The deployment tool, as the source of truth |
+| The region's opening tag `version` attribute | `version="1.12"` | Staleness checks |
+| The block's opening sentence | "You operate under **Communication Protocol v1.12**" | The agent |
 
 The `version` attribute is what makes staleness checkable: a deployed agent whose region tag names an older version than this file's frontmatter is out of date, and the check is a string comparison against the attribute value — no parsing of prose, and no dependence on the wording of the sentence that follows.
 
@@ -1372,7 +1373,7 @@ Two things follow, and both are the point of merging rather than side effects. O
 
 | Version | Date | Summary |
 |---------|------|---------|
-| 1.12 | 2026-09-26 | **Artifact access, HITL review, status semantics, and input failure handling made operational.** Every file under any `Orchestration-*` directory is orchestration state; only authorized paths in the current run's directory are accessible. Inputs use exact paths; outputs may use bounded `*` patterns within one path segment. Inputs grant read access, outputs grant read/write access, and existing outputs are protected from blind replacement. The deployed invocation examples identify required fields, optional fields, and boolean defaults. The HITL review request inventories every changed path with its action and material-change summary while preserving the false-before-review and true-after-approval stamp sequence. Status is now strictly assignment-local: `COMPLETED_NEEDS_ACTION` is a completed assignment whose agent-specific action condition was met; `PARTIALLY_DONE` is an incomplete but continuable assignment, including unresolved acceptance failures. Subagents no longer receive routing actions, concrete targets come only from workflow configuration, and `CAPABILITY_EXCEEDED` escalates without agent substitution. A subagent rejects a malformed or out-of-scope invocation before work with `BLOCKED` and `E100`; an `E100` response omits an unusable correlation identifier rather than inventing one, and the orchestrator corrects the invocation or routing in its next dispatch. `E101` now means an explicitly required resource is absent and never follows from an advisory project-file hint alone; `E401` requires explicit evidence that prerequisite work is incomplete and is never inferred from absence. |
+| 1.12 | 2026-09-26 | **Artifact access, HITL review, status semantics, and input failure handling made operational.** Every file under any `Orchestration-*` directory is orchestration state; only authorized paths in the current run's directory are accessible. Inputs use exact paths; outputs may use bounded `*` patterns within one path segment. Inputs grant read access, outputs grant read/write access, and existing outputs are protected from blind replacement. The deployed invocation examples identify required fields, optional fields, and boolean defaults. `result_data` is present if and only if requested, with no arbitrary word limit. A `status_message` names modifications or states that nothing changed and why. The HITL review request inventories every changed path with its action and material-change summary while preserving the false-before-review and true-after-approval stamp sequence. `E503` escalates immediately; HITL is removed only after explicit human waiver. Status is now strictly assignment-local: `COMPLETED_NEEDS_ACTION` is a completed assignment whose agent-specific action condition was met; `PARTIALLY_DONE` is an incomplete but continuable assignment, including unresolved acceptance failures. The status table is the sole deployed status-selection guidance; duplicate Key Rules were removed. Subagents no longer receive routing actions, concrete targets come only from workflow configuration, and `CAPABILITY_EXCEEDED` escalates without agent substitution. A subagent rejects a malformed or out-of-scope invocation before work with `BLOCKED` and `E100`; an `E100` response omits an unusable correlation identifier rather than inventing one, and the orchestrator corrects the invocation or routing in its next dispatch. `E101` now means an explicitly required resource is absent and never follows from an advisory project-file hint alone; `E401` requires explicit evidence that prerequisite work is incomplete and is never inferred from absence. Stale maintainer references to separate provenance, a marker comment, and v1.9 were corrected. The `human_approved: true` flip covers exactly the output artifacts the approved review request covered: those the invocation wrote, plus any the task asked it to review, which is what lets a gate-discharge re-dispatch that writes no content complete the gate. Any other listed output keeps its prior stamp. Gate verification runs whatever status was returned, except `BLOCKED` with `E503`, which already reports that the gate could not run and is routed directly to escalation. It reads only output artifacts the invocation created or modified, so a listed but absent or unchanged output is not a gate miss. `constraints` is defined once: scope or deliverable restrictions the agent's instructions and inputs do not state — never method or environment facts, which are appended to `task_description`. The deployed input examples say so, and the coverage-threshold example was replaced with a scope restriction. §6.4's `PARTIALLY_DONE` example dispatches a fresh invocation of the same assignment rather than implying re-scoping, and §5.7's "prerequisite is missing" row is split into `E101` (explicitly required resource absent) and `E401` (explicit evidence of incomplete prerequisite work). After a HITL re-dispatch discharges the gate with `SUCCESS`, the orchestrator routes on and records the original invocation's status and error code, with `last_agent` naming the re-dispatch; any other re-dispatch status is routed as returned. Maintainer-text corrections: §3.6 rules 1 and 2 are separate list items again, and §14's rejected per-project extension now points to the custom `ProtocolExtension` sibling region that §10.3 specifies rather than to the agent's instruction body. |
 | 1.11 | 2026-09-03 | **E503 escalation priority corrected.** The orchestrator variant's error-code table previously listed E503 (USER_CONTACT_UNAVAILABLE) with "Re-invoke without HITL flag or escalate", making silent HITL bypass the primary option. Changed to "Escalate to human — re-invoke without HITL flag only if the human explicitly waives the gate." The old wording caused the script-mode orchestrator to resolve every E503 by dropping HITL, completing runs with zero human review despite the workflow declaring HITL on critical steps. The subagent variant is unchanged — its E503 row describes the condition, not the response. |
 | 1.10 | 2026-08-05 | **Artifact provenance merged in.** The provenance stamp — `run_id`, `created_by`, `human_approved`, written into every file named in `output_artifacts` — was a separate contract with its own document, version, and `<ArtifactProvenance type="managed">` region. It is now part of this contract: the text ships inside the subagent variant of §1.1, the reasoning is §9, and there is one version number where there were two. The merge is correct because the orchestrator **verifies** `human_approved` (§9.7) — a field it reads and routes on is hard interop, not an audit convenience, and it is the secondary layer under a JSON response that can otherwise claim anything. Two changes follow from the merge. The field formerly called `hitl_confirmed` is renamed **`human_approved`**: it is read from the artifact, where "HITL" is orchestration jargon a standalone reader does not hold, and "approved" is what the flip actually certifies — the user asked for no further changes. The rename is taken now because nothing yet reads the field, making this the cheapest it will ever be. And the **orchestrator variant gains a Verifying the Human-in-the-Loop Gate subsection** (§9.7), so the check the subagent variant promises is instructed on the side that must perform it; the orchestrator still stamps nothing (§9.9). Consequences: canonical document order drops from eight top-level slots to seven, and `<ArtifactProvenance type="managed">` and `<ArtifactProvenanceExtension type="project">` cease to exist. |
 | 1.9 | 2026-08-03 | **Protocol authority over harness conventions.** Added a Protocol Authority subsection to both variants, establishing that MOSAIC-authored instructions outrank harness-authored ones on message shape. Subagents return the JSON object as their entire response regardless of harness guidance requesting a prose report or summary. Orchestrators put the whole protocol message in the payload field and treat harness metadata fields as bookkeeping carrying no task content, and must never infer a status code from prose when a response contains none. Added as Key Rule 1 in the subagent variant, renumbering the remaining rules. Motivated by harnesses whose subagent-invocation tool schema and injected reporting conventions partially duplicate — and contradict — this protocol. |
@@ -1415,7 +1416,7 @@ Two things follow, and both are the point of merging rather than side effects. O
 
 - **Enumerating the `run_id` echo's consumers.** Under single-run orchestration the response-side echo has no reader. It was added pre-emptively to avoid a second version bump later. If nothing consumes it by the time multi-run coordination is designed, the question of whether it earns its place should be reopened rather than assumed settled.
 - **Whether the receiver rule needs a defined outcome, not just a prohibition.** v1.9 forbids inferring a status from a prose-only response but leaves recovery to orchestration policy. If the deterministic runner and an LLM orchestrator turn out to diverge in practice despite both obeying the prohibition, the resolution is to specify the recovery too — at which point it stops being policy and becomes protocol.
-- **A machine-checkable conformance test for deployed protocol sections.** Version-string comparison (§9.4) catches staleness but not local edits that preserve the version. A hash of the canonical block, recorded at deployment, would catch both. The bundle-sourced regions carry the identical gap for the identical reason, so this is worth solving once for every managed-type region rather than per source.
+- **A machine-checkable conformance test for deployed protocol sections.** Version-string comparison (§10.4) catches staleness but not local edits that preserve the version. A hash of the canonical block, recorded at deployment, would catch both. The bundle-sourced regions carry the identical gap for the identical reason, so this is worth solving once for every managed-type region rather than per source.
 
 **Rejected**
 
@@ -1424,7 +1425,7 @@ Two things follow, and both are the point of merging rather than side effects. O
 - **A seventh status code.** Six proposals have been tested against §8.6 and all six mapped onto existing outcomes.
 - **Leaving protocol precedence to per-harness injections.** One harness already carried a version of this rule as a local constraint, which is how the gap was found: it covered the dispatch side only, said nothing to subagents, and asserted that subagents would ignore competing instructions anyway — an assumption that holds only if something tells them to, and nothing did. A universal invariant maintained in four places is maintained in none of them (§2.4).
 - **Forbidding orchestrators from filling harness metadata fields at all.** Tempting, but some harnesses require those fields, so a blanket prohibition would be unfollowable. The rule instead defines their *status* — bookkeeping, carrying no task content — which is enforceable everywhere and yields the same outcome where it matters.
-- **A per-project protocol extension.** An earlier design had the tool append a `ProtocolExtension` injection after the deployed block, so a project could add its own protocol notes. Rejected because a project able to append to the protocol is a project able to contradict it, and a contradiction *inside* the section is worse than one outside: nothing tells the agent which half is canonical. Precedence is settled centrally (§2.4) precisely so it is not renegotiated per deployment. Project-specific communication guidance belongs in the agent's instruction body, where it reads as guidance (§10.3).
+- **A per-project protocol extension.** An earlier design had the tool append a `ProtocolExtension` injection after the deployed block, so a project could add its own protocol notes. Rejected because a project able to append to the protocol is a project able to contradict it, and a contradiction *inside* the section is worse than one outside: nothing tells the agent which half is canonical. Precedence is settled centrally (§2.4) precisely so it is not renegotiated per deployment. A project that needs to extend protocol mechanics uses a `<ProtocolExtension type="custom">` region as a top-level sibling of the contract region, never inside it (§10.3).
 - **A single merged protocol section for all agent roles.** Would put a routing table into every subagent and return-code rules into the orchestrator, in both cases text the reader cannot act on (§10.2).
 - **Numeric status codes.** Compact on the wire, but every log line, table cell, and routing rule would then need a lookup to be readable. The wire is not the constrained resource here; attention is.
 - **Declaring the status and error vocabularies in frontmatter.** Attractive because a runner could then check its own handling against a YAML list instead of parsing a markdown table. Rejected because the list would be a second copy of what the canonical block already states, and the block is what ships — so the check would validate against the copy and stay green while the deployed text diverged. Parsing the block is marginally more work and is the only version of the check that can actually fail when it should (§10.5).
@@ -1435,5 +1436,5 @@ Two things follow, and both are the point of merging rather than side effects. O
 
 - **The agent instance id pattern in §7.3 is broader than earlier drafts.** Agent names are kebab-case (`checkpoint-manager-git#4`), which a letters-only pattern rejects. The pattern here admits hyphens and digits. Any validator written against the narrower form must be updated, or it will reject valid ids from most of the agent catalogue.
 - **The v1.8 date in §12 should be confirmed** against when the `run_id` change actually landed in the agent files.
-- **One harness injection now duplicates canonical content.** `Catalog/HarnessInjections/Claude Code/HarnessInjectionsOrchestrator.md` restates protocol precedence inside a `HarnessConstraints` block. With §2.4 canonical, that injection should shrink to naming the `Task` tool's metadata fields and drop the precedence claim, per the test in §10.3.
-- **The `hitl_confirmed` → `human_approved` rename is swept everywhere it can reach an agent.** Done: `Catalog/Subagents/Interface/approval-presenter.md` (v1.0.1), its row in `Catalog/Subagents/Interface/README.md`, `Development/Designs/DeploymentBlocks/ClosingProcedure.md`, and `Workflows/Verification/requirements-to-test-cases.md` (v1.2). The 42 agent files and the orchestrator take the new text from `<CommunicationProtocol type="managed">` on redeploy and need no hand edit. Two deliberate exceptions remain: the fixtures under `Tools/Deployment/testdata/golden/`, which regenerate from a redeploy and must not be hand-edited, and the analysis note `OnSuccessHITL.md`, which records the decision in the vocabulary of its date. §9.6 and §12 name the old spelling on purpose, so the rename stays traceable.
+- ~~**One harness injection now duplicates canonical content.**~~ **Resolved 2026-09-27.** `Catalog/HarnessInjections/Claude Code/HarnessInjectionsOrchestrator.md` no longer restates protocol precedence. The `Task`-tool field bullet went with it, so that injection currently names no competing mechanism at all — permitted, since §10.3 makes per-harness naming optional rather than required, but worth knowing if the two-versions-of-the-task failure in §2.4 is ever observed on that harness again. Its Design Rationale now records what the block deliberately omits and why.
+- **The `hitl_confirmed` → `human_approved` rename is swept everywhere it can reach an agent.** Done: `Catalog/Subagents/Interface/approval-presenter.md` (v1.0.1), its row in `Catalog/Subagents/Interface/README.md`, `Development/Designs/DeploymentBlocks/ClosingProcedure.md`, and `Workflows/Verification/requirements-to-test-cases.md` (v1.2). The subagent files and both orchestrators take the new text from `<CommunicationProtocol type="managed">` on redeploy and need no hand edit. Two deliberate exceptions remain: the fixtures under `Tools/Deployment/testdata/golden/`, which regenerate from a redeploy and must not be hand-edited, and the analysis note `OnSuccessHITL.md`, which records the decision in the vocabulary of its date. §9.6 and §12 name the old spelling on purpose, so the rename stays traceable.

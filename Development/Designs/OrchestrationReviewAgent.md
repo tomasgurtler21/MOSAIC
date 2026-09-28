@@ -130,7 +130,7 @@ The search target is a long, unusual literal string, which makes this an ordinar
 
 ### 5.3 The infrastructure agent declaration region
 
-`<InfrastructureAgents type="project">`, in the same deployed orchestrator file located by §5.2, read in the same pass.
+`<InfrastructureAgents type="managed">`, in the same deployed orchestrator file located by §5.2, read in the same pass.
 
 It supplies one thing: the names of the infrastructure agents this orchestrator may dispatch. Tier B reports agents appearing in the Execution Log that the workflow table does not name, and infrastructure agents are never in a workflow table — without this list, every `checkpoint-manager-git` row, and every one of this agent's own rows, would be reported as an anomaly. A drift detector whose most frequent finding is itself would be ignored within one run, taking its real findings with it.
 

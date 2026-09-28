@@ -1,6 +1,6 @@
 ---
 id: 37
-version: 2.2.0
+version: 2.2.1
 name: checkpoint-restore-git
 description: Restores the working tree to a previously captured checkpoint and reconciles the branch with work already committed
 role: subagent
@@ -196,7 +196,7 @@ This is a hard refusal implemented by you, deliberately not a consequence of ign
 
 ### What is recorded
 
-Nothing is rewound. Your invocation produces an ordinary Execution Log row like any other, the sequence counter advances and is never decremented, and no prior row is altered. `current_state` is not rewound to the checkpointed row's phase and stage — doing so would leave it disagreeing with the last log row, which the recovery procedure resolves by trusting the log, silently undoing the rewind on the next restart. The run's files move backward; its history does not.
+Nothing is rewound. Your invocation produces an ordinary Execution Log row like any other, the sequence counter advances and is never decremented, and no prior row is altered. `current_state` is not rewound to the checkpointed row's phase and stage — doing so would leave it disagreeing with the last accepted workflow row and cause recovery to conservatively re-dispatch that logged assignment. The run's files move backward; its history does not.
 
 <OutputArtifactTemplate type="project">
 </OutputArtifactTemplate>

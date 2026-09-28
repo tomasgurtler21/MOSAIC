@@ -1,7 +1,7 @@
 ---
 id: deployed-sections-bundle
 type: specification
-version: "1.2"
+version: "1.3"
 name: "Deployed Sections Bundle"
 description: "The design of the canonical block bundle: what qualifies as a block, why contracts are excluded, how bundle_version works, how the tool deploys blocks, and how staleness is detected."
 author: MOSAIC
@@ -43,16 +43,16 @@ A block belongs in the bundle when all three hold:
 2. It is **authored by MOSAIC** — not assembled from a deployment's selections, and not written by a project.
 3. **It is not a contract.** Nothing in it defines something two parties must agree on.
 
-The first two are obvious. The third is the one that decides hard cases, and it is decidable rather than a matter of judgement. Ask what breaks when an orchestrator and a subagent carry different versions:
+The first two are obvious. The third is the one that decides hard cases, and it is decidable rather than a matter of judgement. Ask what breaks when two agents in one run carry different versions:
 
 | Mismatch | Breaks? |
 |---|---|
 | Subagent speaks orchestration contract 1.7, orchestrator 1.9 | **Yes.** No `run_id` in responses; the orchestrator's provenance check finds nothing to read. A wire disagreement. |
-| Subagent carries bundle 2.0.0, orchestrator carries 3.0.0 | **No.** The retry wording differs. Messages still parse, artifacts still stamp, routing is unaffected. |
+| One subagent carries bundle 2.0.0, another 3.0.0 | **No.** The retry wording differs. Messages still parse, artifacts still stamp, routing is unaffected. |
 
 The bundle contains agent-local behaviour, plus nearby pointers that trigger a procedure owned by the contract without restating it. `AuthorityHierarchy` decides which instruction source wins but delegates invalid-invocation mechanics to the protocol. `ClosingProcedure` places the HITL trigger at the action boundary but delegates every gate rule and response outcome. `ExecutionPhilosophyCommon` covers context use, artifact memory, and single-responsibility discipline without defining statuses or message shape. `ErrorHandlingCommon` states a subagent-side retry rule the contract deliberately leaves to policy.
 
-That is why `bundle_version` is never a compatibility number, and why an agent at one bundle version interoperates perfectly with an orchestrator at another.
+That is why `bundle_version` is never a compatibility number, and why an agent at one bundle version interoperates perfectly with agents at another and with the orchestrator, which carries no bundle stamp (§3.1).
 
 ### 2.1 What is excluded
 
@@ -96,7 +96,7 @@ The bundle source declares `bundle_version`; the tool writes that value into dep
 
 A version comment repeated once per region, in every file, costs context-window tokens in every agent's prompt to serve a reader that is not the agent. Frontmatter is already parsed by the tool, so the stamp goes there: one field, read by the tool, invisible to the model.
 
-The agent's own `version` field is untouched by any of this. When a block changes, forty-two agents receive new text and none of them change version — their own source did not change, and a bump would claim an authorship that did not happen. That separation is the point of single-sourcing: a canonical text change is one version bump in one file, not forty-two.
+The agent's own `version` field is untouched by any of this. When a block changes, every agent carrying the region receives new text and none of them change version — their own source did not change, and a bump would claim an authorship that did not happen. That separation is the point of single-sourcing: a canonical text change is one version bump in one file, not one per agent.
 
 ---
 
@@ -108,7 +108,7 @@ For each agent being deployed:
 2. For each `<{Target} type="managed">` region present in the file, find the bundle block whose `target` matches and whose `applies_to` matches the role. Regions not sourced from the bundle are resolved from the contract's own source or from the deployment's selections (`AgentTemplateArchitecture.md` §2.5).
 3. Replace the region's tool-owned canonical content with the block's content verbatim, then re-emit any nested project/custom regions after the canonical content in preserved order and with preserved bytes.
 4. Write the bundle source's `bundle_version` into deployed frontmatter as `mosaic_bundle_version`.
-5. Resolve remaining project-type regions (`<Name type="project">`) — preserving existing content on update, leaving them empty and listing them in `TODO.md` on create.
+5. Resolve remaining project-type regions (`<Name type="project">`) — preserving existing content on update; on create, writing their source content (empty, or the default content `AgentTemplateArchitecture.md` §2.1.1 allows) and listing them in `TODO.md`.
 
 **Step 5 comes last, always.** A region regenerated after an adjacent injection is resolved would discard content the tool had just placed.
 
@@ -125,7 +125,7 @@ Three edge obligations:
 1. Edit the block in the bundle.
 2. Bump `bundle_version` at the tier the change warrants (§3).
 3. Add one row to the bundle's manifest.
-4. Record the reasoning in the document named by the block's `specified_in`, including a changelog entry there.
+4. Record the reasoning in the document named by the block's `specified_in`: a changelog entry keyed to the new `bundle_version`, and a bump of that document's own `version`, which tracks its prose rather than the bundle.
 5. Redeploy.
 
 Step 4 is not optional bookkeeping. A block whose text changed and whose specifying document did not is a block whose stated reasoning no longer explains it, and that is how a future editor reverts a deliberate decision.
@@ -136,7 +136,7 @@ Step 4 is not optional bookkeeping. A block whose text changed and whose specify
 
 One string comparison per agent: the deployed file's `mosaic_bundle_version` against the bundle source's `bundle_version`. No prose parsing, no dependence on the wording that follows, and no per-block bookkeeping.
 
-What it does not catch is a **local edit that preserves the version** — someone hand-editing a deployed region in place. Consolidating to one bundle narrows that gap, since there is now one number to forge rather than three, without closing it. The interim mitigation is validator rule 22 in `AgentTemplateArchitecture.md` §9, which compares each deployed region's canonical projection against its block byte-for-byte. The projection removes direct nested project/custom regions and trims outer whitespace; their preserved content does not make a canonical region stale. A recorded per-block hash would catch both and is still open (§10).
+What it does not catch is a **local edit that preserves the version** — someone hand-editing a deployed region in place. Consolidating to one bundle narrows that gap, since there is now one number to forge rather than three, without closing it. The interim mitigation is validator rule 22 in `AgentTemplateArchitecture.md` §9, which compares each bundle-sourced managed region's canonical projection against its block byte-for-byte. The projection removes direct nested project/custom regions and trims outer whitespace; their preserved content does not make a canonical region stale. A recorded per-block hash would catch both and is still open (§10).
 
 ---
 
@@ -156,11 +156,11 @@ The cost of the bundle is the no-reproduction rule (§1, §9) — a discipline, 
 
 ## 8. Why Not Also Deploy the Orchestrator's Shared Text
 
-Single-sourcing exists to stop forty-two copies from diverging. **One copy cannot diverge from itself.** Deploying the orchestrator's own text into the orchestrator's own file from a third file adds a hop and a staleness surface to buy nothing.
+Single-sourcing exists to stop a copy per subagent from diverging. **The orchestrator role has two hand-maintained sources** — `orchestrator.md` and `orchestrator-script.md` — and deploying their text from a third file adds a hop and a staleness surface against a divergence risk that one review catches.
 
-For three of the four blocks there is also no shared text to hold: the orchestrator's equivalents share no sentence with their subagent counterparts. `AuthorityHierarchy` is the exception — it is a genuine variant, and excluding it costs a review obligation rather than nothing. The full argument is in `AgentTemplateArchitecture.md` §8.
+For three of the four blocks there is also no shared text to hold: the orchestrators' equivalents share no sentence with their subagent counterparts. `AuthorityHierarchy` is the exception — it is a genuine variant, and excluding it costs a review obligation rather than nothing. The full argument is in `AgentTemplateArchitecture.md` §8.
 
-The general form of the question, should it come up for a future block: **do the two texts state one rule for two readers?** Where they do, the risk is not two copies diverging by accident but the rule being amended in one role and not the other, and that risk is unaffected by there being a single orchestrator. That is what makes such a case arguable at all — and, so far, still not worth a second block.
+The general form of the question, should it come up for a future block: **do the texts state one rule for several readers?** Where they do, the risk is not copies diverging by accident but the rule being amended for one role and not the others — and the orchestrator role being small is what keeps that a review obligation rather than a mechanism. That is what makes such a case arguable at all — and, so far, still not worth a second block.
 
 ---
 
@@ -172,7 +172,7 @@ Severities and enforcement mechanisms are assigned there; they are repeated here
 
 20. **Error, tool.** Every bundle block declares a `target` that is a recognised managed-type region name, an `applies_to` that is a recognised role, and a `specified_in` naming a file that exists.
 21. **Warning, tool.** Every deployed agent's frontmatter `mosaic_bundle_version` equals the bundle source's `bundle_version`, and all agents in one deployment agree (§3.1). The legacy deployed name `bundle_version` remains readable for migration.
-22. **Warning, tool.** Every deployed region's canonical projection equals its bundle block byte-for-byte after the same leading/trailing whitespace trim. The projection removes each direct nested project/custom region in full; interior canonical bytes remain exact.
+22. **Warning, tool.** Every **bundle-sourced** managed region's canonical projection equals its bundle block byte-for-byte after the same leading/trailing whitespace trim. Contract-sourced and per-deployment assembled regions (§2.1) have no block to compare against and are outside this rule. The projection removes each direct nested project/custom region in full; interior canonical bytes remain exact.
 23. **Warning, review.** No document outside the bundle contains a block's opening or closing content line. This is the mechanical form of the no-reproduction rule, and it is what stops the split between payload and rationale from quietly reverting.
 
 Rule 22 catches a hand-edited deployed file. Rule 23 catches a design document that started quoting what it was only supposed to explain.
@@ -191,6 +191,7 @@ Rule 22 catches a hand-edited deployed file. Rule 23 catches a design document t
 
 | Version | Date | Summary |
 |---------|------|---------|
+| 1.3 | 2026-09-26 | **Membership aligned with bundle 2.0.0.** `ProtocolConstraints:Subagent` was removed because it restated the Communication Protocol; its remaining rules moved to their proper owners. The bundle now contains four blocks. Historical rows retain the five-block membership that existed at those versions. §8 no longer rests on there being a single orchestrator: the role has two hand-maintained sources, and the argument for keeping their text out of the bundle is restated on that basis. §5 step 4 now states that changing a block bumps the specifying document's own `version` as well as adding its changelog entry — the field tracks that document's prose, and leaving it unstated had produced one bumped block document and three unbumped ones for the same bundle change. §2's version-mismatch example no longer gives the orchestrator a bundle version (it carries none, §3.1), and §4 step 5 writes a project region's source content — empty or default — on create rather than always leaving it empty. |
 | 1.2 | 2026-08-08 | **Per-deployment region list corrected** to follow `AgentTemplateArchitecture.md` v1.4. `LanguagePatterns` and `CustomConstraints` are removed from §4's list of assembled managed-type regions: neither had a generator, both were listed under a content source that was never implemented, and both leave the deployed vocabulary entirely. No change to the bundle itself — it never held either one, and the five blocks are untouched. |
 | 1.1 | 2026-08-05 | **Aligned with the conformance rework** in `AgentTemplateArchitecture.md` v1.2. An absent deployed region is graded rather than uniformly permitted: the five bundle blocks fill conduct-tier regions, whose absence is a warning (§4). Bundle rules 20–23 gain severities and mechanisms — 20 errors, 21–23 warn, since a stale or hand-edited deployment still runs and `bundle_version` carries no wire semantics (§9). |
 | 1.0 | 2026-08-05 | **Initial specification.** Split from `AgentTemplateArchitecture.md` §10. Establishes the bundle as the single source and single version for all verbatim-deployed MOSAIC text, with the three-part membership test and its decidable contract criterion. Records that the bundle holds **no contracts** — the orchestration contract, including the artifact provenance stamp, deploys from its own source — so per-block contract versions in the bundle frontmatter are removed from the design. Moves the `bundle_version` stamp from a region-body comment to the deployed file's frontmatter, and states the one-version-per-deployment invariant. |
@@ -200,7 +201,7 @@ Rule 22 catches a hand-edited deployed file. Rule 23 catches a design document t
 ## 12. Rejected
 
 - **Keeping canonical blocks inside their specifying design documents.** Three counts, in §7.
-- **A per-block version in the bundle.** Would let a stamp say which block changed. Rejected because there is no partial deploy, so per-block precision describes a granularity nothing can act on, and it restores the marker proliferation the bundle exists to end. The manifest answers "what changed in this version" without putting the answer in forty-two files (§3).
+- **A per-block version in the bundle.** Would let a stamp say which block changed. Rejected because there is no partial deploy, so per-block precision describes a granularity nothing can act on, and it restores the marker proliferation the bundle exists to end. The manifest answers "what changed in this version" without putting the answer in every agent file (§3).
 - **Holding contract versions in the bundle frontmatter.** The form this design took before the contract was excluded from the bundle entirely. Once the bundle holds no contracts, there is no contract version for it to declare, and a version field describing text the file does not ship is a fiction (§2.1).
 - **Merging the contract version into `bundle_version`.** A single number is tempting. Rejected because a typo fix in an unrelated block would promote the orchestration contract to a new version, and everything downstream reasoning about compatibility would be reasoning about noise (§2.1).
 - **Writing `<!-- bundle-version: X -->` into each deployed region body.** The original design. Rejected: it repeats a token cost in every agent's context window, once per region, to serve the tool rather than the model. Frontmatter is already parsed (§3.2).

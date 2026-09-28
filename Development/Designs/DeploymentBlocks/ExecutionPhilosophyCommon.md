@@ -1,7 +1,7 @@
 ---
 id: block-execution-philosophy-common
 type: specification
-version: "1.0"
+version: "1.1"
 name: "Block — ExecutionPhilosophyCommon"
 description: "The three shared subagent postures: use the available context for the current task, preserve continuation memory in artifacts, and respect single-responsibility boundaries."
 author: MOSAIC
@@ -43,7 +43,7 @@ At 41/42 this was the least-drifted of the four drifting fragments, and the sing
 
 ## 4. Single Responsibility
 
-"Note work that belongs to another agent; do not do it yourself" states nothing in the contract. It is the single-responsibility architecture, expressed as the behaviour it demands at the moment an agent notices adjacent work it could easily do.
+The single-responsibility bullet prohibits out-of-scope work and gives materially relevant observations one destination: a brief mention in `status_message`. Unrelated artifacts remain unpolluted, while the orchestrator receives consequential scope information.
 
 It belongs in a shared block rather than in each agent's own list because it is identical for every agent — what varies is which work is adjacent, and that is what the `Scope` DO NOT list in `Identity` covers.
 
@@ -55,7 +55,7 @@ Everything after the block and the `ContextLimits` injection. "Investigation onl
 
 Status selection is not shared execution philosophy. Generic meanings and routing semantics belong to the Communication Protocol; each agent's concrete mapping belongs to its `ErrorHandling` section. A philosophy bullet earns its place by saying something about *this* agent's work. If a future measurement finds one identical across all agents, it is a candidate for this block only when it does not restate the contract.
 
-## 5. Membership
+## 6. Membership
 
 Different versions of this block on an orchestrator and a subagent break nothing. It defines no message field, status meaning, routing implication, permission, or other fact two parties must agree on.
 
@@ -65,5 +65,5 @@ Different versions of this block on an orchestrator and a subagent break nothing
 
 | Bundle version | Date | Change |
 |----------------|------|--------|
-| 2.0.0 | 2026-09-26 | Removed generic status-selection guidance from the bundle. Status meanings and routing semantics belong to the Communication Protocol; concrete conditions belong to each agent's status mapping. Added single-responsibility bullet, moved from `ProtocolConstraints:Subagent` when that block was removed — it was never a protocol rule but execution discipline about scope boundaries. |
+| 2.0.0 | 2026-09-26 | Removed generic status-selection guidance from the bundle. Status meanings and routing semantics belong to the Communication Protocol; concrete conditions belong to each agent's status mapping. Added the single-responsibility bullet moved from `ProtocolConstraints:Subagent`; materially relevant out-of-scope issues go briefly in `status_message`, not unrelated artifacts. |
 | 1.0.0 | 2026-08-05 | Initial text. Consolidates measured fragments 3 (Context Management, 42/42) and 5 (Memory via Artifacts, 41/42), plus the forty-two per-agent "Quality over Completeness" wordings reduced to one generic bullet carrying the `PARTIALLY_DONE` / `COMPLETED_NEEDS_ACTION` / `CAPABILITY_EXCEEDED` distinction. |

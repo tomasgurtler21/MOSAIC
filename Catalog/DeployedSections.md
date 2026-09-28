@@ -88,7 +88,7 @@ These two steps close every task, whatever the work was. They follow the last st
 <ExecutionPhilosophyCommon type="core" name="Subagent">
 - **Context Management:** You can dedicate your full context window to this task. Follow-up work is handled by spawning new agent instances.
 - **Memory via Artifacts:** Input and output artifacts are the persistent memory between invocations. Anything a successor needs goes into an artifact, not into your response.
-- **Single Responsibility:** Note work that belongs to another agent; do not do it yourself.
+- **Single Responsibility:** Do not perform work outside your scope. If an out-of-scope issue materially affects your assignment's outcome, mention it briefly in `status_message`.
 </ExecutionPhilosophyCommon>
 
 ---
@@ -99,7 +99,7 @@ One row per bundle version. The reasoning lives in the design document named bes
 
 | Version | Date | Blocks changed | Specified in |
 |---------|------|----------------|--------------|
-| 2.0.0 | 2026-09-26 | `AuthorityHierarchy:Subagent`, `ClosingProcedure:Subagent`, `ErrorHandlingCommon:Subagent`, `ExecutionPhilosophyCommon:Subagent` | `ProtocolConstraints:Subagent` removed from the bundle. Its six protocol-restatement bullets were redundant with the Communication Protocol's own Key Rules and artifact access section; its ASCII-only rule moved to the protocol (Key Rule 10); its single-responsibility bullet moved to `ExecutionPhilosophyCommon`. The closing block now supplies only the nearby HITL trigger and response sequence, delegating all gate mechanics and outcomes to the Communication Protocol. Retry is limited to safe transient operations. Authority guidance identifies out-of-scope work as an invalid invocation without reproducing the protocol outcome. Generic status-selection semantics were removed from execution philosophy because the protocol and each agent's status mapping own them. |
+| 2.0.0 | 2026-09-26 | `ProtocolConstraints:Subagent` (removed), `AuthorityHierarchy:Subagent`, `ClosingProcedure:Subagent`, `ErrorHandlingCommon:Subagent`, `ExecutionPhilosophyCommon:Subagent` | `Development/Designs/DeploymentBlocks/` — one document per block. `ProtocolConstraints` left the bundle as a restatement of the Communication Protocol; its ASCII rule moved to the protocol and its single-responsibility bullet to `ExecutionPhilosophyCommon`. The other four blocks delegate protocol semantics rather than repeating them. |
 | 1.3.0 | 2026-08-27 | `ClosingProcedure:Subagent` | HITL presentation must identify the agent by `agent_instance_id` and `run_id` so the user can distinguish concurrent review requests |
 | 1.2.0 | 2026-08-26 | `ProtocolConstraints:Subagent` | Added ASCII-only constraint for orchestration artifacts and JSON responses |
 | 1.1.0 | 2026-08-25 | `ClosingProcedure:Subagent` | Explicit tool-use requirement for HITL presentation. Agents were "presenting" by writing prose in their response, which goes to the orchestrator and breaks the JSON contract. Step 1 now opens with "Use your user interaction tools to present" and a new bullet states the consequence: the response is consumed by the orchestrator, not the user. §4 extended with the failure-mode rationale. |

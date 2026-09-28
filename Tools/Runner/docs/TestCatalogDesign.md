@@ -132,9 +132,9 @@ Structurally identical to `mosaictest-checkpoint`: zero tools, hardcoded behavio
 
 **Two invocation contexts, same response:**
 
-1. **Run-start setup dispatch** (Design.md §4.2): The Runner dispatches the commit-class agent once before the dispatch loop. The stub returns SUCCESS with `[branch:mosaictest-run]` at the end of `status_message`. The Runner extracts `commit_branch` from the marker and records it in the artifact frontmatter. If the marker is missing, the run refuses to start.
+1. **Run-start setup dispatch** (Design.md §4.2): The Runner dispatches the commit-class agent once after artifact creation and before the workflow loop. The stub returns SUCCESS with `[branch:mosaictest-run]` at the end of `status_message`. The Runner extracts `commit_branch` from the marker and records it in the artifact frontmatter. If the marker is missing, the run stops before the first workflow invocation and retains the failed setup row in the artifact.
 
-2. **Trigger dispatches** (during the run): Fired by `STAGE_END`. Same SUCCESS, same marker. The Runner records the commit row as an infrastructure-flagged execution log entry.
+2. **Trigger dispatches** (during the run): Fired by `STAGE_END`. Same SUCCESS, same marker. The Runner records the commit row as a non-workflow Execution Log entry whose agent name matches the infrastructure declaration.
 
 **Message template** (for `mosaictest-commit#3`):
 
@@ -335,11 +335,11 @@ A staged Auto-mode workflow (at least 2 stages) with both checkpoint-class and c
 - `STAGE_END` fires exactly at stage boundaries for both checkpoint and commit agents
 - Trigger evaluation fires after workflow steps (not after infrastructure steps — no cascading)
 - Checkpoint marker is recorded in the execution log
-- Infrastructure steps are recorded as infrastructure-flagged rows (don't update `current_state`)
+- Infrastructure steps are recorded as non-workflow rows identified from the declaration region; they do not update `current_state`
 
 **Shape:** 2 stages × 1 row per stage = 2 workflow steps. After stage 1 completes, `STAGE_END` fires for both checkpoint and commit. After stage 2 completes (end of run), `STAGE_END` fires again for both. Plus the commit setup dispatch at run start. Minimal workflow that exercises both classes.
 
-**Run configuration:** `--checkpoints enabled --commits enabled --commit-branch mosaic-owned`. The commit setup dispatch is the first thing that fires (before any workflow step), which is itself a key assertion — if the setup fails or the branch marker is missing, the run refuses to start.
+**Run configuration:** `--checkpoints enabled --commits enabled --commit-branch mosaic-owned`. The commit setup dispatch is the first thing that fires after artifact creation (before any workflow step), which is itself a key assertion — if setup fails or the branch marker is missing, the run stops with that setup attempt preserved in the artifact.
 
 ### 7.7 `infra-review-consult` — Review Trigger and Orchestrator Follow-Up
 

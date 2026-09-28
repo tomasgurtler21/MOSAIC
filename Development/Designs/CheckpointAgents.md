@@ -333,7 +333,7 @@ An ordinary invocation row. Nothing is rewound.
 | 22 | checkpoint-restore-git#22 | EXECUTION | Implementation.2 | SUCCESS | ... | Restored working tree to 4f1a08d (Seq 15) | - | - |
 ```
 
-`global_sequence` advances as for any invocation and is never decremented. No prior row is altered. `current_state` is not rewound to the checkpointed row's phase and stage: doing so would leave `current_state` disagreeing with the last Execution Log row, and the schema's recovery procedure resolves that disagreement by trusting the log — silently undoing the rewind on the next restart. The run's files move backward; its history does not.
+`global_sequence` advances as for any invocation and is never decremented. No prior row is altered. `current_state` is not rewound to the checkpointed row's phase and stage: doing so would leave `current_state` disagreeing with the last accepted workflow row, and the schema's recovery procedure would conservatively re-dispatch that logged assignment. The run's files move backward; its history does not.
 
 This is what the existing schema already prescribes when it says a rollback is "just another subagent invocation." This design adds no special row shape, agent name, or status value.
 
