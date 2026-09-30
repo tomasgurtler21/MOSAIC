@@ -483,7 +483,7 @@ class TestNoCrashOnExtractionFailure(unittest.TestCase):
             {"hook_event_name": "PreToolUse", "session_id": "s1",
              "tool_name": "Bash", "tool_input": {}},
             {"hook_event_name": "PostToolUse", "session_id": "s1",
-             "tool_name": "Bash", "tool_output": "output"},
+             "tool_name": "Bash", "tool_response": "output"},
             {"hook_event_name": "PostToolUseFailure", "session_id": "s1",
              "tool_name": "Bash", "tool_error": "error"},
             {"hook_event_name": "SubagentStart", "session_id": "s1",
@@ -543,7 +543,7 @@ class TestNoCrashOnExtractionFailure(unittest.TestCase):
                 "hook_event_name": "PostToolUse",
                 "session_id": "no-drop-tool-001",
                 "tool_name": "Bash",
-                "tool_output": "hi",
+                "tool_response": "hi",
             },
             {
                 "hook_event_name": "PostToolUseFailure",

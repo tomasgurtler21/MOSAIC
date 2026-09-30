@@ -131,13 +131,64 @@ func (a *Adapter) translatePost(native []byte) (domain.InterceptedCall, error) {
 // agent-start association (agent_id), not from a shared dispatch identifier.
 // Only a malformed payload or a wrong hook_event_name is an error, mirroring
 // translatePre/translatePost's own validation.
+//
+// The completion phase accepts two payloads. On Claude Code 2.1.271+ in auto
+// mode the primary completion is the PostToolUse firing of the subagent's
+// SubagentHandback call: the reply is tool_input.message, and the agent_id
+// is the correlation key (tool_use_id is not; tool_response is only an
+// acknowledgement). SubagentStop, whose reply is last_assistant_message,
+// remains the fallback when no hand-back happens.
 func (a *Adapter) translateCompletion(native []byte) (domain.InterceptedCall, error) {
-	var payload CompletionPayload
+	var payload HandbackPayload
 	if err := json.Unmarshal(native, &payload); err != nil {
 		return domain.InterceptedCall{}, fmt.Errorf("%w: %v", ErrPayloadMalformed, err)
 	}
-	if payload.HookEventName != "SubagentStop" {
+	switch payload.HookEventName {
+	case "SubagentStop":
+		return a.translateSubagentStop(native)
+	case "PostToolUse":
+		return a.translateHandback(native, payload)
+	default:
 		return domain.InterceptedCall{}, fmt.Errorf("%w: hook_event_name %q", ErrPayloadUnrecognised, payload.HookEventName)
+	}
+}
+
+// translateHandback translates a SubagentHandback PostToolUse payload. A
+// message that is present but empty or not JSON is still a delivery: only
+// an absent or non-string message is malformed.
+func (a *Adapter) translateHandback(native []byte, payload HandbackPayload) (domain.InterceptedCall, error) {
+	if payload.ToolName != HandbackToolName {
+		return domain.InterceptedCall{}, fmt.Errorf("%w: hook_event_name %q with tool_name %q is not a hand-back", ErrPayloadUnrecognised, payload.HookEventName, payload.ToolName)
+	}
+	if payload.AgentID == "" {
+		return domain.InterceptedCall{}, fmt.Errorf("%w: agent_id is empty", ErrIdentityUndetermined)
+	}
+	var input HandbackToolInput
+	if len(payload.ToolInput) == 0 {
+		return domain.InterceptedCall{}, fmt.Errorf("%w: tool_input is absent", ErrPayloadMalformed)
+	}
+	if err := json.Unmarshal(payload.ToolInput, &input); err != nil {
+		return domain.InterceptedCall{}, fmt.Errorf("%w: tool_input: %v", ErrPayloadMalformed, err)
+	}
+	if input.Message == nil {
+		return domain.InterceptedCall{}, fmt.Errorf("%w: tool_input.message is absent", ErrPayloadMalformed)
+	}
+
+	return domain.InterceptedCall{
+		Phase:            domain.PhaseCompletion,
+		AgentID:          payload.AgentID,
+		CorrelationToken: "",
+		RawPayload:       json.RawMessage(native),
+		Capabilities:     a.Capabilities(),
+		ObservedResponse: *input.Message,
+	}, nil
+}
+
+// translateSubagentStop translates the SubagentStop fallback completion.
+func (a *Adapter) translateSubagentStop(native []byte) (domain.InterceptedCall, error) {
+	var payload CompletionPayload
+	if err := json.Unmarshal(native, &payload); err != nil {
+		return domain.InterceptedCall{}, fmt.Errorf("%w: %v", ErrPayloadMalformed, err)
 	}
 
 	return domain.InterceptedCall{

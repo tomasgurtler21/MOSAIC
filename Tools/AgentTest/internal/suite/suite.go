@@ -310,6 +310,7 @@ func (s *Suite) Run(ctx context.Context, p preflight.Plan) (report.Result, error
 			SubjectModel:        final.SubjectModel,
 			StubModel:           final.StubModel,
 			HarnessID:           final.HarnessID,
+			HarnessVersion:      final.HarnessVersion,
 			TerminationReason:   final.TerminationReason,
 			TestVersion:         final.Version,
 			NumericID:           final.NumericID,

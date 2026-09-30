@@ -54,6 +54,21 @@ package claudecode
 // event firing before SubagentStop for the same collaborator, which was
 // observed consistently in the live capture.
 //
+// # Hand-back completion (Claude Code 2.1.271+, auto permission mode)
+//
+// A subagent delivers its report by calling the SubagentHandback tool. Live
+// capture on 2.1.284 showed: the hook payloads carry agent_id equal to the
+// SubagentStart/SubagentStop agent_id (the correlation key; the hand-back's
+// tool_use_id is not the dispatching call's); tool_input.message is the raw
+// report and is the echo-comparison input; the PostToolUse tool_response is
+// only an acknowledgement; ordering is hand-back PreToolUse, caller receives
+// the report, hand-back PostToolUse, then SubagentStop 1.5-12 s later. The
+// hand-back PostToolUse is therefore the primary completion, and the
+// SubagentStop's last_assistant_message (post-hand-back commentary) is never
+// the reply once a hand-back has completed the agent. With no hand-back
+// (older Claude Code, non-auto mode, or a subagent that never calls it)
+// SubagentStop remains the completion.
+//
 // These are empirical observations on harness 2.1.240, not documented vendor
 // contracts. A future harness version that changes the payload shape will be
 // caught by the fixture-driven tests in live_capture_test.go.

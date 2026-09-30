@@ -161,6 +161,11 @@ func writeTestLine(w io.Writer, t TestReport) error {
 		if _, err := fmt.Fprintf(w, "  harness: %s\n", subjectVersionOrUnknown(run.HarnessID)); err != nil {
 			return err
 		}
+		if run.HarnessVersion != "" {
+			if _, err := fmt.Fprintf(w, "  harness version: %s\n", run.HarnessVersion); err != nil {
+				return err
+			}
+		}
 		if _, err := fmt.Fprintf(w, "  termination reason: %s\n", subjectVersionOrUnknown(run.TerminationReason)); err != nil {
 			return err
 		}

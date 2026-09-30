@@ -126,9 +126,11 @@ No `duration_ms` field — see §3.5.
 |---|---|---|---|
 | `agent_instance_id` | string | Required | Correlation key back to `invocation_start`. |
 | `status_code` | enum: `SUCCESS`, `COMPLETED_NEEDS_ACTION`, `PARTIALLY_DONE`, `NEEDS_CLARIFICATION`, `CAPABILITY_EXCEEDED`, `BLOCKED` | Optional | Populated when the adapter can determine the subagent's returned status; absent if the harness gives no access to response content. A failed invocation is reported here, never as a separate error event. |
-| `response` | string | Optional | Full final response text from the subagent. |
-| `model` | string | Optional | Model identifier used for the invocation. |
-| `token_usage` | object | Optional | Present only if at least one sub-field is available. Sub-fields, each independently optional: `input_tokens`, `output_tokens`, `cache_read_tokens`, `cache_creation_tokens` (all numbers). |
+| `response` | string | Optional | Full final response text from the subagent. On Claude Code 2.1.271+ in auto mode this is the report the subagent delivers through its `SubagentHandback` tool call (`tool_input.message`, verbatim), and the event timestamp is the hand-back's PostToolUse time; the delivery to the caller happens just before that hook fires. Without a hand-back (older CLI, non-auto mode, or Haiku as the main model, which silently falls back from auto to default) the response is `SubagentStop`'s `last_assistant_message` and the timestamp is the stop time. After a hand-back, a later `SubagentStop` carries only post-hand-back commentary and produces no second `invocation_end`. |
+| `model` | string | Optional | Model identifier used for the invocation. For a Claude Code hand-back it is read from the agent transcript at hand-back time. |
+| `token_usage` | object | Optional | Present only if at least one sub-field is available. Sub-fields, each independently optional: `input_tokens`, `output_tokens`, `cache_read_tokens`, `cache_creation_tokens` (all numbers). For a Claude Code hand-back it is read from the agent transcript at hand-back time. |
+
+Exactly one `invocation_end` is written per invocation. **Known limitation (Claude Code hand-back):** if the agent transcript has not been flushed at hand-back time, `invocation_end` omits `model` and `token_usage`, and they are never back-filled (no second `invocation_end`). `Tools/LogAnalyzer` reports the missing fields as an issue for that invocation. Tokens used after the hand-back are still counted through `usage_record` events.
 
 No `duration_ms` field — see §3.5.
 
@@ -160,7 +162,7 @@ No `call_index` field — see §3.5.
 | `call_id` | string | Required | Correlation key back to `tool_call_start`. |
 | `status` | enum: `"success"` \| `"error"` | Optional | Outcome of the call. Tool failures are reported here, never as a separate error event. |
 | `error` | string | Optional | Error detail when `status` is `"error"`. |
-| `tool_output` | object \| string | Optional | Result returned by the tool. Capture policy: §5. |
+| `tool_output` | object \| string | Optional | Result returned by the tool, not truncated. On Claude Code it is sourced from the PostToolUse payload's `tool_response`. Capture policy: §5. |
 
 No `duration_ms` field — see §3.5.
 

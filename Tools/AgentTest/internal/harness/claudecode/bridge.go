@@ -143,3 +143,38 @@ func CompletionEntry(completion Bridge) Contribution {
 		},
 	}
 }
+
+// HandbackEntry generates the registration contribution for the harness's
+// subagent hand-back: a PostToolUse hook matched on HandbackToolName, routed
+// to the completion bridge. Observation-only: it never rewrites input.
+//
+// On Claude Code 2.1.271+ in auto permission mode a subagent delivers its
+// report by calling the hand-back tool, and the PostToolUse firing of that
+// call is the completion moment (live capture, 2.1.284: the caller receives
+// the report, then this hook starts, and SubagentStop follows 1.5-12 s
+// later). It is registered on PostToolUse only, never PreToolUse, which fires
+// before delivery. The entry is synchronous: a synchronous PostToolUse hook
+// delays only the subagent, never the caller's receipt, so this interceptor
+// always finishes before the same subagent's SubagentStop can fire, making
+// the completion order deterministic. The decision core's completed-agent
+// guard still makes a later SubagentStop a no-op in any order.
+func HandbackEntry(completion Bridge) Contribution {
+	handbackAsync := false
+
+	return Contribution{
+		Source:        "interceptor",
+		RewritesInput: false,
+		Settings: Settings{
+			Hooks: map[string][]Matcher{
+				"PostToolUse": {
+					{
+						Matcher: HandbackToolName,
+						Hooks: []Entry{
+							{Type: "command", Command: completion.Executable, Args: completion.Args, Async: &handbackAsync},
+						},
+					},
+				},
+			},
+		},
+	}
+}

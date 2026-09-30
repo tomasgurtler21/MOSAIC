@@ -116,9 +116,18 @@ def dispatch(raw_input: str) -> None:
         # Step 1: parse
         try:
             payload = json.loads(raw_input)
-        except Exception:
+        except Exception as exc:
+            core.debug_log(
+                f"dispatch: hook payload is not valid JSON "
+                f"(length={len(raw_input) if isinstance(raw_input, str) else 'n/a'}); "
+                f"nothing logged", exc
+            )
             return
         if not isinstance(payload, dict):
+            core.debug_log(
+                f"dispatch: hook payload is JSON but not an object "
+                f"(type={type(payload).__name__}); nothing logged"
+            )
             return
 
         # Step 2: context

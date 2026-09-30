@@ -172,7 +172,7 @@ class TestResolveRunIdentityPerEvent(unittest.TestCase):
     def test_post_tool_use_yields_none(self):
         """PostToolUse has no prompt-bearing field; ctx.run_id stays None."""
         ctx = self._make_ctx("PostToolUse", "per-event-post-tool-use",
-                              tool_name="Bash", tool_output="output")
+                              tool_name="Bash", tool_response="output")
         mosaic_logger.resolve_run_identity(ctx)
         self.assertIsNone(ctx.run_id)
 
@@ -691,7 +691,7 @@ class TestResolveRunIdentityBindingFirst(unittest.TestCase):
         session_id = "binding-sess-post-tool"
         self._bind(session_id, VALID_RUN_ID, "2026-07-27T16:00:00.000Z")
         ctx = self._ctx("PostToolUse", session_id, "2026-07-27T17:00:00.000Z",
-                         tool_name="Bash", tool_output="ok")
+                         tool_name="Bash", tool_response="ok")
         mosaic_logger.resolve_run_identity(ctx)
         self.assertEqual(VALID_RUN_ID, ctx.run_id)
 

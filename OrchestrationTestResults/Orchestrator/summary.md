@@ -5,6 +5,7 @@
 
 | Version | Reports |
 |---------|----------|
+| 7.6.0 | 5 |
 | 7.4.1 | 44 |
 
 <!-- /generated:version-overview -->
@@ -14,17 +15,17 @@
 <!-- generated:version-comparison -->
 ## Version Comparison
 
-| Model | Harness | 7.4.1 |
-|-------|--------|--------|
-| claude-fable-5 | claude-code | 39% |
-| claude-haiku-4-5 | claude-code | 52% |
-| claude-opus-4-6 | claude-code | 78% |
-| claude-opus-5 | claude-code | 96% |
-| claude-sonnet-4-6 | claude-code | 86% |
-| claude-sonnet-5 | claude-code | 83% |
-| gpt-5.6-luna | opencode | 32% |
-| gpt-5.6-sol | opencode | 89% |
-| gpt-5.6-terra | opencode | 79% |
+| Model | Harness | 7.6.0 | 7.4.1 |
+|-------|--------|--------|--------|
+| claude-fable-5 | claude-code | - | 39% |
+| claude-haiku-4-5 | claude-code | - | 52% |
+| claude-opus-4-6 | claude-code | - | 78% |
+| claude-opus-5 | claude-code | - | 96% |
+| claude-sonnet-4-6 | claude-code | - | 86% |
+| claude-sonnet-5 | claude-code | 90% | 83% |
+| gpt-5.6-luna | opencode | - | 32% |
+| gpt-5.6-sol | opencode | - | 89% |
+| gpt-5.6-terra | opencode | - | 79% |
 
 <!-- /generated:version-comparison -->
 

@@ -294,32 +294,32 @@ class TestPostToolUseOrchestratorScoped(unittest.TestCase):
     def test_emits_tool_call_end_event(self):
         """PostToolUse without agent_id emits a tool_call_end event."""
         self._run(tool_name="Read", tool_use_id="tu-200",
-                  tool_output="file contents here")
+                  tool_response="file contents here")
         events = self._orc_events()
         self.assertEqual(1, len(events))
         self.assertEqual("tool_call_end", events[0]["event"])
 
     def test_status_is_success(self):
         """The status field is exactly 'success' on a PostToolUse event."""
-        self._run(tool_name="Read", tool_use_id="tu-201", tool_output="output")
+        self._run(tool_name="Read", tool_use_id="tu-201", tool_response="output")
         event = self._orc_events()[0]
         self.assertEqual("success", event.get("status"))
 
     def test_event_has_required_call_id(self):
-        self._run(tool_name="Write", tool_use_id="tu-202", tool_output="ok")
+        self._run(tool_name="Write", tool_use_id="tu-202", tool_response="ok")
         event = self._orc_events()[0]
         self.assertIn("call_id", event)
         self.assertTrue(event["call_id"])
 
     def test_event_has_required_envelope_fields(self):
-        self._run(tool_name="Read", tool_use_id="tu-203", tool_output="x")
+        self._run(tool_name="Read", tool_use_id="tu-203", tool_response="x")
         event = self._orc_events()[0]
         for field in ("schema_version", "event", "timestamp", "harness"):
             self.assertIn(field, event)
 
     def test_tool_output_present_when_in_payload(self):
         """tool_output is captured when the payload supplies it."""
-        self._run(tool_name="Read", tool_use_id="tu-204", tool_output="the output")
+        self._run(tool_name="Read", tool_use_id="tu-204", tool_response="the output")
         event = self._orc_events()[0]
         self.assertIn("tool_output", event)
         self.assertEqual("the output", event["tool_output"])
@@ -333,24 +333,24 @@ class TestPostToolUseOrchestratorScoped(unittest.TestCase):
 
     def test_no_error_field_on_success(self):
         """A successful tool_call_end must not carry an error field."""
-        self._run(tool_name="Bash", tool_use_id="tu-206", tool_output="done")
+        self._run(tool_name="Bash", tool_use_id="tu-206", tool_response="done")
         event = self._orc_events()[0]
         self.assertNotIn("error", event,
                          "error field must not appear on a success tool_call_end")
 
     def test_no_call_index_ever_written(self):
-        self._run(tool_name="Bash", tool_use_id="tu-207", tool_output="x")
+        self._run(tool_name="Bash", tool_use_id="tu-207", tool_response="x")
         event = self._orc_events()[0]
         self.assertNotIn("call_index", event)
 
     def test_no_duration_ms_ever_written(self):
-        self._run(tool_name="Bash", tool_use_id="tu-208", tool_output="x")
+        self._run(tool_name="Bash", tool_use_id="tu-208", tool_response="x")
         event = self._orc_events()[0]
         self.assertNotIn("duration_ms", event)
 
     def test_does_nothing_when_run_id_is_none(self):
         ctx = _post_tool_ctx(self.tmp.name, tool_name="Read",
-                             tool_use_id="tu-209", tool_output="x")
+                             tool_use_id="tu-209", tool_response="x")
         ctx.run_id = None
         tools.handle_post_tool_use(ctx)
         self.assertFalse(self.paths.orchestrator_events(_RUN_ID).exists())
@@ -382,7 +382,7 @@ class TestPostToolUseFailureOrchestratorScoped(unittest.TestCase):
     def test_emits_tool_call_end_not_a_distinct_error_event(self):
         """Failure results in tool_call_end, never a custom error event type."""
         self._run(tool_name="Read", tool_use_id="tu-300",
-                  tool_output="Error: file not found")
+                  tool_response="Error: file not found")
         events = self._orc_events()
         self.assertEqual(1, len(events))
         self.assertEqual("tool_call_end", events[0]["event"],
@@ -391,20 +391,20 @@ class TestPostToolUseFailureOrchestratorScoped(unittest.TestCase):
     def test_status_is_error(self):
         """The status field is exactly 'error' on a PostToolUseFailure event."""
         self._run(tool_name="Read", tool_use_id="tu-301",
-                  tool_output="Error: permission denied")
+                  tool_response="Error: permission denied")
         event = self._orc_events()[0]
         self.assertEqual("error", event.get("status"))
 
     def test_event_has_required_call_id(self):
         self._run(tool_name="Write", tool_use_id="tu-302",
-                  tool_output="Error: disk full")
+                  tool_response="Error: disk full")
         event = self._orc_events()[0]
         self.assertIn("call_id", event)
         self.assertTrue(event["call_id"])
 
     def test_event_has_required_envelope_fields(self):
         self._run(tool_name="Read", tool_use_id="tu-303",
-                  tool_output="Error: not found")
+                  tool_response="Error: not found")
         event = self._orc_events()[0]
         for field in ("schema_version", "event", "timestamp", "harness"):
             self.assertIn(field, event)
@@ -413,14 +413,14 @@ class TestPostToolUseFailureOrchestratorScoped(unittest.TestCase):
         """error is populated from a dedicated 'error' payload field when present."""
         self._run(tool_name="Bash", tool_use_id="tu-304",
                   error="Command not found: foobar",
-                  tool_output="Command not found: foobar")
+                  tool_response="Command not found: foobar")
         event = self._orc_events()[0]
         self.assertEqual("Command not found: foobar", event.get("error"))
 
     def test_error_field_populated_from_tool_output_when_no_dedicated_error_field(self):
         """When no dedicated error field, error falls back to the string form of tool_output."""
         self._run(tool_name="Read", tool_use_id="tu-305",
-                  tool_output="Error: file not found at /nonexistent")
+                  tool_response="Error: file not found at /nonexistent")
         event = self._orc_events()[0]
         self.assertIn("error", event,
                       "error must be populated from tool_output when no dedicated error field")
@@ -434,25 +434,25 @@ class TestPostToolUseFailureOrchestratorScoped(unittest.TestCase):
 
     def test_tool_output_present_when_in_payload(self):
         self._run(tool_name="Bash", tool_use_id="tu-307",
-                  tool_output="stderr: something went wrong")
+                  tool_response="stderr: something went wrong")
         event = self._orc_events()[0]
         self.assertIn("tool_output", event)
 
     def test_no_call_index_ever_written(self):
         self._run(tool_name="Bash", tool_use_id="tu-308",
-                  tool_output="Error: timeout")
+                  tool_response="Error: timeout")
         event = self._orc_events()[0]
         self.assertNotIn("call_index", event)
 
     def test_no_duration_ms_ever_written(self):
         self._run(tool_name="Bash", tool_use_id="tu-309",
-                  tool_output="Error: timeout")
+                  tool_response="Error: timeout")
         event = self._orc_events()[0]
         self.assertNotIn("duration_ms", event)
 
     def test_does_nothing_when_run_id_is_none(self):
         ctx = _failure_ctx(self.tmp.name, tool_name="Read",
-                           tool_use_id="tu-310", tool_output="err")
+                           tool_use_id="tu-310", tool_response="err")
         ctx.run_id = None
         tools.handle_post_tool_use_failure(ctx)
         self.assertFalse(self.paths.orchestrator_events(_RUN_ID).exists())
@@ -496,7 +496,7 @@ class TestSubagentScopedRouting(unittest.TestCase):
         self._register("aid-s2", "SubAgent#2", "SubAgent")
         ctx = _post_tool_ctx(self.tmp.name, agent_id="aid-s2",
                              tool_name="Write", tool_use_id="tu-401",
-                             tool_output="written")
+                             tool_response="written")
         tools.handle_post_tool_use(ctx)
         event_path = self.paths.invocation_events(_RUN_ID, "SubAgent#2")
         self.assertTrue(event_path.exists())
@@ -508,7 +508,7 @@ class TestSubagentScopedRouting(unittest.TestCase):
         self._register("aid-s3", "SubAgent#3", "SubAgent")
         ctx = _failure_ctx(self.tmp.name, agent_id="aid-s3",
                            tool_name="Bash", tool_use_id="tu-402",
-                           tool_output="Error: exit 1")
+                           tool_response="Error: exit 1")
         tools.handle_post_tool_use_failure(ctx)
         event_path = self.paths.invocation_events(_RUN_ID, "SubAgent#3")
         self.assertTrue(event_path.exists())
@@ -530,7 +530,7 @@ class TestSubagentScopedRouting(unittest.TestCase):
         self._register("aid-s5", "SubAgent#5", "SubAgent")
         ctx = _post_tool_ctx(self.tmp.name, agent_id="aid-s5",
                              tool_name="Write", tool_use_id="tu-404",
-                             tool_output="ok")
+                             tool_response="ok")
         tools.handle_post_tool_use(ctx)
         orc_path = self.paths.orchestrator_events(_RUN_ID)
         self.assertFalse(orc_path.exists(),
@@ -541,7 +541,7 @@ class TestSubagentScopedRouting(unittest.TestCase):
         self._register("aid-s6", "SubAgent#6", "SubAgent")
         ctx = _failure_ctx(self.tmp.name, agent_id="aid-s6",
                            tool_name="Bash", tool_use_id="tu-405",
-                           tool_output="Error: failure")
+                           tool_response="Error: failure")
         tools.handle_post_tool_use_failure(ctx)
         orc_path = self.paths.orchestrator_events(_RUN_ID)
         self.assertFalse(orc_path.exists(),
@@ -699,7 +699,7 @@ class TestCallIdResolution(unittest.TestCase):
         tools.handle_pre_tool_use(ctx_start)
 
         ctx_end = _post_tool_ctx(self.tmp.name, tool_name="Read",
-                                  tool_use_id=shared_id, tool_output="result")
+                                  tool_use_id=shared_id, tool_response="result")
         tools.handle_post_tool_use(ctx_end)
 
         events = _read_jsonl(paths.orchestrator_events(_RUN_ID))
@@ -749,7 +749,7 @@ class TestFullPayloadCapture(unittest.TestCase):
         """tool_output with large content is written entirely, without truncation."""
         large_output = "y" * 100_000
         ctx = _post_tool_ctx(self.tmp.name, tool_name="Read",
-                             tool_use_id="tu-501", tool_output=large_output)
+                             tool_use_id="tu-501", tool_response=large_output)
         tools.handle_post_tool_use(ctx)
         event = self._orc_events()[0]
         self.assertIn("tool_output", event)
@@ -760,7 +760,7 @@ class TestFullPayloadCapture(unittest.TestCase):
         """tool_output on a failure event is captured entirely, without truncation."""
         large_error_output = "Error details: " + "z" * 50_000
         ctx = _failure_ctx(self.tmp.name, tool_name="Bash",
-                           tool_use_id="tu-502", tool_output=large_error_output)
+                           tool_use_id="tu-502", tool_response=large_error_output)
         tools.handle_post_tool_use_failure(ctx)
         event = self._orc_events()[0]
         self.assertIn("tool_output", event)
@@ -782,7 +782,7 @@ class TestFullPayloadCapture(unittest.TestCase):
         """No truncation marker appears in tool_output."""
         large_output = "b" * 100_000
         ctx = _post_tool_ctx(self.tmp.name, tool_name="Read",
-                             tool_use_id="tu-504", tool_output=large_output)
+                             tool_use_id="tu-504", tool_response=large_output)
         tools.handle_post_tool_use(ctx)
         event = self._orc_events()[0]
         self.assertNotIn("[truncated]", event["tool_output"])
@@ -827,7 +827,7 @@ class TestMissingMappingDegradation(unittest.TestCase):
     def test_post_tool_use_does_not_raise_on_missing_mapping(self):
         """handle_post_tool_use never raises when the agent mapping is absent."""
         ctx = _post_tool_ctx(self.tmp.name, agent_id="unmapped-agent-002",
-                             tool_name="Write", tool_use_id="tu-601", tool_output="ok")
+                             tool_name="Write", tool_use_id="tu-601", tool_response="ok")
         try:
             tools.handle_post_tool_use(ctx)
         except Exception as exc:
@@ -837,7 +837,7 @@ class TestMissingMappingDegradation(unittest.TestCase):
         """handle_post_tool_use_failure never raises when the agent mapping is absent."""
         ctx = _failure_ctx(self.tmp.name, agent_id="unmapped-agent-003",
                            tool_name="Bash", tool_use_id="tu-602",
-                           tool_output="Error: failure")
+                           tool_response="Error: failure")
         try:
             tools.handle_post_tool_use_failure(ctx)
         except Exception as exc:
@@ -1365,7 +1365,7 @@ class TestSubagentToolFiringUsageSuppression(unittest.TestCase):
         self._register("aid-sup-2", "SubAgent#102")
         ctx = _post_tool_ctx(self.tmp.name, agent_id="aid-sup-2",
                              tool_name="Write", tool_use_id="tu-sup-2",
-                             tool_output="ok", transcript_path=self._transcript("s2"))
+                             tool_response="ok", transcript_path=self._transcript("s2"))
         tools.handle_post_tool_use(ctx)
         events = _read_jsonl(self.paths.invocation_events(_RUN_ID, "SubAgent#102"))
         usage_events = [e for e in events if e["event"] == "usage_record"]
@@ -1378,7 +1378,7 @@ class TestSubagentToolFiringUsageSuppression(unittest.TestCase):
         self._register("aid-sup-3", "SubAgent#103")
         ctx = _failure_ctx(self.tmp.name, agent_id="aid-sup-3",
                            tool_name="Bash", tool_use_id="tu-sup-3",
-                           tool_output="Error: exit 1", transcript_path=self._transcript("s3"))
+                           tool_response="Error: exit 1", transcript_path=self._transcript("s3"))
         tools.handle_post_tool_use_failure(ctx)
         events = _read_jsonl(self.paths.invocation_events(_RUN_ID, "SubAgent#103"))
         usage_events = [e for e in events if e["event"] == "usage_record"]
@@ -1407,7 +1407,7 @@ class TestSubagentToolFiringUsageSuppression(unittest.TestCase):
         self._register("aid-sup-5", "SubAgent#105")
         ctx = _post_tool_ctx(self.tmp.name, agent_id="aid-sup-5",
                              tool_name="Write", tool_use_id="tu-sup-5",
-                             tool_output="ok", transcript_path=self._transcript("s5"))
+                             tool_response="ok", transcript_path=self._transcript("s5"))
         tools.handle_post_tool_use(ctx)
         orc_path = self.paths.orchestrator_events(_RUN_ID)
         orc_events = _read_jsonl(orc_path) if orc_path.exists() else []
@@ -1421,7 +1421,7 @@ class TestSubagentToolFiringUsageSuppression(unittest.TestCase):
         self._register("aid-sup-6", "SubAgent#106")
         ctx = _failure_ctx(self.tmp.name, agent_id="aid-sup-6",
                            tool_name="Bash", tool_use_id="tu-sup-6",
-                           tool_output="Error: exit 1", transcript_path=self._transcript("s6"))
+                           tool_response="Error: exit 1", transcript_path=self._transcript("s6"))
         tools.handle_post_tool_use_failure(ctx)
         orc_path = self.paths.orchestrator_events(_RUN_ID)
         orc_events = _read_jsonl(orc_path) if orc_path.exists() else []
@@ -1452,7 +1452,7 @@ class TestSubagentToolFiringUsageSuppression(unittest.TestCase):
         self._register("aid-sup-8", "SubAgent#108")
         ctx = _post_tool_ctx(self.tmp.name, agent_id="aid-sup-8",
                              tool_name="Write", tool_use_id="tu-sup-8",
-                             tool_output="ok", transcript_path=self._transcript("s8"))
+                             tool_response="ok", transcript_path=self._transcript("s8"))
         tools.handle_post_tool_use(ctx)
         events = _read_jsonl(self.paths.invocation_events(_RUN_ID, "SubAgent#108"))
         tool_events = [e for e in events if e["event"] == "tool_call_end"]
@@ -1466,7 +1466,7 @@ class TestSubagentToolFiringUsageSuppression(unittest.TestCase):
         self._register("aid-sup-9", "SubAgent#109")
         ctx = _failure_ctx(self.tmp.name, agent_id="aid-sup-9",
                            tool_name="Bash", tool_use_id="tu-sup-9",
-                           tool_output="Error: exit 1", transcript_path=self._transcript("s9"))
+                           tool_response="Error: exit 1", transcript_path=self._transcript("s9"))
         tools.handle_post_tool_use_failure(ctx)
         events = _read_jsonl(self.paths.invocation_events(_RUN_ID, "SubAgent#109"))
         tool_events = [e for e in events if e["event"] == "tool_call_end"]
@@ -1491,7 +1491,7 @@ class TestSubagentToolFiringUsageSuppression(unittest.TestCase):
         """Orchestrator-scoped PostToolUse must still emit a usage_record."""
         os.environ.pop("MOSAIC_LOGGER_USAGE_CAPTURE", None)
         ctx = _post_tool_ctx(self.tmp.name, tool_name="Read", tool_use_id="tu-sup-orc-2",
-                             tool_output="x", transcript_path=self._transcript("o2"))
+                             tool_response="x", transcript_path=self._transcript("o2"))
         tools.handle_post_tool_use(ctx)
         events = _read_jsonl(self.paths.orchestrator_events(_RUN_ID))
         usage_events = [e for e in events if e["event"] == "usage_record"]
@@ -1502,7 +1502,7 @@ class TestSubagentToolFiringUsageSuppression(unittest.TestCase):
         """Orchestrator-scoped PostToolUseFailure must still emit a usage_record."""
         os.environ.pop("MOSAIC_LOGGER_USAGE_CAPTURE", None)
         ctx = _failure_ctx(self.tmp.name, tool_name="Bash", tool_use_id="tu-sup-orc-3",
-                           tool_output="Error: exit 1", transcript_path=self._transcript("o3"))
+                           tool_response="Error: exit 1", transcript_path=self._transcript("o3"))
         tools.handle_post_tool_use_failure(ctx)
         events = _read_jsonl(self.paths.orchestrator_events(_RUN_ID))
         usage_events = [e for e in events if e["event"] == "usage_record"]
@@ -1564,6 +1564,164 @@ class TestSubagentToolFiringUsageSuppression(unittest.TestCase):
             tools.handle_pre_tool_use(ctx)
         except Exception as exc:
             self.fail(f"handle_pre_tool_use raised in subagent scope: {exc}")
+
+# ---------------------------------------------------------------------------
+# tool_call_end output is read from the payload's tool_response
+# ---------------------------------------------------------------------------
+
+# Event field carrying the recorded tool output.
+_OUTPUT_FIELD = "tool_output"
+
+
+class TestToolResponseCapture(unittest.TestCase):
+    """The tool_call_end output field is sourced from the payload's
+    tool_response, recorded in full, and never from a payload key named
+    tool_output. Whether a structured response is kept as JSON or as text is
+    the implementation's choice, so structured assertions are shape-tolerant."""
+
+    def setUp(self):
+        self.tmp = tempfile.TemporaryDirectory()
+        self.paths = core.build_paths(pathlib.Path(self.tmp.name))
+
+    def tearDown(self):
+        self.tmp.cleanup()
+
+    def _events(self):
+        return _read_jsonl(self.paths.orchestrator_events(_RUN_ID))
+
+    def _single_event(self):
+        events = self._events()
+        self.assertEqual(1, len(events))
+        return events[0]
+
+    def _post(self, **kwargs):
+        tools.handle_post_tool_use(_post_tool_ctx(self.tmp.name, **kwargs))
+        return self._single_event()
+
+    def _fail(self, **kwargs):
+        tools.handle_post_tool_use_failure(_failure_ctx(self.tmp.name, **kwargs))
+        return self._single_event()
+
+    def _assert_recorded(self, expected, event):
+        """Recorded output equals expected as structured JSON or as JSON text."""
+        actual = event.get(_OUTPUT_FIELD)
+        self.assertIsNotNone(actual, "output field missing from event")
+        if actual == expected:
+            return
+        self.assertIsInstance(actual, str)
+        self.assertEqual(expected, json.loads(actual))
+
+    def _serialised_output(self, event):
+        actual = event.get(_OUTPUT_FIELD)
+        return actual if isinstance(actual, str) else json.dumps(actual)
+
+    def test_string_response_recorded_unchanged(self):
+        event = self._post(tool_name="Bash", tool_use_id="tr-1",
+                           tool_response="line one\nline two")
+        self.assertEqual("line one\nline two", event.get(_OUTPUT_FIELD))
+
+    def test_object_response_recorded_as_received(self):
+        value = {"success": True, "message": "Report delivered to your caller."}
+        event = self._post(tool_name="Write", tool_use_id="tr-2", tool_response=value)
+        self._assert_recorded(value, event)
+
+    def test_content_block_list_response_recorded_as_received(self):
+        value = [{"type": "text", "text": "hello"}, {"type": "text", "text": "world"}]
+        event = self._post(tool_name="Read", tool_use_id="tr-3", tool_response=value)
+        self._assert_recorded(value, event)
+
+    def test_object_with_nested_empty_members_kept_unchanged(self):
+        value = {"stdout": "", "stderr": "x", "extra": None, "items": [], "meta": {}}
+        event = self._post(tool_name="Bash", tool_use_id="tr-4", tool_response=value)
+        self._assert_recorded(value, event)
+
+    def test_large_string_response_not_truncated(self):
+        value = "q" * 200_000
+        event = self._post(tool_name="Read", tool_use_id="tr-5", tool_response=value)
+        self.assertEqual(value, event.get(_OUTPUT_FIELD))
+
+    def test_large_structured_response_not_truncated(self):
+        value = [{"type": "text", "text": "w" * 150_000}]
+        event = self._post(tool_name="Read", tool_use_id="tr-6", tool_response=value)
+        self.assertIn("w" * 150_000, self._serialised_output(event))
+
+    def test_structured_response_survives_jsonl_round_trip(self):
+        value = {"a": [1, 2, {"b": "c"}], "d": "e"}
+        self._post(tool_name="Bash", tool_use_id="tr-7", tool_response=value)
+        raw = self.paths.orchestrator_events(_RUN_ID).read_text("utf-8")
+        lines = [ln for ln in raw.splitlines() if ln.strip()]
+        self.assertEqual(1, len(lines))
+        self._assert_recorded(value, json.loads(lines[0]))
+
+    def test_handback_tool_post_use_recorded_like_any_tool(self):
+        value = {"success": True, "message": "Report delivered to your caller."}
+        event = self._post(tool_name="SubagentHandback", tool_use_id="tr-8",
+                           tool_input={"message": "done"}, tool_response=value)
+        self.assertEqual("tool_call_end", event.get("event"))
+        self.assertEqual("success", event.get("status"))
+        self.assertIn("tr-8", str(event.get("call_id")))
+        self._assert_recorded(value, event)
+
+    def test_handback_post_use_in_subagent_scope_recorded_in_invocation_stream(self):
+        _register_mapping(self.tmp.name, _RUN_ID, "aid-hb-1", "SubAgent#7", "SubAgent")
+        value = {"success": True, "message": "Report delivered to your caller."}
+        tools.handle_post_tool_use(_post_tool_ctx(
+            self.tmp.name, agent_id="aid-hb-1", tool_name="SubagentHandback",
+            tool_use_id="tr-8b", tool_input={"message": "done"}, tool_response=value))
+        events = _read_jsonl(self.paths.invocation_events(_RUN_ID, "SubAgent#7"))
+        # A mapped hand-back also completes the invocation, so the stream may
+        # carry additional events; the tool call end must be recorded exactly once.
+        tool_ends = [e for e in events if e.get("event") == "tool_call_end"]
+        self.assertEqual(1, len(tool_ends))
+        self._assert_recorded(value, tool_ends[0])
+
+    def test_absent_response_omits_output_field(self):
+        event = self._post(tool_name="Read", tool_use_id="tr-9")
+        self.assertNotIn(_OUTPUT_FIELD, event)
+
+    def test_null_response_omits_output_field(self):
+        event = self._post(tool_name="Read", tool_use_id="tr-10", tool_response=None)
+        self.assertNotIn(_OUTPUT_FIELD, event)
+
+    def test_post_use_with_only_legacy_tool_output_yields_no_output(self):
+        event = self._post(tool_name="Read", tool_use_id="tr-11",
+                           tool_output="legacy value")
+        self.assertNotIn(_OUTPUT_FIELD, event)
+        self.assertNotIn("legacy value", json.dumps(event))
+
+    def test_post_use_with_both_keys_uses_tool_response(self):
+        event = self._post(tool_name="Read", tool_use_id="tr-11b",
+                           tool_output="legacy value", tool_response="real value")
+        self.assertEqual("real value", event.get(_OUTPUT_FIELD))
+        self.assertNotIn("legacy value", json.dumps(event))
+
+    def test_failure_response_recorded_as_received(self):
+        value = {"error": "boom", "code": 2}
+        event = self._fail(tool_name="Bash", tool_use_id="tr-12", tool_response=value)
+        self.assertEqual("error", event.get("status"))
+        self._assert_recorded(value, event)
+
+    def test_failure_content_block_list_response_recorded(self):
+        value = [{"type": "text", "text": "failure detail"}]
+        event = self._fail(tool_name="Bash", tool_use_id="tr-12b", tool_response=value)
+        self.assertEqual("error", event.get("status"))
+        self._assert_recorded(value, event)
+
+    def test_failure_with_only_legacy_tool_output_yields_no_output_or_error(self):
+        event = self._fail(tool_name="Bash", tool_use_id="tr-13",
+                           tool_output="Error: legacy")
+        self.assertNotIn(_OUTPUT_FIELD, event)
+        self.assertNotIn("error", event)
+
+    def test_failure_error_populated_from_dict_response(self):
+        event = self._fail(tool_name="Bash", tool_use_id="tr-14",
+                           tool_response={"k": "distinctivemarker"})
+        self.assertIn("distinctivemarker", str(event.get("error")))
+
+    def test_failure_dedicated_error_field_takes_precedence(self):
+        event = self._fail(tool_name="Bash", tool_use_id="tr-15",
+                           error="dedicated", tool_response={"k": "v"})
+        self.assertEqual("dedicated", event.get("error"))
 
 
 if __name__ == "__main__":

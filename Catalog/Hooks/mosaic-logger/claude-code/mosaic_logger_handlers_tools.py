@@ -11,9 +11,13 @@ usage emission entirely; the subagent-stop handler is the sole source of a
 subagent's own usage records, reading the subagent's own transcript at stop.
 """
 
+import json
 import mosaic_logger_core as core
 import mosaic_logger_runstate as runstate
 import mosaic_logger_usage as usage
+import mosaic_logger_handlers_invocation as invocation
+
+HANDBACK_TOOL_NAME = "SubagentHandback"
 
 
 def resolve_destination(ctx: "core.HookContext"):
@@ -130,21 +134,39 @@ def handle_pre_tool_use(ctx: "core.HookContext") -> None:
     _emit_tool_usage_records(ctx)
 
 
+def _output_text(ctx: "core.HookContext"):
+    """Return the tool's output from the payload's tool_response, or None.
+
+    Strings are kept as-is; structured values (objects, content-block lists)
+    are serialised to JSON text so nested empty members survive the event
+    builder's pruning unchanged.
+    """
+    value = ctx.field("tool_response")
+    if value is None or isinstance(value, str):
+        return value
+    try:
+        return json.dumps(value, ensure_ascii=False)
+    except (TypeError, ValueError):
+        return str(value)
+
+
 def handle_post_tool_use(ctx: "core.HookContext") -> None:
     """Emit tool_call_end with status 'success'."""
     event = core.build_event(
         "tool_call_end", ctx,
         call_id=resolve_call_id(ctx),
         status="success",
-        tool_output=ctx.field("tool_output"),
+        tool_output=_output_text(ctx),
     )
     core.append_event(resolve_destination(ctx), event)
     _emit_tool_usage_records(ctx)
+    if ctx.field("tool_name") == HANDBACK_TOOL_NAME:
+        invocation.complete_from_handback(ctx)
 
 
 def handle_post_tool_use_failure(ctx: "core.HookContext") -> None:
     """Emit tool_call_end with status 'error'."""
-    tool_output = ctx.field("tool_output")
+    tool_output = _output_text(ctx)
     error = ctx.field("error") or (str(tool_output) if tool_output is not None else None)
     event = core.build_event(
         "tool_call_end", ctx,

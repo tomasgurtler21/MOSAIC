@@ -119,3 +119,24 @@ func NeutralReply(phase domain.InterceptionPhase) []byte {
 	}
 	return b
 }
+
+// HandbackToolName is the native name of the tool a subagent calls to
+// deliver its report to its caller (Claude Code 2.1.271+, auto mode).
+const HandbackToolName = "SubagentHandback"
+
+// HandbackPayload is the PostToolUse hook payload of a SubagentHandback call
+// made inside a subagent. Only the fields the completion translation
+// consumes are decoded; tool_response is an acknowledgement, never the reply,
+// and tool_use_id is not a correlation key (agent_id is).
+type HandbackPayload struct {
+	HookEventName string          `json:"hook_event_name"`
+	AgentID       string          `json:"agent_id"`
+	ToolName      string          `json:"tool_name"`
+	ToolInput     json.RawMessage `json:"tool_input"`
+}
+
+// HandbackToolInput is the hand-back tool's input. Message is a pointer so an
+// absent key (malformed) is distinguishable from "" (a delivery).
+type HandbackToolInput struct {
+	Message *string `json:"message"`
+}

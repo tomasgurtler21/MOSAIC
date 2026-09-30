@@ -133,6 +133,10 @@ type RunReport struct {
 	// that as unknown, never as blank.
 	HarnessID string
 
+	// HarnessVersion is the version of the harness that ran this run,
+	// carried from TestResult. Empty means unknown.
+	HarnessVersion string
+
 	// TerminationReason names why this run ended. Values match
 	// domain.RunDisposition: "completed", "early_exit", "timed_out",
 	// "turn_limit", "spawn_failed". Empty only when disposition was not

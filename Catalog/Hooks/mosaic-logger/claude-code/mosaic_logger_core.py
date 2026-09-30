@@ -29,6 +29,7 @@ RESERVED_FILENAME_CHARS = '<>:"/\\|?*'
 DEBUG_ENV_VAR = "MOSAIC_LOGGER_DEBUG"
 WORKSPACE_ENV_VAR = "CLAUDE_PROJECT_DIR"
 USAGE_STATE_DIRNAME = ".usage-state"
+COMPLETION_CLAIM_DIRNAME = ".completion"
 
 # ---------------------------------------------------------------------------
 # Timestamp helpers (module-internal; used by core and callers)
@@ -339,6 +340,21 @@ class LogPaths:
         files, so they never share or contend on state.
         """
         return self.usage_state_dir(run_id) / f"{sanitize_component(stream_key)}.json"
+
+    def completion_claim_dir(self, run_id: str) -> pathlib.Path:
+        """<root>/<run_id>/.completion/
+
+        Run-scoped, dot-prefixed so the analyzer's directory scan skips it.
+        """
+        return self.run_root(run_id) / COMPLETION_CLAIM_DIRNAME
+
+    def completion_claim_entry(self, run_id: str, agent_id: str) -> pathlib.Path:
+        """<...>/.completion/<sanitize_component(agent_id)>.json
+
+        One file per agent_id: whoever creates it owns the completion of the
+        agent's current cycle.
+        """
+        return self.completion_claim_dir(run_id) / f"{sanitize_component(agent_id)}.json"
 
 
 def build_paths(workspace_root: pathlib.Path) -> LogPaths:

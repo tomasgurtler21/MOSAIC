@@ -74,6 +74,14 @@ type RunState struct {
 	//
 	// Nil and empty are equivalent: no agent bindings exist.
 	AgentDispatch map[string]string `json:"agent_dispatch,omitempty"`
+
+	// CompletedAgents records every agent identifier for which a completion
+	// has already been processed. A later completion carrying the same
+	// identifier is ignored by the decision core (passthrough, no records,
+	// no state change). Never cleared during a run.
+	//
+	// Nil and empty are equivalent: no agent has completed.
+	CompletedAgents map[string]bool `json:"completed_agents,omitempty"`
 }
 
 // PendingStub is a stub awaiting its echo check.
@@ -121,6 +129,10 @@ type StateDelta struct {
 	// by the completion phase after the association has been used so the
 	// identifiers do not match a later dispatch erroneously.
 	ReleaseAgents []string
+
+	// CompleteAgents adds these agent identifiers to CompletedAgents.
+	// Applied by the completion phase on an agent's first completion.
+	CompleteAgents []string
 }
 
 // Apply is a pure state transition, so a test can assert on a delta without a
@@ -136,6 +148,7 @@ func (s RunState) Apply(d StateDelta) RunState {
 	next.PendingStubs = clonePendingStubMap(s.PendingStubs)
 	next.InFlight = cloneInFlightMap(s.InFlight)
 	next.AgentDispatch = cloneStringMap(s.AgentDispatch)
+	next.CompletedAgents = cloneBoolMap(s.CompletedAgents)
 
 	next.SequenceCounter += d.SequenceIncrement
 
@@ -193,7 +206,25 @@ func (s RunState) Apply(d StateDelta) RunState {
 		delete(next.AgentDispatch, agentID)
 	}
 
+	for _, agentID := range d.CompleteAgents {
+		if next.CompletedAgents == nil {
+			next.CompletedAgents = map[string]bool{}
+		}
+		next.CompletedAgents[agentID] = true
+	}
+
 	return next
+}
+
+func cloneBoolMap(m map[string]bool) map[string]bool {
+	if m == nil {
+		return nil
+	}
+	out := make(map[string]bool, len(m))
+	for k, v := range m {
+		out[k] = v
+	}
+	return out
 }
 
 func cloneIntMap(m map[string]int) map[string]int {

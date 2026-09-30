@@ -1,0 +1,4 @@
+{"schema_version":"1.0.0","event":"invocation_start","timestamp":"2026-08-01T12:00:01.000Z","harness":"claude-code","session_id":"sess-bad-01","run_id":"20260801T120000Z-ef03","agent_instance_id":"agent#1","agent_type":"agent","prompt":"do work"}
+this is not valid json at all {{{broken
+{"schema_version":"1.0.0","event":"invocation_end","timestamp":"2026-08-01T12:00:02.000Z","harness":"claude-code","session_id":"sess-bad-01","run_id":"20260801T120000Z-ef03","agent_instance_id":"agent#1","status_code":"SUCCESS","model":"claude-sonnet-4-6","token_usage":{"input_tokens":5,"output_tokens":3}}
+{"schema_version":"1.0.0","event":"turn","timestamp":"2026-08-01T12:

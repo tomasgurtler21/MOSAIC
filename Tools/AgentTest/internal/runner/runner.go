@@ -172,6 +172,9 @@ func Run(ctx context.Context, d Deps, req Request, eval domain.AttemptEvaluator)
 		snap.StubModel = snap.SubjectModel
 	}
 	snap.HarnessID = d.Adapter.ID()
+	if vr, ok := d.Adapter.(domain.HarnessVersionReporter); ok {
+		snap.HarnessVersion = vr.HarnessVersion(ctx)
+	}
 
 	costReport, costErr := d.Cost.Cost(ctx, domain.CostQuery{
 		LogRoot:  snap.LogRoot,
@@ -200,6 +203,7 @@ func Run(ctx context.Context, d Deps, req Request, eval domain.AttemptEvaluator)
 		result.SubjectVersion = evidence.SubjectVersion
 		result.SubjectModel = evidence.SubjectModel
 		result.StubModel = evidence.StubModel
+		result.HarnessVersion = evidence.HarnessVersion
 	}
 
 	retention, _ := Teardown(d, ledger, AttemptOutcome{Policy: req.Retention, Failed: failed})
@@ -867,6 +871,9 @@ type Snapshot struct {
 	// this run, set from d.Adapter.ID() at the same point SubjectModel is
 	// captured so BuildEvidence can carry it into RunEvidence.
 	HarnessID string
+
+	// HarnessVersion is the adapter's reported harness version, or empty.
+	HarnessVersion string
 }
 
 // TakeSnapshot captures everything the verdict engine will need, before
@@ -990,9 +997,10 @@ func BuildEvidence(req Request, snap Snapshot, cost domain.CostReport, dur time.
 		// to the subject tier, so snap.StubModel matches what ran rather than
 		// reporting an empty string. The "" → "unknown" display mapping is the
 		// report layer's responsibility; the runner carries the resolved string.
-		SubjectModel: snap.SubjectModel,
-		StubModel:    snap.StubModel,
-		HarnessID:    snap.HarnessID,
+		SubjectModel:   snap.SubjectModel,
+		StubModel:      snap.StubModel,
+		HarnessID:      snap.HarnessID,
+		HarnessVersion: snap.HarnessVersion,
 	}
 }
 

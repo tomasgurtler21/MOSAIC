@@ -109,6 +109,10 @@ type RunEvidence struct {
 	// it as unknown rather than blank — matching SubjectVersion's treatment.
 	HarnessID string
 
+	// HarnessVersion is the version of the harness that ran this run's
+	// subject. Empty means unknown.
+	HarnessVersion string
+
 	// Residue is the correlation state the run still held when it ended.
 	// Zero-valued means nothing leaked, which is the expected state; see
 	// StateResidue.Unreadable for the case where that could not be
@@ -164,6 +168,10 @@ type TestResult struct {
 	// SubjectVersion, SubjectModel, and StubModel are. It names the harness
 	// adapter that actually served this run.
 	HarnessID string
+
+	// HarnessVersion is carried through from RunEvidence unchanged.
+	// Empty means unknown.
+	HarnessVersion string
 
 	// TerminationReason is the raw disposition string from
 	// RunEvidence.SubjectResult.Disposition, carried through unchanged so the

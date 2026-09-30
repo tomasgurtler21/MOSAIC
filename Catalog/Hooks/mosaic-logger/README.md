@@ -13,6 +13,29 @@ A hook adapter bundle that captures hook events and writes structured logs under
 | `vscode-ghcp` | Implemented — Python adapter deployed to `.github/hooks/` |
 | `ghcp-cli` | Implemented — Python adapter deployed to `.github/hooks/` |
 
+## Claude Code: subagent result delivery
+
+On Claude Code 2.1.271+ in auto mode a subagent delivers its result through a
+`SubagentHandback` tool call. The report is `tool_input.message`, and it reaches
+the caller just before the hand-back's PostToolUse hook fires. The adapter
+therefore writes `invocation_end` (`response`, `status_code`, timestamp), the
+final `turn` and `02_output.md` from that PostToolUse. `model` and `token_usage`
+are read from the agent transcript at hand-back time. `SubagentStop` fires later
+and its `last_assistant_message` is only post-hand-back commentary; it does not
+produce a second `invocation_end`.
+
+Without a hand-back (older CLI, non-auto mode, or Haiku as the main model, which
+silently falls back from auto to default) `SubagentStop` /
+`last_assistant_message` remains the delivery point.
+
+Known limitation: if the agent transcript has not been flushed at hand-back time,
+`invocation_end` omits `model` and `token_usage`, and they are never back-filled.
+`Tools/LogAnalyzer` reports the missing fields as an issue for that invocation.
+Tokens used after the hand-back are still counted through `usage_record` events.
+
+`tool_call_end` carries the tool's output in `tool_output`, taken from the
+PostToolUse `tool_response`, without truncation.
+
 ## Interpreter requirement
 
 The `claude-code` variant requires **`python3`** to be available in the environment

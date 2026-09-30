@@ -44,7 +44,6 @@ RunnerLogs/
 DispatchLogs/
 
 # Log capture output (optional enhancement tier)
-*.jsonl
 logs/
 
 # Cost / execution analyzer output
