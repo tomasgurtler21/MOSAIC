@@ -22,6 +22,10 @@ type DeployedArtifactState struct {
 	ProtocolVersion               string            // version from the `version` attribute on the deployed <CommunicationProtocol type="managed"> region's opening tag; "" when absent, region missing, or file unparseable
 	BundleVersion                 string            // frontmatter `bundle_version` scalar, verbatim; "" when absent, unparseable, or the file received no bundle region
 
+	// InfrastructureDeclarations lists the infrastructure agent declarations found in the file;
+	// non-nil only when the file declares at least one.
+	InfrastructureDeclarations DeployedInfrastructureDeclarations
+
 	// HasInjectionRegion reports whether the deployed file's body contains at least one region
 	// whose class is mosaic.InjectionHarness. When false, AgentStaleness skips the
 	// InjectionsVersion comparison to prevent false-positive staleness reports for agents

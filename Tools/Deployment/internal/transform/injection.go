@@ -637,6 +637,11 @@ func applyProjectRegion(node *docformat.Node, name string, class domain.Injectio
 // The blocks are concatenated in selection order; the deployed file's AvailableWorkflows
 // content is completely replaced so there is no possibility of duplication.
 func applyWorkflowRegion(node *docformat.Node, name string, class domain.InjectionClass, req Request) (RegionOutcome, []string) {
+	if len(req.Workflows) == 0 && req.PreserveDeployedWorkflows {
+		if outcome, ids, ok := preserveDeployedWorkflows(node, name, class, req); ok {
+			return outcome, ids
+		}
+	}
 	if len(req.Workflows) == 0 {
 		node.Clear() //nolint:errcheck // Node.Clear always returns nil; forward-compatible error return.
 		return RegionOutcome{
@@ -673,6 +678,9 @@ func applyWorkflowRegion(node *docformat.Node, name string, class domain.Injecti
 // has no InfrastructureAgents region (e.g. the source is adding it for the first time),
 // the node is cleared as a graceful no-op.
 func applyInfrastructureRegion(node *docformat.Node, name string, class domain.InjectionClass, req Request) (RegionOutcome, []string) {
+	if req.InfrastructureMerge != InfrastructureMergeNone && len(req.InfrastructureAgents) > 0 {
+		return applyInfrastructureMerge(node, name, class, req)
+	}
 	if len(req.InfrastructureAgents) == 0 {
 		// Update scenario: preserve whatever was in the deployed file.
 		if req.Deployed != nil {

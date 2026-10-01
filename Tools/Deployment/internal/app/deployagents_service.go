@@ -11,8 +11,13 @@ package app
 // second batch covers infrastructure agents using the same per-agent pattern, threaded from
 // the first batch's state so no tier is re-prompted and no agent appears in both batches.
 //
-// buildContent is always called with nil workflow and infrastructure block maps, so no
-// deployed orchestrator's managed regions are ever touched by this mode.
+// When infrastructure agents are selected, every orchestrator-role file already present in
+// the workspace whose declarations lack or hold a stale copy of a selected agent joins the
+// run: the agents are declared in its InfrastructureAgents region (added, or refreshed in
+// place) and every other declaration stays byte-identical. Its AvailableWorkflows region is
+// kept exactly as deployed, its model is the deployed one, and no question is asked. A file
+// that is absent, or already current, is neither created nor written. A locally modified
+// file goes through the normal conflict loop; on skip a manual-step entry is recorded.
 
 import (
 	"context"
@@ -166,6 +171,9 @@ func deployAgents(ctx context.Context, s *service, req DeployAgentsRequest) (dom
 		}
 	}
 
+	// Orchestrator-role files that must declare the selected infrastructure agents.
+	orch := s.probeOrchestratorInfra(module, workspace, scope, infraAgents)
+
 	// Build the probe set including all selected agents so their target paths are
 	// enumerated and their on-disk state is probed.
 	probeSet, err := plan.ResolveArtifactsFrom(s.deps.Catalog, plan.Selection{
@@ -173,6 +181,7 @@ func deployAgents(ctx context.Context, s *service, req DeployAgentsRequest) (dom
 		UtilityAgentIDs:        utilityIDs,
 		InfrastructureAgentIDs: infraIDs,
 		StandaloneAgentIDs:     standaloneIDs,
+		ScannedAgentKeys:       orch.agentKeys(),
 		ExcludeOrchestrator:    plan.OrchestratorExcludedFor(domain.ModeDeployAgents),
 	})
 	if err != nil {
@@ -188,7 +197,7 @@ func deployAgents(ctx context.Context, s *service, req DeployAgentsRequest) (dom
 		infraAgentKeySet[a.Key] = true
 	}
 	nonInfraProbeAgents := make([]domain.Agent, 0, len(probeSet.Agents))
-	for _, a := range probeSet.Agents {
+	for _, a := range orch.withoutOrchestrators(probeSet.Agents) {
 		if !infraAgentKeySet[a.Key] {
 			nonInfraProbeAgents = append(nonInfraProbeAgents, a)
 		}
@@ -231,7 +240,7 @@ func deployAgents(ctx context.Context, s *service, req DeployAgentsRequest) (dom
 		}
 	}
 
-	customTools, skippedTools := s.resolveCustomTools(ctx, req.CustomTools, req.SkipAll, module, probeSet.Agents)
+	customTools, skippedTools := s.resolveCustomTools(ctx, req.CustomTools, req.SkipAll, module, orch.withoutOrchestrators(probeSet.Agents))
 
 	snap, _ := s.deps.Manifest.Load(workspace)
 
@@ -250,7 +259,7 @@ func deployAgents(ctx context.Context, s *service, req DeployAgentsRequest) (dom
 	if pathErr != nil {
 		return domain.RunSummary{}, pathErr
 	}
-	deployedState, err := probeDeployedStateWithIndex(workspace, plannedPaths, module.Descriptor().Frontmatter.ModelKey, nil, deployedAgentIndex, probeAgentByKey, nil)
+	deployedState, err := probeDeployedStateWithIndex(workspace, plannedPaths, module.Descriptor().Frontmatter.ModelKey, orch.seedStates(), deployedAgentIndex, probeAgentByKey, nil)
 	if err != nil {
 		return domain.RunSummary{}, err
 	}
@@ -263,7 +272,9 @@ func deployAgents(ctx context.Context, s *service, req DeployAgentsRequest) (dom
 	toolMappingsVersion := config.HashToolDestinations(toolCfg.ToolDestinations, userCfg.ToolDestinations)
 
 	// Build plan.Input. WorkflowIDs and HookIDs are nil — deploy-agents never touches
-	// orchestrator workflow regions or hook registrations.
+	// orchestrator workflow regions or hook registrations. Only orchestrator files that need
+	// declaration changes are in the artifact set, so the empty workflow selection cannot make
+	// any other orchestrator look stale.
 	planInput := plan.Input{
 		Catalog:                s.deps.Catalog,
 		Module:                 module,
@@ -278,12 +289,14 @@ func deployAgents(ctx context.Context, s *service, req DeployAgentsRequest) (dom
 		InfrastructureAgentIDs: infraIDs,
 		StandaloneAgentIDs:     standaloneIDs,
 		HookIDs:                nil,
-		Models:                 modelRes.models,
+		Models:                 orch.withDeployedModels(modelRes.models),
 		DeployedState:          deployedState,
 		ToolMappingsVersion:    toolMappingsVersion,
 		ProtocolVersion:        protocol.Version,
 		BundleVersion:          bundle.Version,
 	}
+	planInput.ScannedAgentKeys = orch.agentKeys()
+	planInput.InfrastructureDeclarations = orch.intent()
 	// Clear gaps from any prior abandoned attempt within the same session.
 	// ErrPlanNotConfirmed restarts the flow with the same collector; without
 	// this reset, gaps from the declined plan would persist into the final report.
@@ -295,6 +308,7 @@ func deployAgents(ctx context.Context, s *service, req DeployAgentsRequest) (dom
 	for _, g := range p.Gaps {
 		s.deps.Todo.AddGap(g)
 	}
+	orch.annotate(p.Items)
 
 	conflicts := map[string]domain.ConflictDecision{}
 	var latchedDecision domain.ConflictDecision
@@ -322,6 +336,9 @@ func deployAgents(ctx context.Context, s *service, req DeployAgentsRequest) (dom
 				Kind: domain.GapSkippedFile, Subject: item.Ref.Key,
 				Detail: "file was locally modified and the user chose to skip it",
 			})
+			if gap, ok := orch.skipGap(item); ok {
+				s.deps.Todo.AddGap(gap)
+			}
 		}
 	}
 
@@ -342,9 +359,10 @@ func deployAgents(ctx context.Context, s *service, req DeployAgentsRequest) (dom
 		agentByKey[a.Key] = a
 	}
 
-	// No workflow blocks and no infrastructure blocks: this mode never rewrites the
-	// orchestrator's workflow or infrastructure managed regions.
-	contentFn := s.buildContent(module, agentByKey, modelRes.models, customTools, skippedTools, nil, nil, scope, nil, toolMappingsVersion, protocol, bundle, nil)
+	// No catalog workflow blocks: orchestrator files keep their deployed workflows, and only
+	// their infrastructure declarations are merged (see orch.contentOptions).
+	models := orch.withDeployedModels(modelRes.models)
+	contentFn := s.buildContent(module, agentByKey, models, customTools, skippedTools, nil, nil, scope, orch.deployedReaderFor(workspace), toolMappingsVersion, protocol, bundle, nil, orch.contentOptions(s)...)
 
 	now := s.now()
 	execReq := deploy.ExecRequest{

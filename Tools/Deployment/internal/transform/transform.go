@@ -87,6 +87,7 @@ func Apply(req Request) (Result, error) {
 		Gaps:                 allGaps,
 		Workflows:            workflowIDs,
 		InfrastructureAgents: infraAgentKeys,
+		InfrastructureMerge:  infrastructureMergeReport(req, regionOutcomes),
 		OutputBytes:          len(output),
 	}
 

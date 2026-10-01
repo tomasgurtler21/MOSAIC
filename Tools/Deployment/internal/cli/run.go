@@ -181,7 +181,13 @@ func Run(ctx context.Context, args []string, svc app.Service, out, errOut io.Wri
 	)
 
 	updateCmd := &cobra.Command{
-		Use:           "update",
+		Use:   "update",
+		Short: "Update a deployed workspace to the latest catalog versions",
+		Long: `Update a deployed workspace to the latest catalog versions.
+
+Infrastructure agent declarations in the orchestrator are refreshed when their version,
+class, triggers or on-failure changed in the catalog. New declarations are never added and
+hand-added declarations are never touched.`,
 		SilenceErrors: true,
 		SilenceUsage:  true,
 		RunE: func(cmd *cobra.Command, _ []string) error {
@@ -578,7 +584,13 @@ a prompt.`,
 		Long: `Deploy a chosen mix of subagents, utility agents, and standalone agents plus the skills they require.
 
 Presents a single browsable list spanning all subagents, utility agents, and standalone
-agents. No workflow, hook, or orchestrator work is performed.
+agents. No workflow or hook work is performed.
+
+If an orchestrator file (orchestrator.md, orchestrator-script.md) is already present,
+declarations for newly deployed infrastructure agents are added to it. Existing
+declarations, including hand-added ones, are kept, and a re-deployed agent is refreshed in
+place. A locally modified orchestrator follows --conflict; when skipped, a TODO entry
+explains the manual step. No orchestrator is created, and its workflows are not changed.
 
 The four per-class flags (--subagents, --utility, --infra, --standalone) pre-answer the
 merged agent selection. If any per-class flag is given, the interactive question is skipped

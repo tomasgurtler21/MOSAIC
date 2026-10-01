@@ -88,6 +88,10 @@ The `--conflict` flag controls what happens when a file in the workspace has bee
 - `overwrite`: replace the file with the latest version (local edits are lost)
 - `backup`: copy the local file to `<name>.backup` before overwriting
 
+### Orchestrator declaration refresh
+
+Update also refreshes catalog-backed infrastructure agent declarations in the orchestrator (`orchestrator.md`, `orchestrator-script.md`) when their version, class, triggers or on-failure changed in the catalog. It never adds new declarations and never touches hand-added ones. An orchestrator with current declarations is left unchanged.
+
 ---
 
 ## `transform` subcommand
@@ -165,17 +169,17 @@ mosaic-deploy transform \
 
 ---
 
-## `utility-infra` subcommand
+## `agents` subcommand
 
-Deploy only Utility and Infrastructure agents and the skills they require. Workflow selection, hook configuration, and orchestrator rewriting are never performed.
+Deploy a chosen mix of subagents, utility agents, infrastructure agents, and standalone agents plus the skills they require. No workflow or hook work is performed.
 
 ```
-mosaic-deploy utility-infra [flags]
+mosaic-deploy agents [flags]
 ```
 
 ### When to use this subcommand
 
-Use `utility-infra` when you want to add or refresh utility and infrastructure agents in an existing workspace without touching the orchestrator or any workflow configuration. It is the narrowest deploy operation: it asks only the two agent-group questions and writes only the files those agents require.
+Use `agents` when you want to add or refresh individual agents in an existing workspace without touching workflow or hook configuration. It writes only the files the selected agents require.
 
 ### Flags
 
@@ -183,23 +187,24 @@ Use `utility-infra` when you want to add or refresh utility and infrastructure a
 |------|------|---------|-------------|
 | `--harness <id>` | string | — | Harness ID (required) |
 | `--workspace <path>` | string | — | Absolute path to the target workspace (required) |
-| `--utility <ids>` | string | — | Comma-separated utility agent IDs; absent = ask interactively; empty string = none |
-| `--infrastructure <ids>` | string | — | Comma-separated infrastructure agent IDs; absent = ask interactively; empty string = none |
-| `--conflict <skip\|overwrite\|backup>` | string | `skip` | How to handle locally-modified files |
+| `--subagents <ids>` | string | — | Comma-separated ordinary subagent IDs; absent = ask; empty = none |
+| `--utility <ids>` | string | — | Comma-separated utility agent IDs; absent = ask; empty = none |
+| `--infra <ids>` | string | — | Comma-separated infrastructure agent IDs; absent = ask; empty = none |
+| `--standalone <ids>` | string | — | Comma-separated standalone agent IDs; absent = ask; empty = none |
+| `--conflict <skip\|overwrite\|backup>` | string | — | Default decision for locally-modified files |
 | `--output <json>` | string | — | Machine-readable output format |
 | `--dry-run` | bool | false | Compute and report without writing any file |
-| `--auto-confirm` | bool | false | Auto-confirm the deployment plan without prompting |
+| `--yes` | bool | false | Auto-confirm the deployment plan without prompting |
 
 `--workspace` is quote-stripped via the shared path-input helper, so shell-quoted paths (e.g. from drag-and-drop) work without manual editing.
 
-### Nil vs empty convention for `--utility` and `--infrastructure`
+### Per-class pre-answer convention
 
-The two agent-ID flags follow the CD-6 nil/empty convention used by all pre-answer flags in this tool:
+If any of the four per-class flags (`--subagents`, `--utility`, `--infra`, `--standalone`) is given, the interactive agent selection is skipped entirely and the classes not given are treated as explicitly empty. If none is given, the tool presents a single browsable list and asks.
 
-- **Flag absent** — the tool asks the question interactively (or records a TODO if no terminal is available).
-- **Flag present with a value** — the flag's value is split on commas; the resulting list (which may be empty) pre-answers the selection without prompting.
+### Orchestrator declarations
 
-This means `--utility ""` explicitly selects no utility agents and skips the prompt, while omitting `--utility` entirely leaves the choice to the interactive session.
+If an orchestrator file (`orchestrator.md`, `orchestrator-script.md`) is already present in the workspace, declarations for the newly deployed infrastructure agents are added to it. Existing declarations, including hand-added ones, are kept, and a re-deployed agent is refreshed in place. No extra question is asked. A locally modified orchestrator follows `--conflict`; when it is skipped, a TODO entry explains the manual step. No orchestrator is created when none is present, and the workflows in the orchestrator are not changed.
 
 ### Exit codes
 
@@ -217,31 +222,25 @@ With `--output json`, a single `RunSummary` JSON document is written to stdout c
 ### Examples
 
 ```sh
-# Interactive: ask which utility and infrastructure agents to deploy.
-mosaic-deploy utility-infra \
+# Interactive: ask which agents to deploy.
+mosaic-deploy agents \
   --harness claude-code \
   --workspace /path/to/my-project
 
-# Non-interactive: pre-answer both selections; no prompts are shown.
-mosaic-deploy utility-infra \
+# Non-interactive: pre-answer the selection; unspecified classes are empty.
+mosaic-deploy agents \
   --harness claude-code \
   --workspace /path/to/my-project \
   --utility "code-reviewer,test-runner" \
-  --infrastructure "docker-manager" \
-  --auto-confirm
+  --infra "docker-manager" \
+  --yes
 
-# Explicitly deploy no utility agents, ask about infrastructure.
-mosaic-deploy utility-infra \
+# Dry run - compute the plan without writing anything.
+mosaic-deploy agents \
   --harness claude-code \
   --workspace /path/to/my-project \
-  --utility ""
-
-# Dry run — compute the plan without writing anything.
-mosaic-deploy utility-infra \
-  --harness claude-code \
-  --workspace /path/to/my-project \
-  --utility "code-reviewer" \
-  --infrastructure "" \
+  --subagents "code-reviewer" \
+  --conflict backup \
   --dry-run \
   --output json
 ```

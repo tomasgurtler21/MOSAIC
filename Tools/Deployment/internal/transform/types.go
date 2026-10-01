@@ -25,6 +25,13 @@ type Request struct {
 	Deployed             []byte
 	Workflows            []WorkflowBlock        // non-empty only for the orchestrator agent
 	InfrastructureAgents []InfrastructureBlock  // non-empty only for the orchestrator agent
+
+	// InfrastructureMerge selects the additive merge of InfrastructureAgents blocks into the
+	// deployed region. Zero value keeps the existing replace/preserve/clear behaviour.
+	InfrastructureMerge InfrastructureMergeMode
+
+	// PreserveDeployedWorkflows lifts the deployed AvailableWorkflows region when Workflows is empty.
+	PreserveDeployedWorkflows bool
 	// ToolMappingsVersion is the hash of the effective tool-destination mapping set for this
 	// run, computed by config.HashToolDestinations. It is written to the deployed file as the
 	// `tool_mappings_version` frontmatter stamp so the planner can detect staleness on
@@ -86,6 +93,7 @@ type Report struct {
 	Gaps                 []domain.Gap
 	Workflows            []string // workflow IDs present in the assembled injection, in emitted order
 	InfrastructureAgents []string // agent keys present in the assembled InfrastructureAgents injection, in emitted order
+	InfrastructureMerge  InfrastructureMergeResult // what the additive infrastructure merge did
 	OutputBytes          int
 }
 

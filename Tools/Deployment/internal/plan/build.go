@@ -65,7 +65,7 @@ func (p *planner) Build(ctx context.Context, in Input) (domain.Plan, error) {
 		deployed := in.DeployedState[targetPath]
 
 		// Classify before evaluating gaps: the GapNoModel emission rule depends on the action.
-		item := classifyAgentItem(agent, targetPath, model, manifestUsable, in.Manifest.Manifest, deployed, desc, selectedWorkflows, in.ToolMappingsVersion, in.ProtocolVersion, in.BundleVersion)
+		item := classifyAgentItem(agent, targetPath, model, manifestUsable, in.Manifest.Manifest, deployed, desc, selectedWorkflows, in.ToolMappingsVersion, in.ProtocolVersion, in.BundleVersion, infrastructureInput{Catalog: in.Catalog, Intent: in.InfrastructureDeclarations})
 		items = append(items, item)
 
 		// Surface a GapNoModel gap only when the file write that would occur requires a model
@@ -267,6 +267,7 @@ func classifyAgentItem(
 	toolMappingsVersion string,
 	protocolVersion string,
 	bundleVersion string,
+	infra infrastructureInput,
 ) domain.PlanItem {
 	ref := domain.ArtifactRef{Kind: domain.ArtifactAgent, Key: agent.Key}
 	item := domain.PlanItem{
@@ -348,6 +349,11 @@ func classifyAgentItem(
 		deltas = append(deltas, drift.Deltas()...)
 	}
 
+	// Step 5a (continued): infrastructure declaration drift, orchestrator-role agents only,
+	// evaluated against this item's own deployed declarations.
+	infraDrift := orchestratorInfrastructureDrift(agent, deployed, infra)
+	deltas = append(deltas, infraDrift.Deltas()...)
+
 	// Steps 5b/5c precondition: evaluate once for all role-gated staleness checks.
 	// Utility and standalone agents receive harness transformation only; neither a protocol
 	// marker nor a bundle stamp is written to their deployed files by design. Reporting either
@@ -378,6 +384,9 @@ func classifyAgentItem(
 		item.Action = domain.ActionUpdate
 		item.Stale = deltas
 		reasons := buildAgentUpdateReasons(deltas, !deployed.HasVersionInfo(), drift, protocolDrift, bundleDrift)
+		if infraDrift.IsStale() {
+			reasons = strings.Join(filterEmpty(reasons, infraDrift.Reason()), "; ")
+		}
 		item.Reason = "stale: " + reasons
 		return item
 	}
@@ -563,7 +572,7 @@ func buildAgentUpdateReasons(deltas []domain.VersionDelta, noVersionInfo bool, d
 	// the generic field formatter; each has a dedicated human-readable reason method.
 	var versionDeltas []domain.VersionDelta
 	for _, d := range deltas {
-		if strings.HasPrefix(d.Field, WorkflowDeltaFieldPrefix) {
+		if strings.HasPrefix(d.Field, WorkflowDeltaFieldPrefix) || strings.HasPrefix(d.Field, InfrastructureDeltaFieldPrefix) {
 			continue
 		}
 		if d.Field == ProtocolDeltaField {

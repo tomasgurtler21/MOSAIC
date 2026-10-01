@@ -90,6 +90,10 @@ type Input struct {
 	// own ResolveArtifactsFrom call. If the two diverge, the probe map and the built plan
 	// describe different artifact sets and the plan is wrong.
 	ScannedAgentKeys []string
+
+	// InfrastructureDeclarations is the caller's intent for the infrastructure declarations of
+	// orchestrator-role items. The zero value disables infrastructure drift.
+	InfrastructureDeclarations InfrastructureDeclarationIntent
 }
 
 // ArtifactSet is the derived deployment set: the union of referenced agents across all
