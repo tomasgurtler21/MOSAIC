@@ -13,7 +13,7 @@ This guide is for **project authors** who want to get MOSAIC running in their AI
 | **Deploy** | Create a new workspace from scratch | `mosaic-deploy deploy` |
 | **Update** | Bring an existing workspace to latest versions | `mosaic-deploy update` |
 | **Update workflows** | Replace the workflow set without touching agents or hooks | `mosaic-deploy workflows` |
-| **Deploy agents** | Deploy a chosen mix of agents without touching orchestrator or hooks | `mosaic-deploy agents` |
+| **Deploy agents** | Deploy a chosen mix of agents without touching workflows or hooks | `mosaic-deploy agents` |
 | **Deploy hooks** | Deploy hook bundles alone | `mosaic-deploy hooks` |
 | **Transform** | Convert deployed agents from one harness to another | `mosaic-deploy transform` |
 | **Promote** | Turn a harness-only agent into a reusable generic source | `mosaic-deploy promote` |
@@ -74,6 +74,10 @@ Compares deployed versions against the catalog, shows what's stale, and applies 
   --auto-confirm
 ```
 
+### Orchestrator declaration refresh
+
+Update also refreshes catalog-backed infrastructure agent declarations in the orchestrator when their version, class, triggers or on-failure changed in the catalog. It never adds new declarations and never touches hand-added ones. An orchestrator with current declarations is left unchanged.
+
 ### Conflict resolution
 
 When a file was locally modified since the last deploy:
@@ -125,9 +129,11 @@ The TUI marks currently deployed workflows so you can see what you're keeping.
 
 ## Deploy Agents — Add Individual Agents
 
-Deploys a chosen mix of subagents, utility agents, infrastructure agents, and standalone agents plus the skills they require. No workflow, hook, or orchestrator work is performed.
+Deploys a chosen mix of subagents, utility agents, infrastructure agents, and standalone agents plus the skills they require. No workflow or hook work is performed.
 
-Use this to add or update individual agents across any catalog category without disturbing workflows, hooks, or the orchestrator.
+If an orchestrator file (`orchestrator.md`, `orchestrator-script.md`) is already present, declarations for newly deployed infrastructure agents are added to it. Existing declarations, including hand-added ones, are kept, and a re-deployed agent is refreshed in place. No extra question is asked. A locally modified orchestrator goes through the normal conflict choice (`--conflict` in the CLI); if skipped, a TODO entry explains the manual step. No orchestrator is created when none is present, and its workflows are not changed.
+
+Use this to add or update individual agents across any catalog category without disturbing workflows or hooks.
 
 **Interactive:**
 
@@ -332,7 +338,7 @@ Work through this checklist before using the workspace. Filling project regions 
 | Deploy MOSAIC to a new project | `mosaic-deploy deploy --harness claude-code --workspace /path` |
 | Update agents to latest versions | `mosaic-deploy update --harness claude-code --workspace /path` |
 | Add or swap workflows in an existing workspace | `mosaic-deploy workflows --harness claude-code --workspace /path` |
-| Add specific agents without touching orchestrator | `mosaic-deploy agents --harness claude-code --workspace /path` |
+| Add specific agents (declarations added to an existing orchestrator) | `mosaic-deploy agents --harness claude-code --workspace /path` |
 | Add hook bundles only | `mosaic-deploy hooks --harness claude-code --workspace /path` |
 | Preview without writing files | Add `--dry-run` to any command |
 | Keep my local edits as backups during update | `--conflict backup` |
