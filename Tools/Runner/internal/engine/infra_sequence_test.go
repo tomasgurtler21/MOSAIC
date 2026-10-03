@@ -131,15 +131,13 @@ func TestNext_Interleaved_Infrastructure_SequenceDisambiguation_RepeatedAgent(t 
 	// checkpoint-manager-git then fires as an infrastructure step at seq 9 (not a
 	// routing row). build-review then completes at seq 10 -- one ahead of where it
 	// would land (seq 9) if only workflow rows consumed sequence numbers.
-	state := domain.ArtifactState{
-		GlobalSequence: 10,
-		CurrentState: domain.CurrentState{
-			Phase:      "EXECUTION.Test.[StageNumber]",
-			Stage:      "Stage-1",
-			LastStatus: domain.StatusSUCCESS,
-			LastAgent:  "build-review#10",
-		},
-	}
+	// The log records rows 8 (test-writer-tdd) and 9 (build-review) of the table;
+	// the infrastructure entry carries no row.
+	state := stateWithLog(10,
+		execLogEntry(8, "test-writer-tdd#8", "EXECUTION", "Test.1", domain.StatusSUCCESS, 8),
+		execLogEntry(9, "checkpoint-manager-git#9", "EXECUTION", "Test.1", domain.StatusSUCCESS, 0),
+		execLogEntry(10, "build-review#10", "EXECUTION", "Test.1", domain.StatusSUCCESS, 9),
+	)
 
 	dec := engine.Next(engine.NextInput{
 		Workflow:        aw,

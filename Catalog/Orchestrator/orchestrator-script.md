@@ -1,5 +1,5 @@
 ---
-version: 2.2.0
+version: 2.2.1
 name: orchestrator-script
 description: Makes one routing decision per Runner invocation by reading the orchestration artifact and returning a dispatch or stop instruction
 role: orchestrator
@@ -170,6 +170,7 @@ The orchestration artifact is your primary source and you read all of it.
 |---|---|
 | Full run history -- every invocation in order, with agent instance, phase, stage, status, timestamp | `<ExecutionLog type="core">` |
 | The last step and its status code | The last execution log row |
+| The routing-table row the last step ran | The `WorkflowRow` column of that log row: the value of the workflow table's `Row` column (not the log's own row), `-` for infrastructure and out-of-band steps. A deployed table without a `Row` column is counted by 1-based data-row position. If the agent or group at that row in the current table does not match the log entry, stop and report instead of guessing. Logs written before the column existed have none |
 | The agent's own account of the outcome | The `Summary` column of that row (truncated past 100 characters) |
 | The full, untruncated status message | `last_status_message` in the request -- the artifact does not carry it in full |
 | The blocker explanation of the triggering `BLOCKED` response | `last_error_reason` in the request -- the artifact does not carry it at all |
@@ -244,6 +245,7 @@ A status reports what the invocation did; it never names a target. Every target 
 - Dispatch only agents named in the workflow table, at any position in it.
 - Use the row's `On Success` or `On Findings` target when it names exactly one agent and nothing in the status message places the problem elsewhere.
 - When a status message places the problem in earlier work — a reviewer finding the requirements incomplete, a clarification needing codebase facts — dispatch the table agent whose work produces what is missing.
+- An `On Findings` target resolves to the nearest row above the row that ran whose agent is the target. The row that ran is never a candidate, and group and stage boundaries are ignored. A target with no preceding row counts as no target: deviate or escalate.
 - Never route past a creator/reviewer pair whose reviewer has not passed (Quality Gate).
 - When no single target follows from the workflow table and the status message, escalate.
 

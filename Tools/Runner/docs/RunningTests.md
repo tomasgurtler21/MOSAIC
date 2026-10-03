@@ -12,7 +12,10 @@ The `test` subcommand automates the full deploy → seed → run → check cycle
   catalog into it. Never use the MOSAIC repo itself; runs write `RunnerLogs/` and
   `Orchestration-*/` trees into the working directory.
 - `mosaic-run.exe` and `mosaic-deploy.exe` built and copied into that workspace. Both are
-  required: `mosaic-run` resolves the deployment binary as its own sibling.
+  required: `mosaic-run` resolves the deployment binary as its own sibling. Catalogue runs
+  deploy through that `mosaic-deploy` binary (`Tools/Runner/internal/testdeploy`), so rebuild or
+  reinstall it before runs that exercise the workflow `Row` column; a stale binary deploys tables
+  without it.
 - The MOSAIC repo root (where `Tools/Runner/TestCatalog/` lives), passed as `--catalog`.
 
 ### Running the Smoke Set
@@ -125,6 +128,7 @@ Each workflow has a required mode. Using the wrong mode causes failures (e.g. ru
 | `staged-multigroup` | `auto` | `Fixtures/staged-multigroup` | Implemented |
 | `deviation-chain` | `auto` | `Fixtures/deviation-chain` | Implemented |
 | `hitl-escalate` | `auto` | `Fixtures/hitl-escalate` | Implemented |
+| `staged-findings-loop` | `auto-review` | `Fixtures/staged-findings-loop` | Implemented |
 
 Fixture seed folders live under `Tools\Runner\TestCatalog\Workflows\MosaicTest\Fixtures\`. Use absolute paths for `--input`.
 

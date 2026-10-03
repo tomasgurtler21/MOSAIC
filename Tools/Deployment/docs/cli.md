@@ -179,7 +179,7 @@ mosaic-deploy agents [flags]
 
 ### When to use this subcommand
 
-Use `agents` when you want to add or refresh individual agents in an existing workspace without touching workflow or hook configuration. It writes only the files the selected agents require.
+Use `agents` when you want to add or refresh individual agents in an existing workspace without touching workflow or hook configuration. It writes only the files the selected agents require. Infrastructure-agent declarations injected into an existing orchestrator leave its deployed workflow tables unchanged; the workflow `Row` column is added only when workflows are rebuilt (a full deploy or `mosaic-deploy workflows`).
 
 ### Flags
 

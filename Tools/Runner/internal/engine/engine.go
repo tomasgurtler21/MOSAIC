@@ -136,7 +136,7 @@ func Next(in NextInput) domain.EngineDecision {
 			isUnambiguousHint(currentRow.OnFindings) &&
 			!reviewLoopLimitReached(state) {
 			targetAgent := currentRow.OnFindings.Value
-			targetRowIdx := findFirstRowForAgent(workflow, targetAgent)
+			targetRowIdx := findNearestPrecedingRowForAgent(workflow, currentRowIdx, targetAgent)
 			if targetRowIdx >= 0 {
 				var stageNum domain.StageNumber
 				var stageStr string

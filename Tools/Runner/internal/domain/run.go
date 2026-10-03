@@ -2,13 +2,13 @@ package domain
 
 // RunConfig carries all user-supplied configuration for a run.
 type RunConfig struct {
-	OrchestratorFilePath string        // path to the orchestrator agent file
-	WorkflowID           WorkflowID    // selected workflow identifier
-	Task                 string        // task description
-	RunID                string        // resolved run_id (minted or from scan); always a valid run_id, the session never mints one
-	RunFolder            string        // resolved run-scoped folder path (absolute, e.g. "/workspace/Orchestration-20260727T170000Z-a3f9")
-	AllowVersionDrift    bool          // override version check
-	IsNewRun             bool          // true = create new artifact; false = resume existing
+	OrchestratorFilePath string     // path to the orchestrator agent file
+	WorkflowID           WorkflowID // selected workflow identifier
+	Task                 string     // task description
+	RunID                string     // resolved run_id (minted or from scan); always a valid run_id, the session never mints one
+	RunFolder            string     // resolved run-scoped folder path (absolute, e.g. "/workspace/Orchestration-20260727T170000Z-a3f9")
+	AllowVersionDrift    bool       // override version check
+	IsNewRun             bool       // true = create new artifact; false = resume existing
 
 	// HarnessID is the stable harness identity selected by the user
 	// (e.g. "opencode", "claude-code", "ghcp-cli", "fake"). Populated by

@@ -180,5 +180,12 @@ func TestApply_PreserveDeployedWorkflowsFalse_RequestShapesKeepExistingBehaviour
 
 // assembledQuickFix is the quick-fix block as written into a deployed region: retyped to managed.
 func assembledQuickFix() string {
-	return strings.Replace(quickFixBlock, `<Workflow type="core"`, `<Workflow type="managed"`, 1)
+	block := strings.Replace(quickFixBlock, `<Workflow type="core"`, `<Workflow type="managed"`, 1)
+	block = strings.Replace(block, `| Phase | Subagent | HITL |
+|-------|----------|:----:|
+| PLANNING | planner | TRUE |`,
+		`| Row | Phase | Subagent | HITL |
+|-----|-------|----------|:----:|
+| 1 | PLANNING | planner | TRUE |`, 1)
+	return block
 }

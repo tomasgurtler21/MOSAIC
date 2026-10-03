@@ -281,7 +281,7 @@ func splitDocument(data []byte) (fmContent string, bodyContent string, hasFM boo
 	}
 
 	// fmContent is between the two "---\n" delimiters.
-	fmContent = string(rest[:idx+1])  // include the \n before the closing ---
+	fmContent = string(rest[:idx+1])   // include the \n before the closing ---
 	bodyContent = string(rest[idx+5:]) // skip \n---\n
 	return fmContent, bodyContent, true
 }

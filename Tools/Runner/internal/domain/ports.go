@@ -30,15 +30,18 @@ type HarnessAdapter interface {
 
 // CompletedStep carries everything needed to record one completed invocation.
 type CompletedStep struct {
-	Seq             int
-	AgentInstance   string     // "{AgentName}#{Seq}"
-	Phase           string
-	Stage           string     // "Stage-N" during EXECUTION, "" otherwise
-	Status          StatusCode
-	ErrorCode       ErrorCode  // populated only when Status == StatusBLOCKED
-	Summary         string     // from ProtocolResponse.StatusMessage, truncated per format spec
-	Timestamp       time.Time
-	Checkpoint      string   // empty unless a checkpoint was taken
+	Seq           int
+	AgentInstance string // "{AgentName}#{Seq}"
+	Phase         string
+	Stage         string // "Stage-N" during EXECUTION, "" otherwise
+	// WorkflowRow is the dispatched routing-table row, 1-based.
+	// NoWorkflowRow for infrastructure and out-of-band steps.
+	WorkflowRow WorkflowRow
+	Status      StatusCode
+	ErrorCode   ErrorCode // populated only when Status == StatusBLOCKED
+	Summary     string    // from ProtocolResponse.StatusMessage, truncated per format spec
+	Timestamp   time.Time
+	Checkpoint  string // empty unless a checkpoint was taken
 	// WrittenArtifacts are the concrete paths, in dispatched form, that the
 	// invocation created or modified, as reported by OutputWriteDetector.
 	// Ignored when HITLRejected is true.
@@ -394,12 +397,12 @@ const (
 	EventSessionFilterUnmatched = "session.filter.unmatched"
 
 	// Snapshot event names.
-	EventSnapshotCleanupFailed  = "session.snapshot.cleanup_failed"
-	EventSnapshotRestored       = "session.snapshot.restored"
-	EventSnapshotLockAcquired   = "session.snapshot.lock_acquired"
-	EventSnapshotLockReleased   = "session.snapshot.lock_released"
-	EventSnapshotBackupCreated  = "session.snapshot.backup_created"  // Stage 8: creator wrote backup
-	EventSnapshotRecovery       = "session.snapshot.recovery"        // Stage 9: recovery ran at startup
+	EventSnapshotCleanupFailed = "session.snapshot.cleanup_failed"
+	EventSnapshotRestored      = "session.snapshot.restored"
+	EventSnapshotLockAcquired  = "session.snapshot.lock_acquired"
+	EventSnapshotLockReleased  = "session.snapshot.lock_released"
+	EventSnapshotBackupCreated = "session.snapshot.backup_created" // Stage 8: creator wrote backup
+	EventSnapshotRecovery      = "session.snapshot.recovery"       // Stage 9: recovery ran at startup
 
 	// Graceful-stop lifecycle event names. Silent in a run where no stop is
 	// requested: nothing here is emitted on a negative poll or an ignored key.

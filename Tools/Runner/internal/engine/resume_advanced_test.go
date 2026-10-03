@@ -20,7 +20,7 @@ func TestResumePoint_TargetFormatState_RepeatedAgent_Test_ResolvesNextRow(t *tes
 			LastAgent:  "build-review#9",
 		},
 		ExecutionLog: []domain.ExecutionLogEntry{
-			{Seq: 9, Agent: "build-review#9", Phase: "EXECUTION", Stage: "Test.1", Status: domain.StatusSUCCESS},
+			{Seq: 9, Agent: "build-review#9", Phase: "EXECUTION", Stage: "Test.1", WorkflowRow: 9, Status: domain.StatusSUCCESS},
 		},
 	}
 
@@ -51,7 +51,7 @@ func TestResumePoint_TargetFormatState_RepeatedAgent_Implementation_ResolvesNext
 			LastAgent:  "build-review#12",
 		},
 		ExecutionLog: []domain.ExecutionLogEntry{
-			{Seq: 12, Agent: "build-review#12", Phase: "EXECUTION", Stage: "Implementation.1", Status: domain.StatusSUCCESS},
+			{Seq: 12, Agent: "build-review#12", Phase: "EXECUTION", Stage: "Implementation.1", WorkflowRow: 12, Status: domain.StatusSUCCESS},
 		},
 	}
 

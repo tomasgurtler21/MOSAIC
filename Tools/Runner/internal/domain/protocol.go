@@ -79,7 +79,7 @@ type AgentReference struct {
 
 // DispatchStep is everything the session needs to execute one invocation.
 type DispatchStep struct {
-	RowIndex      int            // which routing table row this invocation is for
+	RowIndex      int // which routing table row this invocation is for
 	Agent         AgentReference
 	Request       ProtocolRequest
 	EffectiveHITL bool   // the computed HITL value, or an override

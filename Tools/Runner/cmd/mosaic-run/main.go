@@ -28,7 +28,7 @@ import (
 	"github.com/mattn/go-isatty"
 )
 
-const ToolVersion = "1.2.0"
+const ToolVersion = "1.3.0"
 
 // wantsTUI reports whether mosaic-run should launch the interactive TUI.
 // The TUI is launched when:

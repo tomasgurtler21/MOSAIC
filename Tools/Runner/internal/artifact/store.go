@@ -141,15 +141,16 @@ func (f *fileStore) Apply(ctx context.Context, state domain.ArtifactState, step 
 
 	// Build the new execution log entry.
 	newEntry := domain.ExecutionLogEntry{
-		Seq:        step.Seq,
-		Agent:      step.AgentInstance,
-		Phase:      step.Phase,
-		Stage:      step.Stage,
-		Status:     step.Status,
-		Timestamp:  step.Timestamp,
-		Summary:    TruncateSummary(step.Summary),
-		Inputs:     step.Inputs,
-		Checkpoint: step.Checkpoint,
+		Seq:         step.Seq,
+		Agent:       step.AgentInstance,
+		Phase:       step.Phase,
+		Stage:       step.Stage,
+		WorkflowRow: step.WorkflowRow,
+		Status:      step.Status,
+		Timestamp:   step.Timestamp,
+		Summary:     TruncateSummary(step.Summary),
+		Inputs:      step.Inputs,
+		Checkpoint:  step.Checkpoint,
 	}
 
 	// Build the new state.

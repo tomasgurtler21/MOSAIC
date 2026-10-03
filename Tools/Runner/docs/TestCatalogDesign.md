@@ -49,7 +49,7 @@ The test catalogue is harness-agnostic, exactly like the normal catalogue. It co
 
 So the plan is:
 
-1. Deploy the test catalogue to a workspace, once per harness, using the normal deploy tool.
+1. Deploy the test catalogue to a workspace, once per harness, using the normal deploy tool. Runner TestCatalog runs deploy through the `mosaic-deploy` binary (`Tools/Runner/internal/testdeploy`), so that binary must be rebuilt or reinstalled before catalogue runs exercise the workflow `Row` column, which mosaic-deploy adds when it rebuilds workflows.
 2. Run the same suite against each one.
 3. Expect the same results everywhere. A difference between harnesses **is** a finding — that is largely why the suite exists.
 
@@ -281,6 +281,7 @@ The remaining workflows test Runner modes, routing mechanisms, and edge cases. T
 | `staged-multigroup` | Auto | Multi-group staged execution (TDD approach: Test group → Implementation group); exercises `EXECUTION.Test.[StageNumber]` and `EXECUTION.Implementation.[StageNumber]` phase parsing through a real harness (§7.4) | **Implemented** |
 | `hitl-escalate` | Auto | The approval check uses up its re-dispatch and escalates to a deviation. Uses stub enhancements E1 + E3 (§7.8) | **Implemented** |
 | `deviation-chain` | Auto | Two consecutive deviations requiring two orchestrator consultations before the run completes; exercises the single-decision chain through a real harness (§7.5) | **Implemented** |
+| `staged-findings-loop` | Auto-review | After an On Findings route-back inside a staged EXECUTION group whose rows share one agent, the engine continues from the row that actually ran, not from a row derived from the invocation count | **Implemented** |
 
 ### 7.1 `findings-loop` — One Workflow, Run Under Two Modes
 

@@ -1,9 +1,9 @@
 # Orchestration Artifact Format
 
 > **Status:** Approved
-> **Version:** 2.3
+> **Version:** 2.4
 > **Created:** 2026-07-28
-> **Last Updated:** 2026-09-27
+> **Last Updated:** 2026-10-03
 > **Scope:** The schema of `Orchestration.md` — the blackboard artifact an orchestrator (human-driven LLM or a future deterministic script) reads and writes to track execution state for one workflow run. Defines its sections, their mutability rules, and the format each section uses.
 
 ---
@@ -186,10 +186,10 @@ Group vocabulary itself — how a workflow declares groups, how the plan artifac
 
 ```markdown
 <ExecutionLog type="core">
-| Seq | Agent | Phase | Stage | Status | Timestamp | Summary | Inputs | Checkpoint |
-|-----|-------|-------|-------|--------|-----------|---------|--------|------------|
-| 1 | Research#1 | RESEARCH | - | SUCCESS | 2026-01-29T09:05:00Z | Analyzed auth requirements, JWT approach selected | - | - |
-| 2 | Validator#2 | RESEARCH | - | SUCCESS | 2026-01-29T09:10:00Z | Validated JWT approach feasibility | Research.md | - |
+| Seq | Agent | Phase | Stage | WorkflowRow | Status | Timestamp | Summary | Inputs | Checkpoint |
+|-----|-------|-------|-------|-------------|--------|-----------|---------|--------|------------|
+| 1 | Research#1 | RESEARCH | - | 1 | SUCCESS | 2026-01-29T09:05:00Z | Analyzed auth requirements, JWT approach selected | - | - |
+| 2 | Validator#2 | RESEARCH | - | 2 | SUCCESS | 2026-01-29T09:10:00Z | Validated JWT approach feasibility | Research.md | - |
 </ExecutionLog>
 ```
 
@@ -201,13 +201,14 @@ One row per completed subagent invocation, appended after that invocation comple
 | `Agent` | `{AgentName}#{Seq}`. |
 | `Phase` | Phase during the invocation, as the bare phase name (§4.1). |
 | `Stage` | Stage value if `Phase` is `EXECUTION` and the workflow has stages; `-` otherwise. Carries the execution group when the workflow declares one — format in §4.1. |
+| `WorkflowRow` | The value of the `Row` column of the workflow routing-table row this invocation ran (not this log's own row number; `Seq` is that). A deployed table carries a first-column `Row` numbered 1..N, added by mosaic-deploy and recomputed on every deploy; authors never write it. When a deployed table has no `Row` column (an orchestrator deployed before the column existed, or a workflow preserved when infrastructure agents were injected), the value is the 1-based position of the data row in the routing table. `-` for infrastructure, out-of-band and ad-hoc-run invocations (an ad-hoc run has no routing table). |
 | `Status` | The subagent's returned status code. |
 | `Timestamp` | ISO-8601, invocation completion time. |
 | `Summary` | The subagent's own `status_message` from its protocol response, copied across — not text the orchestrator composes itself. This keeps `Summary` inside the "mechanical" category (§2) despite reading like free text: it's copied content, not authored content. Bounded and single-line by construction — a `|` or a literal newline inside this field is invalid and must be stripped or escaped by whatever writes the row. Truncation, when `status_message` exceeds 100 characters, takes the **first 50 and last 50 characters**, joined by ` ... ` — not a naive first-100 cut. The three-period delimiter is ASCII because the Communication Protocol requires orchestration artifacts to use only `U+0000`–`U+007F`. This isn't cosmetic: a verbose `status_message` (which shouldn't happen per protocol, but does) tends to front-load process narration and put the actual outcome in its closing sentence, so a head-only truncation systematically discards the part most worth keeping. Head+tail keeps both the opening context and the conclusion, at the same total character budget. |
 | `Inputs` | The `input_artifacts` list dispatched with this invocation; comma-separated filenames with the run-scoped folder prefix omitted (it is identical for every artifact in a run and recoverable from `run_id`). `-` when no artifacts were passed. Sourced directly from the dispatch message — not authored content. On the same mechanical footing as `Status` or `Agent`. |
 | `Checkpoint` | Empty (`-`) on almost every row. Populated on the row of the checkpoint agent invocation that took the checkpoint — never on the row of the preceding workflow step. A non-empty value names a real, externally-restorable content reference; a bare placeholder is never valid. |
 
-**Consumers bind by column name, not position.** The `Inputs` column is an insertion that changes the column count from 8 to 9. As of version 2.0, all consumers must locate columns by matching the header row rather than by counting positions — a positional parser would silently misread every row. The header row is present in every artifact; a name-bound parser also tolerates any future column insertions without a code change.
+**Consumers bind by column name, not position.** The `Inputs` column is an insertion that changes the column count from 8 to 9. As of version 2.0, all consumers must locate columns by matching the header row rather than by counting positions — a positional parser would silently misread every row. The header row is present in every artifact; a name-bound parser also tolerates any future column insertions without a code change. The `WorkflowRow` column, inserted directly after `Stage` in version 2.4 (column count 9 to 10), follows the same rule. **Logs written before that version have no `WorkflowRow` column and remain valid**; a consumer reads a missing column as "no recorded row" and must not rewrite existing rows to add it.
 
 **Checkpoints as a column, not a section.** A checkpoint is taken by a dedicated infrastructure agent dispatched on a trigger condition. That agent's own Execution Log row carries the content-reference in its `Checkpoint` column — not the row of the preceding workflow step. An earlier model placed the reference on the preceding row, on the reasoning that a checkpoint is always "taken right after invocation N," but that reasoning is incoherent once checkpointing is an agent: the checkpoint agent's row is appended only after the checkpoint completes, so populating the preceding row at that point requires editing an already-written row in an append-only section. Recording the reference on the checkpoint agent's own row eliminates the contradiction and upholds the append-only guarantee without exception. The row sits immediately after the workflow step that triggered it, so the phase, stage, and sequence context are fully recoverable from the adjacent rows — restating them in a separate section, as an earlier draft did, was pure duplication.
 
@@ -289,7 +290,7 @@ One residual gap is accepted rather than solved: an interruption between the Exe
 On start (or restart), an orchestrator resuming an existing `Orchestration.md`:
 
 1. Parses the frontmatter and validates `run_id`. If it is absent, empty, malformed, or disagrees with the enclosing `Orchestration-{run_id}/` folder, refuse the resume; do not mint or repair identity during recovery. `current_state` then gives phase, stage, last status, last agent, error code directly.
-2. Cross-checks against the last **workflow** row of the Execution Log, skipping any trailing infrastructure or explicit out-of-band rows (§8). For a table-backed run, a workflow row names a table participant; for an ad-hoc run, it is any task dispatch not excluded above. When its `Agent` equals `current_state.last_agent`, that row is the last accepted workflow outcome. When they disagree, the trailing workflow row is an unaccepted or interrupted attempt: preserve it as history, leave `current_state` at the prior accepted outcome, and re-dispatch that workflow assignment rather than routing on the row's status. A trailing infrastructure row is not a disagreement because §8 already declares that it does not move `current_state`.
+2. Cross-checks against the last **workflow** row of the Execution Log, skipping any trailing infrastructure or explicit out-of-band rows (§8). For a table-backed run, a workflow row names a table participant; for an ad-hoc run, it is any task dispatch not excluded above. When its `Agent` equals `current_state.last_agent`, that row is the last accepted workflow outcome. The workflow-table row that ran is that row's recorded `WorkflowRow` (§5). If the agent or group at that row in the current table does not match the log entry, stop and report instead of guessing a row; a legacy entry without the column is identified by agent and phase, and by the same stop rule when that is ambiguous. When they disagree, the trailing workflow row is an unaccepted or interrupted attempt: preserve it as history, leave `current_state` at the prior accepted outcome, and re-dispatch that workflow assignment rather than routing on the row's status. A trailing infrastructure row is not a disagreement because §8 already declares that it does not move `current_state`.
 3. Validates `global_sequence`, the last allocated sequence, against the highest `Seq` in the Execution Log (workflow or infrastructure). If behind, it is corrected to `max(Seq)`; a higher stored value is preserved to avoid reusing an interrupted allocation.
 4. Interprets `last_status` against the run's routing basis. In a table-backed run, `SUCCESS` follows the success route and `COMPLETED_NEEDS_ACTION` follows the configured action route. In an ad-hoc run, the native orchestrator resolves those targets from the recorded decisions and available-workflow precedent, asking the user when the next invocation remains materially ambiguous. In either kind, `PARTIALLY_DONE` continues the same workflow assignment; `NEEDS_CLARIFICATION` routes to the agent that can supply what is missing, or escalates when only a human can answer; `CAPABILITY_EXCEEDED` escalates without agent substitution; and `BLOCKED` resolves by error code. A status reports the prior invocation's outcome and never names a target by itself. No previous status means a fresh start at the beginning of the first phase.
 
@@ -319,17 +320,17 @@ current_state:
 ---
 
 <ExecutionLog type="core">
-| Seq | Agent | Phase | Stage | Status | Timestamp | Summary | Inputs | Checkpoint |
-|-----|-------|-------|-------|--------|-----------|---------|--------|------------|
-| 1 | Research#1 | RESEARCH | - | SUCCESS | 2026-01-29T08:10:00Z | Analyzed profile feature requirements | - | - |
-| 2 | Planner#2 | PLANNING | - | SUCCESS | 2026-01-29T08:35:00Z | Created 2-iteration plan for profile CRUD | - | - |
-| 3 | Designer#3 | DESIGN | - | SUCCESS | 2026-01-29T09:15:00Z | Designed ProfileService interface | Research.md | - |
-| 4 | checkpoint-manager-git#4 | DESIGN | - | SUCCESS | 2026-01-29T09:16:00Z | Committed checkpoint of working tree (3 files). [checkpoint:4f1a08d] | - | 4f1a08d |
-| ... | ... | ... | ... | ... | ... | ... | ... | ... |
-| 13 | ImplementationReview#13 | EXECUTION | Implementation.1 | SUCCESS | 2026-01-29T10:50:00Z | All tests pass (3/3) | Plan.md, Stage-1/PlanProgress.md | - |
-| 14 | checkpoint-manager-git#14 | EXECUTION | Implementation.1 | SUCCESS | 2026-01-29T10:51:00Z | Committed checkpoint of working tree (7 files). [checkpoint:7c2e9f1] | - | 7c2e9f1 |
-| 15 | TestCreator#15 | EXECUTION | Test.2 | SUCCESS | 2026-01-29T11:15:00Z | Created tests for updateProfile endpoint | Plan.md | - |
-| 16 | Implementation#16 | EXECUTION | Implementation.2 | SUCCESS | 2026-01-29T12:45:00Z | Implemented updateProfile endpoint | Plan.md, Design.md | - |
+| Seq | Agent | Phase | Stage | WorkflowRow | Status | Timestamp | Summary | Inputs | Checkpoint |
+|-----|-------|-------|-------|-------------|--------|-----------|---------|--------|------------|
+| 1 | Research#1 | RESEARCH | - | 1 | SUCCESS | 2026-01-29T08:10:00Z | Analyzed profile feature requirements | - | - |
+| 2 | Planner#2 | PLANNING | - | 2 | SUCCESS | 2026-01-29T08:35:00Z | Created 2-iteration plan for profile CRUD | - | - |
+| 3 | Designer#3 | DESIGN | - | 3 | SUCCESS | 2026-01-29T09:15:00Z | Designed ProfileService interface | Research.md | - |
+| 4 | checkpoint-manager-git#4 | DESIGN | - | - | SUCCESS | 2026-01-29T09:16:00Z | Committed checkpoint of working tree (3 files). [checkpoint:4f1a08d] | - | 4f1a08d |
+| ... | ... | ... | ... | ... | ... | ... | ... | ... | ... |
+| 13 | ImplementationReview#13 | EXECUTION | Implementation.1 | 9 | SUCCESS | 2026-01-29T10:50:00Z | All tests pass (3/3) | Plan.md, Stage-1/PlanProgress.md | - |
+| 14 | checkpoint-manager-git#14 | EXECUTION | Implementation.1 | - | SUCCESS | 2026-01-29T10:51:00Z | Committed checkpoint of working tree (7 files). [checkpoint:7c2e9f1] | - | 7c2e9f1 |
+| 15 | TestCreator#15 | EXECUTION | Test.2 | 6 | SUCCESS | 2026-01-29T11:15:00Z | Created tests for updateProfile endpoint | Plan.md | - |
+| 16 | Implementation#16 | EXECUTION | Implementation.2 | 8 | SUCCESS | 2026-01-29T12:45:00Z | Implemented updateProfile endpoint | Plan.md, Design.md | - |
 </ExecutionLog>
 
 <Artifacts type="core">

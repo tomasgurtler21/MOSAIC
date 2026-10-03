@@ -113,14 +113,14 @@ func TestNext_BuildVerified_TDD_TestGroupSequence(t *testing.T) {
 		},
 		{
 			name:      "after test-writer-tdd, dispatches build-review (test build)",
-			state:     stateAfter("EXECUTION.[StageNumber]", "Stage-1", "test-writer-tdd#8", domain.StatusSUCCESS, 8),
+			state:     stateAfterRow("EXECUTION", "Test.1", "test-writer-tdd#8", domain.StatusSUCCESS, 8, 8),
 			response:  successResponse("test-writer-tdd#8"),
 			seq:       8,
 			wantAgent: "build-review",
 		},
 		{
 			name:      "after build-review (test build), dispatches tests-review-tdd",
-			state:     stateAfter("EXECUTION.[StageNumber]", "Stage-1", "build-review#9", domain.StatusSUCCESS, 9),
+			state:     stateAfterRow("EXECUTION", "Test.1", "build-review#9", domain.StatusSUCCESS, 9, 9),
 			response:  successResponse("build-review#9"),
 			seq:       9,
 			wantAgent: "tests-review-tdd",
@@ -169,21 +169,21 @@ func TestNext_BuildVerified_TDD_ImplGroupSequence(t *testing.T) {
 	}{
 		{
 			name:      "after tests-review-tdd (last test-group row), dispatches implementation-tdd",
-			state:     stateAfter("EXECUTION.[StageNumber]", "Stage-1", "tests-review-tdd#10", domain.StatusSUCCESS, 10),
+			state:     stateAfterRow("EXECUTION", "Test.1", "tests-review-tdd#10", domain.StatusSUCCESS, 10, 10),
 			response:  successResponse("tests-review-tdd#10"),
 			seq:       10,
 			wantAgent: "implementation-tdd",
 		},
 		{
 			name:      "after implementation-tdd, dispatches build-review (impl build)",
-			state:     stateAfter("EXECUTION.[StageNumber]", "Stage-1", "implementation-tdd#11", domain.StatusSUCCESS, 11),
+			state:     stateAfterRow("EXECUTION", "Implementation.1", "implementation-tdd#11", domain.StatusSUCCESS, 11, 11),
 			response:  successResponse("implementation-tdd#11"),
 			seq:       11,
 			wantAgent: "build-review",
 		},
 		{
 			name:      "after build-review (impl build), dispatches implementation-review",
-			state:     stateAfter("EXECUTION.[StageNumber]", "Stage-1", "build-review#12", domain.StatusSUCCESS, 12),
+			state:     stateAfterRow("EXECUTION", "Implementation.1", "build-review#12", domain.StatusSUCCESS, 12, 12),
 			response:  successResponse("build-review#12"),
 			seq:       12,
 			wantAgent: "implementation-review",

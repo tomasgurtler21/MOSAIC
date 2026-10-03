@@ -117,20 +117,20 @@ func TestSession_Start_HappyPath_HarnessInvokedWithCorrectRequest(t *testing.T) 
 // the harness for the loop-back target and does NOT call the deviation
 // resolver.
 //
-// Workflow: agent-a returns CNA → engine dispatches agent-a again (On Findings
-// hint = "agent-a") → agent-a returns SUCCESS → engine advances to agent-b
-// → agent-b returns SUCCESS → COMPLETE.
+// Workflow: agent-a succeeds → agent-b (reviewer) returns CNA → engine
+// dispatches the nearest preceding agent-a row (On Findings = "agent-a") →
+// agent-a returns SUCCESS → agent-b returns SUCCESS → COMPLETE.
 func TestSession_Start_OnFindings_LoopBack_HarnessInvokedNotDeviation(t *testing.T) {
 	dir := t.TempDir()
 
-	// Workflow where agent-a has On Findings = "agent-a" (self-loop for CNA).
+	// Workflow where the reviewer agent-b routes findings back to agent-a above it.
 	const loopbackContent = `<Workflow type="core" name="loopback" version="1.0">
 ## Loopback Workflow
 
 | Phase | Subagent | HITL | On Success | On Findings | Input | Output |
 |-------|----------|:----:|------------|-------------|-------|--------|
-| PLANNING | agent-a | FALSE | agent-b | agent-a | - | plan.md |
-| PLANNING | agent-b | FALSE | COMPLETE | - | plan.md | result.md |
+| PLANNING | agent-a | FALSE | agent-b | - | - | plan.md |
+| PLANNING | agent-b | FALSE | COMPLETE | agent-a | plan.md | result.md |
 </Workflow>
 `
 	orchPath := filepath.Join(dir, "loopback-orch.md")
@@ -149,21 +149,27 @@ func TestSession_Start_OnFindings_LoopBack_HarnessInvokedNotDeviation(t *testing
 		Interact:  &noopInteraction{},
 	})
 
-	// First agent-a call → CNA (triggers loop-back via On Findings hint).
+	// First agent-a call → SUCCESS.
 	f.Queue("agent-a", harness.ScriptedEntry{Response: &domain.ProtocolResponse{
 		AgentInstanceID: "agent-a#1",
+		StatusCode:      domain.StatusSUCCESS,
+		StatusMessage:   "drafted",
+	}})
+	// First agent-b call → CNA (triggers loop-back to agent-a via On Findings).
+	f.Queue("agent-b", harness.ScriptedEntry{Response: &domain.ProtocolResponse{
+		AgentInstanceID: "agent-b#2",
 		StatusCode:      domain.StatusCOMPLETED_NEEDS_ACTION,
-		StatusMessage:   "found issues, re-run me",
+		StatusMessage:   "found issues, fix them",
 	}})
 	// Second agent-a call (loop-back) → SUCCESS.
 	f.Queue("agent-a", harness.ScriptedEntry{Response: &domain.ProtocolResponse{
-		AgentInstanceID: "agent-a#2",
+		AgentInstanceID: "agent-a#3",
 		StatusCode:      domain.StatusSUCCESS,
-		StatusMessage:   "now done",
+		StatusMessage:   "now fixed",
 	}})
-	// agent-b → SUCCESS → COMPLETE.
+	// Second agent-b call → SUCCESS → COMPLETE.
 	f.Queue("agent-b", harness.ScriptedEntry{Response: &domain.ProtocolResponse{
-		AgentInstanceID: "agent-b#3",
+		AgentInstanceID: "agent-b#4",
 		StatusCode:      domain.StatusSUCCESS,
 		StatusMessage:   "done",
 	}})
@@ -180,10 +186,10 @@ func TestSession_Start_OnFindings_LoopBack_HarnessInvokedNotDeviation(t *testing
 
 	requireRunStatus(t, got, err, domain.RunCompleted)
 
-	// Three harness invocations: agent-a (CNA), agent-a (loop-back), agent-b.
+	// Four harness invocations: agent-a, agent-b (CNA), agent-a (loop-back), agent-b.
 	invs := f.Invocations()
-	if len(invs) != 3 {
-		t.Errorf("want 3 harness invocations, got %d", len(invs))
+	if len(invs) != 4 {
+		t.Errorf("want 4 harness invocations, got %d", len(invs))
 	}
 }
 

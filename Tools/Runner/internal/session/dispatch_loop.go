@@ -209,8 +209,8 @@ func (s *sessionImpl) handleAutoHarnessErrorAndBypass(ctx context.Context, rs *r
 	)
 	harnessResp := domain.HarnessErrorResponse(step.Request.AgentInstanceID, rs.config.RunID, invokeErr)
 	deviationInfo := domain.DeviationInfo{
-		Kind:     domain.DeviationNonSuccess,
-		Response: harnessResp,
+		Kind:          domain.DeviationNonSuccess,
+		Response:      harnessResp,
 		CurrentRow:    step.RowIndex,
 		CurrentPhase:  step.Phase,
 		CurrentStage:  step.Stage,
@@ -218,15 +218,16 @@ func (s *sessionImpl) handleAutoHarnessErrorAndBypass(ctx context.Context, rs *r
 	}
 	// Persist a record of the failed dispatch attempt.
 	failedStep := domain.CompletedStep{
-		Seq:              rs.state.GlobalSequence + 1,
-		AgentInstance:    step.Request.AgentInstanceID,
-		Phase:            step.Phase,
-		Stage:            step.Stage,
-		Status:           domain.StatusBLOCKED,
-		ErrorCode:        domain.ErrorTOOL_UNAVAILABLE,
-		Summary:          invokeErr.Error(),
-		Timestamp:        s.deps.Clock.Now(),
-		Inputs:           formatInputs(step.Request.InputArtifacts),
+		Seq:           rs.state.GlobalSequence + 1,
+		AgentInstance: step.Request.AgentInstanceID,
+		Phase:         step.Phase,
+		Stage:         step.Stage,
+		WorkflowRow:   domain.WorkflowRowFromIndex(step.RowIndex),
+		Status:        domain.StatusBLOCKED,
+		ErrorCode:     domain.ErrorTOOL_UNAVAILABLE,
+		Summary:       invokeErr.Error(),
+		Timestamp:     s.deps.Clock.Now(),
+		Inputs:        formatInputs(step.Request.InputArtifacts),
 	}
 	newState, applyErr := s.deps.Store.Apply(ctx, rs.state, failedStep)
 	if applyErr != nil {
@@ -262,15 +263,16 @@ func (s *sessionImpl) handleAutoHarnessErrorAndBypass(ctx context.Context, rs *r
 // stage-set re-derivation.
 func (s *sessionImpl) postAutoDispatchApply(ctx context.Context, rs *runStartCtx, hitlStep domain.DispatchStep, hitlResp domain.ProtocolResponse, hitlAttemptSeq int, written []string, routed *domain.RoutedOutcome, routedResp *domain.ProtocolResponse) (domain.RunOutcome, bool, error) {
 	completedStep := domain.CompletedStep{
-		Seq:             hitlAttemptSeq,
-		AgentInstance:   hitlStep.Request.AgentInstanceID,
-		Phase:           hitlStep.Phase,
-		Stage:           hitlStep.Stage,
-		Status:          hitlResp.StatusCode,
-		ErrorCode:       hitlResp.ErrorCode,
-		Summary:         hitlResp.StatusMessage,
-		Timestamp:       s.deps.Clock.Now(),
-		Inputs:          formatInputs(hitlStep.Request.InputArtifacts),
+		Seq:              hitlAttemptSeq,
+		AgentInstance:    hitlStep.Request.AgentInstanceID,
+		Phase:            hitlStep.Phase,
+		Stage:            hitlStep.Stage,
+		WorkflowRow:      domain.WorkflowRowFromIndex(hitlStep.RowIndex),
+		Status:           hitlResp.StatusCode,
+		ErrorCode:        hitlResp.ErrorCode,
+		Summary:          hitlResp.StatusMessage,
+		Timestamp:        s.deps.Clock.Now(),
+		Inputs:           formatInputs(hitlStep.Request.InputArtifacts),
 		WrittenArtifacts: written,
 		Routed:           routed,
 	}

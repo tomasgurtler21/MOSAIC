@@ -70,7 +70,7 @@ func ResumePoint(
 	if interrupted {
 		// The last workflow log entry was dispatched but not recorded in
 		// CurrentState. Re-run the interrupted row.
-		rowIdx, err := findRowForLogEntry(workflow, stages, lastWorkflowEntry)
+		rowIdx, err := findRowForLogEntry(workflow, lastWorkflowEntry)
 		if err != nil {
 			return domain.ResumeInfo{}, fmt.Errorf("resume: %w", err)
 		}
@@ -92,7 +92,7 @@ func ResumePoint(
 	}
 
 	// Clean completion: advance to the next row after the last workflow step.
-	currentRowIdx, err := findRowForLogEntry(workflow, stages, lastWorkflowEntry)
+	currentRowIdx, err := findRowForLogEntry(workflow, lastWorkflowEntry)
 	if err != nil {
 		return domain.ResumeInfo{}, fmt.Errorf("resume: %w", err)
 	}

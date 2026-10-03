@@ -59,15 +59,6 @@ func orderedGroupsForStage(
 	return result, nil
 }
 
-// countActiveRows returns the total number of rows across all groups in the slice.
-func countActiveRows(groups []domain.ExecutionGroup) int {
-	total := 0
-	for _, g := range groups {
-		total += g.EndRow - g.StartRow
-	}
-	return total
-}
-
 // IsLastRowOfStage reports whether the routing table row at rowIdx is the last
 // row dispatched for stageNum in the admitted workflow.
 //

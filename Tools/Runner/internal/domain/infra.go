@@ -20,11 +20,11 @@ type DeclaredInfraTrigger struct {
 // DeclaredInfraAgent represents one infrastructure agent parsed from the
 // deployed orchestrator's <InfrastructureAgents type="managed"> region.
 type DeclaredInfraAgent struct {
-	Name      string                // agent name (from section identifier)
-	Class     string                // "checkpoint", "commit", "review", "restore"
+	Name      string // agent name (from section identifier)
+	Class     string // "checkpoint", "commit", "review", "restore"
 	Triggers  []DeclaredInfraTrigger
-	OnFailure string                // "halt" or "continue"
-	Version   string                // from the region's version attribute; reserved for future use
+	OnFailure string // "halt" or "continue"
+	Version   string // from the region's version attribute; reserved for future use
 }
 
 // InfraDispatchResult carries the outcome of an infrastructure agent dispatch.

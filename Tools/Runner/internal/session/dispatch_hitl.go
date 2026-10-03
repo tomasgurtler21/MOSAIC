@@ -139,6 +139,7 @@ func (s *sessionImpl) handleAutoHITLRedispatch(ctx context.Context, rs *runStart
 		AgentInstance:    hitlStep.Request.AgentInstanceID,
 		Phase:            hitlStep.Phase,
 		Stage:            hitlStep.Stage,
+		WorkflowRow:      domain.WorkflowRowFromIndex(hitlStep.RowIndex),
 		Status:           hitlResponse.StatusCode,
 		ErrorCode:        hitlResponse.ErrorCode,
 		Summary:          hitlResponse.StatusMessage,
@@ -210,15 +211,16 @@ func (s *sessionImpl) handleAutoHITLRedispatchError(ctx context.Context, rs *run
 		domain.F("agent", hitlStep.Request.AgentInstanceID),
 	)
 	rdFailedStep := domain.CompletedStep{
-		Seq:              rs.state.GlobalSequence + 1,
-		AgentInstance:    hitlStep.Request.AgentInstanceID,
-		Phase:            hitlStep.Phase,
-		Stage:            hitlStep.Stage,
-		Status:           domain.StatusBLOCKED,
-		ErrorCode:        domain.ErrorTOOL_UNAVAILABLE,
-		Summary:          rdErr.Error(),
-		Timestamp:        s.deps.Clock.Now(),
-		Inputs:           formatInputs(hitlStep.Request.InputArtifacts),
+		Seq:           rs.state.GlobalSequence + 1,
+		AgentInstance: hitlStep.Request.AgentInstanceID,
+		Phase:         hitlStep.Phase,
+		Stage:         hitlStep.Stage,
+		WorkflowRow:   domain.WorkflowRowFromIndex(hitlStep.RowIndex),
+		Status:        domain.StatusBLOCKED,
+		ErrorCode:     domain.ErrorTOOL_UNAVAILABLE,
+		Summary:       rdErr.Error(),
+		Timestamp:     s.deps.Clock.Now(),
+		Inputs:        formatInputs(hitlStep.Request.InputArtifacts),
 	}
 	newState, applyErr := s.deps.Store.Apply(ctx, rs.state, rdFailedStep)
 	if applyErr != nil {
@@ -239,8 +241,8 @@ func (s *sessionImpl) handleAutoHITLRedispatchError(ctx context.Context, rs *run
 	}
 	rdResp := domain.HarnessErrorResponse(hitlStep.Request.AgentInstanceID, rs.config.RunID, rdErr)
 	rdDevInfo := domain.DeviationInfo{
-		Kind:     domain.DeviationNonSuccess,
-		Response: rdResp,
+		Kind:       domain.DeviationNonSuccess,
+		Response:   rdResp,
 		CurrentRow: hitlStep.RowIndex, CurrentPhase: hitlStep.Phase, CurrentStage: hitlStep.Stage,
 		ArtifactState: rs.state,
 	}
@@ -264,6 +266,7 @@ func (s *sessionImpl) handleAutoHITLEscalate(ctx context.Context, rs *runStartCt
 		AgentInstance:    hitlStep.Request.AgentInstanceID,
 		Phase:            hitlStep.Phase,
 		Stage:            hitlStep.Stage,
+		WorkflowRow:      domain.WorkflowRowFromIndex(hitlStep.RowIndex),
 		Status:           hitlResponse.StatusCode,
 		ErrorCode:        hitlResponse.ErrorCode,
 		Summary:          hitlResponse.StatusMessage,

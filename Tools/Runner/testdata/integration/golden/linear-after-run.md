@@ -21,10 +21,10 @@ current_state:
 ---
 
 <ExecutionLog type="core">
-| Seq | Agent     | Phase    | Stage | Status  | Timestamp            | Summary       | Inputs                                      | Checkpoint |
-| --- | --------- | -------- | ----- | ------- | -------------------- | ------------- | ------------------------------------------- | ---------- |
-| 1   | agent-a#1 | PLANNING | -     | SUCCESS | 2026-01-01T00:00:00Z | planning done | -                                           | -          |
-| 2   | agent-b#2 | PLANNING | -     | SUCCESS | 2026-01-01T00:00:00Z | review done   | Orchestration-20260727T170000Z-a3f9/plan.md | -          |
+| Seq | Agent     | Phase    | Stage | WorkflowRow | Status  | Timestamp            | Summary       | Inputs                                      | Checkpoint |
+| --- | --------- | -------- | ----- | ----------- | ------- | -------------------- | ------------- | ------------------------------------------- | ---------- |
+| 1   | agent-a#1 | PLANNING | -     | 1           | SUCCESS | 2026-01-01T00:00:00Z | planning done | -                                           | -          |
+| 2   | agent-b#2 | PLANNING | -     | 2           | SUCCESS | 2026-01-01T00:00:00Z | review done   | Orchestration-20260727T170000Z-a3f9/plan.md | -          |
 </ExecutionLog>
 
 <Artifacts type="core">

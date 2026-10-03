@@ -156,16 +156,23 @@ func TestNext_UnresolvableApproach_NoFallbackDispatch(t *testing.T) {
 	}
 }
 
+// unresolvableApproachResumeState is the artifact state of a clean completion
+// of the Test-group build-review (row 9 of the build-verified workflow), with
+// the row recorded on every workflow entry.
+func unresolvableApproachResumeState() domain.ArtifactState {
+	return stateWithLog(9,
+		execLogEntry(8, "test-writer-tdd#8", "EXECUTION", "Test.1", domain.StatusSUCCESS, bvRowTestWriter),
+		execLogEntry(9, "build-review#9", "EXECUTION", "Test.1", domain.StatusSUCCESS, bvRowTestBuild),
+	)
+}
+
 // TestResumePoint_UnresolvableApproach_ReturnsError verifies that ResumePoint
-// returns a non-nil error (not a silent -1 row index) when the approach used in
-// sequence-arithmetic disambiguation is unresolvable.
+// returns a non-nil error (not a silent end-of-run or guessed row) when the
+// stage's approach is unresolvable while working out where the run continues.
 //
-// The test uses brownfield-tdd-build-verified where build-review appears in both
-// the Test and Implementation groups. The sequence-based disambiguation calls
-// orderedGroupsForStage which must fail with an error for an unresolvable approach.
-//
-// RED: the current implementation collapses seq-arithmetic failures to -1, which
-// produces a "could not determine current row" stop rather than the approach error.
+// build-review appears in both the Test and Implementation groups. Its row is
+// identified from the recorded row; the advance from that row then needs the
+// stage's ordered groups, which cannot be built for "UnknownApproach".
 func TestResumePoint_UnresolvableApproach_ReturnsError(t *testing.T) {
 	aw := mustParseAndAdmit(t, brownfieldBuildVerifiedContent, "brownfield-tdd-build-verified", "2.1")
 	// "UnknownApproach" is not in brownfield-tdd-build-verified's Execution Groups table.
@@ -173,58 +180,23 @@ func TestResumePoint_UnresolvableApproach_ReturnsError(t *testing.T) {
 		{Number: 1, HITL: false, Approach: "UnknownApproach"},
 	})
 
-	// build-review appears at rows 8 and 11. The sequence-based disambiguation
-	// uses orderedGroupsForStage, which must fail for "UnknownApproach".
-	// GlobalSequence=9 positions build-review as the second EXECUTION dispatch
-	// (after test-writer-tdd=seq 8), which triggers seq-based lookup.
-	state := domain.ArtifactState{
-		GlobalSequence: 9,
-		CurrentState: domain.CurrentState{
-			Phase:      "EXECUTION.Test.[StageNumber]",
-			Stage:      "Stage-1",
-			LastStatus: domain.StatusSUCCESS,
-			LastAgent:  "build-review#9",
-		},
-		ExecutionLog: []domain.ExecutionLogEntry{
-			{Seq: 8, Agent: "test-writer-tdd#8", Phase: "EXECUTION.Test.[StageNumber]", Stage: "Stage-1", Status: domain.StatusSUCCESS},
-			{Seq: 9, Agent: "build-review#9", Phase: "EXECUTION.Test.[StageNumber]", Stage: "Stage-1", Status: domain.StatusSUCCESS},
-		},
-	}
-
-	_, err := engine.ResumePoint(aw, stages, state, nil)
+	_, err := engine.ResumePoint(aw, stages, unresolvableApproachResumeState(), nil)
 
 	if err == nil {
-		t.Fatal("ResumePoint must return an error when approach is unresolvable during seq disambiguation")
+		t.Fatal("ResumePoint must return an error when the approach is unresolvable")
 	}
 }
 
 // TestResumePoint_UnresolvableApproach_ErrorContainsApproachValue verifies that the
 // error returned by ResumePoint wraps or chains an error containing the unresolvable
 // approach value for user diagnostics.
-//
-// RED: the current implementation returns nil error (collapses to -1, then the
-// caller sees a "could not determine current row" stop).
 func TestResumePoint_UnresolvableApproach_ErrorContainsApproachValue(t *testing.T) {
 	aw := mustParseAndAdmit(t, brownfieldBuildVerifiedContent, "brownfield-tdd-build-verified", "2.1")
 	stages := newTestStageSet([]domain.StageEntry{
 		{Number: 1, HITL: false, Approach: "UnknownApproach"},
 	})
 
-	state := domain.ArtifactState{
-		GlobalSequence: 9,
-		CurrentState: domain.CurrentState{
-			Phase:      "EXECUTION.Test.[StageNumber]",
-			Stage:      "Stage-1",
-			LastStatus: domain.StatusSUCCESS,
-			LastAgent:  "build-review#9",
-		},
-		ExecutionLog: []domain.ExecutionLogEntry{
-			{Seq: 8, Agent: "test-writer-tdd#8", Phase: "EXECUTION.Test.[StageNumber]", Stage: "Stage-1", Status: domain.StatusSUCCESS},
-			{Seq: 9, Agent: "build-review#9", Phase: "EXECUTION.Test.[StageNumber]", Stage: "Stage-1", Status: domain.StatusSUCCESS},
-		},
-	}
-
-	_, err := engine.ResumePoint(aw, stages, state, nil)
+	_, err := engine.ResumePoint(aw, stages, unresolvableApproachResumeState(), nil)
 	if err == nil {
 		t.Fatal("ResumePoint must return an error")
 	}
@@ -272,64 +244,28 @@ func TestNext_UnresolvableApproach_InitialDispatch_StagedOnly_ReturnsStop(t *tes
 	}
 }
 
-// TestNext_UnresolvableApproach_WinsOverGenericRowStop verifies that when
-// findCurrentRowIndex cannot determine the current row because sequence
-// arithmetic fails due to an unresolvable approach, the resulting StopDecision
-// carries the approach error message — not the generic "could not determine
-// current row from artifact state" message. This locks in the ordering
-// requirement from the design: the error check precedes the < 0 check in Next.
+// TestNext_UnresolvableApproach_WinsOverGenericRowStop verifies that an
+// unresolvable approach surfaces as a StopDecision naming the approach value,
+// not as the generic "could not determine current row from artifact state"
+// message, when Next advances from a row of an agent that fills several
+// EXECUTION rows.
 //
 // In brownfield-tdd-build-verified, build-review appears in both the Test and
-// Implementation groups. When build-review is the last agent in the execution
-// log, the engine cannot determine the current row by agent+phase match alone
-// (ambiguous) and falls back to sequence arithmetic via orderedGroupsForStage.
-// With an unresolvable approach, that arithmetic fails: findCurrentRowIndex
-// returns (-1, err) rather than (-1, nil). Without the ordered check, the engine
-// would produce the generic stop; with it, the approach stop wins.
-//
-// RED: the current implementation collapses sequence-arithmetic failures to
-// (-1, nil), so Next produces the generic "could not determine current row"
-// stop rather than the approach stop.
+// Implementation groups. The log records the row that ran (the Test-group
+// build-review), so the row is identified without any approach-dependent
+// arithmetic; the approach error comes from ordering the groups to find the
+// next row.
 func TestNext_UnresolvableApproach_WinsOverGenericRowStop(t *testing.T) {
 	aw := mustParseAndAdmit(t, brownfieldBuildVerifiedContent, "brownfield-tdd-build-verified", "2.1")
 	stages := newTestStageSet([]domain.StageEntry{
 		{Number: 1, HITL: false, Approach: "UnknownApproach"},
 	})
-	agents := newTestAgents(
-		"codebase-research", "requirements-refinement", "requirements-review",
-		"planner-tdd-soft", "plan-review", "contracts-designer", "contracts-review",
-		"test-writer-tdd", "build-review", "tests-review-tdd",
-		"implementation-tdd", "implementation-review",
-	)
-	// build-review appears in both the Test group (row 8) and the Implementation
-	// group (row 11). With seq=9, the engine uses sequence arithmetic to
-	// disambiguate — which calls orderedGroupsForStage and fails for
-	// "UnknownApproach". The StopDecision must name the approach, not emit the
-	// generic "could not determine current row" message.
-	state := domain.ArtifactState{
-		GlobalSequence: 9,
-		CurrentState: domain.CurrentState{
-			Phase:      "EXECUTION.Test.[StageNumber]",
-			Stage:      "Stage-1",
-			LastStatus: domain.StatusSUCCESS,
-			LastAgent:  "build-review#9",
-		},
-		ExecutionLog: []domain.ExecutionLogEntry{
-			{Seq: 8, Agent: "test-writer-tdd#8", Phase: "EXECUTION.Test.[StageNumber]", Stage: "Stage-1", Status: domain.StatusSUCCESS},
-			{Seq: 9, Agent: "build-review#9", Phase: "EXECUTION.Test.[StageNumber]", Stage: "Stage-1", Status: domain.StatusSUCCESS},
-		},
-	}
+	log := &runLog{}
+	log.
+		workflowStep("test-writer-tdd", "Test.1", domain.StatusSUCCESS, bvRowTestWriter).
+		workflowStep("build-review", "Test.1", domain.StatusSUCCESS, bvRowTestBuild)
 
-	dec := engine.Next(engine.NextInput{
-		Workflow:        aw,
-		Stages:          stages,
-		State:           state,
-		LastResponse:    successResponse("build-review#9"),
-		Agents:          agents,
-		Seq:             9,
-		Now:             fixedNow,
-		Mode:            domain.ExecutionModeAutoReview,
-	})
+	dec := nextAfterLog(aw, stages, buildVerifiedAgents(), log)
 
 	stop := requireStop(t, dec)
 	// The stop reason must name the unresolvable approach value. The generic

@@ -333,15 +333,16 @@ func (s *sessionImpl) consultHandleHarnessErr(
 		domain.F("agent", agentReq.AgentInstanceID),
 	)
 	crFailedStep := domain.CompletedStep{
-		Seq:              state.GlobalSequence + 1,
-		AgentInstance:    agentReq.AgentInstanceID,
-		Phase:            phase,
-		Stage:            effectiveStage,
-		Status:           domain.StatusBLOCKED,
-		ErrorCode:        domain.ErrorTOOL_UNAVAILABLE,
-		Summary:          invokeErr.Error(),
-		Timestamp:        s.deps.Clock.Now(),
-		Inputs:           formatInputs(agentReq.InputArtifacts),
+		Seq:           state.GlobalSequence + 1,
+		AgentInstance: agentReq.AgentInstanceID,
+		Phase:         phase,
+		Stage:         effectiveStage,
+		WorkflowRow:   domain.WorkflowRowFromIndex(dispInstr.RowIndex),
+		Status:        domain.StatusBLOCKED,
+		ErrorCode:     domain.ErrorTOOL_UNAVAILABLE,
+		Summary:       invokeErr.Error(),
+		Timestamp:     s.deps.Clock.Now(),
+		Inputs:        formatInputs(agentReq.InputArtifacts),
 	}
 	crNewState, crApplyErr := s.deps.Store.Apply(ctx, *state, crFailedStep)
 	if crApplyErr != nil {
@@ -350,8 +351,8 @@ func (s *sessionImpl) consultHandleHarnessErr(
 	*state = crNewState
 	harnessResp := domain.HarnessErrorResponse(agentReq.AgentInstanceID, config.RunID, invokeErr)
 	devInfo := domain.DeviationInfo{
-		Kind:     domain.DeviationNonSuccess,
-		Response: harnessResp,
+		Kind:          domain.DeviationNonSuccess,
+		Response:      harnessResp,
 		CurrentRow:    dispInstr.RowIndex,
 		CurrentPhase:  phase,
 		ArtifactState: *state,

@@ -61,6 +61,7 @@ func parseExecutionLog(content []byte) ([]domain.ExecutionLogEntry, error) {
 	summaryCol := t.Column("Summary")
 	inputsCol := t.Column("Inputs")
 	checkpointCol := t.Column("Checkpoint")
+	workflowRowCol := t.Column(ExecLogWorkflowRowHeader)
 
 	var entries []domain.ExecutionLogEntry
 	for _, row := range t.Rows {
@@ -84,6 +85,9 @@ func parseExecutionLog(content []byte) ([]domain.ExecutionLogEntry, error) {
 				v = ""
 			}
 			entry.Stage = v
+		}
+		if workflowRowCol >= 0 {
+			entry.WorkflowRow = parseWorkflowRowCell(row[workflowRowCol])
 		}
 		if statusCol >= 0 {
 			entry.Status = domain.StatusCode(strings.TrimSpace(row[statusCol]))
@@ -182,4 +186,15 @@ func parseWorkflowNotes(content []byte) ([]domain.WorkflowNote, error) {
 		notes = append(notes, note)
 	}
 	return notes, nil
+}
+
+// parseWorkflowRowCell reads a WorkflowRow cell. Only a canonical positive
+// decimal number is a row; "-", empty and any other text mean no row.
+func parseWorkflowRowCell(cell string) domain.WorkflowRow {
+	v := strings.TrimSpace(cell)
+	n, err := strconv.Atoi(v)
+	if err != nil || n < 1 || strconv.Itoa(n) != v {
+		return domain.NoWorkflowRow
+	}
+	return domain.WorkflowRow(n)
 }

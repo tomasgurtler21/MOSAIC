@@ -19,7 +19,7 @@ func TestNext_ArtifactInjection_AutoReview_CNA_InjectsLastOutputArtifacts(t *tes
 		"test-writer-tdd", "build-review", "tests-review-tdd",
 		"implementation-tdd", "implementation-review",
 	)
-	state := stateAfter("EXECUTION.[StageNumber]", "Stage-1", "build-review#9", domain.StatusCOMPLETED_NEEDS_ACTION, 9)
+	state := stateAfterRow("EXECUTION", "Test.1", "build-review#9", domain.StatusCOMPLETED_NEEDS_ACTION, 9, 9)
 	// These are the output artifacts of the build-review step that just ran.
 	reviewOutputs := []string{"Stage-1/build-review-tests.md"}
 
@@ -63,7 +63,7 @@ func TestNext_ArtifactInjection_AutoReview_CNA_NoDeduplication_WhenUnique(t *tes
 		"test-writer-tdd", "build-review", "tests-review-tdd",
 		"implementation-tdd", "implementation-review",
 	)
-	state := stateAfter("EXECUTION.[StageNumber]", "Stage-1", "build-review#9", domain.StatusCOMPLETED_NEEDS_ACTION, 9)
+	state := stateAfterRow("EXECUTION", "Test.1", "build-review#9", domain.StatusCOMPLETED_NEEDS_ACTION, 9, 9)
 	// Two unique review outputs not in the table row's inputs.
 	reviewOutputs := []string{"Stage-1/build-review-tests.md", "Stage-1/extra-finding.md"}
 
@@ -115,7 +115,7 @@ func TestNext_ArtifactInjection_AutoReview_CNA_DeduplicatesExisting(t *testing.T
 		"test-writer-tdd", "build-review", "tests-review-tdd",
 		"implementation-tdd", "implementation-review",
 	)
-	state := stateAfter("EXECUTION.[StageNumber]", "Stage-1", "build-review#9", domain.StatusCOMPLETED_NEEDS_ACTION, 9)
+	state := stateAfterRow("EXECUTION", "Test.1", "build-review#9", domain.StatusCOMPLETED_NEEDS_ACTION, 9, 9)
 	// Stage-1/Plan.md is already in test-writer-tdd's table InputArtifacts;
 	// Stage-1/build-review-findings.md is not.
 	reviewOutputs := []string{"Stage-1/Plan.md", "Stage-1/build-review-findings.md"}
@@ -208,7 +208,7 @@ func TestNext_ArtifactInjection_Auto_CNA_NoInjection(t *testing.T) {
 		"test-writer-tdd", "build-review", "tests-review-tdd",
 		"implementation-tdd", "implementation-review",
 	)
-	state := stateAfter("EXECUTION.[StageNumber]", "Stage-1", "build-review#9", domain.StatusCOMPLETED_NEEDS_ACTION, 9)
+	state := stateAfterRow("EXECUTION", "Test.1", "build-review#9", domain.StatusCOMPLETED_NEEDS_ACTION, 9, 9)
 
 	dec := engine.Next(engine.NextInput{
 		Workflow:            aw,
@@ -238,7 +238,7 @@ func TestNext_ArtifactInjection_AutoReview_CNA_InjectsAfterTableEntries(t *testi
 		"test-writer-tdd", "build-review", "tests-review-tdd",
 		"implementation-tdd", "implementation-review",
 	)
-	state := stateAfter("EXECUTION.[StageNumber]", "Stage-1", "build-review#9", domain.StatusCOMPLETED_NEEDS_ACTION, 9)
+	state := stateAfterRow("EXECUTION", "Test.1", "build-review#9", domain.StatusCOMPLETED_NEEDS_ACTION, 9, 9)
 	injectedArtifact := "Stage-1/build-review-tests.md"
 	reviewOutputs := []string{injectedArtifact}
 
@@ -310,7 +310,7 @@ func TestNext_ArtifactInjection_AutoReview_CNA_NilLastOutputArtifacts(t *testing
 		"test-writer-tdd", "build-review", "tests-review-tdd",
 		"implementation-tdd", "implementation-review",
 	)
-	state := stateAfter("EXECUTION.[StageNumber]", "Stage-1", "build-review#9", domain.StatusCOMPLETED_NEEDS_ACTION, 9)
+	state := stateAfterRow("EXECUTION", "Test.1", "build-review#9", domain.StatusCOMPLETED_NEEDS_ACTION, 9, 9)
 
 	dec := engine.Next(engine.NextInput{
 		Workflow:            aw,
@@ -363,7 +363,7 @@ func TestNext_ArtifactInjection_AutoReview_CNA_EmptyLastOutputArtifacts(t *testi
 		"test-writer-tdd", "build-review", "tests-review-tdd",
 		"implementation-tdd", "implementation-review",
 	)
-	state := stateAfter("EXECUTION.[StageNumber]", "Stage-1", "build-review#9", domain.StatusCOMPLETED_NEEDS_ACTION, 9)
+	state := stateAfterRow("EXECUTION", "Test.1", "build-review#9", domain.StatusCOMPLETED_NEEDS_ACTION, 9, 9)
 
 	dec := engine.Next(engine.NextInput{
 		Workflow:            aw,

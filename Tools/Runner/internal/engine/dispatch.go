@@ -63,6 +63,12 @@ func initialDispatch(
 
 // handleNonExecutionSuccess routes after a non-EXECUTION row returns SUCCESS.
 // Outside EXECUTION, the On Success column determines the next step.
+//
+// A named target agent is resolved relative to the row that just ran, so the
+// designated row is dispatched even when the agent fills several rows: the
+// nearest non-EXECUTION row after the current row, else the nearest
+// non-EXECUTION row before it, else the same search over any row. The `next`
+// keyword advances by position, and entry into EXECUTION is approach-driven.
 func handleNonExecutionSuccess(
 	workflow domain.AdmittedWorkflow,
 	stages *domain.StageSet,
@@ -165,11 +171,7 @@ func handleNonExecutionSuccess(
 	}
 
 	// Target is a non-EXECUTION row: find it by agent name.
-	targetRowIdx := findFirstNonExecutionRowForAgent(workflow, targetAgent)
-	if targetRowIdx < 0 {
-		// Fall back to any row for this agent.
-		targetRowIdx = findFirstRowForAgent(workflow, targetAgent)
-	}
+	targetRowIdx := findScopedRowForAgent(workflow, currentRowIdx, targetAgent)
 	if targetRowIdx < 0 {
 		return domain.EngineDecision{Deviation: &domain.DeviationDecision{
 			Info: domain.DeviationInfo{

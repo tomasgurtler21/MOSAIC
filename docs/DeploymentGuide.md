@@ -96,6 +96,8 @@ Rewrites only the orchestrator file with a new set of workflows. No agent, skill
 
 Use this to add, remove, or swap workflows without disturbing the rest of the deployment. If the new workflows require agents that aren't deployed yet, those agents are deployed automatically in the same run.
 
+Each rebuilt workflow routing table gains a first-column `Row` (1..N), added by mosaic-deploy; authors never write it and catalog sources do not contain it. Only a rebuild adds it: injecting infrastructure agents into an existing orchestrator keeps its workflows unchanged, and a version stamp does not trigger it. An orchestrator deployed before this column existed therefore gains it the next time its workflows are redeployed, for example with `mosaic-deploy workflows`. The Runner accepts tables with or without the column, but refuses a table whose `Row` numbers do not match row positions, for example after a hand edit.
+
 **Interactive:**
 
 ```sh

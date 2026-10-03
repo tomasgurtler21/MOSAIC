@@ -244,7 +244,7 @@ func TestRender_ContainsCommitsDisabled(t *testing.T) {
 	// covers the enabled case.
 	state := domain.ArtifactState{
 		Type:     "orchestration-artifact",
-		RunID: testRunID,
+		RunID:    testRunID,
 		Workflow: "test",
 	}
 
@@ -264,7 +264,7 @@ func TestRender_CommitsPosition_AfterCheckpointsBeforeCurrentState(t *testing.T)
 	// together.
 	state := domain.ArtifactState{
 		Type:        "orchestration-artifact",
-		RunID: testRunID,
+		RunID:       testRunID,
 		Workflow:    "test",
 		RunSettings: domain.RunSettings{Checkpoints: true},
 	}
@@ -555,4 +555,3 @@ func TestRender_UnknownFrontmatter_EmittedVerbatimBeforeCurrentStateInOrder(t *t
 		t.Errorf("Render: want unknown keys verbatim in file order before current_state, got:\n%s", out)
 	}
 }
-

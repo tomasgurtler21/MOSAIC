@@ -204,8 +204,8 @@ func TestSession_AutoReviewMode_CNAWithUnambiguousHint_EngineAutoRoutes(t *testi
 
 | Phase | Subagent | HITL | On Success | On Findings | Input | Output |
 |-------|----------|:----:|------------|-------------|-------|--------|
-| PLANNING | agent-a | FALSE | agent-b | agent-a | - | plan.md |
-| PLANNING | agent-b | FALSE | COMPLETE | - | plan.md | result.md |
+| PLANNING | agent-a | FALSE | agent-b | - | - | plan.md |
+| PLANNING | agent-b | FALSE | COMPLETE | agent-a | plan.md | result.md |
 </Workflow>
 `
 	orchPath := filepath.Join(dir, "loopback-orch.md")
@@ -225,20 +225,25 @@ func TestSession_AutoReviewMode_CNAWithUnambiguousHint_EngineAutoRoutes(t *testi
 		Interact: &noopInteraction{},
 	})
 
-	// agent-a returns CNA → On Findings hint "agent-a" → engine auto-routes (no consult).
 	f.Queue("agent-a", harness.ScriptedEntry{Response: &domain.ProtocolResponse{
 		AgentInstanceID: "agent-a#1",
+		StatusCode:      domain.StatusSUCCESS,
+		StatusMessage:   "drafted",
+	}})
+	// agent-b returns CNA → On Findings hint "agent-a" (row above) → engine auto-routes (no consult).
+	f.Queue("agent-b", harness.ScriptedEntry{Response: &domain.ProtocolResponse{
+		AgentInstanceID: "agent-b#2",
 		StatusCode:      domain.StatusCOMPLETED_NEEDS_ACTION,
 		StatusMessage:   "found issues",
 	}})
 	// Second agent-a call (loop-back) → SUCCESS.
 	f.Queue("agent-a", harness.ScriptedEntry{Response: &domain.ProtocolResponse{
-		AgentInstanceID: "agent-a#2",
+		AgentInstanceID: "agent-a#3",
 		StatusCode:      domain.StatusSUCCESS,
 		StatusMessage:   "issues resolved",
 	}})
 	f.Queue("agent-b", harness.ScriptedEntry{Response: &domain.ProtocolResponse{
-		AgentInstanceID: "agent-b#3",
+		AgentInstanceID: "agent-b#4",
 		StatusCode:      domain.StatusSUCCESS,
 		StatusMessage:   "done",
 	}})

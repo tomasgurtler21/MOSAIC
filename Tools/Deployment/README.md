@@ -194,7 +194,11 @@ The update flow updates an existing workspace to the latest agent versions. It:
 
 The agents flow deploys a chosen mix of subagents, utility agents, infrastructure agents, and standalone agents plus the skills they require. It never asks about workflows or hooks. Use it when you want to add or refresh agents in a workspace that already has its orchestrator and workflows configured.
 
-If an orchestrator file (`orchestrator.md`, `orchestrator-script.md`) is already present, declarations for newly deployed infrastructure agents are added to it. Existing declarations, including hand-added ones, are kept, and a re-deployed agent is refreshed in place. A locally modified orchestrator follows `--conflict`; when skipped, a TODO entry explains the manual step. No orchestrator is created when none is present, and its workflows are not changed.
+If an orchestrator file (`orchestrator.md`, `orchestrator-script.md`) is already present, declarations for newly deployed infrastructure agents are added to it. Existing declarations, including hand-added ones, are kept, and a re-deployed agent is refreshed in place. A locally modified orchestrator follows `--conflict`; when skipped, a TODO entry explains the manual step. No orchestrator is created when none is present, and its workflows are not changed: injecting infrastructure agents keeps the deployed workflow tables exactly as they are, and does not add the `Row` column described below.
+
+### Workflow `Row` column
+
+Whenever mosaic-deploy rebuilds workflows into an orchestrator (a full deploy or `mosaic-deploy workflows`), it adds a first-column `Row` (1..N) to each workflow routing table. Catalog workflow sources never contain it and authors do not write it. The Runner accepts tables with or without the column, and refuses a table whose `Row` numbers do not match row positions, for example after a hand edit. Orchestrators deployed before this column existed gain it only when their workflows are next redeployed, for example with `mosaic-deploy workflows`. A version stamp does not trigger it.
 
 The update flow likewise refreshes catalog-backed infrastructure declarations in the orchestrator when their definition changed in the catalog; it never adds new declarations or touches hand-added ones.
 

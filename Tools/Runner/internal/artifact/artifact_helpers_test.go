@@ -48,13 +48,13 @@ func mustReadCanonical(t *testing.T) domain.ArtifactState {
 // newTestStep builds a CompletedStep for use in Apply tests.
 func newTestStep(seq int, agent, phase, stage string, status domain.StatusCode, ts time.Time, artifacts []string) domain.CompletedStep {
 	return domain.CompletedStep{
-		Seq:             seq,
-		AgentInstance:   agent,
-		Phase:           phase,
-		Stage:           stage,
-		Status:          status,
-		Timestamp:       ts,
-		Summary:         "step summary",
+		Seq:              seq,
+		AgentInstance:    agent,
+		Phase:            phase,
+		Stage:            stage,
+		Status:           status,
+		Timestamp:        ts,
+		Summary:          "step summary",
 		WrittenArtifacts: artifacts,
 	}
 }

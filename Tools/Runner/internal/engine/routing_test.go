@@ -124,7 +124,7 @@ func TestNext_OnFindings_AutoReview_UnambiguousHint_CNA_ReturnsDispatch(t *testi
 		"implementation-tdd", "implementation-review",
 	)
 	// build-review is at row 8 (0-indexed) in the test group of brownfield-tdd-build-verified.
-	state := stateAfter("EXECUTION.[StageNumber]", "Stage-1", "build-review#9", domain.StatusCOMPLETED_NEEDS_ACTION, 9)
+	state := stateAfterRow("EXECUTION", "Test.1", "build-review#9", domain.StatusCOMPLETED_NEEDS_ACTION, 9, 9)
 
 	dec := engine.Next(engine.NextInput{
 		Workflow:     aw,
@@ -158,7 +158,7 @@ func TestNext_OnFindings_Auto_UnambiguousHint_CNA_ReturnsDeviation(t *testing.T)
 		"test-writer-tdd", "build-review", "tests-review-tdd",
 		"implementation-tdd", "implementation-review",
 	)
-	state := stateAfter("EXECUTION.[StageNumber]", "Stage-1", "build-review#9", domain.StatusCOMPLETED_NEEDS_ACTION, 9)
+	state := stateAfterRow("EXECUTION", "Test.1", "build-review#9", domain.StatusCOMPLETED_NEEDS_ACTION, 9, 9)
 
 	dec := engine.Next(engine.NextInput{
 		Workflow:     aw,
@@ -189,7 +189,7 @@ func TestNext_OnFindings_AutoReview_UnambiguousHint_CNA_InsideExecution_ReturnsD
 		"implementation-tdd", "implementation-review",
 	)
 	// row 11 is build-review in the impl group; OnFindings="implementation-tdd".
-	state := stateAfter("EXECUTION.[StageNumber]", "Stage-1", "build-review#12", domain.StatusCOMPLETED_NEEDS_ACTION, 12)
+	state := stateAfterRow("EXECUTION", "Implementation.1", "build-review#12", domain.StatusCOMPLETED_NEEDS_ACTION, 12, 12)
 
 	dec := engine.Next(engine.NextInput{
 		Workflow:     aw,
@@ -221,7 +221,7 @@ func TestNext_OnFindings_Auto_UnambiguousHint_CNA_InsideExecution_ReturnsDeviati
 		"test-writer-tdd", "build-review", "tests-review-tdd",
 		"implementation-tdd", "implementation-review",
 	)
-	state := stateAfter("EXECUTION.[StageNumber]", "Stage-1", "build-review#12", domain.StatusCOMPLETED_NEEDS_ACTION, 12)
+	state := stateAfterRow("EXECUTION", "Implementation.1", "build-review#12", domain.StatusCOMPLETED_NEEDS_ACTION, 12, 12)
 
 	dec := engine.Next(engine.NextInput{
 		Workflow:     aw,

@@ -78,7 +78,9 @@ func Render(state domain.ArtifactState) ([]byte, error) {
 		for class := range state.InfraClassSelections {
 			classes = append(classes, class)
 		}
-		sort.Slice(classes, func(i, j int) bool { return infraClassRank(classes[i]) < infraClassRank(classes[j]) || (infraClassRank(classes[i]) == infraClassRank(classes[j]) && classes[i] < classes[j]) })
+		sort.Slice(classes, func(i, j int) bool {
+			return infraClassRank(classes[i]) < infraClassRank(classes[j]) || (infraClassRank(classes[i]) == infraClassRank(classes[j]) && classes[i] < classes[j])
+		})
 		for _, class := range classes {
 			buf.WriteString("  " + class + ": " + state.InfraClassSelections[class] + "\n")
 		}
@@ -175,9 +177,13 @@ func TruncateSummary(s string) string {
 	return head + " ... " + tail
 }
 
+// ExecLogWorkflowRowHeader is the Execution Log column holding the 1-based
+// routing-table row of the step, or "-" for steps without a row.
+const ExecLogWorkflowRowHeader = "WorkflowRow"
+
 // renderExecutionLog renders the execution log entries as a markdown table.
 func renderExecutionLog(entries []domain.ExecutionLogEntry) []byte {
-	headers := []string{"Seq", "Agent", "Phase", "Stage", "Status", "Timestamp", "Summary", "Inputs", "Checkpoint"}
+	headers := []string{"Seq", "Agent", "Phase", "Stage", ExecLogWorkflowRowHeader, "Status", "Timestamp", "Summary", "Inputs", "Checkpoint"}
 	t := mdtable.Table{Header: headers}
 
 	for _, e := range entries {
@@ -189,6 +195,10 @@ func renderExecutionLog(entries []domain.ExecutionLogEntry) []byte {
 		if inputs == "" {
 			inputs = "-"
 		}
+		workflowRow := "-"
+		if e.WorkflowRow != domain.NoWorkflowRow {
+			workflowRow = strconv.Itoa(int(e.WorkflowRow))
+		}
 		checkpoint := e.Checkpoint
 		if checkpoint == "" {
 			checkpoint = "-"
@@ -198,6 +208,7 @@ func renderExecutionLog(entries []domain.ExecutionLogEntry) []byte {
 			e.Agent,
 			e.Phase,
 			stage,
+			workflowRow,
 			string(e.Status),
 			e.Timestamp.UTC().Format(time.RFC3339),
 			e.Summary,

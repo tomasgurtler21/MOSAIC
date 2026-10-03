@@ -132,7 +132,7 @@ func TestNext_TargetFormatState_RepeatedAgent_Test_ResolvesToTestGroupRow(t *tes
 		"test-writer-tdd", "build-review", "tests-review-tdd",
 		"implementation-tdd", "implementation-review",
 	)
-	state := stateAfter("EXECUTION", "Test.1", "build-review#9", domain.StatusSUCCESS, 9)
+	state := stateAfterRow("EXECUTION", "Test.1", "build-review#9", domain.StatusSUCCESS, 9, 9)
 
 	dec := engine.Next(engine.NextInput{
 		Workflow:        aw,
@@ -169,7 +169,7 @@ func TestNext_TargetFormatState_RepeatedAgent_Implementation_ResolvesToImplement
 		"test-writer-tdd", "build-review", "tests-review-tdd",
 		"implementation-tdd", "implementation-review",
 	)
-	state := stateAfter("EXECUTION", "Implementation.1", "build-review#12", domain.StatusSUCCESS, 12)
+	state := stateAfterRow("EXECUTION", "Implementation.1", "build-review#12", domain.StatusSUCCESS, 12, 12)
 
 	dec := engine.Next(engine.NextInput{
 		Workflow:        aw,

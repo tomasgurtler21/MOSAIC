@@ -10,10 +10,12 @@ import (
 //
 // For each block, the first line is examined: if it is an opening boundary tag, its
 // type attribute is rewritten to "managed" before emission so that the injected block
-// carries type="managed" to match the surrounding AvailableWorkflows region. The source
+// carries type="managed" to match the surrounding AvailableWorkflows region. The routing
+// table (the first markdown table) then gains a leading Row column numbered 1..N, with
+// ragged data rows normalised to the header width; see injectRowColumn. The source
 // WorkflowBlock.Block slices are never mutated; every other byte of each block is emitted
 // verbatim. A block whose first line is not an opening boundary tag is emitted entirely
-// verbatim.
+// verbatim, without a Row column.
 //
 // Determinism is guaranteed by the caller's slice order, which reflects the user's
 // selection order. This function never sorts or deduplicates: callers are responsible for
@@ -31,7 +33,7 @@ func assembleWorkflowBlocks(blocks []WorkflowBlock) (assembled []byte, ids []str
 			rest := block[firstLineEnd:]
 			if retyped, ok := docformat.RetypeOpenTagLine(firstLine, docformat.NodeDeployed); ok {
 				assembled = append(assembled, retyped...)
-				assembled = append(assembled, rest...)
+				assembled = append(assembled, injectRowColumn(rest)...)
 			} else {
 				// First line is not a recognised opening boundary tag — emit verbatim.
 				assembled = append(assembled, block...)

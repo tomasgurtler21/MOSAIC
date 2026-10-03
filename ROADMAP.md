@@ -7,12 +7,9 @@ Informal, hand-maintained list of what's next for this project. Order within eac
 ## Now (ASAP)
 
 - Update Runner tool to produce proper MOSAIC logs.
-- Update Runner to use workflows On Finding column so it can run more complex workflows without orchestrator help in Auto mode
-- Update all docs, finalize its organization.
 
 ## Next (Near Future)
 
-- Improve orchestrator according to finished orchestration tests.
 - Add Codex harness.
 - Review all harnesses MOSAIC logs for precision, focused on cost (especially Claude Code, seems to be cca 40% off).
 - Attempt to filter out potential secrets from MOSAIC logs.

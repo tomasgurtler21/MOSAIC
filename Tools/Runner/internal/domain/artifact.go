@@ -19,14 +19,14 @@ type InfrastructureOverride struct {
 // It is the runner's only durable state.
 type ArtifactState struct {
 	// Frontmatter (Tier 1)
-	RunID           string          // set once at creation, never modified; required and always a valid run id
-	Type            string          // "orchestration-artifact"
+	RunID           string // set once at creation, never modified; required and always a valid run id
+	Type            string // "orchestration-artifact"
 	Workflow        WorkflowID
 	WorkflowVersion WorkflowVersion
 	Task            string
 	Started         time.Time
 	LastUpdated     time.Time
-	GlobalSequence  int             // last allocated invocation number
+	GlobalSequence  int // last allocated invocation number
 
 	// RunSettings holds every run-configuration decision that is settled at run
 	// start, immutable for the run, and persisted in the artifact frontmatter so
@@ -71,15 +71,18 @@ type CurrentState struct {
 
 // ExecutionLogEntry is one row of the Execution Log table (append-only).
 type ExecutionLogEntry struct {
-	Seq        int
-	Agent      string     // "{AgentName}#{Seq}"
-	Phase      string
-	Stage      string     // "Stage-N" during EXECUTION, "" otherwise
-	Status     StatusCode
-	Timestamp  time.Time
-	Summary    string // from ProtocolResponse.StatusMessage, truncated
-	Inputs     string // comma-separated input_artifacts, or "" if none; "-" in the table
-	Checkpoint string // "" unless a checkpoint was taken
+	Seq   int
+	Agent string // "{AgentName}#{Seq}"
+	Phase string
+	Stage string // "Stage-N" during EXECUTION, "" otherwise
+	// WorkflowRow is the 1-based routing-table row the step ran; NoWorkflowRow
+	// when absent, "-" or non-canonical in the table.
+	WorkflowRow WorkflowRow
+	Status      StatusCode
+	Timestamp   time.Time
+	Summary     string // from ProtocolResponse.StatusMessage, truncated
+	Inputs      string // comma-separated input_artifacts, or "" if none; "-" in the table
+	Checkpoint  string // "" unless a checkpoint was taken
 }
 
 // ArtifactRegistryEntry is one row of the Artifacts table (keyed registry).

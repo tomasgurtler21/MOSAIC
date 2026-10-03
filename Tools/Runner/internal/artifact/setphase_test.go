@@ -119,11 +119,11 @@ func TestSetPhase_DoesNotModifyArtifactRegistry(t *testing.T) {
 
 	// Apply a step with an output artifact so the registry is non-empty.
 	state, err := store.Apply(ctx, state, domain.CompletedStep{
-		Seq:             1,
-		AgentInstance:   "agent#1",
-		Phase:           "EXECUTION",
-		Status:          "SUCCESS",
-		Timestamp:       time.Date(2026, 1, 1, 1, 0, 0, 0, time.UTC),
+		Seq:              1,
+		AgentInstance:    "agent#1",
+		Phase:            "EXECUTION",
+		Status:           "SUCCESS",
+		Timestamp:        time.Date(2026, 1, 1, 1, 0, 0, 0, time.UTC),
 		WrittenArtifacts: []string{"Plan.md"},
 	})
 	if err != nil {

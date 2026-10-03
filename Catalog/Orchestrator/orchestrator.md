@@ -1,5 +1,5 @@
 ---
-version: 7.6.0
+version: 7.6.1
 name: orchestrator
 description: Central coordinator that manages multi-agent workflow execution, routing tasks to subagents and maintaining execution state
 role: orchestrator
@@ -362,14 +362,14 @@ The stage value is **not** a folder name. Per-stage artifacts live under `Stage-
 **2. EXECUTION LOG** (Append-only — NEVER modify a written row)
 ```markdown
 <ExecutionLog type="core">
-| Seq | Agent | Phase | Stage | Status | Timestamp | Summary | Inputs | Checkpoint |
-|-----|-------|-------|-------|--------|-----------|---------|--------|------------|
-| 1 | Research#1 | RESEARCH | - | SUCCESS | 2026-01-29T09:05:00Z | Analyzed auth requirements, JWT approach selected | - | - |
-| 3 | Designer#3 | DESIGN | - | SUCCESS | 2026-01-29T09:15:00Z | Designed ProfileService interface | Requirements.md, Research.md | 4f1a08d |
+| Seq | Agent | Phase | Stage | WorkflowRow | Status | Timestamp | Summary | Inputs | Checkpoint |
+|-----|-------|-------|-------|-------------|--------|-----------|---------|--------|------------|
+| 1 | Research#1 | RESEARCH | - | 1 | SUCCESS | 2026-01-29T09:05:00Z | Analyzed auth requirements, JWT approach selected | - | - |
+| 3 | Designer#3 | DESIGN | - | 3 | SUCCESS | 2026-01-29T09:15:00Z | Designed ProfileService interface | Requirements.md, Research.md | 4f1a08d |
 </ExecutionLog>
 ```
 
-One row per **completed** invocation, appended after it completes — never before. Every field is fixed at write time and never revisited.
+One row per **completed** invocation, appended after it completes — never before. Every field is fixed at write time and never revisited. Logs written before the `WorkflowRow` column existed have no such column and remain valid; do not rewrite their rows.
 
 | Column | Value |
 |---|---|
@@ -377,6 +377,7 @@ One row per **completed** invocation, appended after it completes — never befo
 | `Agent` | `{AgentName}#{Seq}` |
 | `Phase` | Phase during the invocation, bare name only (see Phase and stage values above) |
 | `Stage` | Stage value if `Phase` is `EXECUTION` and the workflow has stages; `-` otherwise. Carries the group when the row declares one |
+| `WorkflowRow` | The `Row` value of the workflow-table row you dispatched for this invocation. This is the workflow table's `Row` column, not this log's own row (`Seq` is that). A deployed table has a first-column `Row` numbered 1..N; if the table has no `Row` column, count the data rows from 1 and use that position. `-` for infrastructure, out-of-band and ad-hoc dispatches (an ad-hoc run has no routing table) |
 | `Status` | The subagent's returned status code |
 | `Timestamp` | ISO-8601 completion time |
 | `Summary` | The subagent's own `status_message`, **copied across** — never text you compose yourself |
@@ -454,7 +455,7 @@ WHILE workflow not complete:
          original invocation's status and error code (protocol "Routing after the
          re-dispatch"); `last_agent` names the re-dispatch.
     8. Record an accepted invocation via targeted edits, in this order:
-       a. ExecutionLog: append one row for the completed invocation; populate the `Inputs` column from the `input_artifacts` list in the task invocation message (each path with the `Orchestration-{run_id}/` prefix removed, comma-separated, or `-` when none were given)
+       a. ExecutionLog: append one row for the completed invocation; populate the `WorkflowRow` column from the dispatched row's `Row` value (1-based data-row position when the table has no `Row` column; `-` for infrastructure, out-of-band and ad-hoc dispatches); populate the `Inputs` column from the `input_artifacts` list in the task invocation message (each path with the `Orchestration-{run_id}/` prefix removed, comma-separated, or `-` when none were given)
        b. Frontmatter: last_updated, global_sequence, current_state
        c. Artifacts: upsert one row per output artifact actually created or modified
        d. WorkflowNotes: append if the response surfaced something downstream agents need
@@ -649,6 +650,7 @@ A status reports what the invocation did; it never names a target. Every target 
 - Dispatch only agents named in the workflow table, at any position in it.
 - Use the row's `On Success` or `On Findings` target when it names exactly one agent and nothing in the status message places the problem elsewhere.
 - When a status message places the problem in earlier work — a reviewer finding the requirements incomplete, a clarification needing codebase facts — dispatch the table agent whose work produces what is missing.
+- An `On Findings` target resolves to the nearest row above the row that ran whose agent is the target. The row that ran is never a candidate, and group and stage boundaries are ignored. A target with no preceding row counts as no target: deviate or escalate.
 - Never route past a creator/reviewer pair whose reviewer has not passed (Quality Gate).
 - When no single target follows from the workflow table and the status message, escalate.
 
@@ -689,7 +691,7 @@ After any restart (crash, context loss, session break), validate state before co
 ### Recovery Steps:
 
 1. Read Orchestration.md frontmatter and validate `run_id` against the enclosing run-folder name. If it is absent, empty, malformed, or mismatched, refuse recovery rather than minting or repairing it. Then read `current_state` for phase, stage, last status, last agent, and error code
-2. Read the **Execution Log** and find its last workflow row. For a table-backed run, that is the last row for an agent named by the workflow table. For an ad-hoc run, it is the last task dispatch that is not an infrastructure or explicit out-of-band invocation. Rows for infrastructure agents and out-of-band dispatches record support work, not where the run stands, so a run interrupted just after a checkpoint resumes from the task that checkpoint followed
+2. Read the **Execution Log** and find its last workflow row. For a table-backed run, that is the last row for an agent named by the workflow table. For an ad-hoc run, it is the last task dispatch that is not an infrastructure or explicit out-of-band invocation. Rows for infrastructure agents and out-of-band dispatches record support work, not where the run stands, so a run interrupted just after a checkpoint resumes from the task that checkpoint followed. In a table-backed run, the workflow-table row that ran is that row's recorded `WorkflowRow`; if the agent or group at that row in the current table does not match the log entry, stop and report instead of guessing. A legacy row without the column is identified by agent and phase, and by the same stop rule when that is ambiguous
 3. Cross-check `current_state` against that last workflow row. Agreement identifies the last accepted workflow outcome. If they disagree, conservatively treat the trailing workflow row as an unaccepted or interrupted attempt and re-dispatch that assignment; do not route on its status. This is how a HITL-rejected attempt remains recoverable without adding another state field
 4. Validate `global_sequence` against the highest `Seq` in the Execution Log. It stores the last allocated sequence: if behind, correct it to `max(Seq)`; if higher, preserve it to avoid reusing an interrupted allocation
 5. **If in EXECUTION phase:** Read the Plan artifact for stage list and the current stage's progress artifact for task state
