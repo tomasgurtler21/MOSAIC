@@ -2,10 +2,10 @@
  * runner_transcript.ts — in-session transcript refresh for Runner mode.
  *
  * Under `opencode run` the session.idle handler is not awaited at exit, so the
- * transcript is re-exported while the session is running; each refresh replaces
- * the previous file atomically and the last completed one remains. Known
- * limitation: if the process exits before the refresh triggered by the final
- * assistant message completes, that message can be missing from the file.
+ * transcript is re-exported while the session is running. Each refresh writes the
+ * raw file and then the sidecar synchronously, with no await, once the SDK
+ * returns the messages, so the exit cannot interrupt it. The final refresh is
+ * lost only if the SDK call itself has not returned when the process exits.
  */
 
 import * as nodePath from "node:path";

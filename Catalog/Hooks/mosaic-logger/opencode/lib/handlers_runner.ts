@@ -39,8 +39,9 @@
  *     durable closed-session marker (exactly-once is per process).
  *   - 04_session.raw / 04_session.meta.json (and the session-scoped orchestrator
  *     transcript) exist only when the SDK returns messages during the session;
- *     the last completed refresh remains, so the final assistant message can be
- *     missing if the process exits before its refresh completes.
+ *     each refresh writes the raw file then the sidecar synchronously once the
+ *     SDK returns, so the final refresh is lost only if that SDK call has not
+ *     returned when the process exits (not observed on OpenCode 1.18.18).
  *   - 02_output.md is best-effort and may be missing when the process exits
  *     right after session.idle.
  */

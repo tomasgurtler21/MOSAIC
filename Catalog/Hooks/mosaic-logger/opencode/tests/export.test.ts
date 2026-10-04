@@ -22,7 +22,7 @@ import {
   buildSidecar,
 } from "../lib/export";
 import { LogPaths } from "../lib/core";
-import { userMessageEntry, assistantMessageEntry } from "./fixtures/opencode_api";
+import { makeSdkClient, SAMPLE_MESSAGES } from "./export_support";
 
 // ---------------------------------------------------------------------------
 // Test helpers and stub SDK client
@@ -31,57 +31,6 @@ import { userMessageEntry, assistantMessageEntry } from "./fixtures/opencode_api
 const SESSION_ID = "sess-orch-001";
 const SUBAGENT_SESSION_ID = "sess-sub-001";
 const RUN_ID = "20260101T170000Z-a3f9";
-
-/**
- * Minimal SdkClient stub that returns controlled responses.
- * All fields are required to match the SdkClient interface contract.
- */
-function makeSdkClient(options: {
-  messagesResult?: unknown;
-  messagesThrows?: Error;
-  getResult?: { parentID?: string } | undefined;
-} = {}): {
-  session: {
-    get(params: { path: { id: string } }): Promise<{ parentID?: string } | undefined>;
-    messages(params: { path: { id: string } }): Promise<unknown>;
-  };
-  app: {
-    log(params: {
-      body: {
-        service: string;
-        level: "debug" | "info" | "warn" | "error";
-        message: string;
-        extra?: Record<string, unknown>;
-      };
-    }): Promise<void>;
-  };
-} {
-  return {
-    session: {
-      get: async (_params) => options.getResult,
-      messages: async (_params) => {
-        if (options.messagesThrows) {
-          throw options.messagesThrows;
-        }
-        return options.messagesResult;
-      },
-    },
-    app: {
-      log: async (_params) => {},
-    },
-  };
-}
-
-/**
- * Sample message list as the SDK would return from client.session.messages().
- * Built via fixture builders so the real { info, parts } shape is used throughout
- * this file — satisfying the suite-wide constraint that no test constructs a
- * message as { role, content }.
- */
-const SAMPLE_MESSAGES = [
-  userMessageEntry("Do the task.", { id: "msg-001" }),
-  assistantMessageEntry('{"status_code": "SUCCESS"}', { id: "msg-002" }),
-];
 
 // ---------------------------------------------------------------------------
 // buildSidecar

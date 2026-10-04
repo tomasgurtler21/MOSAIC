@@ -21,10 +21,8 @@ import * as nodeFs from "node:fs";
 import * as nodeOs from "node:os";
 
 import { createInvocationHandlers } from "../lib/handlers_invocation";
-import {
-  type HandlerDependencies,
-  type SdkClient,
-} from "../lib/handlers_session";
+import type { SdkClient } from "../lib/handlers_session";
+import { makeNullSdk, makeSdk, makeDeps, type CollectedEvent } from "./handlers_invocation_support";
 import { userMessageEntry, assistantMessageEntry } from "./fixtures/opencode_api";
 import { SessionCorrelationStore } from "../lib/correlation";
 import { LogPaths, setDebugLogger } from "../lib/core";
@@ -66,30 +64,6 @@ function makePaths(): LogPaths {
   return new LogPaths(tmpDir);
 }
 
-function makeNullSdk(): SdkClient {
-  return {
-    session: {
-      get: async () => undefined,
-      messages: async () => [],
-    },
-    app: { log: async () => {} },
-  };
-}
-
-/**
- * SDK client that returns a controlled messages response for specific sessions.
- * `getMessagesForSession` maps session IDs to their message arrays.
- */
-function makeSdk(getMessagesForSession: (sessionId: string) => unknown): SdkClient {
-  return {
-    session: {
-      get: async () => undefined,
-      messages: async ({ path }) => getMessagesForSession(path.id),
-    },
-    app: { log: async () => {} },
-  };
-}
-
 function makeThrowingSdk(): SdkClient {
   return {
     session: {
@@ -99,37 +73,6 @@ function makeThrowingSdk(): SdkClient {
       },
     },
     app: { log: async () => {} },
-  };
-}
-
-type CollectedEvent = { filePath: string; event: Record<string, unknown> };
-
-function makeDeps(
-  store: SessionCorrelationStore,
-  paths: LogPaths,
-  sdkClient: SdkClient,
-  collected: CollectedEvent[],
-): HandlerDependencies {
-  return {
-    store,
-    paths,
-    sdkClient,
-    adapterVersion: "0.1.0",
-    buildEvent: (event, envelope, fields) => ({
-      schema_version: "1.0.0",
-      event,
-      timestamp: envelope.timestamp,
-      harness: "opencode",
-      ...(envelope.sessionId ? { session_id: envelope.sessionId } : {}),
-      ...(envelope.runId ? { run_id: envelope.runId } : {}),
-      ...Object.fromEntries(
-        Object.entries(fields).filter(([, v]) => v !== undefined && v !== null && v !== ""),
-      ),
-    }),
-    appendEvent: async (filePath, event) => {
-      collected.push({ filePath, event });
-    },
-    fallbackCallId: (toolName) => `${toolName ?? "tool"}_fallback`,
   };
 }
 
