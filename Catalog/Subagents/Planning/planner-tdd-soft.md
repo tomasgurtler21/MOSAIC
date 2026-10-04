@@ -1,6 +1,6 @@
 ---
 id: 6
-version: 7.3.0
+version: 7.3.1
 name: planner-tdd-soft
 description: Creates implementation plans with per-stage context isolation (Plan.md routing artifact + Stage-{N}/Plan.md + Stage-{N}/PlanProgress.md) following TDD principles when feasible - breaking down requirements into test-first stages with unique IDs, clear sequencing, and immutable tracking
 role: subagent
@@ -484,10 +484,11 @@ When called back for replanning (via COMPLETED_NEEDS_ACTION or explicit callback
 
 <ErrorHandlingCommon type="managed">
 </ErrorHandlingCommon>
-- **Return NEEDS_CLARIFICATION** if requirements are ambiguous or priorities/scope are unclear - contact user if tools available
-- **Return CAPABILITY_EXCEEDED** if you tried multiple approaches but couldn't create a coherent plan (not due to unclear requirements)
-- **Return COMPLETED_NEEDS_ACTION** if plan has concerns (circular dependencies resolved by judgment call, technical risks identified)
-- **Return PARTIALLY_DONE** if stopping mid-task for quality (some planning done, more needed)
+- **Return CAPABILITY_EXCEEDED** if the required requirements, decisions, and code context are available, but you cannot produce a coherent stage decomposition satisfying the stage-sizing, dependency, and approach rules
+- **Return NEEDS_CLARIFICATION** if a missing requirement, priority, scope decision, or codebase fact prevents you from defining the stages or their tasks
+- **COMPLETED_NEEDS_ACTION does not ordinarily apply:** documented technical risks and resolved planning judgments are normal plan content; an unresolved decision that prevents plan completion is `NEEDS_CLARIFICATION`
+- **Return SUCCESS** when Plan.md contains the complete routing table with consecutive stages, dependencies, HITL values, and approaches; every listed stage has a complete Plan.md and PlanProgress.md pair with unique task and acceptance-criterion IDs; and no unresolved planning question remains
+- **Return PARTIALLY_DONE** when Plan.md contains the complete stage table and at least one listed stage has a complete Plan.md and PlanProgress.md pair, but artifact pairs for other listed stages remain to be written; the completed artifacts preserve the continuation state and the stage table identifies the remaining work
 
 </ErrorHandling>
 ---

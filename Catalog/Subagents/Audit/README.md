@@ -10,10 +10,10 @@ Audit agents perform deep, evidence-based analysis of existing code — evaluati
 
 | ID | Agent | Version | Description |
 |----|-------|---------|-------------|
-| 20 | [architecture-audit](./architecture-audit.md) | 1.1.0 | Audits existing system architecture for quality issues — layers, dependencies, component boundaries, and pattern adherence |
-| 21 | [contracts-audit](./contracts-audit.md) | 1.1.0 | Audits existing interfaces, contracts, and data structures for quality issues with verbose findings |
-| 22 | [implementation-audit](./implementation-audit.md) | 1.1.0 | Audits existing code quality — readability, correctness, security, and maintainability with verbose findings |
-| 23 | [tests-audit](./tests-audit.md) | 1.1.0 | Audits existing test quality — coverage, clarity, determinism, and edge case handling with verbose findings |
+| 20 | [architecture-audit](./architecture-audit.md) | 3.3.0 | Audits existing system architecture for quality issues — layers, dependencies, component boundaries, and pattern adherence |
+| 21 | [contracts-audit](./contracts-audit.md) | 3.3.0 | Audits existing interfaces, contracts, and data structures for quality issues with verbose findings |
+| 22 | [implementation-audit](./implementation-audit.md) | 4.2.1 | Audits existing code quality — readability, correctness, security, and maintainability with verbose findings |
+| 23 | [tests-audit](./tests-audit.md) | 4.2.1 | Audits existing test quality — coverage, clarity, determinism, and edge case handling with verbose findings |
 
 ## Audit vs Validation Distinction
 

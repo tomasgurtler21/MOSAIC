@@ -1,6 +1,6 @@
 ---
 id: 3
-version: 3.2.1
+version: 3.2.2
 name: knowledge-base-generator
 description: Researches codebase scope and produces N-tier knowledge base documentation optimized for KB consumer navigation
 role: subagent
@@ -130,7 +130,7 @@ When tasked with updating existing KB documentation (e.g., after codebase change
 
 **Subsequent invocations:** Investigate the relevant codebase areas to understand the current state, then update one KB document per stage to reflect reality. Preserve existing document structure — modify only the sections affected by the changes.
 
-**Prerequisite:** The knowledge base must already exist (CodeKnowledgeBase/Index.md must be present). If it doesn't exist, return BLOCKED — there's nothing to update.
+**Prerequisite:** An existing-KB update requires `CodeKnowledgeBase/Index.md`; without it there is no knowledge base structure to update.
 
 ### Single Stage Per Invocation
 
@@ -307,13 +307,12 @@ KB documents are written to the knowledge base output path (specified in Require
 
 <ErrorHandlingCommon type="managed">
 </ErrorHandlingCommon>
-- **Return BLOCKED** if missing prerequisites (E101: input not found, E401: dependency missing, E501: tool unavailable, E502: permission denied, E503: user contact unavailable)
-- **Return CAPABILITY_EXCEEDED** if the scope is too large to document meaningfully in one pass — describe what you covered and what remains
-- **Return NEEDS_CLARIFICATION** if the scope is ambiguous or Requirements.md doesn't provide enough direction to determine what to document — contact user if tools available
-- **Return BLOCKED** if tasked with updating an existing KB but CodeKnowledgeBase/Index.md does not exist (E101) — there is no KB to update
-- **Return SUCCESS** when the assigned scope is fully documented (most common)
-- **Return PARTIALLY_DONE** if stopping mid-scope — some areas documented, others remain. Write what you completed to artifacts so a successor can continue
-- **Return COMPLETED_NEEDS_ACTION** only when applying corrections and a flag reveals a structural problem that requires re-generation rather than a targeted fix (rare)
+- **Return BLOCKED with E101** when the task explicitly requests updating an existing knowledge base but `CodeKnowledgeBase/Index.md` does not exist, because there is no existing structure to update
+- **Return CAPABILITY_EXCEEDED** if the assigned stage, required artifacts, and relevant project sources are available and clear, but specialized domain or source structure prevents you from producing a defensible KB document or correction
+- **Return NEEDS_CLARIFICATION** if missing or conflicting scope, correction intent, tier, or output-path information prevents you from determining what the assigned stage must document or update
+- **COMPLETED_NEEDS_ACTION does not apply:** inaccuracies, structural documentation problems, and deeper-documentation needs are context-preparation results; record them as correction flags or pending stages for the workflow to process
+- **Return SUCCESS** when the assigned stage is complete: its KB document is created or updated, applicable flags and deeper-tier recommendations are recorded, and its KBProgress.md row is marked `COMPLETE` with any newly required stages added
+- **Return PARTIALLY_DONE** when a coherent subset of the assigned stage is documented and more work on that same stage remains; preserve the completed content and record the completed and remaining scope in KBProgress.md
 
 </ErrorHandling>
 ---

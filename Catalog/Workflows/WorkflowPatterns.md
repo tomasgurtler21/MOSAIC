@@ -18,6 +18,8 @@ creator → reviewer
             └─ On Findings → creator (re-draft)
 ```
 
+**Placement rule:** `On Findings` resolves to the nearest row *above* the reviewer's row whose agent is the target. The reviewer's own row is never a candidate, and group and stage boundaries are ignored. A target with no preceding row is treated as "no target" (deviation or escalation), so the creator row must sit above its reviewer. Authors never write the `Row` column; mosaic-deploy adds it. Bump the workflow version on every routing-table edit.
+
 **Where it appears:** Nearly every workflow in the catalog. Core instances:
 - `requirements-refinement` / `requirements-review` (Build, Design, Verification workflows)
 - `planner-tdd-soft` / `plan-review` (all plan-driven workflows)
@@ -212,9 +214,9 @@ producer-N ─→ partial-N.md (schema-conformant JSON)       scripts the rest
 
 ## 7. Toolchain Interposition (Build-Review)
 
-**Intent:** Isolate complex build/deploy/test-execution mechanics in a dedicated mechanical agent, keeping execution agents focused on their primary concern (writing code, reviewing logic).
+**Intent:** Isolate complex source-import, build, and deployment mechanics in a dedicated mechanical agent, keeping writer agents focused on code and downstream reviewers focused on executing and evaluating tests.
 
-**Mechanism:** A dedicated `build-review` agent is inserted between each writer agent and its reviewer. It handles compilation, deployment to target platforms, and test execution — concerns that would overload the writer and reviewer agents if they had to own the toolchain directly. The reviewer then reads build results as an artifact input rather than invoking the toolchain itself.
+**Mechanism:** A dedicated `build-review` agent is inserted between each writer agent and its reviewer. It handles source import, compilation, and deployment to the target platform, then records the deployment metadata in its artifact. It does not execute tests; the downstream reviewer uses that metadata to execute tests and evaluate the expected TDD RED or GREEN outcome.
 
 ```
 test-writer-tdd → build-review → tests-review-tdd
@@ -228,7 +230,7 @@ implementation-tdd → build-review → implementation-review
 
 **Trade-offs:**
 - Doubles the agent invocations per stage compared to standard TDD workflows. Justified only when the toolchain complexity genuinely doesn't belong in execution agents' context.
-- The build-review agent is mechanical (no judgment calls), so its failure mode is clean: either it builds or it doesn't, and `On Findings` routes back to the writer.
+- The build-review agent is mechanical (no judgment calls), so its failure mode is clean: either it builds or it doesn't, and `On Findings` routes back to the writer. The writer row must sit above the reviewer row, because `On Findings` resolves to the nearest preceding row for the target agent.
 
 ---
 
@@ -400,3 +402,4 @@ Most workflows combine multiple patterns. This section maps which patterns each 
 | Version | Date | Author | Summary |
 |---------|------|--------|---------|
 | 0.1 | 2026-08-30 | MOSAIC | Initial draft — patterns extracted from analysis of all 16 catalog workflows |
+| 0.2 | 2026-10-03 | MOSAIC | Documented the nearest-preceding On Findings rule, deploy-added `Row` column and version bump on table edits |

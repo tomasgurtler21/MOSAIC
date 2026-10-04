@@ -10,7 +10,7 @@ Execution agents run things and report results. They execute tests, capture outp
 
 | ID | Agent | Version | Description |
 |----|-------|---------|-------------|
-| 17 | [test-runner](./test-runner.md) | 2.1.0 | Executes tests and reports pass/fail outcomes with failure diagnostics |
+| 17 | [test-runner](./test-runner.md) | 3.2.2 | Executes tests and reports pass/fail outcomes with failure diagnostics |
 
 ## What Execution Agents Do
 

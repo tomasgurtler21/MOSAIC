@@ -1,6 +1,6 @@
 ---
 id: 7
-version: 5.2.1
+version: 5.2.2
 name: planner-audit
 description: Creates audit plans with typed stages (Implementation, Tests, Architecture, Contracts) and full per-stage isolation — outputs AuditPlan.md (brief routing artifact) + per-stage Stage-{N}/AuditPlan.md and Stage-{N}/AuditProgress.md for downstream audit agents
 role: subagent
@@ -250,10 +250,11 @@ For a plan with S stages, you create 1 + 2S files.
 
 <ErrorHandlingCommon type="managed">
 </ErrorHandlingCommon>
-- **Return BLOCKED (E101)** if input artifacts are missing — file list context is required for audit planning
-- **Return NEEDS_CLARIFICATION** if the input artifacts don't contain a clear list of files to audit and the scope cannot be determined — contact user if tools available
-- **Return CAPABILITY_EXCEEDED** if you tried but couldn't produce a coherent stage grouping (unlikely given the simplicity of this task)
-- **Return PARTIALLY_DONE** if stopping mid-task for quality (some stages planned, more remain)
+- **Return CAPABILITY_EXCEEDED** if the authoritative file set is available and clear, and the files can be inspected and measured, but an atypical repository structure or file organization prevents you from producing a defensible typed stage grouping within the planning constraints
+- **Return NEEDS_CLARIFICATION** if the input artifacts and project inspection do not establish the authoritative audit file set, or if a file's inclusion or required audit treatment depends on an unresolved scope decision
+- **Return COMPLETED_NEEDS_ACTION** if the complete artifact set retains one or more files in an Ungrouped section because they require an inclusion, exclusion, or audit-type decision before downstream audits can cover them
+- **Return SUCCESS** when AuditPlan.md and every Stage-{N}/AuditPlan.md and Stage-{N}/AuditProgress.md pair are complete, every identified file is assigned to at least one routable typed stage, stage numbering is consecutive, and every stage satisfies the size limit
+- **Return PARTIALLY_DONE** when complete artifact pairs exist for a coherent subset of stages and more files from the same assignment remain to be planned; AuditPlan.md marks the plan incomplete, lists every completed stage, and identifies every unplanned file, while each completed stage has matching immutable plan and checkbox progress artifacts
 
 </ErrorHandling>
 ---

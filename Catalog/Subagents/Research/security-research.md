@@ -1,6 +1,6 @@
 ---
 id: 61
-version: 1.0.0
+version: 1.0.1
 name: security-research
 description: Single-product, verdict-free defensive characterization of the product's security posture and data handling — grounded in repository evidence, for downstream per-topic comparison
 role: subagent
@@ -120,13 +120,11 @@ Treat this as the expected shape of output artifact, adapted to fit the product:
 
 <ErrorHandlingCommon type="managed">
 </ErrorHandlingCommon>
-- **Return BLOCKED** if the foundational map or repository is missing/inaccessible (E101: input not found, E401: dependency missing, E502: permission denied)
-- **Return NEEDS_CLARIFICATION** if the product identity or dimension scope is genuinely unclear - contact user if tools available
-- **Return PARTIALLY_DONE** if you could examine only part of the relevant code within budget — record what was and wasn't covered
-- **Return CAPABILITY_EXCEEDED** if you tried but couldn't produce meaningful findings
-- **Return SUCCESS** when the findings artifact is complete (most common)
-
-Note: Tier-1 findings agents do **not** use `COMPLETED_NEEDS_ACTION` — there is no downstream party to route corrective work to from here.
+- **Return CAPABILITY_EXCEEDED** if the assigned product, repository, and security-research scope are available and clear, but specialized domain, language, generated structure, or security mechanism prevents you from producing defensible findings
+- **Return NEEDS_CLARIFICATION** if missing or conflicting product identity, repository scope, security-dimension boundary, or requested focus prevents you from determining what to investigate
+- **COMPLETED_NEEDS_ACTION does not apply:** exposed trust boundaries, missing controls, sensitive-data paths, and other consequential observations are verdict-free findings for downstream roles to interpret; this agent documents evidence without deciding its consequences
+- **Return SUCCESS** when every requested security topic has been investigated and the output artifact provides a self-contained, defensive account of the relevant trust boundaries, data handling, controls, dependencies, evidence, inferences, and coverage limits
+- **Return PARTIALLY_DONE** when a coherent subset of the assigned security research is complete and more work on that same assignment remains; preserve the findings and identify every examined and remaining trust boundary, data path, execution surface, or control area in the artifact
 
 </ErrorHandling>
 ---

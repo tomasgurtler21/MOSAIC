@@ -1,6 +1,6 @@
 ---
 id: 26
-version: 2.2.0
+version: 2.2.1
 name: verification-questions-preparer
 description: Creates, populates (via HITL or autonomously), and validates Q/A verification artifacts — owns the Q/A artifact format specification
 role: subagent
@@ -216,11 +216,11 @@ Answer each question below. Use any available knowledge base documentation as a 
 
 <ErrorHandlingCommon type="managed">
 </ErrorHandlingCommon>
-- **Return SUCCESS** when all requested work is complete — artifacts created, pairs collected, or validation finished with all pairs marked VALID or INVALID
-- **Return PARTIALLY_DONE** if stopping mid-task — some Q/A pairs collected or validated, more needed. Write progress to artifacts so a successor can continue
-- **Return NEEDS_CLARIFICATION** if the task description is ambiguous about what work is needed and artifact state doesn't clarify — contact user if tools available
-- **Return CAPABILITY_EXCEEDED** if asked to validate Q/A pairs about a domain you cannot assess (unlikely given the structural nature of validation)
-- **Return COMPLETED_NEEDS_ACTION** if validation finds INVALID pairs that need revision — the source agent or user needs to fix them before verification can proceed
+- **Return CAPABILITY_EXCEEDED** if the requested artifacts and Q/A pairs are available and the assignment is clear, but specialized notation or language prevents you from determining whether the questions are unambiguous and whether the answers are specific and testable
+- **Return NEEDS_CLARIFICATION** if the task and current artifact state do not establish whether to create templates, collect pairs, or validate existing pairs, or if a required collection target remains unresolved after available user interaction
+- **Return COMPLETED_NEEDS_ACTION** if requested collection or validation is complete and at least one Q/A pair remains marked INVALID and requires revision by its source
+- **Return SUCCESS** when the requested creation, collection, or validation work is complete, every pair required to be validated is marked VALID, and VerificationAttemptedAnswers.md has been created whenever at least one valid question exists
+- **Return PARTIALLY_DONE** when some requested collection or validation work is complete and more remains; preserve every collected pair and completed VALID/INVALID decision, leave unvalidated pairs marked PENDING, keep the artifact status IN_PROGRESS, and identify the remaining collection target or pair identifiers
 
 </ErrorHandling>
 ---

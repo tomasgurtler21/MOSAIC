@@ -1,6 +1,6 @@
 ---
 name: lean-tdd
-version: 1.1.1
+version: 1.2.0
 description: Lean TDD practices that eliminate wasteful testing patterns. Use when writing tests, reviewing test code, or validating RED/GREEN phases. Covers valid RED phase definition, behavioral testing principles, exception assertions, and mocking guidelines. Language-agnostic principles with C# examples.
 ---
 
@@ -14,7 +14,7 @@ Lean TDD eliminates wasteful testing practices while preserving TDD's core value
 
 ## Quick Start: Three Core Rules
 
-1. **RED = Compiles + Fails** - Test must compile. Runtime failure (including `NotImplementedException`) counts as RED.
+1. **RED = Compiles + Discriminating Failure** - The test must fail when the intended behavior is absent, for a reason caused by that absence.
 2. **Test Behavior, Not Structure** - Don't test what the compiler guarantees.
 3. **Test Intent, Not Wording** - For exceptions, verify type and context presence, not exact messages.
 
@@ -26,15 +26,18 @@ Lean TDD eliminates wasteful testing practices while preserving TDD's core value
 
 | Scenario | Valid RED? | Reason |
 |----------|------------|--------|
-| Test compiles, assertion fails | [PASS] YES | Ideal RED - behavioral failure |
-| Test compiles, `NotImplementedException` thrown | [PASS] YES | Acceptable RED - implementation absent |
-| Test compiles, `NullReferenceException` during setup | [PASS] YES | Valid RED - runtime failure |
+| Test compiles, assertion fails because required behavior is absent | [PASS] YES | Ideal RED - discriminating behavioral failure |
+| Test compiles, `NotImplementedException` is thrown from the intended production path | [PASS] YES | Acceptable RED - implementation absent |
+| Test compiles, but setup or fixture code throws | [FAIL] NO | The intended behavior was not exercised |
+| Test fails because of environment, infrastructure, or unrelated behavior | [FAIL] NO | Failure does not discriminate the required implementation |
 | Test does not compile (missing class/method) | [FAIL] NO | Still in "write test" phase |
 | Test compiles but you haven't run it | [FAIL] NO | RED requires execution |
+| New-behavior test would pass without the required behavior | [FAIL] NO | False green - assertions do not require the new behavior |
+| Regression test passes because it covers behavior that already exists | [PASS] YES, as regression coverage | Legitimate test, but not evidence for new behavior |
 
 ### The Critical Insight
 
-**GREEN means the assertion PASSES, not just "no exception."**
+**RED means the test discriminates the missing behavior, not merely that something failed. GREEN means the assertion PASSES, not just "no exception."**
 
 If your implementation catches exceptions or returns default values, a test that previously threw `NotImplementedException` might now "pass" without actually verifying behavior. Always ensure GREEN comes from assertion success.
 
@@ -43,8 +46,27 @@ If your implementation catches exceptions or returns default values, a test that
 Before claiming RED:
 - [ ] Test file compiles without errors
 - [ ] Test executes (run it!)
-- [ ] Test fails (check the failure reason)
-- [ ] Failure is expected given no/stub implementation
+- [ ] The behavior the test is intended to require is identified
+- [ ] The test would fail when that behavior is absent
+- [ ] Failure is caused by the claimed behavior being absent
+- [ ] Failure is not caused by setup, fixtures, environment, infrastructure, or unrelated behavior
+
+### RED Discriminability
+
+For every test counted as evidence for new behavior, ask:
+
+> **Would an implementation without the required behavior satisfy these assertions?**
+
+- **No, because the assertions require that behavior:** valid RED evidence.
+- **Yes:** false green. Strengthen or replace the test before implementation proceeds.
+- **Yes, because the test protects behavior that already exists:** legitimate regression/support coverage, but do not count it as evidence for the new behavior.
+- **Cannot determine:** RED is unverified; do not claim a valid RED phase.
+
+This is a behavioral question, not a requirement to reconstruct repository history. Use the test's inputs and assertions together with the relevant implementation path to determine whether the behavior is actually required. If implementation is already present, a current passing result alone does not answer the question.
+
+**Expected-success tests need an additional path check.** Identify the decision or condition that is supposed to make success possible. If the expected result is also reachable through an unconditional, generic, fallback, or default path without evaluating that condition, the test is false green.
+
+Suite-level failure is not enough. Each test used as evidence for new behavior must reject an implementation without that behavior on its own; unrelated failing tests can conceal a false green.
 
 ---
 
@@ -285,6 +307,9 @@ public void MethodName_When_Condition_Should_ExpectedResult()
 | Anti-Pattern | Problem | Solution |
 |--------------|---------|----------|
 | Claiming RED on compile error | Not TDD - test doesn't exist yet | Ensure test compiles before claiming RED |
+| Claiming RED from setup, fixture, or environment failure | Intended behavior was not exercised | Fix the test environment and observe the behavioral failure |
+| Expected-success test can pass through a default path | Test does not require the new decision | Add assertions or inputs that discriminate the required condition |
+| Counting a passing regression test as new-behavior evidence | Existing behavior can satisfy it | Keep it as regression coverage and add a discriminating test |
 | Testing property existence | Compiler enforces this | Test behavior that uses the property |
 | Exact exception message match | Breaks on wording changes | Use `StringAssert.Contains()` for key context |
 | `Verify()` call counts | Tests implementation, not behavior | Test outputs and return values |

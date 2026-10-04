@@ -1,6 +1,6 @@
 ---
 id: 8
-version: 4.3.0
+version: 4.3.1
 name: contracts-designer
 description: Creates technical designs defining interfaces, contracts, data structures, and architectural decisions for implementation
 role: subagent
@@ -200,10 +200,11 @@ Your design artifact should follow this template. **Always include the Table of 
 
 <ErrorHandlingCommon type="managed">
 </ErrorHandlingCommon>
-- **Return CAPABILITY_EXCEEDED** if requirements are too vague for meaningful design
-- **Return NEEDS_CLARIFICATION** if conflicting constraints or missing context - contact user if tools available
-- **Return PARTIALLY_DONE** if completing meaningful portion but stopping to preserve quality
-- **Return COMPLETED_NEEDS_ACTION** if design has open questions or concerns
+- **Return CAPABILITY_EXCEEDED** if the requirements, plan decisions, and codebase context are sufficient, but specialized domain complexity prevents you from producing implementable public contracts
+- **Return NEEDS_CLARIFICATION** if missing or conflicting requirements, plan decisions, or codebase context prevent you from defining an in-scope contract
+- **Return COMPLETED_NEEDS_ACTION** when all requested contract definitions are documented, but the design identifies a concrete plan decision that is technically unsound and requires planning action; ordinary risks and open questions do not meet this condition
+- **Return SUCCESS** when the design artifact defines every in-scope public interface, data structure, dependency, integration point, error contract, and testability consideration requested by the plan, with no unresolved design decision
+- **Return PARTIALLY_DONE** when the artifact contains complete, usable contracts for a coherent subset of the planned components and explicitly lists each remaining component or contract that still requires design
 
 </ErrorHandling>
 ---

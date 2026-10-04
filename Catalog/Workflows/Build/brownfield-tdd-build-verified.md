@@ -1,8 +1,8 @@
 ---
-version: "2.3"
+version: "2.4"
 name: "Brownfield TDD Build-Verified Workflow"
 description: "New features or significant changes to an existing codebase requiring test-first development where compilation/build cannot be verified via standard terminal tools (e.g., PLC/SCL with proprietary toolchains, embedded systems, cross-compilation environments)."
-hint: "Field-verified (used for real PLC programming), not just theoretical. Use over standard brownfield-tdd whenever building/running tests requires a non-trivial toolchain — offloading that complexity onto a dedicated build-review agent keeps it out of the execution agents' context instead of overloading them with build/deploy mechanics."
+hint: "Field-verified (used for real PLC programming), not just theoretical. Use over standard brownfield-tdd whenever building and deployment require a non-trivial toolchain — offloading those mechanics onto a dedicated build-review agent keeps them out of the writer agents' context, while downstream reviewers execute tests."
 author: MOSAIC
 id: brownfield-tdd-build-verified
 referenced_agents:
@@ -36,7 +36,7 @@ artifacts:
   - Stage-{StageNumber}/implementation-review.md
 ---
 
-<Workflow type="core" name="brownfield-tdd-build-verified" version="2.3">
+<Workflow type="core" name="brownfield-tdd-build-verified" version="2.4">
 ## Brownfield TDD Build-Verified Workflow
 
 **Use when:** New features or significant changes to an **existing codebase** requiring test-first development where **compilation/build cannot be verified via standard terminal tools** (e.g., PLC/SCL with proprietary toolchains, embedded systems, cross-compilation environments). Adds a dedicated build-and-deploy step between code writing and code review. Review agents execute tests on the target platform to verify TDD RED/GREEN phases.
@@ -84,7 +84,7 @@ artifacts:
 
 Identical to `brownfield-tdd` except for how build/test execution is handled. In standard `brownfield-tdd`, the execution agents (test-writer-tdd, implementation-tdd, and their reviewers) are expected to build and run tests themselves via simple terminal commands. This workflow exists for cases where that path doesn't work — the build/test toolchain is complex enough (proprietary IDEs, COM automation, MCP servers, cross-compilation, target deployment) that making every execution agent competent at it would overload their context with mechanics unrelated to their actual job.
 
-The fix is a dedicated `build-review` agent that owns build/deploy/test-execution exclusively, inserted between each writer and its reviewer. This keeps the complex toolchain knowledge in one place instead of duplicating it across test-writer-tdd, implementation-tdd, tests-review-tdd, and implementation-review — each of those agents stays focused on its own concern and receives build results as an artifact rather than having to invoke the toolchain itself.
+The fix is a dedicated `build-review` agent that owns source import, build, and deployment exclusively, inserted between each writer and its reviewer. It does not execute tests. This keeps build-system and deployment mechanics in one place; downstream review agents use the deployment metadata in its report to execute tests and verify the appropriate TDD RED or GREEN outcome.
 
 Field-verified on real PLC/SCL programming work, not just a theoretical variant.
 
@@ -97,6 +97,7 @@ Field-verified on real PLC/SCL programming work, not just a theoretical variant.
 | 2.1 | 2026-08-17 | MOSAIC | Changelog tracking begins here; earlier revisions predate this record. |
 | 2.2 | 2026-08-26 | MOSAIC | Replace Unicode emoji with ASCII tokens in HITL column (TRUE/FALSE). |
 | 2.3 | 2026-09-28 | MOSAIC | Add Research.md to requirements-review inputs; its codebase alignment and feasibility checks run on research findings. |
+| 2.4 | 2026-09-29 | MOSAIC | Clarify toolchain responsibility: build-review imports, builds, and deploys but does not execute tests; downstream review agents execute tests and verify TDD RED/GREEN outcomes. |
 
 ---
 

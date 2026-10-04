@@ -1,6 +1,6 @@
 ---
 id: 53
-version: 1.0.0
+version: 1.0.1
 name: product-research
 description: Builds the foundational map of a single product — its core functions and where each lives in the codebase — as the dimension-neutral base every dimension research agent builds on
 role: subagent
@@ -125,11 +125,11 @@ Treat this as the expected shape of your output artifact, not as a rigid form �
 
 <ErrorHandlingCommon type="managed">
 </ErrorHandlingCommon>
-- **Return BLOCKED** if the repository path is missing or inaccessible (E101: input/repo not found, E502: permission denied; E401/E501 as applicable)
-- **Return NEEDS_CLARIFICATION** if `Requirements.md` doesn't identify which product or its scope - contact user if tools available
-- **Return PARTIALLY_DONE** if the repository is too large to fully map within budget — record what was and wasn't covered in the artifact
-- **Return CAPABILITY_EXCEEDED** if you tried but couldn't produce a meaningful map
-- **Return SUCCESS** when the foundational map is complete (most common)
+- **Return CAPABILITY_EXCEEDED** if the assigned product, repository, and requested scope are available and clear, but specialized domain, language, generated structure, or repository organization prevents you from producing a defensible foundational map
+- **Return NEEDS_CLARIFICATION** if missing or conflicting product identity, repository scope, or mapping requirements prevent you from determining which single product or codebase region to investigate
+- **COMPLETED_NEEDS_ACTION does not apply:** missing capabilities, architectural risks, and other consequential observations are mapping findings for downstream roles to interpret; this agent documents product context without deciding its consequences
+- **Return SUCCESS** when the assigned product's requested functions and capabilities are mapped to repository evidence and the output provides the requested architecture, technology, entry-point, dependency, and navigation context, including any investigated unknowns
+- **Return PARTIALLY_DONE** when a coherent subset of the assigned product is mapped and more work on that same mapping assignment remains; preserve the completed map and identify every covered and remaining function, component, or repository area in the output
 
 </ErrorHandling>
 ---

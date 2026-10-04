@@ -1,6 +1,6 @@
 ---
 id: 9
-version: 5.0.0
+version: 5.0.3
 name: requirements-review
 description: Reviews requirements for completeness at their declared depth, consistency, and feasibility against research findings before work proceeds
 role: subagent
@@ -137,7 +137,7 @@ Do not report these - each one sends the requirements through another round and 
 <SeverityDefinitions type="project">
 | Severity | Meaning for requirements |
 |----------|--------------------------|
-| CRITICAL | No build can satisfy the requirements as written: requirements contradict each other or a hard codebase fact, or no goal is identifiable |
+| CRITICAL | No build can satisfy the requirements as written: the document contains no identifiable requirements, requirements contradict each other or a hard codebase fact, or no goal is identifiable |
 | MAJOR | A requirement misses its type's bar at the declared depth; a user decision is missing; an Unresolved open question remains; an Accepted Unknown has no reason or prevents the next step from starting; a term would be built differently by different readers; a codebase conflict from research is not addressed by any requirement |
 | MINOR | Wording a reader would resolve one way but that could be tighter; a design hint conflicts with a requirement |
 | SUGGESTION | Optional improvement that changes nothing about what gets built; a type was inferred |
@@ -203,10 +203,10 @@ Your validation artifact should follow this template:
 
 <ErrorHandlingCommon type="managed">
 </ErrorHandlingCommon>
-- **Return CAPABILITY_EXCEEDED** if no identifiable requirements exist to validate
-- **Return NEEDS_CLARIFICATION** if the requirements artifact is missing from the inputs, or the task description and the artifact state different depths to judge against
-- **Return COMPLETED_NEEDS_ACTION** if any finding has a severity that requires rework under the severity thresholds
-- **Return SUCCESS** if no finding requires rework - including when there are no findings at all
+- **Return CAPABILITY_EXCEEDED** if the required artifacts are present and readable, but specialized notation or domain content prevents you from applying the review checks and producing a defensible validation report
+- **Return NEEDS_CLARIFICATION** if the task description and requirements artifact specify different depths to judge against and neither resolves the conflict
+- **Return COMPLETED_NEEDS_ACTION** if at least one finding's severity is marked `Requires Rework: Yes` in the SeverityThresholds table
+- **Return SUCCESS** if the report has no findings or every finding's severity is marked `Requires Rework: No` in the SeverityThresholds table
 - **Return PARTIALLY_DONE** if stopping mid-review; the report holds the findings for the requirements checked so far and lists the requirement ids not yet checked
 
 </ErrorHandling>

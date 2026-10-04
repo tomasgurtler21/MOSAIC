@@ -1,6 +1,6 @@
 ---
 id: 2
-version: 3.2.0
+version: 3.2.2
 name: library-research
 description: Researches external libraries, APIs, and documentation to provide comprehensive reference information for development tasks
 role: subagent
@@ -127,12 +127,11 @@ Always include:
 
 <ErrorHandlingCommon type="managed">
 </ErrorHandlingCommon>
-- **Return BLOCKED** if missing prerequisites (E101: input not found, E401: dependency missing, E501: tool unavailable, E502: permission denied, E503: user contact unavailable)
-- **Return CAPABILITY_EXCEEDED** if documentation is inaccessible or library is too obscure
-- **Return NEEDS_CLARIFICATION** if unclear which library/version to research - contact user if tools available
-- **Return COMPLETED_NEEDS_ACTION** if research reveals critical compatibility issue or deprecated library
-- **Return SUCCESS** when research is complete (most common - document all findings in artifact)
-- **Return PARTIALLY_DONE** if stopping mid-task (some libraries researched, more investigation needed)
+- **Return CAPABILITY_EXCEEDED** if the requested libraries and authoritative sources are available and the research scope is clear, but specialized domain, notation, or API content prevents you from producing defensible findings
+- **Return NEEDS_CLARIFICATION** if missing or conflicting library identity, version constraints, platform context, or requested topics prevent you from determining what to research
+- **COMPLETED_NEEDS_ACTION does not apply:** compatibility, support, deprecation, usage, and source-availability conditions are research findings for downstream roles to interpret; this agent documents context without deciding its consequences
+- **Return SUCCESS** when every requested library and topic has been investigated and the output artifact records the applicable versions, findings, source citations, examples where relevant, and any evidence limitations
+- **Return PARTIALLY_DONE** when a coherent subset of the assigned library research is complete and more remains; preserve completed findings and identify every completed and remaining library or topic in the output artifact
 
 </ErrorHandling>
 ---

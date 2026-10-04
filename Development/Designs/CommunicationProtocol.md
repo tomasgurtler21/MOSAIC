@@ -1,7 +1,7 @@
 ---
 id: communication-protocol
 type: protocol
-version: "1.12"
+version: "1.13"
 name: "Communication Protocol"
 description: "JSON message contract between the orchestrator and its subagents: task invocation, task response, status codes, error codes."
 author: MOSAIC
@@ -25,10 +25,10 @@ Deployment mechanics — which block goes where, how the block is bounded, what 
 
 ### 1.1 Subagent Variant
 
-<CommunicationProtocol type="core" name="Subagent" version="1.12">
+<CommunicationProtocol type="core" name="Subagent" version="1.13">
 ## Communication Protocol
 
-You operate under **Communication Protocol v1.12**. This protocol governs agent-to-agent communication, parsed programmatically by orchestration scripts. Both input and output are structured JSON - no conversational text.
+You operate under **Communication Protocol v1.13**. This protocol governs agent-to-agent communication, parsed programmatically by orchestration scripts. Both input and output are structured JSON - no conversational text.
 
 ### Protocol Authority
 
@@ -75,7 +75,7 @@ The current run's orchestration directory is exactly `Orchestration-{run_id}/`. 
 
 ### Artifact Format
 
-Orchestration artifacts and JSON responses use only ASCII characters (`U+0000`–`U+007F`). When reproducing non-ASCII source text (identifiers, comments, user-supplied strings), convert it to an ASCII equivalent before including it. Project source files are unchanged unless the task requires otherwise.
+Orchestration artifacts and JSON responses use only ASCII characters (`U+0000`–`U+007F`). Within JSON string values, preserve non-ASCII source text with JSON Unicode escape sequences (`\uXXXX`), using a surrogate pair for a code point above `U+FFFF`; the serialized artifact or response remains ASCII while a JSON parser reconstructs the original text. Outside JSON string values, convert non-ASCII source text to an ASCII equivalent. Project source files are unchanged unless the task requires otherwise.
 
 ### Human-in-the-Loop
 When `human_in_the_loop: true`:
@@ -153,7 +153,7 @@ A missing `input_files` path does not trigger `E101`; project-file lists are adv
 7. Only include `error_code` and `error_reason` if status is `BLOCKED`
 8. **Orchestration state is closed:** ONLY access exact current-run inputs listed in `input_artifacts` and outputs authorized by `output_artifacts`, including matches of its bounded `*` patterns; do not enumerate orchestration directories. Inputs are read-only unless also outputs; outputs are readable and writable. Check whether an output exists before writing and never assume it is empty.
 9. **Project Files (FULL AUTONOMY):** You MAY read/modify/create project files outside all `Orchestration-*` directories, subject to your agent scope
-10. **Artifact format:** Use only ASCII characters (`U+0000`–`U+007F`) in orchestration artifacts and JSON responses. Convert non-ASCII source text to an ASCII equivalent before including it
+10. **Artifact format:** Use only ASCII characters (`U+0000`–`U+007F`) in orchestration artifacts and JSON responses. Preserve non-ASCII text inside JSON strings with `\uXXXX` escapes and surrogate pairs where needed; outside JSON strings, convert it to an ASCII equivalent
 11. **Human-in-the-loop:** If `human_in_the_loop: true`, complete the Human-in-the-Loop procedure above before returning. (E503 if no user channel is available.)
 
 ### Artifact Provenance
@@ -191,10 +191,10 @@ The orchestrator compares this field against the `human_in_the_loop` value it di
 
 ### 1.2 Orchestrator Variant
 
-<CommunicationProtocol type="core" name="Orchestrator" version="1.12">
+<CommunicationProtocol type="core" name="Orchestrator" version="1.13">
 ## Communication Protocol
 
-You operate under **Communication Protocol v1.12**. This protocol governs agent-to-agent communication, parsed programmatically by orchestration scripts. Both input and output are structured JSON - no conversational text.
+You operate under **Communication Protocol v1.13**. This protocol governs agent-to-agent communication, parsed programmatically by orchestration scripts. Both input and output are structured JSON - no conversational text.
 
 ### Protocol Authority
 
@@ -1327,9 +1327,9 @@ The frontmatter `version` field is the protocol version. It appears in two furth
 
 | Where | Form | Read by |
 |---|---|---|
-| This file's frontmatter | `version: "1.12"` | The deployment tool, as the source of truth |
-| The region's opening tag `version` attribute | `version="1.12"` | Staleness checks |
-| The block's opening sentence | "You operate under **Communication Protocol v1.12**" | The agent |
+| This file's frontmatter | `version: "1.13"` | The deployment tool, as the source of truth |
+| The region's opening tag `version` attribute | `version="1.13"` | Staleness checks |
+| The block's opening sentence | "You operate under **Communication Protocol v1.13**" | The agent |
 
 The `version` attribute is what makes staleness checkable: a deployed agent whose region tag names an older version than this file's frontmatter is out of date, and the check is a string comparison against the attribute value — no parsing of prose, and no dependence on the wording of the sentence that follows.
 
@@ -1373,6 +1373,7 @@ Two things follow, and both are the point of merging rather than side effects. O
 
 | Version | Date | Summary |
 |---------|------|---------|
+| 1.13 | 2026-10-02 | **ASCII-safe preservation of Unicode in JSON.** Non-ASCII source text inside JSON string values is serialized with `\uXXXX` escapes, using surrogate pairs above `U+FFFF`, so orchestration artifacts and protocol responses remain ASCII without losing the original string value when parsed. Text outside JSON strings continues to use an ASCII equivalent. |
 | 1.12 | 2026-09-26 | **Artifact access, HITL review, status semantics, and input failure handling made operational.** Every file under any `Orchestration-*` directory is orchestration state; only authorized paths in the current run's directory are accessible. Inputs use exact paths; outputs may use bounded `*` patterns within one path segment. Inputs grant read access, outputs grant read/write access, and existing outputs are protected from blind replacement. The deployed invocation examples identify required fields, optional fields, and boolean defaults. `result_data` is present if and only if requested, with no arbitrary word limit. A `status_message` names modifications or states that nothing changed and why. The HITL review request inventories every changed path with its action and material-change summary while preserving the false-before-review and true-after-approval stamp sequence. `E503` escalates immediately; HITL is removed only after explicit human waiver. Status is now strictly assignment-local: `COMPLETED_NEEDS_ACTION` is a completed assignment whose agent-specific action condition was met; `PARTIALLY_DONE` is an incomplete but continuable assignment, including unresolved acceptance failures. The status table is the sole deployed status-selection guidance; duplicate Key Rules were removed. Subagents no longer receive routing actions, concrete targets come only from workflow configuration, and `CAPABILITY_EXCEEDED` escalates without agent substitution. A subagent rejects a malformed or out-of-scope invocation before work with `BLOCKED` and `E100`; an `E100` response omits an unusable correlation identifier rather than inventing one, and the orchestrator corrects the invocation or routing in its next dispatch. `E101` now means an explicitly required resource is absent and never follows from an advisory project-file hint alone; `E401` requires explicit evidence that prerequisite work is incomplete and is never inferred from absence. Stale maintainer references to separate provenance, a marker comment, and v1.9 were corrected. The `human_approved: true` flip covers exactly the output artifacts the approved review request covered: those the invocation wrote, plus any the task asked it to review, which is what lets a gate-discharge re-dispatch that writes no content complete the gate. Any other listed output keeps its prior stamp. Gate verification runs whatever status was returned, except `BLOCKED` with `E503`, which already reports that the gate could not run and is routed directly to escalation. It reads only output artifacts the invocation created or modified, so a listed but absent or unchanged output is not a gate miss. `constraints` is defined once: scope or deliverable restrictions the agent's instructions and inputs do not state — never method or environment facts, which are appended to `task_description`. The deployed input examples say so, and the coverage-threshold example was replaced with a scope restriction. §6.4's `PARTIALLY_DONE` example dispatches a fresh invocation of the same assignment rather than implying re-scoping, and §5.7's "prerequisite is missing" row is split into `E101` (explicitly required resource absent) and `E401` (explicit evidence of incomplete prerequisite work). After a HITL re-dispatch discharges the gate with `SUCCESS`, the orchestrator routes on and records the original invocation's status and error code, with `last_agent` naming the re-dispatch; any other re-dispatch status is routed as returned. Maintainer-text corrections: §3.6 rules 1 and 2 are separate list items again, and §14's rejected per-project extension now points to the custom `ProtocolExtension` sibling region that §10.3 specifies rather than to the agent's instruction body. |
 | 1.11 | 2026-09-03 | **E503 escalation priority corrected.** The orchestrator variant's error-code table previously listed E503 (USER_CONTACT_UNAVAILABLE) with "Re-invoke without HITL flag or escalate", making silent HITL bypass the primary option. Changed to "Escalate to human — re-invoke without HITL flag only if the human explicitly waives the gate." The old wording caused the script-mode orchestrator to resolve every E503 by dropping HITL, completing runs with zero human review despite the workflow declaring HITL on critical steps. The subagent variant is unchanged — its E503 row describes the condition, not the response. |
 | 1.10 | 2026-08-05 | **Artifact provenance merged in.** The provenance stamp — `run_id`, `created_by`, `human_approved`, written into every file named in `output_artifacts` — was a separate contract with its own document, version, and `<ArtifactProvenance type="managed">` region. It is now part of this contract: the text ships inside the subagent variant of §1.1, the reasoning is §9, and there is one version number where there were two. The merge is correct because the orchestrator **verifies** `human_approved` (§9.7) — a field it reads and routes on is hard interop, not an audit convenience, and it is the secondary layer under a JSON response that can otherwise claim anything. Two changes follow from the merge. The field formerly called `hitl_confirmed` is renamed **`human_approved`**: it is read from the artifact, where "HITL" is orchestration jargon a standalone reader does not hold, and "approved" is what the flip actually certifies — the user asked for no further changes. The rename is taken now because nothing yet reads the field, making this the cheapest it will ever be. And the **orchestrator variant gains a Verifying the Human-in-the-Loop Gate subsection** (§9.7), so the check the subagent variant promises is instructed on the side that must perform it; the orchestrator still stamps nothing (§9.9). Consequences: canonical document order drops from eight top-level slots to seven, and `<ArtifactProvenance type="managed">` and `<ArtifactProvenanceExtension type="project">` cease to exist. |
