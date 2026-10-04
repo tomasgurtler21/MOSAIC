@@ -16,6 +16,7 @@ import mosaic_logger_core as core
 import mosaic_logger_runstate as runstate
 import mosaic_logger_usage as usage
 import mosaic_logger_handlers_invocation as invocation
+import mosaic_logger_runner_mode as runner_mode
 
 HANDBACK_TOOL_NAME = "SubagentHandback"
 
@@ -24,6 +25,10 @@ def resolve_destination(ctx: "core.HookContext"):
     """Route tool event to orchestrator or subagent stream based on agent_id presence."""
     run_id = core.effective_run_id(ctx)
     if not ctx.agent_id:
+        mode = runner_mode.read_runner_mode()
+        if mode is not None and mode.agent_instance_id:
+            # Runner subagent role: the primary session is the invocation.
+            return ctx.paths.invocation_events(run_id, mode.agent_instance_id)
         return ctx.paths.orchestrator_events(run_id)
     agent_instance_id, _mapped = runstate.resolve_invocation(
         ctx.paths, run_id, ctx.agent_id
@@ -65,6 +70,9 @@ def _emit_tool_usage_records(ctx: "core.HookContext") -> None:
         return
     if not usage.tool_capture_enabled():
         return
+    mode = runner_mode.read_runner_mode()
+    if mode is not None and mode.agent_instance_id:
+        return  # Runner subagent role emits usage once, at SessionEnd.
     agent_instance_id, source = _resolve_usage_scope(ctx)
     usage.emit_usage_records(ctx, ctx.transcript_path, agent_instance_id, source)
 

@@ -14,6 +14,8 @@ import mosaic_logger_runstate as runstate
 import mosaic_logger_handlers_session as _session
 import mosaic_logger_handlers_invocation as _invocation
 import mosaic_logger_handlers_tools as _tools
+import mosaic_logger_handlers_runner as _runner
+import mosaic_logger_runner_mode as runner_mode
 
 
 # ---------------------------------------------------------------------------
@@ -45,11 +47,18 @@ _RUN_ID_PROMPT_FIELDS: dict = {
 def build_context(event: str, payload: dict) -> core.HookContext:
     """Construct the immutable per-firing context from an event name and parsed payload.
     The event name comes from sys.argv[1] (passed by the hook registration command).
-    Resolves the workspace root and LogPaths tree. Does not create directories."""
+    Resolves the workspace root and LogPaths tree. Does not create directories.
+    In Runner mode every orchestrator transcript gets a session-scoped name."""
     workspace_root = core.resolve_workspace_root(payload)
-    paths = core.build_paths(workspace_root)
+    mode = runner_mode.read_runner_mode()
+    paths = core.build_paths(workspace_root, mode is not None)
     timestamp = core.current_timestamp()
-    return core.HookContext(event, payload, workspace_root, paths, timestamp)
+    ctx = core.HookContext(event, payload, workspace_root, paths, timestamp)
+    ctx.runner_mode = mode
+    if mode is not None and mode.agent_type and ctx.agent_id is None:
+        # The primary session of a Runner subagent is the invocation itself.
+        ctx.agent_type = ctx.agent_type or mode.agent_type
+    return ctx
 
 
 def resolve_run_identity(ctx: core.HookContext) -> None:
@@ -65,9 +74,17 @@ def resolve_run_identity(ctx: core.HookContext) -> None:
     4. Miss. When both steps yield nothing, ctx.run_id stays None and
        core.effective_run_id continues to produce 'unknown-run'.
 
+    In Runner mode a valid MOSAIC_RUN_ID is the run identity and is used before
+    any of the above; no other source overrides it and nothing is cached.
+
     Never raises. Reports unexpected failures through core.debug_log.
     """
     try:
+        mode = ctx.runner_mode
+        if mode is not None and mode.run_id:
+            ctx.run_id = mode.run_id
+            return
+
         # Step 1: prompt-field extraction (highest priority, unchanged)
         prompt_run_id = None
         field_name = _RUN_ID_PROMPT_FIELDS.get(ctx.event)
@@ -134,14 +151,15 @@ def dispatch(event: str, raw_input: str) -> None:
 
         # Step 4: emit run_start on sessionStart
         try:
-            if ctx.event == "sessionStart":
+            if ctx.event == "sessionStart" and ctx.runner_mode is None:
                 _session.emit_run_start(ctx)
         except Exception as exc:
             core.debug_log("emit_run_start failed", exc)
 
         # Step 5: handler
         try:
-            handler = HANDLERS.get(ctx.event)
+            handler = _runner.handlers_for(ctx.runner_mode).get(ctx.event)
+            handler = handler or HANDLERS.get(ctx.event)
             if handler is not None:
                 handler(ctx)
         except Exception as exc:
@@ -149,7 +167,7 @@ def dispatch(event: str, raw_input: str) -> None:
 
         # Step 6: emit run_end on sessionEnd -- always runs
         try:
-            if ctx.event == "sessionEnd":
+            if ctx.event == "sessionEnd" and ctx.runner_mode is None:
                 outcome = ctx.field("reason")
                 _session.emit_run_end(ctx, outcome)
         except Exception as exc:

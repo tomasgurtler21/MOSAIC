@@ -17,6 +17,7 @@ import (
 	"mosaic-run/internal/domain"
 	"mosaic-run/internal/harness"
 	"mosaic-run/internal/harness/cliexec"
+	"mosaic-run/internal/harness/roleenv"
 )
 
 // Sentinel errors specific to OpenCodeAdapter, aliased onto the shared
@@ -45,7 +46,11 @@ type OpenCodeAdapter struct {
 	spawner        commonharness.Spawner
 	sink           commonharness.Sink
 	logger         domain.DebugLogger
+	roleEnv        roleenv.Config
 }
+
+// RunID returns the run id the adapter was constructed with ("" when unknown).
+func (a *OpenCodeAdapter) RunID() string { return a.roleEnv.RunID }
 
 // ExecutablePath implements domain.ExecutableRevealer. It returns the
 // executable path or command name this adapter was constructed with.
@@ -60,7 +65,7 @@ func NewOpenCodeAdapter(executablePath string, timeout time.Duration) *OpenCodeA
 // NewOpenCodeAdapterWithLogger creates an adapter that records every
 // invocation's raw stdout, raw stderr and outcome to the debug log. A nil
 // logger is normalised to domain.NopDebugLogger.
-func NewOpenCodeAdapterWithLogger(executablePath string, timeout time.Duration, logger domain.DebugLogger) *OpenCodeAdapter {
+func NewOpenCodeAdapterWithLogger(executablePath string, timeout time.Duration, logger domain.DebugLogger, opts ...roleenv.Option) *OpenCodeAdapter {
 	if timeout == 0 {
 		timeout = 30 * time.Minute
 	}
@@ -72,7 +77,7 @@ func NewOpenCodeAdapterWithLogger(executablePath string, timeout time.Duration, 
 		commonharness.WithTimeout(timeout),
 		commonharness.WithSink(sink),
 	)
-	return &OpenCodeAdapter{executablePath: executablePath, timeout: timeout, spawner: spawner, sink: sink, logger: logger}
+	return &OpenCodeAdapter{executablePath: executablePath, timeout: timeout, spawner: spawner, sink: sink, logger: logger, roleEnv: roleenv.NewConfig(opts...)}
 }
 
 // Invoke implements domain.HarnessAdapter.
@@ -94,6 +99,10 @@ func (a *OpenCodeAdapter) Invoke(ctx context.Context, agent domain.AgentReferenc
 		return domain.ProtocolResponse{}, fmt.Errorf("marshal request: %w", err)
 	}
 
+	runID := request.RunID
+	if runID == "" {
+		runID = a.roleEnv.RunID
+	}
 	spawnReq := commonharness.SpawnRequest{
 		Agent: commonharness.AgentRef{
 			Identifier:     agent.Identifier,
@@ -101,6 +110,7 @@ func (a *OpenCodeAdapter) Invoke(ctx context.Context, agent domain.AgentReferenc
 			Kind:           commonharness.InvocationKind(agent.InvocationKind),
 		},
 		Prompt:       string(reqBytes),
+		Env:          roleenv.SubagentEnv(runID, request.AgentInstanceID),
 		OutputFormat: "json",
 		// SystemPrompt carries a synthesized <env> block for BOTH invocation
 		// kinds, unlike ClaudeCodeAdapter (which only needs one for the
@@ -195,6 +205,7 @@ func (a *OpenCodeAdapter) InvokeRaw(ctx context.Context, agent domain.AgentRefer
 			Kind:           commonharness.InvocationKind(agent.InvocationKind),
 		},
 		Prompt:       string(payload),
+		Env:          roleenv.OrchestratorEnv(a.roleEnv.RunID),
 		OutputFormat: "json",
 		SystemPrompt: commonharness.EnvBlock(""),
 	}

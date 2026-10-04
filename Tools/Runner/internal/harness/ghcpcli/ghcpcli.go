@@ -33,6 +33,7 @@ import (
 	"mosaic-run/internal/domain"
 	"mosaic-run/internal/harness"
 	"mosaic-run/internal/harness/cliexec"
+	"mosaic-run/internal/harness/roleenv"
 )
 
 // Sentinel aliases, GHCP-specific names so they do not collide with the
@@ -55,8 +56,12 @@ type GHCPCLIAdapter struct {
 	spawner        commonharness.Spawner
 	sink           commonharness.Sink
 	logger         domain.DebugLogger
+	roleEnv        roleenv.Config
 	mode           commonharness.GHCPCLIPermissionMode
 }
+
+// RunID returns the run id the adapter was constructed with ("" when unknown).
+func (a *GHCPCLIAdapter) RunID() string { return a.roleEnv.RunID }
 
 // ExecutablePath implements domain.ExecutableRevealer. It returns the
 // executable path or command name this adapter was constructed with.
@@ -110,7 +115,7 @@ func NewGHCPCLIAdapterWithLogger(executablePath string, timeout time.Duration, l
 // Until then, NewGHCPCLIAdapter and NewGHCPCLIAdapterWithLogger remain the
 // primary constructors; this constructor is available for tests and future
 // production wiring.
-func NewGHCPCLIAdapterWithMode(executablePath string, timeout time.Duration, logger domain.DebugLogger, mode commonharness.GHCPCLIPermissionMode) *GHCPCLIAdapter {
+func NewGHCPCLIAdapterWithMode(executablePath string, timeout time.Duration, logger domain.DebugLogger, mode commonharness.GHCPCLIPermissionMode, opts ...roleenv.Option) *GHCPCLIAdapter {
 	if timeout == 0 {
 		timeout = 30 * time.Minute
 	}
@@ -122,7 +127,7 @@ func NewGHCPCLIAdapterWithMode(executablePath string, timeout time.Duration, log
 		commonharness.WithTimeout(timeout),
 		commonharness.WithSink(sink),
 	)
-	return &GHCPCLIAdapter{executablePath: executablePath, timeout: timeout, spawner: spawner, sink: sink, logger: logger, mode: mode}
+	return &GHCPCLIAdapter{executablePath: executablePath, timeout: timeout, spawner: spawner, sink: sink, logger: logger, roleEnv: roleenv.NewConfig(opts...), mode: mode}
 }
 
 // Invoke implements domain.HarnessAdapter.
@@ -144,6 +149,10 @@ func (a *GHCPCLIAdapter) Invoke(ctx context.Context, agent domain.AgentReference
 		return domain.ProtocolResponse{}, fmt.Errorf("marshal request: %w", err)
 	}
 
+	runID := request.RunID
+	if runID == "" {
+		runID = a.roleEnv.RunID
+	}
 	spawnReq := commonharness.SpawnRequest{
 		Agent: commonharness.AgentRef{
 			Identifier:     agent.Identifier,
@@ -151,6 +160,7 @@ func (a *GHCPCLIAdapter) Invoke(ctx context.Context, agent domain.AgentReference
 			Kind:           commonharness.InvocationKind(agent.InvocationKind),
 		},
 		Prompt:       string(reqBytes),
+		Env:          roleenv.SubagentEnv(runID, request.AgentInstanceID),
 		OutputFormat: "json",
 		GHCPCLIMode:  a.mode,
 		// SystemPrompt is deliberately left unset for both invocation kinds.
@@ -263,6 +273,7 @@ func (a *GHCPCLIAdapter) InvokeRaw(ctx context.Context, agent domain.AgentRefere
 			Kind:           commonharness.InvocationKind(agent.InvocationKind),
 		},
 		Prompt:       string(payload),
+		Env:          roleenv.OrchestratorEnv(a.roleEnv.RunID),
 		OutputFormat: "json",
 		GHCPCLIMode:  a.mode,
 	}

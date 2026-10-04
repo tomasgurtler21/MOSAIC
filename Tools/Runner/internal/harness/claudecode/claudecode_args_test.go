@@ -97,23 +97,6 @@ func TestClaudeCodeAdapter_OrdinaryInvocation_IncludesPermissionModeDontAsk(t *t
 	}
 }
 
-// TestClaudeCodeAdapter_OrdinaryInvocation_IncludesNoSessionPersistence
-// verifies that ordinary invocations include --no-session-persistence.
-func TestClaudeCodeAdapter_OrdinaryInvocation_IncludesNoSessionPersistence(t *testing.T) {
-	argsFile := setHelperEnv(t, "success")
-
-	adapter := claudecode.NewClaudeCodeAdapter(helperExe(t), 5*time.Second)
-	_, err := adapter.Invoke(context.Background(), ordinaryAgentRefCC(t), minimalClaudeRequest("test-agent#1"))
-	if err != nil {
-		t.Fatalf("unexpected error: %v", err)
-	}
-
-	args := readArgs(t, argsFile)
-	if !containsArg(args, "--no-session-persistence") {
-		t.Errorf("want --no-session-persistence in args, got %v", args)
-	}
-}
-
 // TestClaudeCodeAdapter_OrdinaryInvocation_NeverDangerouslySkipPermissions
 // verifies that --dangerously-skip-permissions is never present in ordinary
 // invocation arguments.
@@ -226,23 +209,6 @@ func TestClaudeCodeAdapter_OrchestratorInvocation_IncludesPermissionModeDontAsk(
 	args := readArgs(t, argsFile)
 	if !containsSequence(args, "--permission-mode", "dontAsk") {
 		t.Errorf("want --permission-mode dontAsk in orchestrator args (derived from agent tools frontmatter), got %v", args)
-	}
-}
-
-// TestClaudeCodeAdapter_OrchestratorInvocation_IncludesNoSessionPersistence
-// verifies that orchestrator invocations include --no-session-persistence.
-func TestClaudeCodeAdapter_OrchestratorInvocation_IncludesNoSessionPersistence(t *testing.T) {
-	argsFile := setHelperEnv(t, "success")
-
-	adapter := claudecode.NewClaudeCodeAdapter(helperExe(t), 5*time.Second)
-	_, err := adapter.Invoke(context.Background(), orchestratorAgentRefCC(t), minimalClaudeRequest("orchestrator-agent#1"))
-	if err != nil {
-		t.Fatalf("unexpected error: %v", err)
-	}
-
-	args := readArgs(t, argsFile)
-	if !containsArg(args, "--no-session-persistence") {
-		t.Errorf("want --no-session-persistence in orchestrator args, got %v", args)
 	}
 }
 

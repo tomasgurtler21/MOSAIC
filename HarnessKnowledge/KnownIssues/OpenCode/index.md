@@ -1,9 +1,9 @@
 # OpenCode — Issue Index
 
-> Last updated: 2026-09-10 (run 2)
+> Last updated: 2026-10-04 (OC-099 added from MOSAIC experiments)
 > Latest platform version: v1.18.30 (released 2026-09-09)
 
-## Active Issues (49)
+## Active Issues (50)
 
 | ID | Title | Type | Confidence | Impact | Workaround | Reproduced | Response |
 |----|-------|------|------------|--------|------------|------------|----------|
@@ -41,6 +41,7 @@
 | OC-096 | No timeout/idle-watchdog on any LLM stream (subagent or primary) — stalled response hangs session forever | Bug | Confirmed | HIGH | Partial | No | Unevaluated |
 | OC-097 | Plugin agent manifest `tools: {question: true}` doesn't override hardcoded default-deny — tool silently unavailable | Bug | Unverified | MEDIUM | Yes | No | Unevaluated |
 | OC-098 | Truncation is undocumented/unconfigurable, gives misleading recovery instructions for disabled tools, inconsistent hook ordering | Bug | Likely | MEDIUM | Partial | No | Unevaluated |
+| OC-099 | `session.idle` plugin handler not awaited on `opencode run` exit; work after its first `await` (incl. SDK calls) is lost | Limitation | Confirmed | HIGH | Yes | Yes | Mitigated |
 | OC-041 | Write tool fails silently on large files (~1000+ lines) | Bug | Confirmed | HIGH | Yes | No | Unevaluated |
 | OC-042 | Write tool has no guard against empty content, silently overwrites existing files with nothing | Bug | Confirmed | HIGH | Partial | No | Unevaluated |
 | OC-043 | Tool output truncation drops the most important content (background_output synthesis, read offset, grep head_limit) | Bug | Likely | HIGH | Partial | No | Unevaluated |

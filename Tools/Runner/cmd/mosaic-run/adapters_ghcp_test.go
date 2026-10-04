@@ -25,7 +25,7 @@ import (
 // existing TestBuildAdapter_Fake_ReturnsMockAdapter by asserting that Stage 4's
 // changes to buildAdapter have not removed or broken the fake case.
 func TestFakeHarness_RemainsSelectable(t *testing.T) {
-	h := buildAdapter(harness.FakeHarnessID, "", "", 30*time.Minute)
+	h := buildAdapter("", harness.FakeHarnessID, "", "", 30*time.Minute)
 	if _, ok := h.(*harness.MockAdapter); !ok {
 		t.Errorf("buildAdapter(%q) returned %T, want *harness.MockAdapter; "+
 			"the fake harness must remain constructible after Stage 4 changes",
@@ -37,7 +37,7 @@ func TestFakeHarness_RemainsSelectable(t *testing.T) {
 // adapter does not implement domain.ExecutableRevealer. The fake spawns no
 // process and has no executable path; exposing one would misrepresent it.
 func TestFakeHarness_DoesNotImplementExecutableRevealer(t *testing.T) {
-	h := buildAdapter(harness.FakeHarnessID, "some-path", "", 30*time.Minute)
+	h := buildAdapter("", harness.FakeHarnessID, "some-path", "", 30*time.Minute)
 	if _, ok := h.(domain.ExecutableRevealer); ok {
 		t.Errorf("buildAdapter(%q) implements domain.ExecutableRevealer; "+
 			"the fake adapter spawns no process and must not expose an executable path",
@@ -51,7 +51,7 @@ func TestFakeHarness_DoesNotImplementExecutableRevealer(t *testing.T) {
 // is unaffected. This pins the design constraint that buildAdapter's fake case
 // never inspects or stores the override.
 func TestFakeHarness_IgnoresExecutableOverride(t *testing.T) {
-	h := buildAdapter(harness.FakeHarnessID, "should-be-ignored", "", 30*time.Minute)
+	h := buildAdapter("", harness.FakeHarnessID, "should-be-ignored", "", 30*time.Minute)
 	if _, ok := h.(*harness.MockAdapter); !ok {
 		t.Errorf("buildAdapter(%q, override='should-be-ignored') returned %T, want *harness.MockAdapter; "+
 			"the fake harness must ignore the executable override",
@@ -114,7 +114,7 @@ func TestScanFlag_GHCPPermissionMode_AbsentFlag(t *testing.T) {
 // TestBuildAdapter_GHCPCli_BlanketMode_ProducesGHCPCLIAdapter verifies that
 // buildAdapter("ghcp-cli", ..., "blanket", ...) returns a *ghcpcli.GHCPCLIAdapter.
 func TestBuildAdapter_GHCPCli_BlanketMode_ProducesGHCPCLIAdapter(t *testing.T) {
-	h := buildAdapter(commonharness.HarnessIDGHCPCLI, "copilot", "blanket", 30*time.Minute)
+	h := buildAdapter("", commonharness.HarnessIDGHCPCLI, "copilot", "blanket", 30*time.Minute)
 	if _, ok := h.(*ghcpcli.GHCPCLIAdapter); !ok {
 		t.Errorf("buildAdapter(ghcp-cli, blanket) returned %T; want *ghcpcli.GHCPCLIAdapter", h)
 	}
@@ -123,7 +123,7 @@ func TestBuildAdapter_GHCPCli_BlanketMode_ProducesGHCPCLIAdapter(t *testing.T) {
 // TestBuildAdapter_GHCPCli_AllowlistMode_ProducesGHCPCLIAdapter verifies that
 // buildAdapter("ghcp-cli", ..., "allowlist", ...) returns a *ghcpcli.GHCPCLIAdapter.
 func TestBuildAdapter_GHCPCli_AllowlistMode_ProducesGHCPCLIAdapter(t *testing.T) {
-	h := buildAdapter(commonharness.HarnessIDGHCPCLI, "copilot", "allowlist", 30*time.Minute)
+	h := buildAdapter("", commonharness.HarnessIDGHCPCLI, "copilot", "allowlist", 30*time.Minute)
 	if _, ok := h.(*ghcpcli.GHCPCLIAdapter); !ok {
 		t.Errorf("buildAdapter(ghcp-cli, allowlist) returned %T; want *ghcpcli.GHCPCLIAdapter", h)
 	}
@@ -133,7 +133,7 @@ func TestBuildAdapter_GHCPCli_AllowlistMode_ProducesGHCPCLIAdapter(t *testing.T)
 // ghcpMode defaults to GHCPCLIModeBlanket inside buildAdapter (backward compatibility).
 func TestBuildAdapter_GHCPCli_EmptyMode_DefaultsToBlanket(t *testing.T) {
 	// Passing "" should produce a GHCPCLIAdapter (not a fake or panic).
-	h := buildAdapter(commonharness.HarnessIDGHCPCLI, "copilot", "", 30*time.Minute)
+	h := buildAdapter("", commonharness.HarnessIDGHCPCLI, "copilot", "", 30*time.Minute)
 	if _, ok := h.(*ghcpcli.GHCPCLIAdapter); !ok {
 		t.Errorf("buildAdapter(ghcp-cli, '') returned %T; want *ghcpcli.GHCPCLIAdapter (empty mode defaults to blanket)", h)
 	}
@@ -142,7 +142,7 @@ func TestBuildAdapter_GHCPCli_EmptyMode_DefaultsToBlanket(t *testing.T) {
 // TestBuildAdapter_GHCPCli_UnknownMode_DefaultsToBlanket verifies that an
 // unrecognised ghcpMode value defaults to GHCPCLIModeBlanket.
 func TestBuildAdapter_GHCPCli_UnknownMode_DefaultsToBlanket(t *testing.T) {
-	h := buildAdapter(commonharness.HarnessIDGHCPCLI, "copilot", "not-a-real-mode", 30*time.Minute)
+	h := buildAdapter("", commonharness.HarnessIDGHCPCLI, "copilot", "not-a-real-mode", 30*time.Minute)
 	if _, ok := h.(*ghcpcli.GHCPCLIAdapter); !ok {
 		t.Errorf("buildAdapter(ghcp-cli, 'not-a-real-mode') returned %T; want *ghcpcli.GHCPCLIAdapter (unknown mode defaults to blanket)", h)
 	}

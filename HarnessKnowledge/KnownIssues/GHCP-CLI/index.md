@@ -1,9 +1,9 @@
 # GitHub Copilot CLI — Issue Index
 
-> Last updated: 2026-09-10 (run 2)
-> Latest platform version: v1.0.83 (released 2026-09-04)
+> Last updated: 2026-10-04 (GC-020 added from MOSAIC experiments)
+> Latest platform version: v1.0.91 (released 2026-10-01); v1.0.92-3 pre-release out 2026-10-02
 
-## Active Issues (19)
+## Active Issues (20)
 
 | ID | Title | Type | Confidence | Impact | Workaround | Reproduced | Response |
 |----|-------|------|------------|--------|------------|------------|----------|
@@ -26,6 +26,7 @@
 | GC-017 | `preToolUse` hook `ask` decision auto-approved by TUI since v1.0.53 | Bug | Unverified | HIGH | Partial | No | Unevaluated |
 | GC-018 | `--allow-tool='shell(docker ps)'` pattern matching fails for non-git commands | Bug | Unverified | HIGH | Partial | No | Unevaluated |
 | GC-019 | Non-interactive `--yolo` bypasses `disableBypassPermissionsMode` managed setting | Bug | Unverified | MEDIUM | No | No | Unevaluated |
+| GC-020 | Repo-level hooks (`.github/hooks/*.json`) silently not loaded in `-p` mode unless the working directory equals or is under a `trustedFolders` entry of `config.json` (exit 0, no warning) | Limitation | Confirmed | HIGH | Yes | Yes | Mitigated |
 
 ## Resolved / Retired Issues (0)
 

@@ -154,6 +154,17 @@ var rules = []rule{
 		},
 	},
 	{
+		dir:  "internal/mosaiclog",
+		desc: "mosaiclog is a leaf log writer: must only import domain from this module",
+		forbidPrefix: []string{
+			modulePrefix + "internal/artifact",
+			modulePrefix + "internal/cli",
+			modulePrefix + "internal/harness",
+			modulePrefix + "internal/session",
+			modulePrefix + "internal/tui",
+		},
+	},
+	{
 		dir:  "internal/cli",
 		desc: "cli is an adapter frontend: must not import the tui sibling frontend",
 		forbidPrefix: []string{

@@ -258,6 +258,8 @@ func TestHook_Variant_ClaudeCode_Files_TargetNames(t *testing.T) {
 		"mosaic_logger_handlers_tools.py":      true,
 		"mosaic_logger_artifacts.py":           true,
 		"mosaic_logger_usage.py":               true,
+		"mosaic_logger_runner_mode.py":         true,
+		"mosaic_logger_handlers_runner.py":     true,
 		"hook.yaml":                            true,
 	}
 	for _, f := range v.Files {
@@ -437,6 +439,8 @@ func TestHook_Variant_GhcpCli_Files_TargetNames(t *testing.T) {
 		"mosaic_logger_handlers_invocation.py": true,
 		"mosaic_logger_handlers_tools.py":      true,
 		"mosaic_logger_artifacts.py":           true,
+		"mosaic_logger_runner_mode.py":         true,
+		"mosaic_logger_handlers_runner.py":     true,
 		"hook.yaml":                            true,
 	}
 	for _, f := range v.Files {

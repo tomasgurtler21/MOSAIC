@@ -29,7 +29,7 @@ import (
 // is the primary AC3.1 assertion: the right adapter type is instantiated for
 // the real Claude Code CLI.
 func TestBuildAdapter_ClaudeCode_ReturnsClaudeCodeAdapter(t *testing.T) {
-	h := buildAdapter("claude-code", "/custom/claude", "", 45*time.Minute)
+	h := buildAdapter("", "claude-code", "/custom/claude", "", 45*time.Minute)
 	if _, ok := h.(*claudecode.ClaudeCodeAdapter); !ok {
 		t.Errorf("buildAdapter(claude-code) returned %T, want *claudecode.ClaudeCodeAdapter", h)
 	}
@@ -38,7 +38,7 @@ func TestBuildAdapter_ClaudeCode_ReturnsClaudeCodeAdapter(t *testing.T) {
 // TestBuildAdapter_Fake_ReturnsMockAdapter verifies that "fake" constructs a
 // *harness.MockAdapter, confirming backward-compatible default behaviour (AC3.2).
 func TestBuildAdapter_Fake_ReturnsMockAdapter(t *testing.T) {
-	h := buildAdapter("fake", "", "", 0)
+	h := buildAdapter("", "fake", "", "", 0)
 	if _, ok := h.(*harness.MockAdapter); !ok {
 		t.Errorf("buildAdapter(fake) returned %T, want *harness.MockAdapter", h)
 	}
@@ -48,7 +48,7 @@ func TestBuildAdapter_Fake_ReturnsMockAdapter(t *testing.T) {
 // harnessStr falls back to MockAdapter without panicking. Unknown values are
 // rejected upstream by cli.Run (AC3.8); buildAdapter is a safe fallback.
 func TestBuildAdapter_Unknown_ReturnsMockAdapter(t *testing.T) {
-	h := buildAdapter("unknown-harness", "", "", 0)
+	h := buildAdapter("", "unknown-harness", "", "", 0)
 	if _, ok := h.(*harness.MockAdapter); !ok {
 		t.Errorf("buildAdapter(unknown-harness) returned %T, want *harness.MockAdapter", h)
 	}
@@ -59,7 +59,7 @@ func TestBuildAdapter_Unknown_ReturnsMockAdapter(t *testing.T) {
 // runs) is treated as the 30-minute default, not a zero-timeout adapter. The
 // returned adapter must still be a ClaudeCodeAdapter.
 func TestBuildAdapter_ClaudeCode_ZeroTimeoutDefaultsTo30Min(t *testing.T) {
-	h := buildAdapter("claude-code", "claude", "", 0)
+	h := buildAdapter("", "claude-code", "claude", "", 0)
 	if _, ok := h.(*claudecode.ClaudeCodeAdapter); !ok {
 		t.Errorf("buildAdapter(claude-code, timeout=0) returned %T, want *claudecode.ClaudeCodeAdapter", h)
 	}
@@ -70,7 +70,7 @@ func TestBuildAdapter_ClaudeCode_ZeroTimeoutDefaultsTo30Min(t *testing.T) {
 // is absent) produces a valid ClaudeCodeAdapter. This closes AC3.4's default
 // propagation gap.
 func TestBuildAdapter_ClaudeCode_DefaultPath(t *testing.T) {
-	h := buildAdapter("claude-code", "claude", "", 30*time.Minute)
+	h := buildAdapter("", "claude-code", "claude", "", 30*time.Minute)
 	if _, ok := h.(*claudecode.ClaudeCodeAdapter); !ok {
 		t.Errorf("buildAdapter(claude-code, claude, 30m) returned %T, want *claudecode.ClaudeCodeAdapter", h)
 	}
@@ -80,7 +80,7 @@ func TestBuildAdapter_ClaudeCode_DefaultPath(t *testing.T) {
 // executable path and a non-default timeout both produce a ClaudeCodeAdapter.
 // Covers the combined AC3.3 + AC3.4 propagation path.
 func TestBuildAdapter_ClaudeCode_CustomPathAndTimeout(t *testing.T) {
-	h := buildAdapter("claude-code", "/opt/claude/bin/claude", "", 90*time.Second)
+	h := buildAdapter("", "claude-code", "/opt/claude/bin/claude", "", 90*time.Second)
 	if _, ok := h.(*claudecode.ClaudeCodeAdapter); !ok {
 		t.Errorf("buildAdapter(claude-code, custom path/timeout) returned %T, want *claudecode.ClaudeCodeAdapter", h)
 	}
@@ -91,7 +91,7 @@ func TestBuildAdapter_ClaudeCode_CustomPathAndTimeout(t *testing.T) {
 // primary AC4.3 assertion: the new catalog entry resolves to its own
 // adapter, mirroring TestBuildAdapter_ClaudeCode_ReturnsClaudeCodeAdapter.
 func TestBuildAdapter_OpenCode_ReturnsOpenCodeAdapter(t *testing.T) {
-	h := buildAdapter("opencode", "/custom/opencode", "", 45*time.Minute)
+	h := buildAdapter("", "opencode", "/custom/opencode", "", 45*time.Minute)
 	if _, ok := h.(*opencode.OpenCodeAdapter); !ok {
 		t.Errorf("buildAdapter(opencode) returned %T, want *opencode.OpenCodeAdapter", h)
 	}
@@ -101,7 +101,7 @@ func TestBuildAdapter_OpenCode_ReturnsOpenCodeAdapter(t *testing.T) {
 // timeout for "opencode" is treated as the 30-minute default, mirroring the
 // claude-code case.
 func TestBuildAdapter_OpenCode_ZeroTimeoutDefaultsTo30Min(t *testing.T) {
-	h := buildAdapter("opencode", "opencode", "", 0)
+	h := buildAdapter("", "opencode", "opencode", "", 0)
 	if _, ok := h.(*opencode.OpenCodeAdapter); !ok {
 		t.Errorf("buildAdapter(opencode, timeout=0) returned %T, want *opencode.OpenCodeAdapter", h)
 	}
@@ -112,7 +112,7 @@ func TestBuildAdapter_OpenCode_ZeroTimeoutDefaultsTo30Min(t *testing.T) {
 // an unrecognised value must still fall back to MockAdapter, and adding the
 // "opencode" case must not have widened the default arm's match.
 func TestBuildAdapter_Unknown_StillReturnsMockAdapter_AfterOpenCodeAdded(t *testing.T) {
-	h := buildAdapter("still-unknown-harness", "", "", 0)
+	h := buildAdapter("", "still-unknown-harness", "", "", 0)
 	if _, ok := h.(*harness.MockAdapter); !ok {
 		t.Errorf("buildAdapter(still-unknown-harness) returned %T, want *harness.MockAdapter", h)
 	}
@@ -129,7 +129,7 @@ func TestBuildAdapter_Unknown_StillReturnsMockAdapter_AfterOpenCodeAdded(t *test
 
 func TestBuildAdapter_CatalogCoverage_EveryEntryResolvesToARealAdapter(t *testing.T) {
 	for _, entry := range commonharness.CLIHarnesses() {
-		h := buildAdapter(entry.ID, "some-path", "", 5*time.Minute)
+		h := buildAdapter("", entry.ID, "some-path", "", 5*time.Minute)
 		if _, isFake := h.(*harness.MockAdapter); isFake {
 			t.Errorf("buildAdapter(%q) returned *harness.MockAdapter; every catalog entry must resolve to a real adapter, or this composition root has silently missed a case", entry.ID)
 		}

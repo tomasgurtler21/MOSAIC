@@ -294,6 +294,8 @@ The clearest way to prove this is **the same workflow and the same fixtures, run
 
 In Auto-review, the routing fixture's findings rule simply never fires. That the run finishes without ever firing it is the proof.
 
+The workflow has two rows: a creator, then a reviewer whose `On Findings` names the creator. A one-row workflow whose reviewer names itself does not work: the findings target resolves to the nearest row *above* the row that ran, and that row is never its own candidate (Design.md §2.4, nearest-preceding rule). A self-target therefore counts as no target, and Auto-review deviates just as Auto does.
+
 ### 7.2 `preconsult-advice` Needs Both Kinds of Dispatch
 
 Pre-consultation advice is added only to dispatches the Runner builds itself, never to ones the orchestrator writes. To show the "never" half, the run needs both kinds — so this workflow also causes one deviation. The echoing stub (E2) then shows the advice present on the auto-built dispatch and absent on the orchestrator-written one.

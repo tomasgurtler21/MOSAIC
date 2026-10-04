@@ -4,9 +4,10 @@ mosaictest_script: 1
 
 # MosaicTest Script: findings-loop
 
-Marker-gated. First invocation writes the marker and returns COMPLETED_NEEDS_ACTION. Second
-invocation finds the marker and returns SUCCESS. This gives exactly two passes through the
-single workflow row, regardless of who routes the second dispatch.
+Marker-gated. Bound to row 2 (the reviewer) in findings-loop. First invocation writes the
+marker and returns COMPLETED_NEEDS_ACTION, which sends the run back to the creator on row 1.
+Second invocation finds the marker and returns SUCCESS. This gives exactly two passes through
+the reviewer row, regardless of who routes the route-back.
 
 ## Selector
 marker-artifact: MosaicTestMarker.md
@@ -19,7 +20,7 @@ COMPLETED_NEEDS_ACTION
 
 ### Message
 ~~~
-row 1 / RESEARCH / marker absent / wrote MosaicTestMarker.md / returning COMPLETED_NEEDS_ACTION
+row 2 / REVIEW / reviewer / marker absent / wrote MosaicTestMarker.md / returning COMPLETED_NEEDS_ACTION
 ~~~
 
 ### Write
@@ -34,7 +35,7 @@ SUCCESS
 
 ### Message
 ~~~
-row 1 / RESEARCH / marker present / returning SUCCESS
+row 2 / REVIEW / reviewer / marker present / returning SUCCESS
 ~~~
 
 ### Write

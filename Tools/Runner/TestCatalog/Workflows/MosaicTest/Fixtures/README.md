@@ -60,7 +60,7 @@ Three constraints force this layout, and each one is a way a hand-assembled seed
 |------|----------|
 | `{workflow-id}/Requirements.md` | Seed-rule placeholder. Never read. |
 | `{workflow-id}/Plan.md` | Pre-placed stage table, for workflows that need one. |
-| `{workflow-id}/MosaicTestRouting.md` | Routing fixture for the stub orchestrator, for workflows run in a mode that consults it. Fixed filename — a consultation carries no artifact paths, so there is no per-invocation channel to bind a fixture through. |
+| `{workflow-id}/MosaicTestRouting.md` | Routing fixture for the stub orchestrator. **Required for every workflow whose `pre_consult` is not `false`**, which is all of them by default: the run-start pre-consultation reads its `## Pre-Consultation` section. A workflow that never routes through the orchestrator still needs one, with `none` and no rules; a later consultation then matches no rule and stops loudly. Without the file the pre-consultation answer depends on how the model words "fixture not found", and the run passes or fails at random. Fixed filename — a consultation carries no artifact paths, so there is no per-invocation channel to bind a fixture through. |
 | `{workflow-id}/MosaicTestScript/` | Behaviour scripts for that workflow. Named for behaviour, never for row number. |
 
 Scripts live under the workflow that uses them and are not shared. No two workflows currently need identical behaviour, so sharing would buy nothing while forcing a layout that trips the prefix rule above. Two workflows that genuinely need one script should hold identical copies — a fixture is a specimen, and drift between two copies is a signal worth seeing rather than a duplication worth removing.

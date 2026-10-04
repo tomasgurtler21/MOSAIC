@@ -12,6 +12,7 @@ import (
 	"mosaic-run/internal/harness/claudecode"
 	"mosaic-run/internal/harness/ghcpcli"
 	"mosaic-run/internal/harness/opencode"
+	"mosaic-run/internal/harness/roleenv"
 )
 
 // newLoggedArtifactStore builds the run's artifact store and records a debug
@@ -63,11 +64,15 @@ func newLoggedArtifactStore(path string, logger domain.DebugLogger) domain.Artif
 // CLI adapter is constructed with the logger so that invocation I/O is
 // captured in the debug log. When omitted, the adapter uses a no-op logger.
 // The fake adapter ignores the logger in all cases.
-func buildAdapter(harnessStr, execPathStr, ghcpMode string, timeout time.Duration, loggers ...domain.DebugLogger) domain.HarnessAdapter {
+//
+// runFolder is the absolute Orchestration-{run_id} folder of the run the adapter
+// is bound to; "" or a non-run folder means no run id is supplied.
+func buildAdapter(runFolder, harnessStr, execPathStr, ghcpMode string, timeout time.Duration, loggers ...domain.DebugLogger) domain.HarnessAdapter {
 	var logger domain.DebugLogger = domain.NopDebugLogger{}
 	if len(loggers) > 0 && loggers[0] != nil {
 		logger = loggers[0]
 	}
+	runOpts := runIDOptions(runFolder)
 	switch harnessStr {
 	case commonharness.HarnessIDClaudeCode:
 		exe := execPathStr
@@ -77,7 +82,7 @@ func buildAdapter(harnessStr, execPathStr, ghcpMode string, timeout time.Duratio
 		if timeout <= 0 {
 			timeout = 30 * time.Minute
 		}
-		return claudecode.NewClaudeCodeAdapterWithLogger(exe, timeout, logger)
+		return claudecode.NewClaudeCodeAdapterWithLogger(exe, timeout, logger, runOpts...)
 	case commonharness.HarnessIDOpenCode:
 		exe := execPathStr
 		if exe == "" {
@@ -86,7 +91,7 @@ func buildAdapter(harnessStr, execPathStr, ghcpMode string, timeout time.Duratio
 		if timeout <= 0 {
 			timeout = 30 * time.Minute
 		}
-		return opencode.NewOpenCodeAdapterWithLogger(exe, timeout, logger)
+		return withOpenCodeSafetyNet(opencode.NewOpenCodeAdapterWithLogger(exe, timeout, logger, runOpts...), runFolder, logger)
 	case commonharness.HarnessIDGHCPCLI:
 		exe := execPathStr
 		if exe == "" {
@@ -99,10 +104,23 @@ func buildAdapter(harnessStr, execPathStr, ghcpMode string, timeout time.Duratio
 		if mode != commonharness.GHCPCLIModeBlanket && mode != commonharness.GHCPCLIModePartialAllowlist {
 			mode = commonharness.GHCPCLIModeBlanket
 		}
-		return ghcpcli.NewGHCPCLIAdapterWithMode(exe, timeout, logger, mode)
+		return ghcpcli.NewGHCPCLIAdapterWithMode(exe, timeout, logger, mode, runOpts...)
 	default: // "fake" or unknown
 		return harness.NewMockAdapter()
 	}
+}
+
+// runIDOptions returns the adapter option carrying the run id derived from
+// runFolder, or no option when runFolder is empty or not a run folder.
+func runIDOptions(runFolder string) []roleenv.Option {
+	if runFolder == "" {
+		return nil
+	}
+	runID, ok := domain.ParseRunFolder(filepath.Base(runFolder))
+	if !ok {
+		return nil
+	}
+	return []roleenv.Option{roleenv.WithRunID(runID)}
 }
 
 // realClock provides the current UTC time.

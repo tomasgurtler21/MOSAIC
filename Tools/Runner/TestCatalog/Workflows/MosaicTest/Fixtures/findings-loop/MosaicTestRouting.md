@@ -6,12 +6,14 @@ mosaictest_routing: 1
 
 Used only in the Auto mode run. In Auto-review the engine auto-routes CNA and never consults.
 
-One rule: after the stub returns COMPLETED_NEEDS_ACTION, dispatch the same agent again. The
-re-dispatch's SUCCESS is routed by the engine (On Success = COMPLETE), so no second rule is
-needed.
+One rule: after the reviewer (row 2) returns COMPLETED_NEEDS_ACTION, dispatch the creator
+again. The Runner binds a consultant dispatch to the first row naming the agent, which is
+row 1 (the creator). From there the engine routes on its own: the creator's SUCCESS goes to the
+reviewer via `next`, and the reviewer's second SUCCESS ends the run via `On Success = COMPLETE`.
+No second rule is needed.
 
-If the orchestrator is consulted after SUCCESS, no rule matches and the stub stops — catching
-a mode confusion where the run reaches the orchestrator when it should not.
+If the orchestrator is consulted after any SUCCESS, no rule matches and the stub stops. That
+catches a mode mix-up where the run reaches the orchestrator when it should not.
 
 ## Pre-Consultation
 none
@@ -26,7 +28,7 @@ mosaictest-scripted
 
 ### TaskDescription
 ~~~
-MOSAICTEST-FINDINGS-REDISPATCH / orchestrator re-dispatching after CNA deviation / marker should now be present
+MOSAICTEST-FINDINGS-REDISPATCH / orchestrator re-dispatching the creator after the reviewer's CNA deviation
 ~~~
 
 ### Overrides

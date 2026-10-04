@@ -28,7 +28,7 @@ import (
 	"github.com/mattn/go-isatty"
 )
 
-const ToolVersion = "1.3.0"
+const ToolVersion = "1.4.0"
 
 // wantsTUI reports whether mosaic-run should launch the interactive TUI.
 // The TUI is launched when:
@@ -187,7 +187,7 @@ func runCLIMode(args, cobraArgs []string) int {
 
 	// Build the harness adapter via buildAdapter, passing the process logger
 	// so that invocation I/O is captured in the debug log.
-	h := buildAdapter(harnessStr, execPathStr, ghcpPermissionMode, invocationTimeout, logger)
+	h := buildAdapter(runIdentity.RunFolder, harnessStr, execPathStr, ghcpPermissionMode, invocationTimeout, logger)
 
 	// Extract the raw-JSON transport if the selected harness adapter implements it.
 	// Production adapters implement both HarnessAdapter and RawInvoker over the same
@@ -211,7 +211,7 @@ func runCLIMode(args, cobraArgs []string) int {
 	// Wire the session with the resolved run-scoped store and all port dependencies.
 	// The store path matches runIdentity.RunFolder, so session I/O and the COMPLETED
 	// marker write both target the same Orchestration-{run_id}/Orchestration.md file.
-	sess := session.New(session.Deps{
+	var sess session.Session = session.New(session.Deps{
 		Harness:     h,
 		Store:       store,
 		Clock:       &realClock{},
@@ -228,5 +228,9 @@ func runCLIMode(args, cobraArgs []string) int {
 	// Pass the pre-resolved store and identity so that cli.Run skips its own
 	// resolution step and uses the same run folder that was used to wire the session.
 	// Use cobraArgs (not args) so the entry-point-only --dev flag does not reach cobra.
-	return cli.Run(context.Background(), cobraArgs, store, runIdentity, sess, os.Stdout, os.Stderr)
+	sess = withGHCPTrustPreflight(sess, runIdentity.RunFolder, harnessStr, interact, false, logger)
+	sess = newRunLifecycleSession(sess, runLogConfig{RunFolder: runIdentity.RunFolder, HarnessID: harnessStr, Debug: logger, Clock: &realClock{}})
+	runCtx, releaseRunCtx := newCLIRunContext(context.Background(), osInterrupt)
+	defer releaseRunCtx()
+	return cli.Run(runCtx, cobraArgs, store, runIdentity, sess, os.Stdout, os.Stderr)
 }

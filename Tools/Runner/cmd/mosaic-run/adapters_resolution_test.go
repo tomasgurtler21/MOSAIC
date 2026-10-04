@@ -54,7 +54,7 @@ func requireExecutableRevealer(t *testing.T, h domain.HarnessAdapter) domain.Exe
 // RED: the claude-code case currently passes the override directly without an
 // empty-string guard, so ExecutablePath() returns "" not "claude".
 func TestBuildAdapter_ClaudeCode_NoOverride_ResolvesDefaultClaude(t *testing.T) {
-	h := buildAdapter(commonharness.HarnessIDClaudeCode, "", "", 30*time.Minute)
+	h := buildAdapter("", commonharness.HarnessIDClaudeCode, "", "", 30*time.Minute)
 	rev := requireExecutableRevealer(t, h)
 
 	got := rev.ExecutablePath()
@@ -69,7 +69,7 @@ func TestBuildAdapter_ClaudeCode_NoOverride_ResolvesDefaultClaude(t *testing.T) 
 // when no executable override is supplied, buildAdapter resolves the opencode
 // harness to its per-harness default executable "opencode".
 func TestBuildAdapter_OpenCode_NoOverride_ResolvesDefaultOpenCode(t *testing.T) {
-	h := buildAdapter(commonharness.HarnessIDOpenCode, "", "", 30*time.Minute)
+	h := buildAdapter("", commonharness.HarnessIDOpenCode, "", "", 30*time.Minute)
 	rev := requireExecutableRevealer(t, h)
 
 	got := rev.ExecutablePath()
@@ -83,7 +83,7 @@ func TestBuildAdapter_OpenCode_NoOverride_ResolvesDefaultOpenCode(t *testing.T) 
 // when no executable override is supplied, buildAdapter resolves the ghcp-cli
 // harness to its per-harness default executable "copilot".
 func TestBuildAdapter_GHCPCli_NoOverride_ResolvesDefaultCopilot(t *testing.T) {
-	h := buildAdapter(commonharness.HarnessIDGHCPCLI, "", "blanket", 30*time.Minute)
+	h := buildAdapter("", commonharness.HarnessIDGHCPCLI, "", "blanket", 30*time.Minute)
 	rev := requireExecutableRevealer(t, h)
 
 	got := rev.ExecutablePath()
@@ -99,7 +99,7 @@ func TestBuildAdapter_GHCPCli_NoOverride_ResolvesDefaultCopilot(t *testing.T) {
 // of the reported failure: the GHCP CLI harness was spawning "claude" because
 // the pre-scan injected "claude" as a fallback before buildAdapter was called.
 func TestBuildAdapter_GHCPCli_NoOverride_DoesNotResolveClaude(t *testing.T) {
-	h := buildAdapter(commonharness.HarnessIDGHCPCLI, "", "blanket", 30*time.Minute)
+	h := buildAdapter("", commonharness.HarnessIDGHCPCLI, "", "blanket", 30*time.Minute)
 	rev := requireExecutableRevealer(t, h)
 
 	if got := rev.ExecutablePath(); got == "claude" {
@@ -113,7 +113,7 @@ func TestBuildAdapter_GHCPCli_NoOverride_DoesNotResolveClaude(t *testing.T) {
 // cross-harness property for the opencode harness: with no override, it must
 // not resolve to "claude".
 func TestBuildAdapter_OpenCode_NoOverride_DoesNotResolveClaude(t *testing.T) {
-	h := buildAdapter(commonharness.HarnessIDOpenCode, "", "", 30*time.Minute)
+	h := buildAdapter("", commonharness.HarnessIDOpenCode, "", "", 30*time.Minute)
 	rev := requireExecutableRevealer(t, h)
 
 	if got := rev.ExecutablePath(); got == "claude" {
@@ -141,7 +141,7 @@ func TestBuildAdapter_OpenCode_NoOverride_DoesNotResolveClaude(t *testing.T) {
 // regardless of the per-harness default.
 func TestBuildAdapter_ClaudeCode_WithOverride_UsesOverride(t *testing.T) {
 	const override = "/opt/custom/claude"
-	h := buildAdapter(commonharness.HarnessIDClaudeCode, override, "", 30*time.Minute)
+	h := buildAdapter("", commonharness.HarnessIDClaudeCode, override, "", 30*time.Minute)
 	rev := requireExecutableRevealer(t, h)
 
 	if got := rev.ExecutablePath(); got != override {
@@ -155,7 +155,7 @@ func TestBuildAdapter_ClaudeCode_WithOverride_UsesOverride(t *testing.T) {
 // per-harness default of "opencode".
 func TestBuildAdapter_OpenCode_WithOverride_UsesOverride(t *testing.T) {
 	const override = "/opt/custom/opencode"
-	h := buildAdapter(commonharness.HarnessIDOpenCode, override, "", 30*time.Minute)
+	h := buildAdapter("", commonharness.HarnessIDOpenCode, override, "", 30*time.Minute)
 	rev := requireExecutableRevealer(t, h)
 
 	if got := rev.ExecutablePath(); got != override {
@@ -169,7 +169,7 @@ func TestBuildAdapter_OpenCode_WithOverride_UsesOverride(t *testing.T) {
 // per-harness default of "copilot".
 func TestBuildAdapter_GHCPCli_WithOverride_UsesOverride(t *testing.T) {
 	const override = "/opt/custom/copilot"
-	h := buildAdapter(commonharness.HarnessIDGHCPCLI, override, "blanket", 30*time.Minute)
+	h := buildAdapter("", commonharness.HarnessIDGHCPCLI, override, "blanket", 30*time.Minute)
 	rev := requireExecutableRevealer(t, h)
 
 	if got := rev.ExecutablePath(); got != override {
@@ -193,7 +193,7 @@ func TestBuildAdapter_AllRealHarnesses_OverrideWinsOverDefault(t *testing.T) {
 	for _, tc := range cases {
 		tc := tc
 		t.Run(tc.harnessID, func(t *testing.T) {
-			h := buildAdapter(tc.harnessID, override, "", 30*time.Minute)
+			h := buildAdapter("", tc.harnessID, override, "", 30*time.Minute)
 			rev := requireExecutableRevealer(t, h)
 			if got := rev.ExecutablePath(); got != override {
 				t.Errorf("buildAdapter(%q, override=%q) ExecutablePath() = %q, want %q; "+
@@ -247,7 +247,7 @@ func TestPreScanComposition_GHCPCli_AbsentExecPath_ResolvesCopilot(t *testing.T)
 			"scanFlag must not inject a default, only the entry-path fallback code does", execPath)
 	}
 
-	h := buildAdapter(commonharness.HarnessIDGHCPCLI, execPath, "blanket", 30*time.Minute)
+	h := buildAdapter("", commonharness.HarnessIDGHCPCLI, execPath, "blanket", 30*time.Minute)
 	rev := requireExecutableRevealer(t, h)
 
 	if got := rev.ExecutablePath(); got != "copilot" {
@@ -263,7 +263,7 @@ func TestPreScanComposition_OpenCode_AbsentExecPath_ResolvesOpenCode(t *testing.
 	args := []string{"run", "--harness", commonharness.HarnessIDOpenCode}
 	execPath := scanFlag(args, "--executable-path")
 
-	h := buildAdapter(commonharness.HarnessIDOpenCode, execPath, "", 30*time.Minute)
+	h := buildAdapter("", commonharness.HarnessIDOpenCode, execPath, "", 30*time.Minute)
 	rev := requireExecutableRevealer(t, h)
 
 	if got := rev.ExecutablePath(); got != "opencode" {
@@ -278,7 +278,7 @@ func TestPreScanComposition_ClaudeCode_AbsentExecPath_ResolvesDefaultClaude(t *t
 	args := []string{"run", "--harness", commonharness.HarnessIDClaudeCode}
 	execPath := scanFlag(args, "--executable-path")
 
-	h := buildAdapter(commonharness.HarnessIDClaudeCode, execPath, "", 30*time.Minute)
+	h := buildAdapter("", commonharness.HarnessIDClaudeCode, execPath, "", 30*time.Minute)
 	rev := requireExecutableRevealer(t, h)
 
 	if got := rev.ExecutablePath(); got != "claude" {
@@ -306,8 +306,8 @@ func TestPreScanComposition_CLIAndTUI_ProduceSameResolution(t *testing.T) {
 			args := []string{"run", "--harness", tc.harnessID}
 			execPath := scanFlag(args, "--executable-path")
 
-			cliH := buildAdapter(tc.harnessID, execPath, "", 30*time.Minute)
-			tuiH := buildAdapter(tc.harnessID, execPath, "", 30*time.Minute)
+			cliH := buildAdapter("", tc.harnessID, execPath, "", 30*time.Minute)
+			tuiH := buildAdapter("", tc.harnessID, execPath, "", 30*time.Minute)
 
 			cliRev := requireExecutableRevealer(t, cliH)
 			tuiRev := requireExecutableRevealer(t, tuiH)

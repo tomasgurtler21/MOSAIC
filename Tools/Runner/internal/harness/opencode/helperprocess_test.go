@@ -60,9 +60,20 @@ func runHelperProcess() {
 
 // recordHelperArgs persists the received args before any output is produced.
 func recordHelperArgs() {
+	recordHelperEnv()
 	if argsFile := os.Getenv("GO_HELPER_ARGS_FILE"); argsFile != "" {
 		data, _ := json.Marshal(os.Args[1:])
 		os.WriteFile(argsFile, data, 0644) //nolint:errcheck
+	}
+}
+
+// recordHelperEnv persists the full environment the adapter gave the process
+// to the file named by GO_HELPER_ENV_FILE (when set), as a JSON array of
+// "KEY=value" entries, so tests can assert on the spawn environment.
+func recordHelperEnv() {
+	if envFile := os.Getenv("GO_HELPER_ENV_FILE"); envFile != "" {
+		data, _ := json.Marshal(os.Environ())
+		os.WriteFile(envFile, data, 0644) //nolint:errcheck
 	}
 }
 

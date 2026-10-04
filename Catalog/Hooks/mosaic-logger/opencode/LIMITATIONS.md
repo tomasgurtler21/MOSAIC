@@ -75,3 +75,33 @@ model: one `notification` event is emitted per `permission.ask` firing, with no
 will ever pair with would be worse than omitting it. If the hook proves to fire
 twice, the implementation should be updated to mint a `notification_id` and pair
 the ask and resolution events.
+
+## `session.idle` is not awaited on `opencode run` exit
+
+Verified on OpenCode 1.18.18: when `opencode run` finishes, the process exits without
+awaiting the plugin's `session.idle` handler. Any work after the handler's first
+`await` is lost, including SDK calls such as `client.session.messages()`. This
+affects every `opencode run` session, native or Runner-hosted, and cannot be fixed
+inside the adapter.
+
+Runner mode (selected by the `MOSAIC_ROLE`, `MOSAIC_RUN_ID` and
+`MOSAIC_AGENT_INSTANCE_ID` environment variables the Runner sets) works around it:
+
+- `invocation_end` is written synchronously, before the first `await` of the
+  `session.idle` path, from state accumulated during the session (status, and the
+  last assistant text observed through message events).
+- The session transcript (`04_session.raw`, or the session-scoped orchestrator
+  transcript) is exported while the session is running, not at the end. The last
+  completed refresh remains, so the final assistant message can be missing if the
+  process exits before its refresh completes, and `02_output.md` is best-effort.
+- As a safety net, after an OpenCode subagent process exits the Runner appends an
+  `invocation_end` (`agent_instance_id`, `status_code`, `response`) when the
+  invocation folder holds none.
+
+Re-evaluation condition: drop the Runner safety net (and its call in the Runner's
+adapter construction) once live Runner runs on OpenCode show that it never fires, that
+is, every invocation folder already holds the plugin's own `invocation_end`.
+
+Known Runner-mode field gaps for this adapter are listed in
+`Development/Designs/MosaicLogFormat.md` section 4.6 and in the header of
+`lib/handlers_runner.ts`.

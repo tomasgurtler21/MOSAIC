@@ -229,8 +229,11 @@ class LogPaths:
     this class.
     """
 
-    def __init__(self, workspace_root: pathlib.Path):
+    def __init__(self, workspace_root: pathlib.Path,
+                 scope_orchestrator_transcript: bool = False):
         self.root: pathlib.Path = workspace_root / LOGS_DIRNAME
+        # Runner mode: every orchestrator session keeps its own transcript.
+        self.scope_orchestrator_transcript = scope_orchestrator_transcript
 
     def run_root(self, run_id: str) -> pathlib.Path:
         return self.root / run_id
@@ -245,7 +248,8 @@ class LogPaths:
         return self.run_root(run_id) / "00_orchestrator_events.jsonl"
 
     def orchestrator_raw(self, run_id: str, session_id: "str | None" = None) -> pathlib.Path:
-        if run_id == "unknown-run" and session_id:
+        if session_id and (self.scope_orchestrator_transcript
+                           or run_id == "unknown-run"):
             scope = transcript_scope_segment(HARNESS, session_id)
             return self.run_root(run_id) / f"00_orchestrator_session__{scope}.raw"
         return self.run_root(run_id) / "00_orchestrator_session.raw"
@@ -357,9 +361,10 @@ class LogPaths:
         return self.completion_claim_dir(run_id) / f"{sanitize_component(agent_id)}.json"
 
 
-def build_paths(workspace_root: pathlib.Path) -> LogPaths:
+def build_paths(workspace_root: pathlib.Path,
+                scope_orchestrator_transcript: bool = False) -> LogPaths:
     """Construct the LogPaths tree. Creates no directories."""
-    return LogPaths(workspace_root)
+    return LogPaths(workspace_root, scope_orchestrator_transcript)
 
 
 # ---------------------------------------------------------------------------

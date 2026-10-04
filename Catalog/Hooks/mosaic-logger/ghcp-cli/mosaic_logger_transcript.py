@@ -124,3 +124,58 @@ def read_last_assistant_facts(transcript_path) -> TurnFacts:
 
     except Exception:
         return TurnFacts()
+
+
+def _text_of(content) -> "str | None":
+    """Text of a message content value: a string, or the text blocks of a list."""
+    if isinstance(content, str):
+        return content or None
+    if isinstance(content, list):
+        parts = [b.get("text") for b in content
+                 if isinstance(b, dict) and b.get("type") == "text"
+                 and isinstance(b.get("text"), str) and b.get("text")]
+        return "\n".join(parts) or None
+    return None
+
+
+def _assistant_text(record: dict) -> "str | None":
+    """Assistant text of one record, or None when it is not an assistant record
+    or carries no text. Understands the GHCP event shape (assistant.message with
+    data.content) and the type/role 'assistant' shapes."""
+    if record.get("type") == "assistant.message":
+        data = record.get("data")
+        return _text_of(data.get("content")) if isinstance(data, dict) else None
+    if record.get("type") != "assistant" and record.get("role") != "assistant":
+        return None
+    message = record.get("message")
+    if isinstance(message, dict):
+        text = _text_of(message.get("content"))
+        if text is not None:
+            return text
+    return _text_of(record.get("content"))
+
+
+def read_last_assistant_text(transcript_path) -> "str | None":
+    """Text of the LAST assistant record that carries text, or None when the
+    transcript is missing, unreadable, malformed or holds no assistant text.
+    Tool-use blocks are never part of the text. Never raises."""
+    try:
+        if not isinstance(transcript_path, str) or not transcript_path:
+            return None
+        last = None
+        with open(transcript_path, "r", encoding="utf-8", errors="replace") as f:
+            for raw_line in f:
+                line = raw_line.strip()
+                if not line:
+                    continue
+                try:
+                    record = json.loads(line)
+                except (json.JSONDecodeError, ValueError):
+                    continue
+                if isinstance(record, dict):
+                    text = _assistant_text(record)
+                    if text is not None:
+                        last = text
+        return last
+    except Exception:
+        return None

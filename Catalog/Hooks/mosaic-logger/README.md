@@ -36,6 +36,48 @@ Tokens used after the hand-back are still counted through `usage_record` events.
 `tool_call_end` carries the tool's output in `tool_output`, taken from the
 PostToolUse `tool_response`, without truncation.
 
+## Runner mode
+
+The `claude-code`, `ghcp-cli` and `opencode` adapters also log sessions started by
+the MOSAIC Runner (`Tools/Runner`). The Runner sets `MOSAIC_ROLE` (`orchestrator` or
+`subagent`), `MOSAIC_RUN_ID` and, for the subagent role, `MOSAIC_AGENT_INSTANCE_ID`
+in the harness process environment. Without `MOSAIC_ROLE` the adapter is a native
+adapter. The deployed registration is the same in both modes.
+
+In Runner mode the Runner writes `run_start` and `run_end` itself; the adapter writes
+everything else. A subagent-role session is one invocation and is logged in the
+invocation folder named by `MOSAIC_AGENT_INSTANCE_ID`; an orchestrator-role session
+writes to the run's orchestrator stream and exports its transcript to a
+session-scoped `00_orchestrator_session__{scope}.raw`. Fields Runner mode cannot
+produce, the accepted differences from native logs, and the per-harness constraints
+are listed in `Development/Designs/MosaicLogFormat.md` section 4.6 (Runner-hosted
+mode). One difference worth knowing on Claude Code: in the subagent role
+`invocation_end.token_usage` is summed over all assistant records of the session,
+whereas native `invocation_end` uses the last assistant record only.
+
+### Claude Code registration: synchronous Stop and SessionEnd
+
+`Stop` and `SessionEnd` are registered synchronous (together with `SubagentStart`) in
+both modes. Claude Code kills async hooks when a `-p` process exits, so the Runner
+could otherwise find a session's final events missing. Native sessions pay the same
+cost: handler wall time measured on 2026-10-04 (adapter 1.5.0, 1200-record, 1.24 MB
+transcript, including about 30 ms interpreter start-up) is about 200 ms for `Stop` and
+about 60 ms for `SessionEnd` natively, and about 215 ms for the Runner subagent-role
+`SessionEnd`. Existing deployments keep the previous (asynchronous) registration and
+file set until redeployed, so redeploy the bundle to pick up the new registration and
+the Runner-mode modules.
+
+### GHCP CLI: trusted folder required
+
+GHCP CLI loads repository hooks (`.github/hooks/*.json`) in `-p` mode only from a
+trusted folder, so without trust no MOSAIC logs are written and no warning is shown.
+See `ghcp-cli/README.md`.
+
+### OpenCode: `session.idle` is not awaited on exit
+
+`opencode run` does not await the plugin's `session.idle` handler at exit. See
+`opencode/LIMITATIONS.md`.
+
 ## Interpreter requirement
 
 The `claude-code` variant requires **`python3`** to be available in the environment

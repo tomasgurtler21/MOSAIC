@@ -19,6 +19,7 @@ import (
 	"mosaic-run/internal/domain"
 	"mosaic-run/internal/harness"
 	"mosaic-run/internal/harness/cliexec"
+	"mosaic-run/internal/harness/roleenv"
 )
 
 // ClaudeCodeAdapter implements domain.HarnessAdapter by delegating to
@@ -46,7 +47,11 @@ type ClaudeCodeAdapter struct {
 	spawner        commonharness.Spawner
 	sink           commonharness.Sink
 	logger         domain.DebugLogger
+	roleEnv        roleenv.Config
 }
+
+// RunID returns the run id the adapter was constructed with ("" when unknown).
+func (a *ClaudeCodeAdapter) RunID() string { return a.roleEnv.RunID }
 
 // ExecutablePath implements domain.ExecutableRevealer. It returns the
 // executable path or command name this adapter was constructed with.
@@ -67,7 +72,7 @@ func NewClaudeCodeAdapter(executablePath string, timeout time.Duration) *ClaudeC
 //
 // A nil logger is normalised to domain.NopDebugLogger here, so the adapter's
 // logger field is never nil and Invoke never nil-checks it.
-func NewClaudeCodeAdapterWithLogger(executablePath string, timeout time.Duration, logger domain.DebugLogger) *ClaudeCodeAdapter {
+func NewClaudeCodeAdapterWithLogger(executablePath string, timeout time.Duration, logger domain.DebugLogger, opts ...roleenv.Option) *ClaudeCodeAdapter {
 	if timeout == 0 {
 		timeout = 30 * time.Minute
 	}
@@ -79,7 +84,7 @@ func NewClaudeCodeAdapterWithLogger(executablePath string, timeout time.Duration
 		commonharness.WithTimeout(timeout),
 		commonharness.WithSink(sink),
 	)
-	return &ClaudeCodeAdapter{executablePath: executablePath, timeout: timeout, spawner: spawner, sink: sink, logger: logger}
+	return &ClaudeCodeAdapter{executablePath: executablePath, timeout: timeout, spawner: spawner, sink: sink, logger: logger, roleEnv: roleenv.NewConfig(opts...)}
 }
 
 // Invoke implements domain.HarnessAdapter.
@@ -122,16 +127,22 @@ func (a *ClaudeCodeAdapter) Invoke(ctx context.Context, agent domain.AgentRefere
 		return domain.ProtocolResponse{}, fmt.Errorf("marshal request: %w", err)
 	}
 
+	runID := request.RunID
+	if runID == "" {
+		runID = a.roleEnv.RunID
+	}
 	spawnReq := commonharness.SpawnRequest{
 		Agent: commonharness.AgentRef{
 			Identifier:     agent.Identifier,
 			DefinitionPath: agent.DefinitionPath,
 			Kind:           commonharness.InvocationKind(agent.InvocationKind),
 		},
-		Prompt:       string(reqBytes),
-		OutputFormat: "json",
-		DerivedTools: derivedTools,
-		ToolsDerived: true, // signals derivation was performed; empty slice is valid (strict dontAsk, no tools)
+		Prompt:             string(reqBytes),
+		Env:                roleenv.SubagentEnv(runID, request.AgentInstanceID),
+		SessionPersistence: true,
+		OutputFormat:       "json",
+		DerivedTools:       derivedTools,
+		ToolsDerived:       true, // signals derivation was performed; empty slice is valid (strict dontAsk, no tools)
 	}
 
 	resp, err := a.spawner.Spawn(ctx, spawnReq)
@@ -247,10 +258,12 @@ func (a *ClaudeCodeAdapter) InvokeRaw(ctx context.Context, agent domain.AgentRef
 			DefinitionPath: agent.DefinitionPath,
 			Kind:           commonharness.InvocationKind(agent.InvocationKind),
 		},
-		Prompt:       string(payload),
-		OutputFormat: "json",
-		DerivedTools: derivedTools,
-		ToolsDerived: true, // signals derivation was performed; empty slice is valid (strict dontAsk, no tools)
+		Prompt:             string(payload),
+		Env:                roleenv.OrchestratorEnv(a.roleEnv.RunID),
+		SessionPersistence: true,
+		OutputFormat:       "json",
+		DerivedTools:       derivedTools,
+		ToolsDerived:       true, // signals derivation was performed; empty slice is valid (strict dontAsk, no tools)
 	}
 
 	cmd, err := commonharness.ResolveExecutable(a.executablePath)

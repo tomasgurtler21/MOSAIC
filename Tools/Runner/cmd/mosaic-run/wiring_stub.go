@@ -126,8 +126,7 @@ func buildInteractiveWiring(in interactiveWiringInput) interactiveWiring {
 		if execPath == "" {
 			execPath = in.ExecutablePath
 		}
-		h := buildAdapter(cfg.Harness, execPath, cfg.GHCPCLIMode, cfg.Timeout, in.Debug)
-
+		effectiveRunFolder := runFolder
 		artifactPath, err := resolveTUIArtifactPath(runFolder)
 		if errors.Is(err, errUnresolvedRunFolder) {
 			// Defensive branch: an unresolved run folder is a contract violation
@@ -138,7 +137,9 @@ func buildInteractiveWiring(in interactiveWiringInput) interactiveWiring {
 				domain.F("path", mintedFolder))
 			fmt.Fprintf(os.Stderr, "notice: run folder unresolved; minting new run at %s\n", mintedFolder)
 			artifactPath = filepath.Join(mintedFolder, "Orchestration.md")
+			effectiveRunFolder = mintedFolder
 		}
+		h := buildAdapter(effectiveRunFolder, cfg.Harness, execPath, cfg.GHCPCLIMode, cfg.Timeout, in.Debug)
 		store := newLoggedArtifactStore(artifactPath, in.Debug)
 
 		// Extract the raw-JSON transport if the selected harness adapter
@@ -182,7 +183,11 @@ func buildInteractiveWiring(in interactiveWiringInput) interactiveWiring {
 			InitialRunFolder:   in.Identity.RunFolder,
 			DevMode:            in.DevMode,
 			SessionFactory: func(runFolder string, isNewRun bool, orchFile string, cfg runconfig.ConfigSelection) session.Session {
-				return session.New(newDeps(runFolder, isNewRun, orchFile, cfg))
+				sessionRunFolder := resolveSessionRunFolder(runFolder, in)
+				sess := withGHCPTrustPreflight(session.New(newDeps(sessionRunFolder, isNewRun, orchFile, cfg)),
+					sessionRunFolder, cfg.Harness, in.ProgramRef, true, in.Debug)
+				return newRunLifecycleSession(sess,
+					runLogConfig{RunFolder: sessionRunFolder, HarnessID: cfg.Harness, Debug: in.Debug, Clock: in.Clock})
 			},
 			MintRunIdentity:        in.Minter,
 			OrchestratorDiscoverer: harness.DiscoverOrchestrator,

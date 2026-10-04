@@ -20,6 +20,8 @@ def capture_run_id_from_tool_args(ctx: "core.HookContext") -> "str | None":
     Returns the run_id string on a hit, None on a miss. Never raises.
     """
     try:
+        if ctx.runner_mode is not None and ctx.runner_mode.run_id:
+            return None  # the Runner-declared run id is never overridden
         tool_args = ctx.field("toolArgs")
         run_id = runstate.extract_run_id_from_tool_args(tool_args)
         if run_id:
@@ -40,6 +42,11 @@ def resolve_destination(ctx: "core.HookContext") -> pathlib.Path:
     overrides core.effective_run_id(ctx). ctx is not mutated.
     """
     if not ctx.agent_id:
+        mode = ctx.runner_mode
+        if mode is not None and mode.agent_instance_id:
+            # Runner subagent role: the primary session is the invocation.
+            return ctx.paths.invocation_events(
+                core.effective_run_id(ctx), mode.agent_instance_id)
         return ctx.paths.orchestrator_events(core.effective_run_id(ctx))
     # Step 2: consult the association; authoritative when present.
     assoc_run_id = runstate.resolve_run_for_agent(ctx.paths, ctx.agent_id)

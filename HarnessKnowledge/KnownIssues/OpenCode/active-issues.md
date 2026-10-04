@@ -1868,3 +1868,38 @@ Plan mode is meant to give MOSAIC (or any external supervisor) a hard guarantee 
 Classified as Bug rather than pure Limitation because the docs specifically claim bash defaults to `ask` in Plan mode and reporters observed zero prompt at all (not merely "the model ignored an ask I answered") — that specific contradiction of documented behavior is a defect, layered on top of the architectural Limitation that Plan mode is fundamentally prompt-level rather than execution-layer enforcement (per the model's own explanation). If a hard fix ever moves enforcement to the tool-execution layer, downgrade/resolve this entry; until then, both the Bug (missing ask prompt) and the underlying Limitation (soft enforcement) apply and MOSAIC should not treat Plan mode as a true sandboxing mechanism.
 
 **Verification pass (2026-09-10, run 2):** Re-fetched issue #39491 and all 5 comments. The bot-referenced duplicate resolved to **#10741** ("plan mode has no hard system-level guard against file writes, so the model can bypass restrictions via bash commands... not consistently reproducible") — confirming this has been an unaddressed architectural gap since at least early 2026, now spanning two separate report clusters. A fourth independent reporter (@xenos1984, 2026-09-09) confirmed the identical bypass on the current release with no version regression noted, and quoted the exact doc language ("set to ask") that the behavior contradicts — reinforcing Confirmed confidence and that this is not stale. No fix PR opened yet; assignee `nexxeln` has not commented. No change to classification, confidence, impact, or workarounds — entry remains accurate as-is.
+
+---
+
+### OC-099: `session.idle` plugin handler is not awaited when `opencode run` exits - work after its first `await` (including SDK calls) is lost
+
+| Field | Value |
+|-------|-------|
+| **Classification** | Limitation |
+| **Source** | MOSAIC experiments, 2026-10-03 (Windows 11); no upstream issue filed |
+| **Reported** | 2026-10-03 (MOSAIC) |
+| **Last Activity** | 2026-10-03 |
+| **Confidence** | Confirmed (reproduced at MOSAIC) |
+| **Orchestration Impact** | HIGH for plugins that finalise state on `session.idle`; LOW otherwise |
+| **Reproduced at MOSAIC** | Yes |
+| **MOSAIC Response** | Mitigated: the mosaic-logger plugin writes `invocation_end` before its first `await` and exports the transcript during the session; the Runner appends a fallback `invocation_end` after the process exits |
+| **Version(s) Affected** | 1.18.18 (unknown for other versions) |
+| **Latest Platform Version** | v1.18.30 (2026-09-09) |
+| **Labels** | `area:plugins`, `area:non-interactive` |
+
+**Summary:**
+When `opencode run` completes, the process exits without awaiting the plugin's `session.idle` event handler. The handler runs synchronously up to its first `await`; everything after is lost, including SDK calls such as `client.session.messages()`.
+
+**Impact on Orchestration:**
+A plugin that reads session messages and writes final artifacts from `session.idle` produces nothing in headless/Runner runs. For MOSAIC logging, the final `invocation_end`, `02_output.md` and the session transcript export are at risk.
+
+**Evidence:**
+Handler instrumented with timestamps in `opencode run`: work before the first `await` always completed; work after it (including `client.session.messages()`) did not once the process exited.
+
+**Workaround(s):**
+1. Do exit-critical writes synchronously before the first `await` of the handler, from state accumulated during the session.
+2. Export or refresh data (such as the transcript) while the session is running; the last completed refresh remains.
+3. Add an external fallback: the Runner appends `invocation_end` after the process exits when none exists.
+
+**Notes:**
+Not probed: other OpenCode versions, interactive TUI exit, other event handlers. Same class of behaviour as CC-082 (async hooks killed on `-p` exit) and, loosely, GC-020.

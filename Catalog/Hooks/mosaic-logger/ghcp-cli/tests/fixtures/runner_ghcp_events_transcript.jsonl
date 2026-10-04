@@ -1,0 +1,3 @@
+{"type":"user.message","data":{"content":"Do the research task"},"id":"id1","timestamp":"2026-08-12T21:00:00Z"}
+{"type":"assistant.message","data":{"content":"First answer"},"id":"id2","timestamp":"2026-08-12T21:00:01Z","parentId":"id1"}
+{"type":"assistant.message","data":{"content":"Final answer text"},"id":"id3","timestamp":"2026-08-12T21:00:02Z","parentId":"id2"}

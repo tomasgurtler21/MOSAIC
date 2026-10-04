@@ -108,7 +108,7 @@ The orchestrator file is **auto-discovered** from the `--harness` value using ea
 
 ## Workflow Modes
 
-Each workflow has a required mode. Using the wrong mode causes failures (e.g. running an auto-only workflow in orchestrated mode triggers orchestrator consultation with no routing fixture).
+Each workflow has a required mode. Using the wrong mode causes failures (e.g. running an auto-only workflow in orchestrated mode triggers orchestrator consultations the routing fixture has no rules for, so the stub stops).
 
 | Workflow | Mode(s) | Fixture Seed Folder | State |
 |----------|---------|-------------------|-------|

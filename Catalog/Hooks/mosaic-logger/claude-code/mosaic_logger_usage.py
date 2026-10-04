@@ -129,6 +129,11 @@ def record_fingerprint(record) -> str:
         return ""
 
 
+def stream_key_for(sink) -> str:
+    """Stable, fixed-length state key of a destination stream."""
+    return hashlib.sha256(str(sink).encode("utf-8")).hexdigest()[:16]
+
+
 def load_usage_state(paths: "core.LogPaths",
                      run_id: str,
                      stream_key: str) -> dict:
@@ -258,7 +263,7 @@ def emit_usage_records(ctx: "core.HookContext",
         )
 
         # Derive a stable, fixed-length stream key from the resolved sink.
-        stream_key = hashlib.sha256(str(sink).encode("utf-8")).hexdigest()[:16]
+        stream_key = stream_key_for(sink)
 
         # Load per-stream state; treat any failure as empty (emit everything).
         try:
