@@ -159,6 +159,40 @@ func TestTodoFile_ExecutorGapAppearsInFile(t *testing.T) {
 	}
 }
 
+// TestTodoFile_SharedCollector_ExecutorGapListedOnce pins the production wiring: the
+// executor's collector and the TodoItems provider are the same collector, so an executor
+// gap is visible through both. The written file must list it once, not twice.
+func TestTodoFile_SharedCollector_ExecutorGapListedOnce(t *testing.T) {
+	workspace := t.TempDir()
+	mosaicRoot := t.TempDir()
+	targetPath := "agents/runner.md"
+
+	writeExisting(t, workspace, targetPath, []byte("local content"))
+
+	shared := todo.NewCollector()
+	item := newConflictItem("runner", targetPath)
+	req := deploy.ExecRequest{
+		Plan:       newPlan(workspace, item),
+		MosaicRoot: mosaicRoot,
+		Content:    fixedContent([]byte("new content")),
+		Conflicts:  map[string]domain.ConflictDecision{targetPath: domain.DecisionSkip},
+		TodoItems:  shared.Items,
+	}
+
+	ex := deploy.NewExecutor(manifest.NewStore(), newSpyLogger(), shared)
+	result, err := ex.Execute(context.Background(), req)
+	if err != nil {
+		t.Fatalf("Execute: %v", err)
+	}
+	content, err := os.ReadFile(result.TodoFilePath)
+	if err != nil {
+		t.Fatalf("read TODO file at %q: %v", result.TodoFilePath, err)
+	}
+	if n := strings.Count(string(content), "- [ ]"); n != 1 {
+		t.Errorf("TODO file lists %d items, want exactly 1 (executor gap must not be duplicated);\nfile:\n%s", n, content)
+	}
+}
+
 // TestTodoFile_TodoMetaEmbeddedInFile verifies that run-level metadata from
 // ExecRequest.TodoMeta (at minimum the harness name) appears in the written file header.
 func TestTodoFile_TodoMetaEmbeddedInFile(t *testing.T) {

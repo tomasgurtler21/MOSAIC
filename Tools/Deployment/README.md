@@ -6,7 +6,8 @@ target AI harness workspace. It handles several operations:
 - **Deploy** — create a new workspace from scratch by selecting agents, skills,
   workflows, and model assignments, then writing every file in one pass.
 - **Update** — bring an existing workspace up to date with the latest agent
-  versions, preserving locally-modified files as you choose.
+  versions, preserving locally-modified files as you choose; also refreshes
+  hook bundles that are already deployed.
 - **Deploy agents** — deploy a chosen mix of subagents, utility,
   infrastructure and standalone agents and their required skills, without
   touching workflows or hooks; declarations for new infrastructure agents are
@@ -179,6 +180,27 @@ The update flow updates an existing workspace to the latest agent versions. It:
 | `skip` (default) | Leave the modified file unchanged; add it to the TODO checklist |
 | `overwrite` | Replace with the latest version (local edits are lost) |
 | `backup` | Copy the local file to `<name>.backup` before overwriting |
+
+**Hook refresh:** Update also refreshes hook bundles that are already deployed in
+the workspace (files of the harness's hook variant found on disk) when the Catalog
+version is newer than the version recorded in the manifest. Up-to-date hooks are
+reported unchanged and are not rewritten. Update never adds a hook that is not
+deployed; use Deploy or the deploy-hooks mode for that.
+
+- Refreshed hook files are overwritten with the Catalog version (local edits are
+  lost); files the new version no longer has are left in place.
+- An existing registration target (for example `.claude/settings.json` or
+  `.github/hooks/mosaic-logger.json`) is never modified. For every refreshed hook
+  whose registration target exists, the update reports a TODO with the registration
+  fragment, whether or not the fragment changed. A missing registration target is
+  created. Up-to-date hooks and hooks skipped in a conflict produce no registration
+  TODO. The TODO is produced when the update is applied; it is not listed in the plan
+  review and `--dry-run` reports none.
+- A deployed hook with no manifest record is treated as a locally-modified file:
+  `--conflict skip` leaves it as is, `overwrite` and `backup` refresh it.
+- `claude-code` and `vscode-ghcp` share `.claude/hooks/`; Update for either harness
+  refreshes the shared hook, writing that harness's variant files (files only the
+  other variant has keep their previous content).
 
 **CLI example:**
 

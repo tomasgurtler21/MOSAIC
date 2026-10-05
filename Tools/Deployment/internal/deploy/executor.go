@@ -856,13 +856,28 @@ func computeOutcome(actions []domain.ActionRecord, partialErr error, fallback do
 func (e *executor) writeTodoFile(req ExecRequest, execGaps []domain.Gap) (string, error) {
 	collector := todo.NewCollector()
 
+	// In production the executor's own collector (e.todos) and the app layer's TodoItems
+	// provider are the same collector, so every executor gap is already in TodoItems().
+	// Adding execGaps on top would list each executor gap twice. Skip items already present.
+	seen := make(map[domain.TodoItem]bool)
+	add := func(item domain.TodoItem) {
+		if seen[item] {
+			return
+		}
+		seen[item] = true
+		collector.Add(item)
+	}
 	if req.TodoItems != nil {
 		for _, item := range req.TodoItems() {
-			collector.Add(item)
+			add(item)
 		}
 	}
+	gapCollector := todo.NewCollector()
 	for _, g := range execGaps {
-		collector.AddGap(g)
+		gapCollector.AddGap(g)
+	}
+	for _, item := range gapCollector.Items() {
+		add(item)
 	}
 
 	content := todo.RenderMarkdown(collector.Groups(), req.TodoMeta)

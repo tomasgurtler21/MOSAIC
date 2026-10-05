@@ -66,7 +66,7 @@ Unknown keys in the selections file are silently ignored (forward-compatible).
 
 ## `update` subcommand
 
-Update an existing workspace deployment to the latest agent versions.
+Update an existing workspace deployment to the latest agent versions, including already-deployed hook bundles.
 
 ```
 mosaic-deploy update [flags]
@@ -91,6 +91,15 @@ The `--conflict` flag controls what happens when a file in the workspace has bee
 ### Orchestrator declaration refresh
 
 Update also refreshes catalog-backed infrastructure agent declarations in the orchestrator (`orchestrator.md`, `orchestrator-script.md`) when their version, class, triggers or on-failure changed in the catalog. It never adds new declarations and never touches hand-added ones. An orchestrator with current declarations is left unchanged.
+
+### Hook refresh
+
+Update also refreshes hook bundles that are already deployed in the workspace (files of the harness's hook variant found on disk) when the Catalog version is newer than the version recorded in the manifest. Up-to-date hooks are reported unchanged and not rewritten. It never adds a hook that is not deployed (use `deploy` or the deploy-hooks mode for that).
+
+- Refreshed hook files are overwritten with the Catalog version (local edits are lost); files the new version no longer has are left in place.
+- An existing registration target (e.g. `.claude/settings.json`, `.github/hooks/mosaic-logger.json`) is never modified; a TODO with the registration fragment is reported for every refreshed hook whose target exists, whether or not the fragment changed. A missing target is created. The TODO is emitted when the update is applied, so the plan review and `--dry-run` show none. Up-to-date hooks and hooks skipped in a conflict produce no registration TODO.
+- A deployed hook with no manifest record is treated as locally modified: `--conflict skip` (default) leaves it as is; `overwrite` and `backup` refresh it.
+- `claude-code` and `vscode-ghcp` share `.claude/hooks/`; Update for either harness refreshes the shared hook, writing that harness's variant files (files only the other variant has keep their previous content).
 
 ---
 

@@ -1,284 +1,448 @@
-//go:build stage3
-
 package app
 
-// hook_probe_test.go covers probeDeployedHookBundle, the directory-oriented presence probe
-// for hook bundle artifacts.
+// hook_probe_test.go covers the layout-aware hook presence probe (probeHookPlanPresence), the
+// path-keyed HookPlan index (hookPlansByTargetPath) and the post-pass (applyHookPresence).
 //
-// Hook bundles deploy to a directory rather than a file, so the file-oriented
-// probeDeployedArtifact function (which always yields Present: false for directories) cannot
-// report hook bundles as present. probeDeployedHookBundle is a dedicated probe that treats a
-// non-empty directory as present.
+// A hook bundle is present when at least one file of the harness's hook variant exists as a
+// regular file at <workspace>/<HookPlan.TargetDir>/<HookFile.TargetName>. Nested target names
+// (for example "lib/util.ts") resolve relative to TargetDir. A directory at
+// <hooks dir>/<hook key> is not a presence signal: the executor never writes one.
 //
-// Covered cases (T3.2):
-//
-//   Missing target path:
-//     - No entry at <workspace>/<targetPath> → Present: false
-//
-//   File at target path (not a directory):
-//     - A regular file at the path → Present: false (hook bundles are directories)
-//
-//   Empty directory:
-//     - Target path exists as a directory but contains no files → Present: false
-//
-//   Directory with at least one file:
-//     - Target path exists as a directory and contains one or more files → Present: true
-//
-//   ContentHash when present:
-//     - Present: true → ContentHash == manifest.Hash(nil) (reproduces the executor's nil hash)
-//
-//   Version fields when present:
-//     - All version fields are empty: a hook bundle carries no in-file version marker
-//
-//   I/O failure graceful degradation:
-//     - Any I/O failure → Present: false, no error returned
-//
-// All tests use t.TempDir() for filesystem fixtures, matching the existing app test style.
+// All tests use t.TempDir() workspaces and literal HookPlan values; nothing reads Catalog/.
 
 import (
+	"errors"
 	"os"
 	"path/filepath"
+	"reflect"
 	"testing"
 
+	"mosaic-deploy/internal/domain"
 	"mosaic-deploy/internal/manifest"
+	"mosaic-deploy/internal/plan"
 )
 
 // ---------------------------------------------------------------------------
-// probeDeployedHookBundle — missing target path
+// Helpers
 // ---------------------------------------------------------------------------
 
-// TestProbeDeployedHookBundle_MissingPath_PresentIsFalse verifies that when there is no entry
-// at the hook bundle's target path (neither a file nor a directory), the probe reports
-// Present: false.
-func TestProbeDeployedHookBundle_MissingPath_PresentIsFalse(t *testing.T) {
-	ws := t.TempDir()
+const probeHooksDir = ".claude/hooks"
 
-	state := probeDeployedHookBundle(ws, "hooks/my-hooks")
-
-	if state.Present {
-		t.Error("expected Present: false for a missing target path, got true")
+// flatHookPlan returns a supported HookPlan whose files are written flat into dir.
+func flatHookPlan(dir string, names ...string) domain.HookPlan {
+	files := make([]domain.HookFile, 0, len(names))
+	for _, n := range names {
+		files = append(files, domain.HookFile{SourcePath: "/src/" + n, TargetName: n})
 	}
+	return domain.HookPlan{Supported: true, TargetDir: dir, Files: files}
 }
 
-// TestProbeDeployedHookBundle_MissingPath_ContentHashIsEmpty verifies that a missing target
-// path yields an empty ContentHash, not a zero-hash or nil-hash value.
-func TestProbeDeployedHookBundle_MissingPath_ContentHashIsEmpty(t *testing.T) {
-	ws := t.TempDir()
-
-	state := probeDeployedHookBundle(ws, "hooks/my-hooks")
-
-	if state.ContentHash != "" {
-		t.Errorf("missing path must have empty ContentHash, got %q", state.ContentHash)
+// writeWorkspaceFile creates workspace-relative file rel (and its parent directories).
+func writeWorkspaceFile(t *testing.T, workspace, rel string) {
+	t.Helper()
+	full := filepath.Join(workspace, filepath.FromSlash(rel))
+	if err := os.MkdirAll(filepath.Dir(full), 0o755); err != nil {
+		t.Fatalf("MkdirAll %s: %v", rel, err)
 	}
-}
-
-// ---------------------------------------------------------------------------
-// probeDeployedHookBundle — file at target path (not a directory)
-// ---------------------------------------------------------------------------
-
-// TestProbeDeployedHookBundle_FileAtPath_PresentIsFalse verifies that when a regular file
-// exists at the target path (rather than a directory), the probe reports Present: false.
-// Hook bundles are directories; a regular file at that path is not a valid hook bundle.
-func TestProbeDeployedHookBundle_FileAtPath_PresentIsFalse(t *testing.T) {
-	ws := t.TempDir()
-	// Create a regular file at the target path.
-	if err := os.WriteFile(filepath.Join(ws, "hooks-bundle"), []byte("not a directory"), 0o644); err != nil {
-		t.Fatalf("WriteFile: %v", err)
-	}
-
-	state := probeDeployedHookBundle(ws, "hooks-bundle")
-
-	if state.Present {
-		t.Error("expected Present: false when target path is a regular file, got true")
+	if err := os.WriteFile(full, []byte("content"), 0o644); err != nil {
+		t.Fatalf("WriteFile %s: %v", rel, err)
 	}
 }
 
 // ---------------------------------------------------------------------------
-// probeDeployedHookBundle — empty directory
+// probeHookPlanPresence - present layouts
 // ---------------------------------------------------------------------------
 
-// TestProbeDeployedHookBundle_EmptyDirectory_PresentIsFalse verifies that when the target
-// path exists as a directory but contains no files, the probe reports Present: false.
-// An empty directory is treated as absent because no hook content has been deployed there.
-func TestProbeDeployedHookBundle_EmptyDirectory_PresentIsFalse(t *testing.T) {
+// TestProbeHookPlanPresence_FlatLayout_Present verifies that a bundle whose files were written
+// directly into the hooks directory (claude-code, vscode-ghcp, ghcp-cli layout) is present.
+func TestProbeHookPlanPresence_FlatLayout_Present(t *testing.T) {
 	ws := t.TempDir()
-	if err := os.MkdirAll(filepath.Join(ws, "hooks", "my-hooks"), 0o755); err != nil {
-		t.Fatalf("MkdirAll: %v", err)
-	}
+	writeWorkspaceFile(t, ws, ".claude/hooks/logger.sh")
+	writeWorkspaceFile(t, ws, ".claude/hooks/logger.py")
+	hp := flatHookPlan(probeHooksDir, "logger.sh", "logger.py")
 
-	state := probeDeployedHookBundle(ws, "hooks/my-hooks")
-
-	if state.Present {
-		t.Error("expected Present: false for an empty directory, got true")
-	}
-}
-
-// TestProbeDeployedHookBundle_DirectoryWithOnlySubdirs_PresentIsFalse verifies that a
-// directory that contains only subdirectories (but no regular files directly inside it) is
-// also treated as not present. Only regular files count as hook content.
-func TestProbeDeployedHookBundle_DirectoryWithOnlySubdirs_PresentIsFalse(t *testing.T) {
-	ws := t.TempDir()
-	bundleDir := filepath.Join(ws, "hooks", "my-hooks")
-	if err := os.MkdirAll(filepath.Join(bundleDir, "subdir"), 0o755); err != nil {
-		t.Fatalf("MkdirAll: %v", err)
-	}
-
-	state := probeDeployedHookBundle(ws, "hooks/my-hooks")
-
-	if state.Present {
-		t.Error("expected Present: false for a directory containing only subdirectories, got true")
-	}
-}
-
-// ---------------------------------------------------------------------------
-// probeDeployedHookBundle — directory with at least one file
-// ---------------------------------------------------------------------------
-
-// TestProbeDeployedHookBundle_DirectoryWithOneFile_PresentIsTrue verifies that when the
-// target path is a directory and contains at least one regular file directly within it, the
-// probe reports Present: true.
-func TestProbeDeployedHookBundle_DirectoryWithOneFile_PresentIsTrue(t *testing.T) {
-	ws := t.TempDir()
-	bundleDir := filepath.Join(ws, "hooks", "my-hooks")
-	if err := os.MkdirAll(bundleDir, 0o755); err != nil {
-		t.Fatalf("MkdirAll: %v", err)
-	}
-	if err := os.WriteFile(filepath.Join(bundleDir, "hook.sh"), []byte("#!/bin/sh\n"), 0o755); err != nil {
-		t.Fatalf("WriteFile hook.sh: %v", err)
-	}
-
-	state := probeDeployedHookBundle(ws, "hooks/my-hooks")
+	state := probeHookPlanPresence(ws, hp)
 
 	if !state.Present {
-		t.Error("expected Present: true for a directory with at least one file, got false")
+		t.Error("Present = false for a bundle deployed flat into the hooks directory, want true")
 	}
 }
 
-// TestProbeDeployedHookBundle_DirectoryWithMultipleFiles_PresentIsTrue verifies that a
-// directory with several files is treated as present, confirming that the one-file check is
-// a minimum threshold, not an exact count.
-func TestProbeDeployedHookBundle_DirectoryWithMultipleFiles_PresentIsTrue(t *testing.T) {
+// TestProbeHookPlanPresence_NestedLibLayout_Present verifies that a bundle whose files include
+// nested target names (opencode lib/<file>.ts) is present when the nested file is on disk.
+func TestProbeHookPlanPresence_NestedLibLayout_Present(t *testing.T) {
 	ws := t.TempDir()
-	bundleDir := filepath.Join(ws, "hooks", "pre-commit")
-	if err := os.MkdirAll(bundleDir, 0o755); err != nil {
-		t.Fatalf("MkdirAll: %v", err)
-	}
-	for _, name := range []string{"pre-commit.sh", "utils.sh", "README"} {
-		if err := os.WriteFile(filepath.Join(bundleDir, name), []byte("content"), 0o644); err != nil {
-			t.Fatalf("WriteFile %s: %v", name, err)
-		}
-	}
+	writeWorkspaceFile(t, ws, ".opencode/plugins/logger.ts")
+	writeWorkspaceFile(t, ws, ".opencode/plugins/lib/util.ts")
+	hp := flatHookPlan(".opencode/plugins", "logger.ts", "lib/util.ts")
 
-	state := probeDeployedHookBundle(ws, "hooks/pre-commit")
+	state := probeHookPlanPresence(ws, hp)
 
 	if !state.Present {
-		t.Error("expected Present: true for a directory with multiple files, got false")
+		t.Error("Present = false for an opencode-style bundle with nested lib/ files, want true")
 	}
 }
 
-// ---------------------------------------------------------------------------
-// probeDeployedHookBundle — ContentHash contract when present
-// ---------------------------------------------------------------------------
-
-// TestProbeDeployedHookBundle_PresentBundle_ContentHashIsNilHash verifies that when a hook
-// bundle is present (directory with at least one file), ContentHash is set to manifest.Hash(nil).
-// This reproduces the executor's convention: hook bundles are recorded in the manifest with a
-// nil content hash, so probe and manifest hashes are directly comparable and step 4 of
-// classifyHookItem does not classify every bundle as a local modification.
-func TestProbeDeployedHookBundle_PresentBundle_ContentHashIsNilHash(t *testing.T) {
+// TestProbeHookPlanPresence_OnlyNestedFileOnDisk_Present verifies that the nested file alone
+// is enough: nested target names are resolved relative to TargetDir, not skipped.
+func TestProbeHookPlanPresence_OnlyNestedFileOnDisk_Present(t *testing.T) {
 	ws := t.TempDir()
-	bundleDir := filepath.Join(ws, "hooks", "my-hooks")
-	if err := os.MkdirAll(bundleDir, 0o755); err != nil {
-		t.Fatalf("MkdirAll: %v", err)
-	}
-	if err := os.WriteFile(filepath.Join(bundleDir, "hook.sh"), []byte("#!/bin/sh\n"), 0o755); err != nil {
-		t.Fatalf("WriteFile: %v", err)
-	}
+	writeWorkspaceFile(t, ws, ".opencode/plugins/lib/util.ts")
+	hp := flatHookPlan(".opencode/plugins", "logger.ts", "lib/util.ts")
 
-	state := probeDeployedHookBundle(ws, "hooks/my-hooks")
-
-	want := manifest.Hash(nil)
-	if state.ContentHash != want {
-		t.Errorf("ContentHash = %q, want manifest.Hash(nil) = %q; present hook bundle must reproduce the executor's nil-hash convention",
-			state.ContentHash, want)
-	}
-}
-
-// TestProbeDeployedHookBundle_AbsentBundle_ContentHashIsEmpty verifies that an absent bundle
-// (missing or empty directory) has an empty ContentHash, not the nil-hash value. An empty
-// ContentHash distinguishes "absent" from "present with nil hash".
-func TestProbeDeployedHookBundle_AbsentBundle_ContentHashIsEmpty(t *testing.T) {
-	ws := t.TempDir()
-	// No directory at the target path.
-
-	state := probeDeployedHookBundle(ws, "hooks/absent-bundle")
-
-	nilHash := manifest.Hash(nil)
-	if state.ContentHash == nilHash {
-		t.Errorf("absent bundle must have empty ContentHash, not manifest.Hash(nil) = %q; "+
-			"nil-hash must only appear for present bundles", nilHash)
-	}
-	if state.ContentHash != "" {
-		t.Errorf("absent bundle ContentHash = %q, want empty", state.ContentHash)
-	}
-}
-
-// ---------------------------------------------------------------------------
-// probeDeployedHookBundle — version fields always empty
-// ---------------------------------------------------------------------------
-
-// TestProbeDeployedHookBundle_PresentBundle_AllVersionFieldsEmpty verifies that all four
-// version fields (Version, TransformVersion, InjectionsVersion, OrchestratorInjectionsVersion)
-// are empty even when the bundle is present. A hook bundle directory carries no in-file version
-// marker, so no version information can be read from the probe.
-func TestProbeDeployedHookBundle_PresentBundle_AllVersionFieldsEmpty(t *testing.T) {
-	ws := t.TempDir()
-	bundleDir := filepath.Join(ws, "hooks", "my-hooks")
-	if err := os.MkdirAll(bundleDir, 0o755); err != nil {
-		t.Fatalf("MkdirAll: %v", err)
-	}
-	if err := os.WriteFile(filepath.Join(bundleDir, "hook.sh"), []byte("#!/bin/sh\n"), 0o755); err != nil {
-		t.Fatalf("WriteFile: %v", err)
-	}
-
-	state := probeDeployedHookBundle(ws, "hooks/my-hooks")
-
-	if state.Version != "" {
-		t.Errorf("Version = %q, want empty; hook bundle probe must leave all version fields empty", state.Version)
-	}
-	if state.HarnessVersion != "" {
-		t.Errorf("TransformVersion = %q, want empty", state.HarnessVersion)
-	}
-	if state.InjectionsVersion != "" {
-		t.Errorf("InjectionsVersion = %q, want empty", state.InjectionsVersion)
-	}
-	if state.OrchestratorInjectionsVersion != "" {
-		t.Errorf("OrchestratorInjectionsVersion = %q, want empty", state.OrchestratorInjectionsVersion)
-	}
-}
-
-// TestProbeDeployedHookBundle_PresentBundle_HasVersionInfoReturnsFalse verifies that a present
-// hook bundle, despite being Present: true, returns false from HasVersionInfo(). This is the
-// load-bearing property for classifyHookItem's step-7 bypass: the probe deliberately leaves all
-// four version fields empty, so HasVersionInfo() is always false for hook bundles. The classifier
-// must not treat this as evidence of staleness.
-func TestProbeDeployedHookBundle_PresentBundle_HasVersionInfoReturnsFalse(t *testing.T) {
-	ws := t.TempDir()
-	bundleDir := filepath.Join(ws, "hooks", "my-hooks")
-	if err := os.MkdirAll(bundleDir, 0o755); err != nil {
-		t.Fatalf("MkdirAll: %v", err)
-	}
-	if err := os.WriteFile(filepath.Join(bundleDir, "hook.sh"), []byte("#!/bin/sh\n"), 0o755); err != nil {
-		t.Fatalf("WriteFile: %v", err)
-	}
-
-	state := probeDeployedHookBundle(ws, "hooks/my-hooks")
+	state := probeHookPlanPresence(ws, hp)
 
 	if !state.Present {
-		t.Fatal("expected Present: true for a directory with one file")
+		t.Error("Present = false when only the nested lib/ variant file exists, want true")
+	}
+}
+
+// TestProbeHookPlanPresence_SomeVariantFilesMissing_StillPresent verifies that one existing
+// file out of several is sufficient for presence.
+func TestProbeHookPlanPresence_SomeVariantFilesMissing_StillPresent(t *testing.T) {
+	ws := t.TempDir()
+	writeWorkspaceFile(t, ws, ".github/hooks/hooks.json")
+	hp := flatHookPlan(".github/hooks", "hooks.json", "logger.sh", "logger.ps1")
+
+	state := probeHookPlanPresence(ws, hp)
+
+	if !state.Present {
+		t.Error("Present = false when one of three variant files exists, want true")
+	}
+}
+
+// ---------------------------------------------------------------------------
+// probeHookPlanPresence - absent cases
+// ---------------------------------------------------------------------------
+
+// TestProbeHookPlanPresence_NoVariantFileOnDisk_Absent verifies that a supported plan whose
+// files are all missing probes absent, even though the hooks directory exists.
+func TestProbeHookPlanPresence_NoVariantFileOnDisk_Absent(t *testing.T) {
+	ws := t.TempDir()
+	writeWorkspaceFile(t, ws, ".claude/hooks/unrelated.sh")
+	hp := flatHookPlan(probeHooksDir, "logger.sh", "logger.py")
+
+	state := probeHookPlanPresence(ws, hp)
+
+	if state.Present {
+		t.Error("Present = true although none of the variant files exist, want false")
+	}
+}
+
+// TestProbeHookPlanPresence_MissingWorkspaceDir_Absent verifies that a nonexistent hooks
+// directory probes absent without error.
+func TestProbeHookPlanPresence_MissingWorkspaceDir_Absent(t *testing.T) {
+	ws := t.TempDir()
+	hp := flatHookPlan(probeHooksDir, "logger.sh")
+
+	state := probeHookPlanPresence(ws, hp)
+
+	if state.Present {
+		t.Error("Present = true for an empty workspace, want false")
+	}
+}
+
+// TestProbeHookPlanPresence_UnsupportedPlan_Absent verifies that an unsupported HookPlan
+// probes absent even when files matching its (stale) file list are on disk.
+func TestProbeHookPlanPresence_UnsupportedPlan_Absent(t *testing.T) {
+	ws := t.TempDir()
+	writeWorkspaceFile(t, ws, ".claude/hooks/logger.sh")
+	hp := flatHookPlan(probeHooksDir, "logger.sh")
+	hp.Supported = false
+	hp.Reason = "runtime-provisioned"
+
+	state := probeHookPlanPresence(ws, hp)
+
+	if state.Present {
+		t.Error("Present = true for an unsupported HookPlan, want false")
+	}
+}
+
+// TestProbeHookPlanPresence_SupportedPlanWithoutFiles_Absent verifies that a supported plan
+// with no files (a bundle without a variant for the harness) probes absent.
+func TestProbeHookPlanPresence_SupportedPlanWithoutFiles_Absent(t *testing.T) {
+	ws := t.TempDir()
+	writeWorkspaceFile(t, ws, ".claude/hooks/logger.sh")
+	hp := domain.HookPlan{Supported: true, TargetDir: probeHooksDir}
+
+	state := probeHookPlanPresence(ws, hp)
+
+	if state.Present {
+		t.Error("Present = true for a HookPlan with no files, want false")
+	}
+}
+
+// TestProbeHookPlanPresence_EmptyTargetNameIgnored verifies that a file entry with an empty
+// TargetName does not resolve to the (existing) hooks directory itself.
+func TestProbeHookPlanPresence_EmptyTargetNameIgnored(t *testing.T) {
+	ws := t.TempDir()
+	writeWorkspaceFile(t, ws, ".claude/hooks/other.sh")
+	hp := domain.HookPlan{
+		Supported: true,
+		TargetDir: probeHooksDir,
+		Files:     []domain.HookFile{{SourcePath: "/src/x", TargetName: ""}},
+	}
+
+	state := probeHookPlanPresence(ws, hp)
+
+	if state.Present {
+		t.Error("Present = true for a file entry with an empty TargetName, want false")
+	}
+}
+
+// TestProbeHookPlanPresence_DirectoryAtFilePath_Absent verifies that a directory sitting at
+// a variant file's path is not a regular file and does not count as presence.
+func TestProbeHookPlanPresence_DirectoryAtFilePath_Absent(t *testing.T) {
+	ws := t.TempDir()
+	if err := os.MkdirAll(filepath.Join(ws, ".claude", "hooks", "logger.sh"), 0o755); err != nil {
+		t.Fatalf("MkdirAll: %v", err)
+	}
+	hp := flatHookPlan(probeHooksDir, "logger.sh")
+
+	state := probeHookPlanPresence(ws, hp)
+
+	if state.Present {
+		t.Error("Present = true when the variant file path is a directory, want false")
+	}
+}
+
+// TestProbeHookPlanPresence_StrayBundleDirectory_NotThePresenceSignal verifies the old
+// directory-at-<hooks dir>/<key> layout is no longer a presence signal: a populated
+// <hooks dir>/<key> directory does not make a bundle present when no variant file exists.
+func TestProbeHookPlanPresence_StrayBundleDirectory_NotThePresenceSignal(t *testing.T) {
+	ws := t.TempDir()
+	writeWorkspaceFile(t, ws, ".claude/hooks/mosaic-logger/hook.sh")
+	hp := flatHookPlan(probeHooksDir, "logger.sh")
+
+	state := probeHookPlanPresence(ws, hp)
+
+	if state.Present {
+		t.Error("Present = true because of a stray <hooks dir>/<key> directory, want false; " +
+			"presence is decided by the variant files at <TargetDir>/<TargetName>")
+	}
+}
+
+// TestProbeHookPlanPresence_AbsentState_IsZeroValue verifies the absent result is the zero
+// DeployedArtifactState: no nil-hash, no version fields.
+func TestProbeHookPlanPresence_AbsentState_IsZeroValue(t *testing.T) {
+	ws := t.TempDir()
+	hp := flatHookPlan(probeHooksDir, "logger.sh")
+
+	state := probeHookPlanPresence(ws, hp)
+
+	if !reflect.DeepEqual(state, domain.DeployedArtifactState{}) {
+		t.Errorf("absent state = %+v, want the zero DeployedArtifactState", state)
+	}
+}
+
+// ---------------------------------------------------------------------------
+// probeHookPlanPresence - present state conventions
+// ---------------------------------------------------------------------------
+
+// TestProbeHookPlanPresence_PresentState_CarriesNilContentHash verifies ContentHash is
+// manifest.Hash(nil), the executor's recorded hash for hook bundles.
+func TestProbeHookPlanPresence_PresentState_CarriesNilContentHash(t *testing.T) {
+	ws := t.TempDir()
+	writeWorkspaceFile(t, ws, ".claude/hooks/logger.sh")
+
+	state := probeHookPlanPresence(ws, flatHookPlan(probeHooksDir, "logger.sh"))
+
+	if !state.Present {
+		t.Fatal("Present = false, want true")
+	}
+	if want := manifest.Hash(nil); state.ContentHash != want {
+		t.Errorf("ContentHash = %q, want manifest.Hash(nil) = %q", state.ContentHash, want)
+	}
+}
+
+// TestProbeHookPlanPresence_PresentState_VersionFieldsEmpty verifies every version field of a
+// present state is empty: the manifest entry is the only version source for hooks.
+func TestProbeHookPlanPresence_PresentState_VersionFieldsEmpty(t *testing.T) {
+	ws := t.TempDir()
+	writeWorkspaceFile(t, ws, ".claude/hooks/logger.sh")
+
+	state := probeHookPlanPresence(ws, flatHookPlan(probeHooksDir, "logger.sh"))
+
+	if !state.Present {
+		t.Fatal("Present = false, want true")
 	}
 	if state.HasVersionInfo() {
-		t.Error("HasVersionInfo() must return false for a present hook bundle; " +
-			"the probe leaves all version fields empty by design, and that must not be treated as staleness evidence")
+		t.Error("HasVersionInfo() = true for a present hook state, want false")
+	}
+	if state.Version != "" || state.HarnessVersion != "" ||
+		state.InjectionsVersion != "" || state.OrchestratorInjectionsVersion != "" {
+		t.Errorf("version fields must be empty, got %+v", state)
+	}
+	if state.ParseFailed {
+		t.Error("ParseFailed = true for a present hook state, want false")
+	}
+}
+
+// ---------------------------------------------------------------------------
+// hookPlansByTargetPath
+// ---------------------------------------------------------------------------
+
+// hookPlanModule is a HarnessModule whose HookPlan returns a canned result per bundle key.
+// Only HookPlan is implemented; the embedded nil interface panics on any other method, which
+// would indicate the code under test reaches beyond its contract.
+type hookPlanModule struct {
+	domain.HarnessModule
+	plans map[string]domain.HookPlan
+	errs  map[string]error
+}
+
+func (m hookPlanModule) HookPlan(req domain.HookPlanRequest) (domain.HookPlan, error) {
+	if err := m.errs[req.Bundle.Key]; err != nil {
+		return domain.HookPlan{}, err
+	}
+	return m.plans[req.Bundle.Key], nil
+}
+
+func hookPathEntry(key, path string) plan.PlannedPath {
+	return plan.PlannedPath{Ref: domain.ArtifactRef{Kind: domain.ArtifactHook, Key: key}, TargetPath: path}
+}
+
+// TestHookPlansByTargetPath_KeysPlansByPlannedHookPath verifies each bundle's HookPlan is
+// indexed under the bundle's planned hook target path.
+func TestHookPlansByTargetPath_KeysPlansByPlannedHookPath(t *testing.T) {
+	flat := flatHookPlan(probeHooksDir, "logger.sh")
+	other := flatHookPlan(probeHooksDir, "audit.sh")
+	module := hookPlanModule{plans: map[string]domain.HookPlan{"mosaic-logger": flat, "audit": other}}
+	hooks := []domain.HookBundle{{Key: "mosaic-logger"}, {Key: "audit"}}
+	paths := plan.PlannedPaths{
+		hookPathEntry("mosaic-logger", ".claude/hooks/mosaic-logger"),
+		hookPathEntry("audit", ".claude/hooks/audit"),
+	}
+
+	got := hookPlansByTargetPath(module, hooks, paths, domain.ScopeProject)
+
+	if len(got) != 2 {
+		t.Fatalf("len(index) = %d, want 2: %+v", len(got), got)
+	}
+	if hp, ok := got[".claude/hooks/mosaic-logger"]; !ok || len(hp.Files) != 1 || hp.Files[0].TargetName != "logger.sh" {
+		t.Errorf("index[.claude/hooks/mosaic-logger] = %+v (found=%v), want the logger HookPlan", hp, ok)
+	}
+	if hp, ok := got[".claude/hooks/audit"]; !ok || len(hp.Files) != 1 || hp.Files[0].TargetName != "audit.sh" {
+		t.Errorf("index[.claude/hooks/audit] = %+v (found=%v), want the audit HookPlan", hp, ok)
+	}
+}
+
+// TestHookPlansByTargetPath_OmitsUnplannedAndErroringBundles verifies a bundle with no planned
+// path or whose HookPlan errors is left out, and unsupported plans are kept.
+func TestHookPlansByTargetPath_OmitsUnplannedAndErroringBundles(t *testing.T) {
+	module := hookPlanModule{
+		plans: map[string]domain.HookPlan{
+			"unplanned":   flatHookPlan(probeHooksDir, "a.sh"),
+			"unsupported": {Supported: false, Reason: "runtime"},
+		},
+		errs: map[string]error{"broken": errors.New("boom")},
+	}
+	hooks := []domain.HookBundle{{Key: "unplanned"}, {Key: "broken"}, {Key: "unsupported"}}
+	paths := plan.PlannedPaths{
+		hookPathEntry("broken", ".claude/hooks/broken"),
+		hookPathEntry("unsupported", ".claude/hooks/unsupported"),
+	}
+
+	got := hookPlansByTargetPath(module, hooks, paths, domain.ScopeProject)
+
+	if got == nil {
+		t.Fatal("index is nil, want a non-nil map")
+	}
+	if _, ok := got[".claude/hooks/broken"]; ok {
+		t.Error("bundle whose HookPlan errors must be omitted")
+	}
+	if len(got) != 1 {
+		t.Errorf("len(index) = %d, want 1 (only the unsupported bundle): %+v", len(got), got)
+	}
+	if hp, ok := got[".claude/hooks/unsupported"]; !ok || hp.Supported {
+		t.Errorf("index[.claude/hooks/unsupported] = %+v (found=%v), want the unsupported plan kept", hp, ok)
+	}
+}
+
+// ---------------------------------------------------------------------------
+// applyHookPresence
+// ---------------------------------------------------------------------------
+
+// TestApplyHookPresence_DeployedBundle_OverwritesAbsentEntry verifies the post-pass turns the
+// generic probe's absent hook entry into a present one for a flat-deployed bundle.
+func TestApplyHookPresence_DeployedBundle_OverwritesAbsentEntry(t *testing.T) {
+	ws := t.TempDir()
+	writeWorkspaceFile(t, ws, ".claude/hooks/logger.sh")
+	const key = ".claude/hooks/mosaic-logger"
+	state := map[string]domain.DeployedArtifactState{key: {Present: false}}
+	hookPlans := map[string]domain.HookPlan{key: flatHookPlan(probeHooksDir, "logger.sh")}
+
+	applyHookPresence(ws, state, hookPlans)
+
+	got := state[key]
+	if !got.Present {
+		t.Fatalf("state[%s].Present = false after the post-pass, want true", key)
+	}
+	if got.ContentHash != manifest.Hash(nil) {
+		t.Errorf("ContentHash = %q, want manifest.Hash(nil)", got.ContentHash)
+	}
+}
+
+// TestApplyHookPresence_BundleNotOnDisk_RecordsAbsent verifies the post-pass replaces a stale
+// present entry with absent when the variant files are not on disk.
+func TestApplyHookPresence_BundleNotOnDisk_RecordsAbsent(t *testing.T) {
+	ws := t.TempDir()
+	const key = ".claude/hooks/mosaic-logger"
+	state := map[string]domain.DeployedArtifactState{
+		key: {Present: true, ContentHash: manifest.Hash(nil)},
+	}
+	hookPlans := map[string]domain.HookPlan{key: flatHookPlan(probeHooksDir, "logger.sh")}
+
+	applyHookPresence(ws, state, hookPlans)
+
+	if state[key].Present {
+		t.Errorf("state[%s].Present = true with no variant file on disk, want false", key)
+	}
+}
+
+// TestApplyHookPresence_NonHookEntriesUntouched verifies entries whose key is not in the hook
+// plan index (agents, skills, seeded entries) are not modified or removed.
+func TestApplyHookPresence_NonHookEntriesUntouched(t *testing.T) {
+	ws := t.TempDir()
+	writeWorkspaceFile(t, ws, ".claude/hooks/logger.sh")
+	const hookKey = ".claude/hooks/mosaic-logger"
+	agent := domain.DeployedArtifactState{Present: true, ContentHash: "sha256:agent", Version: "2.0"}
+	skill := domain.DeployedArtifactState{Present: false}
+	state := map[string]domain.DeployedArtifactState{
+		hookKey:                  {},
+		".claude/agents/foo.md":  agent,
+		".claude/skills/bar.md":  skill,
+	}
+	hookPlans := map[string]domain.HookPlan{hookKey: flatHookPlan(probeHooksDir, "logger.sh")}
+
+	applyHookPresence(ws, state, hookPlans)
+
+	if !state[hookKey].Present {
+		t.Fatal("hook entry was not updated; the post-pass must apply to hook entries")
+	}
+	if !reflect.DeepEqual(state[".claude/agents/foo.md"], agent) {
+		t.Errorf("agent entry changed to %+v, want it untouched", state[".claude/agents/foo.md"])
+	}
+	if !reflect.DeepEqual(state[".claude/skills/bar.md"], skill) {
+		t.Errorf("skill entry changed to %+v, want it untouched", state[".claude/skills/bar.md"])
+	}
+	if len(state) != 3 {
+		t.Errorf("len(state) = %d, want 3 (no entries added or removed)", len(state))
+	}
+}
+
+// TestApplyHookPresence_NilOrEmptyHookPlans_NoOp verifies the post-pass does nothing, and does
+// not panic, when there are no hook plans (including a nil state map).
+func TestApplyHookPresence_NilOrEmptyHookPlans_NoOp(t *testing.T) {
+	ws := t.TempDir()
+	untouched := domain.DeployedArtifactState{Present: true, ContentHash: "sha256:x"}
+	state := map[string]domain.DeployedArtifactState{"a.md": untouched}
+
+	applyHookPresence(ws, state, nil)
+	applyHookPresence(ws, state, map[string]domain.HookPlan{})
+	applyHookPresence(ws, nil, nil)
+
+	if len(state) != 1 || !reflect.DeepEqual(state["a.md"], untouched) {
+		t.Errorf("state changed to %+v, want it unchanged", state)
 	}
 }

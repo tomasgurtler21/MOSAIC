@@ -524,15 +524,15 @@ func classifyHookItem(
 	}
 
 	// Step 5: Staleness check using the manifest-recorded version as the deployed version
-	// signal. Hook bundles are directories and carry no in-file version marker, so
-	// deployed.Version is always empty; the manifest entry's recorded Version is the only
+	// signal. Hook bundles are deployed as plain files (flat or nested in the hooks directory) with no
+	// in-file version marker, so deployed.Version is always empty; the manifest entry's recorded Version is the only
 	// truthful "deployed version" for a hook bundle.
 	deltas := HookStalenessFromRecorded(entry.Version, hook.Version)
 
 	// Step 7: The manifest-version comparison above is the sole update trigger on the hook
 	// path. The !deployed.HasVersionInfo() fallback that the pre-fix code ORed in is
-	// deliberately excluded here: probeDeployedHookBundle always leaves all four version
-	// fields empty (a directory carries no in-file marker), making HasVersionInfo()
+	// deliberately excluded here: the hook presence probe always leaves all four version
+	// fields empty (a hook bundle carries no in-file marker), making HasVersionInfo()
 	// unconditionally false for every present hook bundle. Leaving that fallback in place
 	// would force every present hook to ActionUpdate regardless of step 5's result.
 	if len(deltas) > 0 {

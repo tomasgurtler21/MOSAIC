@@ -57,7 +57,8 @@ to make anything happen on disk.
    closure of the selected agents only, because skills are collected from the included agent
    set. In every other mode: agents are pulled in transitively from every selected workflow
    plus explicitly selected utility agents; skills are pulled in transitively from every
-   included agent's `RequiredSkills`; hook bundles come from the explicit hook selection.
+   included agent's `RequiredSkills`; hook bundles come from the explicit hook selection,
+   except in Update, where they are the hooks already deployed (see Hook deployment below).
    Everything is deduplicated and sorted by key for determinism.
 3. For each artifact, `Build` asks the harness module (via `domain.HarnessModule.TargetPath`)
    where it would land in the target workspace, then classifies the item into one of four
@@ -169,7 +170,13 @@ a pure function: source bytes + harness module + request context in, output byte
      before writing the new content, so repeated backups of the same file in the same run
      never collide.
 3. **Hook deployment and registration** — hook bundle files are copied to the harness's
-   declared target directory. Registration steps (edits to files the tool doesn't own, e.g.
+   declared target directory; claude-code and vscode-ghcp share `.claude/hooks/`. In Update,
+   hook membership is not a selection: a Catalog hook is included when at least one file of
+   the harness's hook variant is on disk (`deployedHookIDs` in update_hooks.go, using the
+   layout-aware `probeHookPlanPresence`), and its deployed version comes from the manifest.
+   A deployed hook with no manifest record is a conflict. Hooks never deployed are never
+   added; refreshed files are overwritten and files the new version dropped stay.
+   Registration steps (edits to files the tool doesn't own, e.g.
    `.claude/settings.json`) follow a fixed policy: not performable → always a manual-step
    gap; performable and target absent → write the fragment silently; performable and target
    present → never modify it, always emit a registration gap so the user pastes it in by
@@ -208,7 +215,7 @@ recorded is a real, detectable local modification, not noise to be smoothed over
 | Plan item action | One of Create / Update / Unchanged / Conflict — the single classification a plan item carries into execution. |
 | Version delta | An independent per-field staleness signal (`version`, `mosaic_transform_version`, `mosaic_injections_version` for agents; a single `version` for skills/hooks). Deployed field names carry the `mosaic_` prefix; legacy unprefixed names are accepted as fallback (prefixed wins when both present). The `role` field follows the same pattern: deployed as `mosaic_role`, legacy bare `role` accepted as fallback; key-name difference alone is not a staleness signal. |
 | Orchestrator inclusion rule | The orchestrator is included unconditionally in every run mode except standalone-only. `OrchestratorExcludedFor(mode)` is the single authority for the mode → boolean decision; both the artifact-probe path and `plan.Build` derive `sel.ExcludeOrchestrator` from it, so the two paths cannot disagree. |
-| Update set-membership rule | In `ModeUpdateWorkspace`, which agents to staleness-check is determined by a workspace scan of the harness's deployed-agents directory (`scanWorkspaceAgents`), not by workflow discovery. Every `.md` file found there is classified in one pass: catalog-matched files (by numeric id first, filename key second) enter `plan.Selection.ScannedAgentKeys` and the full staleness pipeline; unmatched but two-signal-eligible files enter the harness-only consent path; neither-classified files are left byte-identical with no plan item. The scope is agents only — skills and hooks keep their current derivation. Workflow discovery feeds `plan.Input.WorkflowIDs` for orchestrator workflow-set drift reporting only; it no longer gates which non-orchestrator agents are checked. The manifest is a complementary per-item lookup, not an inclusion gate: an agent present in the workspace but absent from the manifest is still staleness-checked. No reconciliation pass adds catalog agents missing from the workspace — Update only updates what is deployed. |
+| Update set-membership rule | In `ModeUpdateWorkspace`, which agents to staleness-check is determined by a workspace scan of the harness's deployed-agents directory (`scanWorkspaceAgents`), not by workflow discovery. Every `.md` file found there is classified in one pass: catalog-matched files (by numeric id first, filename key second) enter `plan.Selection.ScannedAgentKeys` and the full staleness pipeline; unmatched but two-signal-eligible files enter the harness-only consent path; neither-classified files are left byte-identical with no plan item. The scope is agents only — skills keep their current derivation, and hooks are the already-deployed set (see Hook deployment, step 3). Workflow discovery feeds `plan.Input.WorkflowIDs` for orchestrator workflow-set drift reporting only; it no longer gates which non-orchestrator agents are checked. The manifest is a complementary per-item lookup, not an inclusion gate: an agent present in the workspace but absent from the manifest is still staleness-checked. No reconciliation pass adds catalog agents missing from the workspace — Update only updates what is deployed. |
 | Injection class | Harness / Project / Workflow — determines whether region content is always refreshed, preserved-then-refreshed, or fully reassembled. |
 | Gap | A structured "this needed a human decision or couldn't be automated" signal, produced at any of the plan/transform/deploy stages and funneled into `todo`. |
 | Fallback tier | Workspace / MOSAIC-root / OS-temp — the three-tier writability chain resolved exactly once per run. |
