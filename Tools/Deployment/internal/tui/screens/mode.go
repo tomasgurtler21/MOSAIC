@@ -31,6 +31,9 @@ var modeItems = []widgets.ListItem{
 			"Infrastructure agent declarations in the orchestrator are refreshed when\n" +
 			"their catalog definition changed; new or hand-added declarations are\n" +
 			"never added or touched.\n\n" +
+			"Hook bundles already deployed are refreshed when the catalog version is\n" +
+			"newer (local edits lost); hooks not deployed are never added, and an\n" +
+			"existing registration file is never modified (a TODO is reported).\n\n" +
 			"Use this after updating the generic agents or when a harness\n" +
 			"descriptor has changed.",
 	},

@@ -329,9 +329,9 @@ func TestHook_Variant_ClaudeCode_RegistrationSteps_HaveIDs(t *testing.T) {
 	}
 }
 
-// TestHook_Variant_ClaudeCode_RegistrationSteps_HasSettingsFragment verifies that the
-// settings-fragment step is present and is marked as performable.
-func TestHook_Variant_ClaudeCode_RegistrationSteps_HasSettingsFragment(t *testing.T) {
+// TestHook_Variant_ClaudeCode_RegistrationSteps_HasRegisterStep verifies that the
+// register-mosaic-logger step is present and is marked as performable.
+func TestHook_Variant_ClaudeCode_RegistrationSteps_HasRegisterStep(t *testing.T) {
 	cat := loadRealCatalog(t)
 	h, _ := cat.Hook("mosaic-logger")
 
@@ -340,17 +340,17 @@ func TestHook_Variant_ClaudeCode_RegistrationSteps_HasSettingsFragment(t *testin
 		t.Fatal("mosaic-logger Variants[\"claude-code\"]: not found")
 	}
 	for _, step := range v.Registration {
-		if step.ID == "settings-fragment" {
+		if step.ID == "register-mosaic-logger" {
 			if !step.Performable {
-				t.Error("claude-code settings-fragment step Performable = false; expected true")
+				t.Error("claude-code register-mosaic-logger step Performable = false; expected true")
 			}
 			if step.Fragment == "" {
-				t.Error("claude-code settings-fragment step Fragment is empty; expected hook JSON")
+				t.Error("claude-code register-mosaic-logger step Fragment is empty; expected hook JSON")
 			}
 			return
 		}
 	}
-	t.Error("claude-code variant missing expected registration step with id \"settings-fragment\"")
+	t.Error("claude-code variant missing expected registration step with id \"register-mosaic-logger\"")
 }
 
 // TestHook_Variant_OpenCode_RegistrationSteps_Empty verifies that the opencode variant
@@ -454,9 +454,9 @@ func TestHook_Variant_GhcpCli_Files_TargetNames(t *testing.T) {
 	}
 }
 
-// TestHook_Variant_GhcpCli_RegistrationSteps_HasSettingsFragment verifies that the
-// ghcp-cli variant has a settings-fragment registration step with a non-empty fragment.
-func TestHook_Variant_GhcpCli_RegistrationSteps_HasSettingsFragment(t *testing.T) {
+// TestHook_Variant_GhcpCli_RegistrationSteps_HasRegisterStep verifies that the
+// ghcp-cli variant has a register-mosaic-logger registration step with a non-empty fragment.
+func TestHook_Variant_GhcpCli_RegistrationSteps_HasRegisterStep(t *testing.T) {
 	cat := loadRealCatalog(t)
 	h, _ := cat.Hook("mosaic-logger")
 
@@ -465,17 +465,17 @@ func TestHook_Variant_GhcpCli_RegistrationSteps_HasSettingsFragment(t *testing.T
 		t.Fatal("mosaic-logger Variants[\"ghcp-cli\"]: not found")
 	}
 	for _, step := range v.Registration {
-		if step.ID == "settings-fragment" {
+		if step.ID == "register-mosaic-logger" {
 			if !step.Performable {
-				t.Error("ghcp-cli settings-fragment step Performable = false; expected true")
+				t.Error("ghcp-cli register-mosaic-logger step Performable = false; expected true")
 			}
 			if step.Fragment == "" {
-				t.Error("ghcp-cli settings-fragment step Fragment is empty; expected hook JSON")
+				t.Error("ghcp-cli register-mosaic-logger step Fragment is empty; expected hook JSON")
 			}
 			return
 		}
 	}
-	t.Error("ghcp-cli variant missing expected registration step with id \"settings-fragment\"")
+	t.Error("ghcp-cli variant missing expected registration step with id \"register-mosaic-logger\"")
 }
 
 // ---------------------------------------------------------------------------

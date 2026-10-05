@@ -1,0 +1,3 @@
+{
+  "hooks": {"PreToolUse": [{"command": ".claude/hooks/logger.sh"}]}
+}

@@ -96,6 +96,7 @@ func deployHooks(ctx context.Context, s *service, req DeployHooksRequest) (domai
 	if err != nil {
 		return domain.RunSummary{}, err
 	}
+	applyHookPresence(workspace, deployedState, hookPlansByTargetPath(module, probeSet.Hooks, plannedPaths, scope))
 
 	toolCfg, _ := s.deps.ToolConfig.Load()
 	userCfg, err := s.deps.UserConfig.Load()

@@ -1,3 +1,11 @@
+# 0.6.1 (2026-10-05)
+
+## Tools
+
+### Deploy v1.1.3
+#### Changes
+- `Update workspace` updates deployed hooks as well
+
 # 0.6.0 (2026-10-05)
 
 ## Tools

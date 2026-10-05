@@ -155,43 +155,6 @@ func extractDeployedInjectionVersion(data []byte, legacyFrontmatterKey string) (
 	return "", foundRegion
 }
 
-// probeDeployedHookBundle reports the on-disk state of a hook bundle, whose target path is a
-// directory rather than a file. Present is true when <workspace>/<targetPath> exists, is a
-// directory, and contains at least one regular file directly within it; false in every other
-// case, including an unreadable path, a file at that path, and an empty directory.
-//
-// ContentHash is manifest.Hash(nil) whenever Present is true, matching the executor's hook
-// manifest convention (hook bundles are recorded with a nil content hash), so an untouched
-// bundle does not classify as a local modification. Every version field is left empty: a hook
-// bundle carries no in-file version marker.
-//
-// It never returns an error; any I/O failure yields Present: false.
-func probeDeployedHookBundle(workspace, targetPath string) domain.DeployedArtifactState {
-	fullPath := filepath.Join(workspace, targetPath)
-
-	entries, err := os.ReadDir(fullPath)
-	if err != nil {
-		// Path absent, unreadable, or is not a directory.
-		return domain.DeployedArtifactState{Present: false}
-	}
-
-	// A hook bundle is present only when at least one regular file exists directly inside
-	// the directory. Subdirectories and other non-regular entries do not count.
-	for _, entry := range entries {
-		if !entry.IsDir() && entry.Type().IsRegular() {
-			return domain.DeployedArtifactState{
-				Present:     true,
-				ContentHash: manifest.Hash(nil),
-				// All version fields left empty: a hook bundle directory carries no in-file
-				// version marker. The manifest entry's recorded Version is the only version
-				// signal for hooks; classifyHookItem reads it via HookStalenessFromRecorded.
-			}
-		}
-	}
-
-	return domain.DeployedArtifactState{Present: false}
-}
-
 // probeDeployedState probes every path in paths, passing modelKey to each per-artifact probe.
 // Entries already present in seed are reused verbatim and not re-read, so a path probed
 // earlier in the flow (the orchestrator, for workflow discovery) is read exactly once per run.
@@ -264,11 +227,11 @@ func probeDeployedStateWithIndex(
 			continue
 		}
 
-		// Hook artifacts deploy to a directory, not a file. Use the directory-oriented probe
-		// so that a non-empty hook bundle directory is observed as present. probeDeployedArtifact
-		// always yields Present: false for directories and must not be used for hooks.
+		// Hook bundles deploy as files directly in the hooks directory, not at the planned
+		// <hooks dir>/<key> path, so a read at that path cannot observe them. Record absent here;
+		// callers that plan hooks apply the layout-aware presence post-pass (applyHookPresence).
 		if pp.Ref.Kind == domain.ArtifactHook {
-			result[pp.TargetPath] = probeDeployedHookBundle(workspace, pp.TargetPath)
+			result[pp.TargetPath] = domain.DeployedArtifactState{}
 			continue
 		}
 

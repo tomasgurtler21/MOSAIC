@@ -219,6 +219,7 @@ func (s *service) DeployNew(ctx context.Context, req DeployRequest) (domain.RunS
 	if err != nil {
 		return domain.RunSummary{}, err
 	}
+	applyHookPresence(workspace, deployedState, hookPlansByTargetPath(module, probeSet.Hooks, plannedPaths, scope))
 
 	// Compute the tool-mappings version hash from the loaded config stores so the planner
 	// can detect staleness when the user modifies their tool-destination configuration.

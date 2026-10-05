@@ -455,13 +455,13 @@ func TestLoad_RealMosaicLoggerBundle_ClaudeCodeFragmentPreservesStructureVerbati
 
 	var step *hookbundle.RegistrationStep
 	for i := range v.Registration {
-		if v.Registration[i].ID == "settings-fragment" {
+		if v.Registration[i].ID == "register-mosaic-logger" {
 			step = &v.Registration[i]
 			break
 		}
 	}
 	if step == nil {
-		t.Fatal(`Variants["claude-code"].Registration has no "settings-fragment" step`)
+		t.Fatal(`Variants["claude-code"].Registration has no "register-mosaic-logger" step`)
 	}
 
 	// The fragment is copied verbatim, never round-tripped through a parsed
