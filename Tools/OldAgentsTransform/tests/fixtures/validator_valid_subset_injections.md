@@ -12,10 +12,6 @@ You are the TestAgent agent in a multi-agent orchestration system.
 
 **Goal:** Test that not all injections are required.
 
-<IdentityExtension type="project">
-Only this injection is present in this file.
-</IdentityExtension>
-
 </Identity>
 ---
 
@@ -28,6 +24,10 @@ Only this injection is present in this file.
 ## Capabilities
 
 Capabilities content without any injection.
+
+<CodebaseContext type="project">
+Only this injection is present in this file.
+</CodebaseContext>
 
 </Capabilities>
 ---

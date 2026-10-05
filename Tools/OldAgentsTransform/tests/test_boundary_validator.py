@@ -334,7 +334,7 @@ class TestValidateFileErrorDetection:
 
     def test_unmatched_injection_open_tag_returns_e001_error(self) -> None:
         # Arrange
-        # <IdentityExtension type="project"> is opened inside Identity but never closed.
+        # <CodebaseContext type="project"> is opened inside Identity but never closed.
         fixture = _fixture("validator_invalid_e001_injection_missing_close.md")
 
         # Act
@@ -349,7 +349,7 @@ class TestValidateFileErrorDetection:
 
     def test_orphan_injection_close_tag_returns_e002_error(self) -> None:
         # Arrange
-        # </IdentityExtension> appears with no corresponding open tag.
+        # </CodebaseContext> appears with no corresponding open tag.
         fixture = _fixture("validator_invalid_e002_injection_orphan_close.md")
 
         # Act
@@ -380,7 +380,7 @@ class TestValidateFileErrorDetection:
 
     def test_duplicate_injection_name_returns_e006_error(self) -> None:
         # Arrange
-        # <IdentityExtension type="project"> appears twice in the same file.
+        # <CodebaseContext type="project"> appears twice in the same file.
         fixture = _fixture("validator_invalid_e006_duplicate_injection.md")
 
         # Act
@@ -1428,7 +1428,7 @@ class TestStage3InjectionParentAdvisory:
         self, tmp_path: pathlib.Path
     ) -> None:
         # Arrange
-        # IdentityExtension inside Capabilities — advisory parent mismatch.
+        # CodebaseContext (usual parent Capabilities) inside Identity — advisory parent mismatch.
         content = (
             "---\n"
             "id: test-advisory\n"
@@ -1436,12 +1436,12 @@ class TestStage3InjectionParentAdvisory:
             "name: test-agent\n"
             "description: Agent with injection in wrong parent section.\n"
             "---\n\n"
-            '<Capabilities type="core">\n'
-            "## Capabilities\n"
-            '<IdentityExtension type="project">\n'
+            '<Identity type="core">\n'
+            "# TestAgent Agent\n"
+            '<CodebaseContext type="project">\n'
             "Extension content.\n"
-            "</IdentityExtension>\n"
-            "</Capabilities>\n"
+            "</CodebaseContext>\n"
+            "</Identity>\n"
         )
         agent_file = tmp_path / "advisory-injection.md"
         agent_file.write_text(content, encoding="utf-8")
@@ -1450,7 +1450,7 @@ class TestStage3InjectionParentAdvisory:
         findings = validate_file(agent_file)
 
         # Assert
-        injection_findings = [f for f in findings if "IdentityExtension" in f.message]
+        injection_findings = [f for f in findings if "CodebaseContext" in f.message]
         assert injection_findings, (
             "Expected a finding for the misplaced injection to confirm advisory severity "
             "(absence of a finding is also valid but must be explicitly tested separately)"
@@ -1477,12 +1477,12 @@ class TestStage3InjectionParentAdvisory:
             "name: test-agent\n"
             "description: Agent with only an advisory finding.\n"
             "---\n\n"
-            '<Capabilities type="core">\n'
-            "## Capabilities\n"
-            '<IdentityExtension type="project">\n'
+            '<Identity type="core">\n'
+            "# TestAgent Agent\n"
+            '<CodebaseContext type="project">\n'
             "Extension content.\n"
-            "</IdentityExtension>\n"
-            "</Capabilities>\n"
+            "</CodebaseContext>\n"
+            "</Identity>\n"
         )
         agent_file = tmp_path / "advisory-only.md"
         agent_file.write_text(content, encoding="utf-8")
@@ -1501,14 +1501,10 @@ class TestStage3InjectionParentAdvisory:
         self, tmp_path: pathlib.Path
     ) -> None:
         # Arrange
-        # ProtocolConstraints (canonical parent: Constraints) placed inside Identity --
+        # HarnessConstraints (canonical parent: Constraints) placed inside Identity --
         # deployed region in wrong parent. Must remain a hard error. The advisory
         # relaxation applies only to <Name type="project"> regions.
-        # LanguagePatterns is no longer usable as this sample: it left CANONICAL_DEPLOYED
-        # entirely, so a <LanguagePatterns type="managed"> tag now signals an unknown/unclassified
-        # deployed name rather than a wrong-parent placement -- a different structural
-        # meaning. ProtocolConstraints is a surviving canonical name with a non-empty
-        # parent, preserving the original wrong-parent scenario.
+        # HarnessConstraints is a surviving canonical name with a non-empty parent.
         content = (
             "---\n"
             "id: test-deployed-parent\n"
@@ -1518,8 +1514,8 @@ class TestStage3InjectionParentAdvisory:
             "---\n\n"
             '<Identity type="core">\n'
             "# TestAgent Agent\n"
-            '<ProtocolConstraints type="managed">\n'
-            "</ProtocolConstraints>\n"
+            '<HarnessConstraints type="managed">\n'
+            "</HarnessConstraints>\n"
             "</Identity>\n"
         )
         agent_file = tmp_path / "deployed-wrong-parent.md"
@@ -1531,7 +1527,7 @@ class TestStage3InjectionParentAdvisory:
         # Assert
         e008_findings = [
             f for f in findings
-            if f.error_code == "E008" and "ProtocolConstraints" in f.message
+            if f.error_code == "E008" and "HarnessConstraints" in f.message
         ]
         assert e008_findings, (
             'A misplaced <Name type="managed"> region must still produce an E008 finding after Stage 3'
@@ -1550,9 +1546,8 @@ class TestStage3InjectionParentAdvisory:
     ) -> None:
         # Arrange
         # A document with a misplaced deployed region (hard error). CLI must exit 1.
-        # ProtocolConstraints is a surviving canonical name with a non-empty parent
-        # (Constraints); see test_deployed_wrong_parent_severity_remains_error for why
-        # LanguagePatterns no longer serves this purpose.
+        # HarnessConstraints is a surviving canonical name with a non-empty parent
+        # (Constraints); see test_deployed_wrong_parent_severity_remains_error.
         content = (
             "---\n"
             "id: test-deployed-err\n"
@@ -1562,8 +1557,8 @@ class TestStage3InjectionParentAdvisory:
             "---\n\n"
             '<Identity type="core">\n'
             "# TestAgent Agent\n"
-            '<ProtocolConstraints type="managed">\n'
-            "</ProtocolConstraints>\n"
+            '<HarnessConstraints type="managed">\n'
+            "</HarnessConstraints>\n"
             "</Identity>\n"
         )
         agent_file = tmp_path / "deployed-error.md"
@@ -1577,6 +1572,119 @@ class TestStage3InjectionParentAdvisory:
             "CLI must exit non-zero when an error-severity finding (deployed wrong-parent) exists. "
             f"Got returncode={result.returncode}"
         )
+
+
+# ---------------------------------------------------------------------------
+# Retired names are rejected in OUTPUT documents
+# ---------------------------------------------------------------------------
+
+class TestRetiredNamesRejectedByValidator:
+    """A document that contains a region named ProtocolConstraints,
+    IdentityExtension or ErrorHandlingExtension is rejected, whatever the
+    region type. These names are recognised on migration INPUT only."""
+
+    _HEAD = (
+        "---\n"
+        "id: test-retired\n"
+        "version: 1.0.0\n"
+        "name: test-agent\n"
+        "description: Agent carrying a retired region name.\n"
+        "---\n\n"
+    )
+
+    def _validate(self, tmp_path: pathlib.Path, body: str):
+        agent_file = tmp_path / "retired.md"
+        agent_file.write_text(self._HEAD + body, encoding="utf-8")
+        return validate_file(agent_file)
+
+    def _errors_naming(self, findings, name: str):
+        return [f for f in findings if name in f.message and f.severity == "error"]
+
+    def test_protocol_constraints_managed_region_is_rejected(self, tmp_path) -> None:
+        findings = self._validate(
+            tmp_path,
+            '<Constraints type="core">\n'
+            "## Constraints\n"
+            '<ProtocolConstraints type="managed">\n'
+            "</ProtocolConstraints>\n"
+            "</Constraints>\n",
+        )
+        assert self._errors_naming(findings, "ProtocolConstraints"), (
+            f"expected an error-severity finding naming ProtocolConstraints, got {findings}"
+        )
+
+    def test_protocol_constraints_custom_region_is_rejected(self, tmp_path) -> None:
+        findings = self._validate(
+            tmp_path,
+            '<Constraints type="core">\n'
+            "## Constraints\n"
+            '<ProtocolConstraints type="custom">\n'
+            "</ProtocolConstraints>\n"
+            "</Constraints>\n",
+        )
+        assert self._errors_naming(findings, "ProtocolConstraints")
+
+    def test_identity_extension_project_region_is_rejected(self, tmp_path) -> None:
+        findings = self._validate(
+            tmp_path,
+            '<Identity type="core">\n'
+            "# TestAgent Agent\n"
+            '<IdentityExtension type="project">\n'
+            "Extension content.\n"
+            "</IdentityExtension>\n"
+            "</Identity>\n",
+        )
+        assert self._errors_naming(findings, "IdentityExtension")
+
+    def test_error_handling_extension_project_region_is_rejected(self, tmp_path) -> None:
+        findings = self._validate(
+            tmp_path,
+            '<ErrorHandling type="core">\n'
+            "## Error Handling\n"
+            '<ErrorHandlingExtension type="project">\n'
+            "</ErrorHandlingExtension>\n"
+            "</ErrorHandling>\n",
+        )
+        assert self._errors_naming(findings, "ErrorHandlingExtension")
+
+    def test_error_handling_extension_custom_region_is_rejected(self, tmp_path) -> None:
+        findings = self._validate(
+            tmp_path,
+            '<ErrorHandling type="core">\n'
+            "## Error Handling\n"
+            '<ErrorHandlingExtension type="custom">\n'
+            "Some content.\n"
+            "</ErrorHandlingExtension>\n"
+            "</ErrorHandling>\n",
+        )
+        assert self._errors_naming(findings, "ErrorHandlingExtension")
+
+    def test_cli_exits_nonzero_for_retired_name(self, tmp_path) -> None:
+        agent_file = tmp_path / "retired-cli.md"
+        agent_file.write_text(
+            self._HEAD
+            + '<Identity type="core">\n'
+            "# TestAgent Agent\n"
+            '<IdentityExtension type="project">\n'
+            "</IdentityExtension>\n"
+            "</Identity>\n",
+            encoding="utf-8",
+        )
+        result = _run_cli(str(agent_file))
+        assert result.returncode != 0
+
+    def test_retired_name_inside_fenced_block_is_not_a_region(self, tmp_path) -> None:
+        findings = self._validate(
+            tmp_path,
+            '<Identity type="core">\n'
+            "# TestAgent Agent\n"
+            "```\n"
+            '<IdentityExtension type="project">\n'
+            "</IdentityExtension>\n"
+            "```\n"
+            "</Identity>\n",
+        )
+        assert not self._errors_naming(findings, "IdentityExtension")
 
 
 # ---------------------------------------------------------------------------

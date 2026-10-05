@@ -7,9 +7,10 @@ target AI harness workspace. It handles several operations:
   workflows, and model assignments, then writing every file in one pass.
 - **Update** — bring an existing workspace up to date with the latest agent
   versions, preserving locally-modified files as you choose.
-- **Utility/infrastructure only** — deploy only Utility and Infrastructure
-  agents and their required skills, without touching workflows, hooks, or
-  orchestrator configuration.
+- **Deploy agents** — deploy a chosen mix of subagents, utility,
+  infrastructure and standalone agents and their required skills, without
+  touching workflows or hooks; declarations for new infrastructure agents are
+  added to an existing orchestrator.
 
 The tool reads from the MOSAIC source tree (generic agents, skills, hook bundles,
 workflow definitions) and writes harness-specific files to a workspace you own.
@@ -104,8 +105,8 @@ From the MOSAIC root, with the binary installed:
 # CLI — update an existing workspace
 ./mosaic-deploy update --harness claude-code --workspace /path/to/my-project --auto-confirm
 
-# CLI — deploy only utility and infrastructure agents
-./mosaic-deploy utility-infra --harness claude-code --workspace /path/to/my-project --auto-confirm
+# CLI — deploy a chosen mix of agents
+./mosaic-deploy agents --harness claude-code --workspace /path/to/my-project --yes
 ```
 
 On Windows, use `.\mosaic-deploy.exe` instead of `./mosaic-deploy`.
@@ -189,38 +190,36 @@ The update flow updates an existing workspace to the latest agent versions. It:
   --auto-confirm
 ```
 
-### Utility/infrastructure only — deploy a subset without workflows
+### Agents only — deploy a subset without workflows
 
-The utility-infra flow deploys only Utility and Infrastructure agents and the skills they require. It never asks about workflows, hooks, or the orchestrator. Use it when you want to add or refresh these agent groups in a workspace that already has its orchestrator and workflows configured.
+The agents flow deploys a chosen mix of subagents, utility agents, infrastructure agents, and standalone agents plus the skills they require. It never asks about workflows or hooks. Use it when you want to add or refresh agents in a workspace that already has its orchestrator and workflows configured.
 
-The flow:
+If an orchestrator file (`orchestrator.md`, `orchestrator-script.md`) is already present, declarations for newly deployed infrastructure agents are added to it. Existing declarations, including hand-added ones, are kept, and a re-deployed agent is refreshed in place. A locally modified orchestrator follows `--conflict`; when skipped, a TODO entry explains the manual step. No orchestrator is created when none is present, and its workflows are not changed: injecting infrastructure agents keeps the deployed workflow tables exactly as they are, and does not add the `Row` column described below.
 
-1. Asks you to select utility agents (or pre-answer with `--utility`)
-2. Asks you to select infrastructure agents (or pre-answer with `--infrastructure`)
-3. Resolves models for infrastructure agents using the same two-batch logic as the full deploy, including the skip/gap path
-4. Shows a plan for review
-5. Writes only the selected agents and the skills they require
+### Workflow `Row` column
 
-Workflow-driven agents, the orchestrator, and hook bundles are not touched.
+Whenever mosaic-deploy rebuilds workflows into an orchestrator (a full deploy or `mosaic-deploy workflows`), it adds a first-column `Row` (1..N) to each workflow routing table. Catalog workflow sources never contain it and authors do not write it. The Runner accepts tables with or without the column, and refuses a table whose `Row` numbers do not match row positions, for example after a hand edit. Orchestrators deployed before this column existed gain it only when their workflows are next redeployed, for example with `mosaic-deploy workflows`. A version stamp does not trigger it.
+
+The update flow likewise refreshes catalog-backed infrastructure declarations in the orchestrator when their definition changed in the catalog; it never adds new declarations or touches hand-added ones.
 
 **CLI example:**
 
 ```sh
 # Ask interactively which agents to deploy.
-./mosaic-deploy utility-infra \
+./mosaic-deploy agents \
   --harness claude-code \
   --workspace /path/to/my-project
 
-# Non-interactive: pre-answer both selections.
-./mosaic-deploy utility-infra \
+# Non-interactive: pre-answer the selection (unspecified classes are empty).
+./mosaic-deploy agents \
   --harness claude-code \
   --workspace /path/to/my-project \
   --utility "code-reviewer,test-runner" \
-  --infrastructure "docker-manager" \
-  --auto-confirm
+  --infra "docker-manager" \
+  --yes
 ```
 
-Pass `--dry-run` to see the plan without writing any files. See the [CLI Reference](docs/cli.md#utility-infra-subcommand) for the full flag list and nil/empty pre-answer convention.
+Pass `--dry-run` to see the plan without writing any files. See the [CLI Reference](docs/cli.md#agents-subcommand) for the full flag list and pre-answer convention.
 
 ### Runner deployment
 
@@ -419,6 +418,8 @@ The generated generic file:
   - `name` — taken from the source `name` field when present; otherwise derived
     from the output filename.
   - `role` — taken from the source `role` field.
+  - Source-only keys `infrastructure`, `triggers` and `on_failure` are in the
+    default drop set of every builtin harness and never appear in deployed files.
   - All other source fields not in the drop set are carried over verbatim (e.g.
     `description`, `recommended_tier`, `tools`, `required_skills`).
   - Deployment and transform stamps are **dropped**: `transform_version`,

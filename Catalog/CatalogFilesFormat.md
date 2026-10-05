@@ -12,32 +12,91 @@ schema for readers working from the tool side, alongside
 **All three are copies and must be updated together**; where any of them
 disagrees with the design document, the design document is right.
 
-Unique to this document, and not specified anywhere else: skill frontmatter
-fields, hook bundle structure, and their version bump rules.
+Unique to this document, and not specified anywhere else: file encoding and
+frontmatter fence rules, skill frontmatter fields, hook bundle structure, and
+their version bump rules.
+
+---
+
+## File Encoding and Frontmatter Fences
+
+These rules apply to all MOSAIC source files: agents, skills, and workflows.
+The tools enforce them when they read a file.
+
+### Encoding
+
+- Files must be UTF-8. A file with invalid UTF-8, or a UTF-16 file, is rejected
+  with an error that names the file.
+- A leading UTF-8 byte order mark (BOM) is tolerated without a warning.
+  Deployed output is written without it.
+
+### Line endings
+
+- LF and CRLF line endings are both accepted. LF is recommended; the
+  repository's `.gitattributes` enforces LF for `*.md`.
+- Deployed output uses the source file's line-ending style throughout.
+- CR-only line endings are rejected.
+
+### Frontmatter fences
+
+- Frontmatter starts with a `---` line on the first line of the file (after an
+  optional BOM) and ends with a `---` line.
+- Trailing spaces or tabs after either fence are tolerated. When the tool
+  rewrites the file, the fence is written as plain `---`.
+- Leading blank lines, leading whitespace, or invisible characters before or
+  around the opening fence are rejected with an error that shows the line.
+- Invisible characters on an unindented fence-like line inside the frontmatter
+  are rejected the same way.
+- An indented `---` inside a block value is ordinary content.
+- A file whose first non-blank line is not fence-like has no frontmatter.
+
+### Agent frontmatter requirement
+
+Every agent file needs frontmatter. Subagents additionally need `id`, `name`,
+and `version`. A violation stops the deploy before any file is written.
+
+### Rewrite reporting
+
+When a deploy run overwrites a deployed agent or skill file whose BOM or
+line-ending style differs from the bytes written, the change is reported in the
+run log and the summaries. The following writes are not reported: hook files,
+fallback-location writes, and files written by the `transform`, `promote`, and
+`render` commands to an explicit destination.
 
 ---
 
 ## Agent Frontmatter Fields
 
-Every generic agent file (`Catalog/Subagents/**/*.md`), the orchestrator
-(`Catalog/Orchestrator/orchestrator.md`), and every generic utility
-agent (`Catalog/UtilityAgents/*.md`) carries the following frontmatter.
+Every generic agent file (`Catalog/Subagents/**/*.md`), both orchestrators
+(`Catalog/Orchestrator/orchestrator.md` and
+`Catalog/Orchestrator/orchestrator-script.md`), every generic utility agent
+(`Catalog/UtilityAgents/*.md`), and every standalone agent
+(`Catalog/StandaloneAgents/*.md`) carries the following frontmatter.
 
-Utility agents carry frontmatter only. They have no boundary tags, are never
-deployed into a run, and everything below about regions and canonical order
-does not apply to them.
+Utility and standalone agents receive harness transformation only — frontmatter
+mapping, model substitution, tool name mapping. No bundle content is deployed
+into them, no `mosaic_bundle_version` is stamped, and they are not checked for
+canonical order or required regions. Whether such a file uses boundary tags or
+follows the section structure below is its author's choice; the tool transforms
+what it finds and does not report what is absent. See
+`AgentTemplateArchitecture.md` §5A.
 
 ### Standard identity fields (pre-existing)
 
 | Field | Type | Description |
 |-------|------|-------------|
-| `id` | integer string | Numeric agent identifier for round-tripping. Not present on utility agents or the orchestrator. |
+| `id` | integer string | Numeric agent identifier for round-tripping. Present only on `role: subagent` files — absent from the orchestrators, utility agents, and standalone agents. |
 | `version` | semver string | Agent version. Bumped on any change to identity or hand-authored body content. Tiers in `AgentTemplateArchitecture.md` §3.4. Content arriving in a `managed` region never bumps it. |
 | `name` | string | Agent slug (matches file base name). |
 | `description` | string | One-line description shown to users. |
-| `role` | enum | `subagent` or `orchestrator`. Declares what the agent is; selects which canonical text it receives. Not `utility` — utility agents are outside the schema. |
+| `role` | enum | `subagent`, `orchestrator`, `utility`, or `standalone`. Declares what the agent is. `subagent` lives under `Catalog/Subagents/`, `orchestrator` under `Catalog/Orchestrator/`, `utility` under `Catalog/UtilityAgents/`, `standalone` under `Catalog/StandaloneAgents/`. The latter two are outside the agent-body schema and the bundle. |
 | `model` | string | Model placeholder (`{model-identifier}`) or a concrete model id in a deployed file. |
 | `tools` | flow-list or placeholder | Generic tool vocabulary (`{tool-permissions}` for the orchestrator). |
+| `infrastructure` | enum | Infrastructure agents only (`Catalog/Subagents/Infrastructure/`). The agent's class: `checkpoint`, `commit`, `restore`, or `review`. |
+| `triggers` | list | Infrastructure agents only. Default triggers, each `trigger` plus `trigger_param` (`null` where the trigger takes none). |
+| `on_failure` | enum | Infrastructure agents only. Default failure policy: `halt` or `continue`. |
+
+The three infrastructure fields are assembly defaults: the deployment tool reads them to build the orchestrator's `<InfrastructureAgents>` region, and nothing consults them at runtime. Harness descriptors drop them, so they do not appear in deployed agent files. Their meaning is owned by `Development/Designs/InfrastructureAgentConcept.md` §3.2.
 
 ### Generic tool vocabulary
 
@@ -86,23 +145,17 @@ of truth for the pairing.
 | Deployed field | Generic source field | Written by |
 |----------------|---------------------|------------|
 | `mosaic_id` | `id` | deploy transform (rename of source `id`) |
+| `mosaic_role` | `role` | deploy transform (rename of source `role`) |
+| `mosaic_version` | `version` | deploy transform (rename of source `version`) |
 | `mosaic_bundle_version` | — | deploy transform |
-| `mosaic_transform_version` | — | harness descriptor |
-| `mosaic_injections_version` | — | harness descriptor |
+| `mosaic_harness_version` | — | harness descriptor |
 | `mosaic_tool_mappings_version` | — | harness descriptor |
-| `mosaic_orchestrator_injections_version` | — | harness module (orchestrator only) |
 
-**Legacy names:** Deployed files produced before the `mosaic_` prefix was
-introduced carry the same fields without the prefix (e.g. `bundle_version`,
-`transform_version`). Every read site accepts both forms, preferring the
-prefixed name when both are present. A file carrying only legacy names is not
-spuriously stale; on the next update its fields are migrated to the prefixed
-names with values preserved, and a repeat run reports it unchanged.
-
-> **Not yet read by the tool.** `role` is specified but role is still inferred
-> from the file's path in `domain.AgentRole`, whose enum reads
-> `worker`/`orchestrator`/`utility`. The frontmatter vocabulary is `subagent`;
-> the code should follow or map explicitly at the boundary.
+**Legacy names:** Deployed files produced before the current field layout may
+carry unprefixed names (`bundle_version`, `version`, `role`) or former transform
+and injection-version fields. Read sites accept those migration forms while
+preferring the current prefixed field or managed-region version attribute. The
+next update writes the current form.
 
 ### Deployment metadata fields (added Stage 2)
 
@@ -228,7 +281,7 @@ documentation is needed to understand which regions the tool will touch.
 |----------|-----------|-----------|------------------------------|
 | `<Name type="core">` | `</Name>` | MOSAIC source authors | Content carried byte-identically from the source on every deploy |
 | `<Name type="managed">` | `</Name>` | The deploy tool | Regenerated by the tool on every deploy; do not author content inside these |
-| `<Name type="project">` | `</Name>` | MOSAIC source authors | Declared empty in source; project fills with content; preserved byte-identically across updates |
+| `<Name type="project">` | `</Name>` | MOSAIC source authors, then the adopting project | Usually empty in source; may carry deploy-once default content. Once deployed, project content is preserved byte-identically across updates |
 | `<Name type="custom">` | `</Name>` | Project authors | Never in source; project-invented; preserved byte-identically across updates |
 
 A tag occupies its own line in full — no self-closing tags, and a tag line
@@ -289,40 +342,40 @@ place user-authored content inside them; it will be overwritten.
 | `ClosingProcedure` | `Identity` | Bundle |
 | `AvailableWorkflows` | `Identity` | Assembled from selected workflows |
 | `InfrastructureAgents` | `Identity` | Assembled from selected declarations |
-| `ProtocolConstraints` | `Constraints` | Bundle |
 | `HarnessConstraints` | `Constraints` | Selected harness module |
 | `ErrorHandlingCommon` | `ErrorHandling` | Bundle |
 | `ExecutionPhilosophyCommon` | `ExecutionPhilosophy` | Bundle |
 
 "Bundle" means `Catalog/DeployedSections.md`.
 
-Nine names, and every one of them names a generator that exists. A name with
+Eight names, and every one of them names a generator that exists. A name with
 nothing to fill it does not belong here — see `AgentTemplateArchitecture.md`
 §2.5.1. `LanguagePatterns` and `CustomConstraints` were listed here until
 2026-08-08 with the source "Deployment configuration", which was never a real
-mechanism; `LanguagePatterns` is now a project-declared injection name and
+mechanism. Neither is a MOSAIC region any longer: a project that wants
+language patterns declares its own `type="custom"` region, and
 `CustomConstraints` no longer exists.
-
-> **Not yet read by the tool.** The five bundle-sourced names above are
-> specified but the deployment tool does not read the bundle. Until it does,
-> those regions have no content source and the agents are unmigrated.
 
 #### What an absent managed region costs
 
 | Tier | Names | Absence is |
 |------|-------|-----------|
 | Contract | `CommunicationProtocol` | Error |
-| Conduct | `AuthorityHierarchy`, `ClosingProcedure`, `ProtocolConstraints`, `ErrorHandlingCommon`, `ExecutionPhilosophyCommon` | Warning |
+| Conduct | `AuthorityHierarchy`, `ClosingProcedure`, `ErrorHandlingCommon`, `ExecutionPhilosophyCommon` | Warning |
 | Deployment | `HarnessConstraints`, `AvailableWorkflows`, `InfrastructureAgents` | Silent |
 
 A region *present* with no content source for the file's role is always an error.
 
 ### Source-declared names — declare with `<Name type="project">`
 
-These are declared empty in MOSAIC's source files. Projects fill them with
-content. The deploy tool preserves them byte-identically on every update. On
-schema reorder, they follow the source's new position automatically. No
-project-declared injection is ever required to be filled.
+These are usually declared empty in MOSAIC's source files so projects can fill
+them. A source region may instead carry default content: the deploy tool copies
+that content on initial deployment, then treats the deployed region as project
+owned and preserves it byte-identically on every update. Later changes to the
+source default affect new deployments only. `SeverityThresholds` in validation
+agents is the primary current example. On schema reorder, project regions follow
+the source's new position automatically. No project-declared injection is ever
+required to be filled.
 
 | Name | Usual parent |
 |------|--------------|

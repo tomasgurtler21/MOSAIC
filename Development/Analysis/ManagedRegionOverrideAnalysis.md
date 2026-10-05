@@ -22,9 +22,9 @@ These define the wire format between orchestrator and subagent. If orchestrator 
 | Input Format — the JSON schema with `agent_instance_id`, `run_id`, `task_description`, `input_artifacts`, `output_artifacts`, etc. | Both sides must agree on field names and semantics. |
 | Output Format — the two JSON response schemas (non-BLOCKED, BLOCKED) | The orchestrator parses these fields to route. |
 | Status Codes — the 6-code vocabulary and their meanings | Routing decisions key on these. A status code unknown to the orchestrator cannot be routed. |
-| Error Codes — the 5-code vocabulary (E101, E401, E501, E502, E503) | The orchestrator's tiered error handling keys on these. |
+| Error Codes — the 6-code vocabulary (E100, E101, E401, E501, E502, E503) | The orchestrator's error handling keys on these. |
 | Key Rules 1-4, 6-7 — JSON-only response, echo IDs, always return status_code/status_message, result_data and error fields conditional | Wire format discipline. |
-| Key Rules 11-16 — status code usage guidance | Routing correctness. |
+| Status Codes table — status-selection guidance | Routing correctness. |
 | Artifact Provenance — `run_id`, `created_by`, `human_approved` fields on output artifacts | The orchestrator reads these to verify artifact ownership and approval state. |
 | "Your entire response is the JSON object defined below" | Without this, the orchestrator's parser fails. |
 

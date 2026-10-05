@@ -55,19 +55,16 @@ CANONICAL_ORDER: tuple[str, ...] = (
     "ExecutionPhilosophy",
 )
 
-# Nine tool-managed boundary names, a closed set.
+# Eight tool-managed boundary names, a closed set.
 # These must be declared with [[DEPLOYED:]] in any document that uses them.
-# ArtifactProvenance is removed; AuthorityHierarchy, ClosingProcedure,
-# ProtocolConstraints, ErrorHandlingCommon, and ExecutionPhilosophyCommon are added.
-# LanguagePatterns moves to INJECTION_PARENT_MAP; CustomConstraints is deleted
-# outright (it is never tool-managed, only an advisory old-marker name).
+# LanguagePatterns lives in INJECTION_PARENT_MAP; CustomConstraints is never
+# tool-managed (only an advisory old-marker name).
 CANONICAL_DEPLOYED: tuple[str, ...] = (
     "CommunicationProtocol",
     "AuthorityHierarchy",
     "ClosingProcedure",
     "AvailableWorkflows",
     "InfrastructureAgents",
-    "ProtocolConstraints",
     "HarnessConstraints",
     "ErrorHandlingCommon",
     "ExecutionPhilosophyCommon",
@@ -78,34 +75,39 @@ CANONICAL_DEPLOYED: tuple[str, ...] = (
 # This table is consulted for advisory reporting only, never enforcement.
 # A value of None means the injection usually appears at body top level (not inside
 # any section). An absent key means no usual parent is recorded.
-# ArtifactProvenanceExtension is removed; ProtocolExtension and LanguagePatterns
-# are added.
+# Mirrors the Go InjectionParent map. Retired names are not listed here.
 INJECTION_PARENT_MAP: dict[str, str | None] = {
-    "ProtocolExtension": None,      # top level
-    "IdentityExtension": "Identity",
     "CodebaseContext": "Capabilities",
     "OutputArtifactTemplate": "Capabilities",
     "SeverityThresholds": "Capabilities",
     "SeverityDefinitions": "Capabilities",
     "LanguagePatterns": "Capabilities",
-    "ErrorHandlingExtension": "ErrorHandling",
     "ContextLimits": "ExecutionPhilosophy",
 }
 
 # Tool-managed boundary name -> required parent section.
 # A value of None means the boundary must appear at body top level.
-# Nine entries mirroring the Go DeployedParent map.
+# Eight entries mirroring the Go DeployedParent map.
 DEPLOYED_PARENT_MAP: dict[str, str | None] = {
     "CommunicationProtocol": None,      # top level — must not be nested in any section
     "AuthorityHierarchy": "Identity",
     "ClosingProcedure": "Identity",
     "AvailableWorkflows": "Identity",
     "InfrastructureAgents": "Identity",
-    "ProtocolConstraints": "Constraints",
     "HarnessConstraints": "Constraints",
     "ErrorHandlingCommon": "ErrorHandling",
     "ExecutionPhilosophyCommon": "ExecutionPhilosophy",
 }
+
+# Names retired from the output vocabulary. They are kept for INPUT only:
+# legacy source files may still carry these regions or their old
+# [INJECTION: ...] markers, and the migration tool must recognise them.
+# They must never appear in migrated OUTPUT.
+LEGACY_INPUT_NAMES: frozenset[str] = frozenset({
+    "ProtocolConstraints",
+    "IdentityExtension",
+    "ErrorHandlingExtension",
+})
 
 # Canonical name -> the marker kind it must be declared with.
 # Rebuilt from the deployed names only: injection names are open and have no allowlist.

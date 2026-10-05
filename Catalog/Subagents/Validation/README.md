@@ -10,13 +10,14 @@ Validation agents are gatekeepers that ensure quality before proceeding to the n
 
 | ID | Agent | Version | Description |
 |----|-------|---------|-------------|
-| 9 | [requirements-review](./requirements-review.md) | 2.0.1 | Reviews requirements completeness, identifies gaps, ensures sufficient information for planning |
-| 12 | [contracts-review](./contracts-review.md) | 4.4.0 | Reviews contracts and design specifications for correctness and completeness |
-| 11 | [plan-review](./plan-review.md) | 5.3.0 | Reviews implementation plans for feasibility, completeness, and alignment |
-| 10 | [system-design-review](./system-design-review.md) | 2.0.1 | Reviews system design for architecture quality and design principles |
-| 14 | [implementation-review](./implementation-review.md) | 2.2.0 | Reviews code quality, design compliance, and code standards |
-| 13 | [tests-review-tdd](./tests-review-tdd.md) | 2.3.0 | Reviews test quality, coverage, and TDD RED phase correctness |
-| 65 | [comparison-review](./comparison-review.md) | 1.0.0 | Autonomous quality gate on the comparison synthesis - validates balance, evidence, criteria alignment, and consistency with per-topic comparisons |
+| 9 | [requirements-review](./requirements-review.md) | 5.0.4 | Reviews requirements for completeness at their declared depth, consistency, and feasibility against research findings |
+| 12 | [contracts-review](./contracts-review.md) | 4.4.3 | Reviews contracts and design specifications for correctness and completeness |
+| 11 | [plan-review](./plan-review.md) | 5.3.1 | Reviews implementation plans for feasibility, completeness, and alignment |
+| 10 | [system-design-review](./system-design-review.md) | 3.4.1 | Reviews system design for architecture quality and design principles |
+| 14 | [implementation-review](./implementation-review.md) | 4.2.3 | Reviews code quality, design compliance, and code standards |
+| 13 | [tests-review-tdd](./tests-review-tdd.md) | 3.4.1 | Reviews test quality, coverage, and TDD RED discriminability |
+| 35 | [build-review](./build-review.md) | 4.0.0 | Imports, builds, and deploys source changes, reporting actionable build results and deployment metadata without executing tests |
+| 65 | [comparison-review](./comparison-review.md) | 1.0.2 | Autonomous quality gate on the comparison synthesis - validates balance, evidence, criteria alignment, and consistency with per-topic comparisons |
 
 ## What Validation Agents Do
 
@@ -30,7 +31,7 @@ Validation agents are gatekeepers that ensure quality before proceeding to the n
 
 - Gather new information (that's Research)
 - Write code or tests (that's Creation)
-- Execute tests (that's Execution)
+- Own general-purpose test execution as a separate workflow step (that's Execution); a validation agent may run tests needed to verify its review condition
 - Make design decisions (that's Planning)
 
 ## What They Validate
@@ -43,4 +44,5 @@ Validation agents are gatekeepers that ensure quality before proceeding to the n
 | SystemDesignReview | System design documents (SystemDesign.md) |
 | ImplementationReview | Project files (source code) |
 | TestsReview TDD | Project files (test code) |
+| BuildReview | Build imports, compilation results, and target deployment metadata |
 | ComparisonReview | Orchestration artifacts (ComparisonAnalysis.md against per-topic comparisons and Requirements.md) |

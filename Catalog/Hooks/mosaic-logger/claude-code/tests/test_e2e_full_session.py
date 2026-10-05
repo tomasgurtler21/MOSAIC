@@ -211,7 +211,7 @@ def _full_session_payloads(tmp_path: pathlib.Path,
               tool_input={"command": "ls -la"}),
         _base("PostToolUse",
               tool_name="Bash", tool_use_id="call-orch-001",
-              tool_output="total 8\ndrwxr-xr-x 3 user user 4096 Jan 01 17:00 ."),
+              tool_response="total 8\ndrwxr-xr-x 3 user user 4096 Jan 01 17:00 ."),
 
         # 4 – SubagentStart for two different agent_id values.
         _base("SubagentStart",
@@ -235,7 +235,7 @@ def _full_session_payloads(tmp_path: pathlib.Path,
         _base("PostToolUse",
               agent_id=_AGENT_ID_ALPHA, tool_name="Read",
               tool_use_id="call-alpha-001",
-              tool_output="Paper content here."),
+              tool_response="Paper content here."),
         _base("PreToolUse",
               agent_id=_AGENT_ID_BETA, tool_name="Write",
               tool_use_id="call-beta-001",
@@ -246,7 +246,7 @@ def _full_session_payloads(tmp_path: pathlib.Path,
         _base("PostToolUseFailure",
               agent_id=_AGENT_ID_BETA, tool_name="Write",
               tool_use_id="call-beta-001",
-              tool_output="Error: permission denied writing /tests/test_foo.py"),
+              tool_response="Error: permission denied writing /tests/test_foo.py"),
 
         # 7 – PreCompact / PostCompact.
         _base("PreCompact", trigger="auto", tokens_before=95000),
@@ -1312,7 +1312,7 @@ class TestBindingFirstResolutionAcrossSession(unittest.TestCase):
                     "session_id": session_id,
                     "tool_name": "Bash",
                     "tool_use_id": "call-binding-001",
-                    "tool_output": "hi",
+                    "tool_response": "hi",
                 },
             ])
 
@@ -1363,6 +1363,59 @@ class TestBindingFirstResolutionAcrossSession(unittest.TestCase):
             "unknown-run/ must not be created once the session's run_id "
             "binding has already been established",
         )
+
+
+# ---------------------------------------------------------------------------
+# Real-shaped PostToolUse payload: tool output recorded end to end
+# ---------------------------------------------------------------------------
+
+class TestPostToolUseOutputEndToEnd(unittest.TestCase):
+    """A harness-shaped PostToolUse payload (tool_response, duration_ms,
+    tool_use_id) dispatched through the logger yields a tool_call_end event
+    carrying the response, with no stdout and no exception."""
+
+    def setUp(self):
+        self.tmp = tempfile.TemporaryDirectory()
+        self.tmp_path = pathlib.Path(self.tmp.name)
+
+    def tearDown(self):
+        self.tmp.cleanup()
+
+    def test_post_tool_use_output_reaches_events_file(self):
+        import contextlib
+        import io
+        session_id = "output-e2e-sess-001"
+        marker = "distinctive-output-marker-91"
+        stdout = io.StringIO()
+        with _ReplayHarness(self.tmp_path) as h:
+            with contextlib.redirect_stdout(stdout):
+                h.replay([
+                    {
+                        "hook_event_name": "SubagentStart",
+                        "session_id": session_id,
+                        "agent_id": "agt-output-001",
+                        "agent_type": "Research",
+                        "agent_prompt": (
+                            '{"agent_instance_id": "Research#9", '
+                            f'"run_id": "{VALID_RUN_ID}"}}'
+                        ),
+                    },
+                    {
+                        "hook_event_name": "PostToolUse",
+                        "session_id": session_id,
+                        "tool_name": "Bash",
+                        "tool_use_id": "call-output-001",
+                        "tool_input": {"command": "echo hi"},
+                        "tool_response": {"stdout": marker, "stderr": ""},
+                        "duration_ms": 12,
+                    },
+                ])
+            events = h.orchestrator_events(VALID_RUN_ID)
+
+        ends = [e for e in events if e["event"] == "tool_call_end"]
+        self.assertEqual(1, len(ends))
+        self.assertIn(marker, json.dumps(ends[0].get("tool_output")))
+        self.assertEqual("", stdout.getvalue())
 
 
 if __name__ == "__main__":

@@ -207,6 +207,9 @@ frontmatter:
   drop:
     - "recommended_tier"
     - "tier_rationale"
+    - "infrastructure"
+    - "triggers"
+    - "on_failure"
   key_order:
     - "id"
     - "version"
@@ -402,7 +405,7 @@ extension change.
 | `model_key` | string | Frontmatter key where the selected model is written. Empty = model is not emitted. |
 | `tools_key` | string | Frontmatter key where the rendered tool list is written. Empty = the harness module decides. |
 | `add` | list | Fields added to every deployed agent. Each entry: `key` (string) and `value` (any YAML value). |
-| `drop` | list of strings | Frontmatter keys to remove from the generic source before deployment. |
+| `drop` | list of strings | Frontmatter keys to remove from the generic source before deployment. Builtin descriptors drop the source-only keys `recommended_tier`, `tier_rationale`, `required_skills`, `infrastructure`, `triggers` and `on_failure`. |
 | `key_order` | list of strings | Desired output key ordering. Keys not listed keep their source-relative order and are appended after the listed keys. |
 
 ---

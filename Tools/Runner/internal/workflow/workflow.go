@@ -34,13 +34,16 @@ var requiredColumns = []string{"Phase", "Subagent", "HITL", "Input", "Output"}
 // region. The info carries the identifier and version extracted by orchfile.
 //
 // Required columns: Phase, Subagent, HITL, Input, Output.
-// Optional columns: On Success, On Findings.
+// Optional columns: On Success, On Findings, Row. Row is validated, not stored:
+// when present, each data row must hold its 1-based position in the table.
 //
 // Returns a *domain.RefusalError with a specific message naming the workflow
 // and condition if:
 //   - The content contains no parseable routing table
 //   - Required columns (Phase, Subagent, HITL, Input, Output) are missing
 //   - The table has a header and separator but zero data rows
+//   - A Row column is present and a row's value is not its 1-based position
+//     (non-numeric, missing, duplicated, out of order or wrong start)
 //   - An EXECUTION phase string is malformed
 //   - The **Execution Groups:** heading is present but the approach table is invalid
 func Parse(content []byte, info domain.WorkflowInfo) (domain.RoutingTable, error) {
@@ -73,6 +76,10 @@ func Parse(content []byte, info domain.WorkflowInfo) (domain.RoutingTable, error
 			Resource:  workflowID,
 			Reason:    "routing table has no data rows",
 		}
+	}
+
+	if err := validateRowColumn(t, workflowID); err != nil {
+		return domain.RoutingTable{}, err
 	}
 
 	// Resolve column indices.

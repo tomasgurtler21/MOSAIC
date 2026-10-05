@@ -60,28 +60,19 @@ This is also where an unexpected extra consultation is caught: a fourth SUCCESS 
 
 ## Expected Run
 
-Six Orchestration.md log rows. The stop consultation is NOT logged in Orchestration.md — it surfaces as a `session.consult.stop` event in RunnerLogs and as the TUI/CLI exit message.
+Three Orchestration.md log rows. Every consultation — including the one before step one and the stop consultation after step three — is NOT logged in Orchestration.md: consultations allocate no `Seq` and leave no row. The routing consultations surface only as dispatch-log entries and the consultant call; the final stop consultation additionally surfaces as a `session.consult.stop` event in RunnerLogs and as the TUI/CLI exit message.
 
-| Log `Seq` | `Agent` | Kind | `Phase` | `Status` | `Summary` shows |
-|:---:|---|---|---|---|---|
-| 1 | `orchestrator-script#1` | consultation | — | "" | the task description sent for step one |
-| 2 | `mosaictest-scripted#1` | workflow step | RESEARCH | SUCCESS | step one's task description, echoed back |
-| 3 | `orchestrator-script#3` | consultation | — | "" | the task description sent for step two |
-| 4 | `mosaictest-scripted#2` | workflow step | RESEARCH | SUCCESS | step two's task description, echoed back |
-| 5 | `orchestrator-script#5` | consultation | — | "" | the task description sent for step three |
-| 6 | `mosaictest-scripted#3` | workflow step | RESEARCH | SUCCESS | step three's task description, echoed back |
+| Log `Seq` | `Agent` | `Phase` | `Status` | `Summary` shows |
+|:---:|---|---|---|---|
+| 1 | `mosaictest-scripted#1` | RESEARCH | SUCCESS | step one's task description, echoed back |
+| 2 | `mosaictest-scripted#2` | RESEARCH | SUCCESS | step two's task description, echoed back |
+| 3 | `mosaictest-scripted#3` | RESEARCH | SUCCESS | step three's task description, echoed back |
 
 **Run outcome:** stopped by the orchestrator (`RunStoppedByConsultant`), with the fixture's stop reason surfaced in the exit message. Not `COMPLETE` — in this mode the orchestrator ends the run, and the table's `On Success` column is never consulted.
 
 **RunnerLogs verification:** The debug log must contain a `session.consult.stop` entry with `reason="MOSAICTEST-ROUTING-COMPLETE / three dispatches done as scripted / ending the run on fixture instruction"`.
 
-### Two numbering observations to confirm on the first run
-
-Both are recorded here as predictions from reading the Runner, not as settled expectations. If either differs, the difference is a finding about the Runner, not about this fixture.
-
-1. **The consultation agent name.** Consultation rows are currently written under a hardcoded literal rather than the orchestrator actually consulted. The table above assumes that literal. Once `RUN-6` in `Requirements.md` is fixed, these rows should instead name this catalogue's stub orchestrator.
-
-2. **`Seq` and the `#N` suffix disagree.** For consultation-routed dispatches the Runner numbers the log row from the global sequence but numbers the agent instance from a separate workflow-step counter. So `mosaictest-scripted#2` is expected on log row 4, not row 2. On the auto-routed path the two agree, which is why this only shows up in Orchestrated mode. Whether the divergence is intended is an open question — `agent_instance_id` is documented as running over a global counter, which is not what the consultation path does.
+**Numbering observation to confirm on the first run:** Because no consultation allocates a `Seq`, the three workflow rows are numbered consecutively (1, 2, 3) with no gaps and no disagreement between `Seq` and the `#N` suffix on `AgentInstance`. This is recorded here as a prediction from reading the Runner, not as a settled expectation. If it differs, the difference is a finding about the Runner, not about this fixture.
 
 ---
 
@@ -96,6 +87,7 @@ Both are recorded here as predictions from reading the Runner, not as settled ex
 | Summaries are identical across the three steps | The task description is not reaching the subagent, or the echo fixture is not being honoured |
 | A fourth dispatch occurs, or the stub stops with "no matching rule" | The Runner consulted more times than the mode requires |
 | Summaries differ but are mangled — wrong characters, truncation | The harness is not carrying dispatch content intact |
+| An `orchestrator-script` row appears in `Orchestration.md`, or `Seq` skips a number | Consultations must leave no row and allocate no `Seq`; a routing consultation wrongly called `Store.Apply` |
 
 ---
 

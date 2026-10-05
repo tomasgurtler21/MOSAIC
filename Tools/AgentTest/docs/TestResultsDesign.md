@@ -51,7 +51,7 @@ OrchestrationTestResults/
 
 ### 2.3 Why Flat
 
-Both harness and model are recorded inside the report JSON (`harness_id`, `subject_model` per run). Forcing one into the directory hierarchy above the other is arbitrary — it privileges one comparison axis and makes the other harder to navigate. Since the summary generator reads metadata from the JSON content regardless of directory placement, the tree structure only needs to scope "which version."
+Harness, model and harness version are recorded inside the report JSON (`harness_id`, `subject_model`, and `harness_version` when known, per run). Forcing one into the directory hierarchy above the other is arbitrary — it privileges one comparison axis and makes the other harder to navigate. Since the summary generator reads metadata from the JSON content regardless of directory placement, the tree structure only needs to scope "which version."
 
 Flat also avoids empty directory combinations. Not every harness x model x suite combination will have results. Nesting would create sparse trees with many empty leaves.
 
@@ -380,6 +380,7 @@ For reference, these fields in the report schema feed the storage and summary sy
 - `subject_model` — model the orchestrator ran on
 - `stub_model` — model used for stub responses (if applicable)
 - `subject_version` — orchestrator version from frontmatter
+- `harness_version` — version of the harness that ran the run (for Claude Code, from `claude --version`); omitted when unknown. It is retained in the stored copy but is not part of the file name or directory key.
 - `duration_ms`, `cost`
 - `verdict`, `reasons`, `assertions`, `conditions`
 - `termination_reason`

@@ -172,7 +172,10 @@ func TestAgentByNumericID_NonExistentID_ReturnsFalse(t *testing.T) {
 func TestAgentByNumericID_AgentWithNoID_NotInNumericIndex(t *testing.T) {
 	// Arrange — write an agent without an `id` field.
 	root := makeTempMosaicRoot(t)
-	writeWorkerAgentFile(t, root, "Creation", "no-id-agent", "")
+	// Subagents must declare an id, so the id-less agent is a utility agent.
+	mustMkdir(t, root, "Catalog", "UtilityAgents")
+	mustWriteFile(t, root, filepath.Join("Catalog", "UtilityAgents", "no-id-agent.md"),
+		[]byte("---\nrole: utility\nname: no-id-agent\n---\nContent.\n"))
 
 	cat, err := catalog.Load(root, "")
 	if err != nil {

@@ -45,6 +45,11 @@ type ActionRecord struct {
 	// Populated for agent artifacts when the source declares one; empty otherwise.
 	// This is distinct from Stale, which records staleness deltas, not the declared version.
 	SourceVersion string
+
+	// FormatChange is non-nil when this write replaced an existing file whose BOM presence or
+	// line-ending style differs from the written bytes. nil when nothing changed, the target
+	// did not exist, the write failed, or the write path is excluded from reporting.
+	FormatChange *FormatChange
 }
 
 // ExternalModuleInfo carries identity information about the external harness process, for logging

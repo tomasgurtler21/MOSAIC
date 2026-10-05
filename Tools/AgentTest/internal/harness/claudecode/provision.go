@@ -49,11 +49,18 @@ type Options struct {
 	// user-home-based source. A test substitutes this seam so no test run
 	// ever reads or copies the developer's real credentials.
 	Credentials CredentialSource
+
+	// VersionProbe returns the raw output of the harness CLI's version
+	// command. nil selects running `claude --version`. Tests substitute it.
+	VersionProbe func(ctx context.Context) ([]byte, error)
 }
 
 // Adapter implements domain.HarnessAdapter for the Claude Code harness.
 type Adapter struct {
 	opts Options
+
+	// version memoizes the captured harness version; see HarnessVersion.
+	version versionMemo
 }
 
 var _ domain.HarnessAdapter = (*Adapter)(nil)
@@ -85,8 +92,12 @@ func (a *Adapter) ID() string {
 //	    evaluated against what it observes.
 //	SupportsReplyRecovery:      true
 //	    The collaborator's real reply is recovered from the harness's own
-//	    completion signal (its SubagentStop hook) instead, which is what
-//	    makes echo-fidelity comparison possible on this harness.
+//	    completion signal instead, which is what makes echo-fidelity
+//	    comparison possible on this harness. On Claude Code 2.1.271+ in auto
+//	    permission mode the primary completion is the PostToolUse firing of
+//	    the subagent's SubagentHandback call (reply: tool_input.message);
+//	    the SubagentStop hook (reply: last_assistant_message) is the
+//	    fallback when no hand-back happens.
 //	CorrelationField:           "tool_use_id"
 //	    The dispatch-scoped identifier the harness sends on PreToolUse and
 //	    PostToolUse events. The correlation token is populated directly from
@@ -97,7 +108,8 @@ func (a *Adapter) ID() string {
 //	    The SubagentStop (completion) event carries NO tool_use_id — the field
 //	    is absent from the payload entirely on every observed firing against
 //	    harness version 2.1.240. agent_id is the only identifier on that event
-//	    that distinguishes one dispatch from another. Declaring a non-empty
+//	    that distinguishes one dispatch from another. The hand-back hook
+//	    payload carries the same agent_id (live capture, 2.1.284). Declaring a non-empty
 //	    CompletionCorrelationField is this adapter's statement that its
 //	    completion event uses a different correlation field and that it
 //	    therefore registers an agent-start interception phase.
@@ -285,9 +297,12 @@ func (a *Adapter) Provision(ctx context.Context, req domain.ProvisionRequest) (d
 		return prov, fmt.Errorf("claudecode: building agent-start bridge: %w", err)
 	}
 
-	allContribs := make([]Contribution, 0, len(bundleContribs)+3)
+	allContribs := make([]Contribution, 0, len(bundleContribs)+4)
 	allContribs = append(allContribs, InterceptorEntries(preBridge, postBridge))
 	allContribs = append(allContribs, CompletionEntry(completionBridge))
+	// The hand-back hook shares the completion bridge: on Claude Code 2.1.271+
+	// in auto mode it is the primary completion, SubagentStop the fallback.
+	allContribs = append(allContribs, HandbackEntry(completionBridge))
 	allContribs = append(allContribs, AgentStartEntry(agentStartBridge))
 	allContribs = append(allContribs, bundleContribs...)
 

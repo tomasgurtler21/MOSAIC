@@ -20,10 +20,10 @@ func runTestCLI(t *testing.T, args []string, workDir string) (exitCode int, stdo
 	return code, out.String(), errOut.String()
 }
 
-// makeCatalogRoot creates a minimal test catalog directory structure in a temp
+// newTestCatalogRoot creates a minimal test catalog directory structure in a temp
 // dir and returns the MOSAIC root path (the --catalog flag value). The catalog
 // contains one workflow with the given ID and modes, and a fixture directory.
-func makeCatalogRoot(t *testing.T, workflowID string, modes []string, smokeSet []string) string {
+func newTestCatalogRoot(t *testing.T, workflowID string, modes []string, smokeSet []string) string {
 	t.Helper()
 	root := t.TempDir()
 
@@ -71,7 +71,7 @@ func TestRunTestCommand_MissingCatalog_ReturnsUsageError(t *testing.T) {
 }
 
 func TestRunTestCommand_NeitherSuiteNorWorkflow_ReturnsUsageError(t *testing.T) {
-	root := makeCatalogRoot(t, "smoke-single", []string{"auto"}, []string{"auto"})
+	root := newTestCatalogRoot(t, "smoke-single", []string{"auto"}, []string{"auto"})
 	code, _, errOut := runTestCLI(t, []string{"test", "--catalog", root}, t.TempDir())
 	if code != cli.ExitUsage {
 		t.Errorf("exit code = %d, want ExitUsage (%d)", code, cli.ExitUsage)
@@ -86,7 +86,7 @@ func TestRunTestCommand_NeitherSuiteNorWorkflow_ReturnsUsageError(t *testing.T) 
 // ---------------------------------------------------------------------------
 
 func TestRunTestCommand_SuiteAndWorkflowTogether_ReturnsUsageError(t *testing.T) {
-	root := makeCatalogRoot(t, "smoke-single", []string{"auto"}, []string{"auto"})
+	root := newTestCatalogRoot(t, "smoke-single", []string{"auto"}, []string{"auto"})
 	code, _, errOut := runTestCLI(t, []string{
 		"test", "--catalog", root, "--suite", "smoke", "--workflow", "smoke-single",
 	}, t.TempDir())
@@ -178,7 +178,7 @@ func TestRunTestCommand_CatalogPathDoesNotExist_ReturnsUsageError(t *testing.T) 
 // ---------------------------------------------------------------------------
 
 func TestRunTestCommand_UnknownWorkflowID_ReturnsUsageError(t *testing.T) {
-	root := makeCatalogRoot(t, "smoke-single", []string{"auto"}, []string{"auto"})
+	root := newTestCatalogRoot(t, "smoke-single", []string{"auto"}, []string{"auto"})
 	code, _, errOut := runTestCLI(t, []string{
 		"test", "--catalog", root, "--workflow", "does-not-exist",
 	}, t.TempDir())
@@ -195,7 +195,7 @@ func TestRunTestCommand_UnknownWorkflowID_ReturnsUsageError(t *testing.T) {
 
 func TestRunTestCommand_SingleWorkflowMultiModeNoMode_RequiresModeFlag(t *testing.T) {
 	// Workflow declares two modes but --mode is not supplied.
-	root := makeCatalogRoot(t, "smoke-single", []string{"auto", "auto-review"}, []string{"auto"})
+	root := newTestCatalogRoot(t, "smoke-single", []string{"auto", "auto-review"}, []string{"auto"})
 	code, _, errOut := runTestCLI(t, []string{
 		"test", "--catalog", root, "--workflow", "smoke-single",
 	}, t.TempDir())
@@ -221,7 +221,7 @@ func TestRunTestCommand_SingleWorkflowSingleMode_InfersModeAutomatically(t *test
 	// produce a --mode usage error. It cannot confirm that the inferred mode
 	// value reaches the orchestrator correctly without end-to-end coverage.
 	// End-to-end validation is deferred to manual testing per the stage plan.
-	root := makeCatalogRoot(t, "smoke-single", []string{"auto"}, []string{"auto"})
+	root := newTestCatalogRoot(t, "smoke-single", []string{"auto"}, []string{"auto"})
 	code, _, errOut := runTestCLI(t, []string{
 		"test", "--catalog", root, "--workflow", "smoke-single",
 		"--harness", "fake",
@@ -239,7 +239,7 @@ func TestRunTestCommand_SingleWorkflowSingleMode_InfersModeAutomatically(t *test
 }
 
 func TestRunTestCommand_SingleWorkflowModeNotDeclared_ReturnsUsageError(t *testing.T) {
-	root := makeCatalogRoot(t, "smoke-single", []string{"auto"}, []string{"auto"})
+	root := newTestCatalogRoot(t, "smoke-single", []string{"auto"}, []string{"auto"})
 	code, _, errOut := runTestCLI(t, []string{
 		"test", "--catalog", root, "--workflow", "smoke-single", "--mode", "orchestrated",
 	}, t.TempDir())
@@ -256,7 +256,7 @@ func TestRunTestCommand_SingleWorkflowModeNotDeclared_ReturnsUsageError(t *testi
 // ---------------------------------------------------------------------------
 
 func TestRunTestCommand_GHCPPermissionModeWithoutGHCPCLI_ReturnsUsageError(t *testing.T) {
-	root := makeCatalogRoot(t, "smoke-single", []string{"auto"}, []string{"auto"})
+	root := newTestCatalogRoot(t, "smoke-single", []string{"auto"}, []string{"auto"})
 	code, _, errOut := runTestCLI(t, []string{
 		"test", "--catalog", root, "--suite", "smoke",
 		"--harness", "fake",
@@ -273,7 +273,7 @@ func TestRunTestCommand_GHCPPermissionModeWithoutGHCPCLI_ReturnsUsageError(t *te
 func TestRunTestCommand_GHCPPermissionModeWithGHCPCLIHarness_PassesValidation(t *testing.T) {
 	// --ghcp-permission-mode + --harness ghcp-cli should pass validation.
 	// The orchestrator will fail (no binary), but validation itself passes.
-	root := makeCatalogRoot(t, "smoke-single", []string{"auto"}, []string{"auto"})
+	root := newTestCatalogRoot(t, "smoke-single", []string{"auto"}, []string{"auto"})
 	code, _, errOut := runTestCLI(t, []string{
 		"test", "--catalog", root, "--suite", "smoke",
 		"--harness", "ghcp-cli",
@@ -376,11 +376,11 @@ func TestTestFlagSpecs_MatchRegistration(t *testing.T) {
 
 	// These are the test-subcommand flags and their expected arity.
 	want := map[string]bool{
-		"--catalog":             true,
-		"--suite":               true,
-		"--workflow":            true,
-		"--mode":                true,
-		"--harness":             true,
+		"--catalog":              true,
+		"--suite":                true,
+		"--workflow":             true,
+		"--mode":                 true,
+		"--harness":              true,
 		"--ghcp-permission-mode": true,
 	}
 	for name, wantTakesValue := range want {
@@ -410,7 +410,7 @@ func TestTestFlagSpecs_MatchRegistration(t *testing.T) {
 // into RunTestCommand so a fake orchestrator can return AllPass=true; that is
 // a future implementation-level change.
 func TestRunTestCommand_FlagValidationOnly_SmokeScope(t *testing.T) {
-	root := makeCatalogRoot(t, "w1", []string{"auto"}, []string{"auto"})
+	root := newTestCatalogRoot(t, "w1", []string{"auto"}, []string{"auto"})
 	code, _, errOut := runTestCLI(t, []string{
 		"test", "--catalog", root, "--suite", "smoke",
 	}, t.TempDir())
@@ -423,7 +423,7 @@ func TestRunTestCommand_FlagValidationOnly_SmokeScope(t *testing.T) {
 }
 
 func TestRunTestCommand_FlagValidationOnly_FullScope(t *testing.T) {
-	root := makeCatalogRoot(t, "w1", []string{"auto"}, nil)
+	root := newTestCatalogRoot(t, "w1", []string{"auto"}, nil)
 	code, _, _ := runTestCLI(t, []string{
 		"test", "--catalog", root, "--suite", "full",
 	}, t.TempDir())
@@ -433,7 +433,7 @@ func TestRunTestCommand_FlagValidationOnly_FullScope(t *testing.T) {
 }
 
 func TestRunTestCommand_FlagValidationOnly_SingleWorkflowWithExplicitMode(t *testing.T) {
-	root := makeCatalogRoot(t, "w1", []string{"auto", "auto-review"}, nil)
+	root := newTestCatalogRoot(t, "w1", []string{"auto", "auto-review"}, nil)
 	code, _, errOut := runTestCLI(t, []string{
 		"test", "--catalog", root, "--workflow", "w1", "--mode", "auto",
 	}, t.TempDir())
@@ -444,7 +444,7 @@ func TestRunTestCommand_FlagValidationOnly_SingleWorkflowWithExplicitMode(t *tes
 }
 
 func TestRunTestCommand_FlagValidationOnly_CustomScope(t *testing.T) {
-	root := makeCatalogRoot(t, "w1", []string{"auto"}, nil)
+	root := newTestCatalogRoot(t, "w1", []string{"auto"}, nil)
 	// Add a second workflow to the catalog.
 	wfDir := filepath.Join(root, "Tools", "Runner", "TestCatalog", "Workflows", "MosaicTest")
 	fixDir := filepath.Join(wfDir, "Fixtures", "w2")

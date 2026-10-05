@@ -31,6 +31,7 @@ type catalogImpl struct {
 	tiers        []domain.TierInfo
 	issues       []Issue
 	sourcePaths  map[string]bool // every absolute path emitted by the catalog
+	failures     sourceFailures  // source files that could not be interpreted during load
 }
 
 // Root returns the absolute MOSAIC repository root passed to Load.
@@ -48,12 +49,13 @@ func (c *catalogImpl) Agent(key string) (domain.Agent, bool) {
 	return a, ok
 }
 
-// Orchestrator returns the single orchestrator agent.
+// Orchestrator returns the native orchestrator agent, one of two orchestrator sources
+// (the other is the script orchestrator returned by OrchestratorScript).
 func (c *catalogImpl) Orchestrator() domain.Agent { return c.orchestr }
 
 // OrchestratorScript returns the script-mode orchestrator agent when present.
 // Returns (domain.Agent{}, false) when the catalog root has no orchestrator-script.md.
-// This is a stub that always returns false until I7.2 is implemented.
+// The script orchestrator is loaded at catalog load time; the bool reports whether it was found.
 func (c *catalogImpl) OrchestratorScript() (domain.Agent, bool) {
 	return c.orchScript, c.orchScriptOK
 }
@@ -185,6 +187,10 @@ func loadCatalog(mosaicRoot, catalogRoot string) (Catalog, error) {
 	// The catalogue root wins on key collision; shadowing is silent (no Issue produced).
 	cat.issues = append(cat.issues, cat.loadSkillsMerged(defaultCatalogRoot, catalogRoot)...)
 	cat.issues = append(cat.issues, cat.loadHooksMerged(defaultCatalogRoot, catalogRoot)...)
+
+	if err := cat.failures.asError(); err != nil {
+		return nil, err
+	}
 
 	cat.tiers = buildTiers(cat.agentIdx)
 

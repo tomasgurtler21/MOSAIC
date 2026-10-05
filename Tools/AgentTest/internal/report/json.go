@@ -56,20 +56,20 @@ type wireTestReport struct {
 }
 
 type wireAggregate struct {
-	TestName              string            `json:"test_name"` // human-readable display name (renamed from test_id string)
-	TestID                int               `json:"test_id"`   // stable numeric identity
-	Verdict               string            `json:"verdict"`
-	Reasons               []string          `json:"reasons"`
-	Counted               int               `json:"counted"`
-	Passed                int               `json:"passed"`
-	Excluded              int               `json:"excluded"`
-	PassRate              float64           `json:"pass_rate"`
-	RequiredPassRate      float64           `json:"required_pass_rate"`
-	InfrastructureFailure bool              `json:"infrastructure_failure"`
-	TotalCost             wireCost          `json:"total_cost"`
+	TestName              string   `json:"test_name"` // human-readable display name (renamed from test_id string)
+	TestID                int      `json:"test_id"`   // stable numeric identity
+	Verdict               string   `json:"verdict"`
+	Reasons               []string `json:"reasons"`
+	Counted               int      `json:"counted"`
+	Passed                int      `json:"passed"`
+	Excluded              int      `json:"excluded"`
+	PassRate              float64  `json:"pass_rate"`
+	RequiredPassRate      float64  `json:"required_pass_rate"`
+	InfrastructureFailure bool     `json:"infrastructure_failure"`
+	TotalCost             wireCost `json:"total_cost"`
 	// Exclusions describes every run excluded from the denominator, in the
 	// order the runs were attempted. Always an array, never null.
-	Exclusions            []wireExcludedRun `json:"exclusions"`
+	Exclusions []wireExcludedRun `json:"exclusions"`
 }
 
 // wireExcludedRun is the stable wire shape for one excluded run.
@@ -113,6 +113,9 @@ type wireRunReport struct {
 	// HarnessID names the harness adapter that produced this run. Always
 	// present; the literal "unknown" when no harness identity was recorded.
 	HarnessID string `json:"harness_id"`
+
+	// HarnessVersion is the harness version. Omitted when unknown.
+	HarnessVersion string `json:"harness_version,omitempty"`
 
 	// TerminationReason names why this run ended. Always present; the literal
 	// "unknown" when no disposition was recorded.
@@ -278,6 +281,7 @@ func toWireRunReport(r RunReport) wireRunReport {
 		SubjectModel:        subjectVersionOrUnknown(r.SubjectModel),
 		StubModel:           subjectVersionOrUnknown(r.StubModel),
 		HarnessID:           subjectVersionOrUnknown(r.HarnessID),
+		HarnessVersion:      r.HarnessVersion,
 		TerminationReason:   subjectVersionOrUnknown(r.TerminationReason),
 		TestVersion:         r.TestVersion,
 		TestID:              r.NumericID,

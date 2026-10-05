@@ -177,7 +177,7 @@ func TestDeploymentBoundaryFixtures_UnknownDeployedName(t *testing.T) {
 // ---------------------------------------------------------------------------
 
 // TestDeploymentBoundaryFixtures_DeployedOutsideRequiredParent asserts that a fixture
-// declaring <ProtocolConstraints type="managed"> inside <Identity type="core"> — instead of
+// declaring <HarnessConstraints type="managed"> inside <Identity type="core"> — instead of
 // the required <Constraints type="core"> — produces a "wrong-parent" validation issue.
 func TestDeploymentBoundaryFixtures_DeployedOutsideRequiredParent(t *testing.T) {
 	src := readDeploymentBoundaryFixture(t, "malformed/deployed-outside-required-parent.md")
@@ -189,7 +189,7 @@ func TestDeploymentBoundaryFixtures_DeployedOutsideRequiredParent(t *testing.T) 
 
 	issues := docformat.Validate(doc, docformat.ValidateOptions{RequireInjectionParents: true})
 	if !deploymentBoundaryHasCode(issues, "wrong-parent") {
-		t.Errorf("expected a 'wrong-parent' issue for ProtocolConstraints inside Identity; got: %s",
+		t.Errorf("expected a 'wrong-parent' issue for HarnessConstraints inside Identity; got: %s",
 			deploymentBoundaryFormatIssues(issues))
 	}
 }
@@ -271,8 +271,8 @@ func TestDeploymentBoundaryFixtures_MalformedCases_IssueCode(t *testing.T) {
 		// duplicate-name: the same boundary name used more than once.
 		{fixture: "malformed/duplicate-names.md", code: "duplicate-name"},
 
-		// wrong-parent (injection): IdentityExtension appears at body top level instead of
-		// inside the Identity section. Requires RequireInjectionParents.
+		// wrong-parent (injection): CodebaseContext appears at body top level instead of
+		// inside the Capabilities section. Requires RequireInjectionParents.
 		{
 			fixture: "malformed/injection-outside-section.md",
 			code:    "wrong-parent",
@@ -302,8 +302,8 @@ func TestDeploymentBoundaryFixtures_MalformedCases_IssueCode(t *testing.T) {
 		// wrong-nesting: a section nested inside another section.
 		{fixture: "malformed/wrong-nesting.md", code: "wrong-nesting"},
 
-		// wrong-parent (injection): IdentityExtension appears inside Capabilities instead of
-		// Identity. Requires RequireInjectionParents.
+		// wrong-parent (injection): CodebaseContext appears inside Identity instead of
+		// Capabilities. Requires RequireInjectionParents.
 		{
 			fixture: "malformed/wrong-parent.md",
 			code:    "wrong-parent",

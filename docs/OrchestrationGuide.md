@@ -63,7 +63,7 @@ Your starting documents (requirements, specifications, briefs) were written befo
 
 **What counts as a seed artifact:** Only orchestration artifacts (requirements docs, specs). Regular project files (source code, configs) are passed as `input_files` hints and stay where they are.
 
-**When it's required:** If the workflow's first subagent expects an input artifact (typically `Requirements.md`), you must provide it as a seed. Without it, the first subagent will report `BLOCKED` with `E101 INPUT_NOT_FOUND` and the run won't start. Check the workflow table's Input column for the first step to see what's needed.
+**When it's required:** If the workflow's first subagent expects an input artifact (typically `Requirements.md`), you must provide it as a seed. Without it, the first subagent will report `BLOCKED` with `E101 REQUIRED_RESOURCE_NOT_FOUND` and the run won't start. Check the workflow table's Input column for the first step to see what's needed.
 
 ---
 

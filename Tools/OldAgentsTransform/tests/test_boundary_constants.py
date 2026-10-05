@@ -6,13 +6,13 @@ vocabulary correction that drops `OutputFormat` from the canonical sections:
 
   - CANONICAL_SECTIONS: 5 section names (OutputFormat removed)
   - CANONICAL_ORDER: 6 document slots (OutputFormat removed)
-  - CANONICAL_DEPLOYED: 9 tool-managed names (ArtifactProvenance removed
-    earlier; LanguagePatterns and CustomConstraints removed by this change)
-  - DEPLOYED_PARENT_MAP: 9 entries
-  - INJECTION_PARENT_MAP: 9 advisory entries (ArtifactProvenanceExtension
-    removed, ProtocolExtension added earlier; LanguagePatterns added by
-    this change with parent Capabilities. CustomConstraints is NOT
-    re-catalogued here — it is deleted outright.)
+  - CANONICAL_DEPLOYED: 8 tool-managed names, identical to the Go copy
+    (ProtocolConstraints retired from the output vocabulary)
+  - DEPLOYED_PARENT_MAP: 8 entries
+  - INJECTION_PARENT_MAP: 6 advisory entries, identical to the Go
+    InjectionParent (IdentityExtension, ErrorHandlingExtension and
+    ProtocolExtension are not output names)
+  - LEGACY_INPUT_NAMES: the retired names, recognised on input only
   - EXPECTED_MARKER: built from CANONICAL_DEPLOYED only (no injection allowlist)
   - CANONICAL_INJECTIONS: absent — removed in Stage 2
 """
@@ -32,6 +32,8 @@ from boundary_constants import (  # noqa: E402
     CANONICAL_DEPLOYED,
     DEPLOYED_PARENT_MAP,
     INJECTION_PARENT_MAP,
+    INJECTION_OLD_MARKER_MAP,
+    MARKER_TO_INJECTION_NAME,
     EXPECTED_MARKER,
     KNOWN_FRONTMATTER_KEYS,
     SECTION_HEADING_MAP,
@@ -143,22 +145,22 @@ class TestCanonicalOrder:
 
 
 # ---------------------------------------------------------------------------
-# CANONICAL_DEPLOYED: 9 tool-managed names after the vocabulary correction
+# CANONICAL_DEPLOYED: 8 tool-managed names
 # ---------------------------------------------------------------------------
 
 
 class TestCanonicalDeployed:
-    """CANONICAL_DEPLOYED: 9 tool-managed boundary names.
+    """CANONICAL_DEPLOYED: 8 tool-managed boundary names.
 
     LanguagePatterns and CustomConstraints are removed by this change:
     LanguagePatterns moves to the advisory injection catalogue, CustomConstraints
     is deleted outright with no replacement.
     """
 
-    def test_canonical_deployed_contains_nine_entries(self) -> None:
-        assert len(CANONICAL_DEPLOYED) == 9, (
-            f"Expected 9 canonical tool-managed boundary names "
-            f"(LanguagePatterns and CustomConstraints removed), "
+    def test_canonical_deployed_contains_eight_entries(self) -> None:
+        assert len(CANONICAL_DEPLOYED) == 8, (
+            f"Expected 8 canonical tool-managed boundary names "
+            f"(ProtocolConstraints retired), "
             f"got {len(CANONICAL_DEPLOYED)}: {CANONICAL_DEPLOYED}"
         )
 
@@ -188,8 +190,11 @@ class TestCanonicalDeployed:
     def test_closing_procedure_is_in_canonical_deployed(self) -> None:
         assert "ClosingProcedure" in CANONICAL_DEPLOYED
 
-    def test_protocol_constraints_is_in_canonical_deployed(self) -> None:
-        assert "ProtocolConstraints" in CANONICAL_DEPLOYED
+    def test_retired_names_absent_from_canonical_deployed(self) -> None:
+        for name in ("ProtocolConstraints", "IdentityExtension", "ErrorHandlingExtension"):
+            assert name not in CANONICAL_DEPLOYED, (
+                f"{name} is retired from the output vocabulary"
+            )
 
     def test_error_handling_common_is_in_canonical_deployed(self) -> None:
         assert "ErrorHandlingCommon" in CANONICAL_DEPLOYED
@@ -207,7 +212,7 @@ class TestCanonicalDeployed:
         assert "HarnessConstraints" in CANONICAL_DEPLOYED
 
     def test_canonical_deployed_full_sequence(self) -> None:
-        """CANONICAL_DEPLOYED must equal the exact 9-name ordered tuple, matching
+        """CANONICAL_DEPLOYED must equal the exact 8-name ordered tuple, matching
         the Go copy name-for-name and index-for-index (AC2.1)."""
         expected: tuple[str, ...] = (
             "CommunicationProtocol",
@@ -215,7 +220,6 @@ class TestCanonicalDeployed:
             "ClosingProcedure",
             "AvailableWorkflows",
             "InfrastructureAgents",
-            "ProtocolConstraints",
             "HarnessConstraints",
             "ErrorHandlingCommon",
             "ExecutionPhilosophyCommon",
@@ -232,16 +236,16 @@ class TestCanonicalDeployed:
 
 
 # ---------------------------------------------------------------------------
-# DEPLOYED_PARENT_MAP: 9 entries
+# DEPLOYED_PARENT_MAP: 8 entries
 # ---------------------------------------------------------------------------
 
 
 class TestDeployedParentMap:
-    """DEPLOYED_PARENT_MAP: 9 entries mapping each tool-managed name to its required parent."""
+    """DEPLOYED_PARENT_MAP: 8 entries mapping each tool-managed name to its required parent."""
 
-    def test_deployed_parent_map_contains_nine_entries(self) -> None:
-        assert len(DEPLOYED_PARENT_MAP) == 9, (
-            f"Expected 9 entries in DEPLOYED_PARENT_MAP, got {len(DEPLOYED_PARENT_MAP)}"
+    def test_deployed_parent_map_contains_eight_entries(self) -> None:
+        assert len(DEPLOYED_PARENT_MAP) == 8, (
+            f"Expected 8 entries in DEPLOYED_PARENT_MAP, got {len(DEPLOYED_PARENT_MAP)}"
         )
 
     def test_artifact_provenance_absent_from_deployed_parent_map(self) -> None:
@@ -276,8 +280,8 @@ class TestDeployedParentMap:
     def test_infrastructure_agents_parent_is_identity(self) -> None:
         assert DEPLOYED_PARENT_MAP.get("InfrastructureAgents") == "Identity"
 
-    def test_protocol_constraints_parent_is_constraints(self) -> None:
-        assert DEPLOYED_PARENT_MAP.get("ProtocolConstraints") == "Constraints"
+    def test_protocol_constraints_absent_from_deployed_parent_map(self) -> None:
+        assert "ProtocolConstraints" not in DEPLOYED_PARENT_MAP
 
     def test_harness_constraints_parent_is_constraints(self) -> None:
         assert DEPLOYED_PARENT_MAP.get("HarnessConstraints") == "Constraints"
@@ -289,14 +293,13 @@ class TestDeployedParentMap:
         assert DEPLOYED_PARENT_MAP.get("ExecutionPhilosophyCommon") == "ExecutionPhilosophy"
 
     def test_deployed_parent_map_full_exact_values(self) -> None:
-        """DEPLOYED_PARENT_MAP must have exactly these 9 entries. None = top level."""
+        """DEPLOYED_PARENT_MAP must have exactly these 8 entries. None = top level."""
         expected: dict[str, str | None] = {
             "CommunicationProtocol":     None,
             "AuthorityHierarchy":        "Identity",
             "ClosingProcedure":          "Identity",
             "AvailableWorkflows":        "Identity",
             "InfrastructureAgents":      "Identity",
-            "ProtocolConstraints":       "Constraints",
             "HarnessConstraints":        "Constraints",
             "ErrorHandlingCommon":       "ErrorHandling",
             "ExecutionPhilosophyCommon": "ExecutionPhilosophy",
@@ -307,19 +310,17 @@ class TestDeployedParentMap:
 
 
 # ---------------------------------------------------------------------------
-# INJECTION_PARENT_MAP: 9 advisory entries after the vocabulary correction
+# INJECTION_PARENT_MAP: 6 advisory entries (matches Go InjectionParent)
 # ---------------------------------------------------------------------------
 
 
 class TestInjectionParentMap:
-    """INJECTION_PARENT_MAP: 9 advisory entries. LanguagePatterns is added with
-    parent Capabilities; CustomConstraints is NOT re-catalogued here — it is
-    deleted outright, not moved to the injection side."""
+    """INJECTION_PARENT_MAP: 6 advisory entries, the same pairs as the Go
+    InjectionParent map. The retired names are not output vocabulary."""
 
-    def test_injection_parent_map_contains_nine_entries(self) -> None:
-        assert len(INJECTION_PARENT_MAP) == 9, (
-            f"Expected 9 advisory entries in INJECTION_PARENT_MAP "
-            f"(LanguagePatterns added), "
+    def test_injection_parent_map_contains_six_entries(self) -> None:
+        assert len(INJECTION_PARENT_MAP) == 6, (
+            f"Expected 6 advisory entries in INJECTION_PARENT_MAP, "
             f"got {len(INJECTION_PARENT_MAP)}: {list(INJECTION_PARENT_MAP)}"
         )
 
@@ -345,18 +346,11 @@ class TestInjectionParentMap:
             "INJECTION_PARENT_MAP['LanguagePatterns'] must be 'Capabilities'"
         )
 
-    def test_protocol_extension_present_in_injection_parent_map(self) -> None:
-        assert "ProtocolExtension" in INJECTION_PARENT_MAP, (
-            "ProtocolExtension must be in INJECTION_PARENT_MAP — added in Stage 2"
-        )
-
-    def test_protocol_extension_maps_to_none_top_level(self) -> None:
-        assert INJECTION_PARENT_MAP.get("ProtocolExtension") is None, (
-            "INJECTION_PARENT_MAP['ProtocolExtension'] must be None (top-level sentinel)"
-        )
-
-    def test_identity_extension_maps_to_identity(self) -> None:
-        assert INJECTION_PARENT_MAP.get("IdentityExtension") == "Identity"
+    def test_retired_names_absent_from_injection_parent_map(self) -> None:
+        for name in ("ProtocolExtension", "IdentityExtension", "ErrorHandlingExtension"):
+            assert name not in INJECTION_PARENT_MAP, (
+                f"{name} must not be an output injection name"
+            )
 
     def test_codebase_context_maps_to_capabilities(self) -> None:
         assert INJECTION_PARENT_MAP.get("CodebaseContext") == "Capabilities"
@@ -370,28 +364,55 @@ class TestInjectionParentMap:
     def test_severity_definitions_maps_to_capabilities(self) -> None:
         assert INJECTION_PARENT_MAP.get("SeverityDefinitions") == "Capabilities"
 
-    def test_error_handling_extension_maps_to_error_handling(self) -> None:
-        assert INJECTION_PARENT_MAP.get("ErrorHandlingExtension") == "ErrorHandling"
-
     def test_context_limits_maps_to_execution_philosophy(self) -> None:
         assert INJECTION_PARENT_MAP.get("ContextLimits") == "ExecutionPhilosophy"
 
     def test_injection_parent_map_full_exact_values(self) -> None:
-        """INJECTION_PARENT_MAP must have exactly these 9 advisory entries."""
+        """INJECTION_PARENT_MAP must have exactly these 6 advisory entries."""
         expected: dict[str, str | None] = {
-            "ProtocolExtension":      None,
-            "IdentityExtension":      "Identity",
             "CodebaseContext":        "Capabilities",
             "LanguagePatterns":       "Capabilities",
             "OutputArtifactTemplate": "Capabilities",
             "SeverityThresholds":     "Capabilities",
             "SeverityDefinitions":    "Capabilities",
-            "ErrorHandlingExtension": "ErrorHandling",
             "ContextLimits":          "ExecutionPhilosophy",
         }
         assert INJECTION_PARENT_MAP == expected, (
             f"INJECTION_PARENT_MAP mismatch.\nExpected: {expected}\nGot:      {INJECTION_PARENT_MAP}"
         )
+
+
+# ---------------------------------------------------------------------------
+# LEGACY_INPUT_NAMES: retired names recognised on input only
+# ---------------------------------------------------------------------------
+
+
+class TestLegacyInputNames:
+    """The retired names are kept for legacy INPUT recognition, never for output."""
+
+    def test_legacy_input_names_exact_set(self) -> None:
+        assert boundary_constants.LEGACY_INPUT_NAMES == frozenset({
+            "ProtocolConstraints", "IdentityExtension", "ErrorHandlingExtension",
+        })
+
+    def test_legacy_names_disjoint_from_output_vocabulary(self) -> None:
+        legacy = boundary_constants.LEGACY_INPUT_NAMES
+        assert legacy.isdisjoint(CANONICAL_DEPLOYED)
+        assert legacy.isdisjoint(DEPLOYED_PARENT_MAP)
+        assert legacy.isdisjoint(INJECTION_PARENT_MAP)
+        assert legacy.isdisjoint(EXPECTED_MARKER)
+
+    def test_legacy_injection_markers_still_recognised_as_input(self) -> None:
+        assert INJECTION_OLD_MARKER_MAP["IdentityExtension"] == "[INJECTION: identity_extension]"
+        assert INJECTION_OLD_MARKER_MAP["ErrorHandlingExtension"] == "[INJECTION: error_handling_extension]"
+        assert INJECTION_OLD_MARKER_MAP["ProtocolExtension"] == "[INJECTION: protocol_extension]"
+        assert MARKER_TO_INJECTION_NAME["[INJECTION: identity_extension]"] == "IdentityExtension"
+        assert MARKER_TO_INJECTION_NAME["[INJECTION: error_handling_extension]"] == "ErrorHandlingExtension"
+
+    def test_module_documents_input_only_retention(self) -> None:
+        source = pathlib.Path(boundary_constants.__file__).read_text(encoding="utf-8")
+        assert "LEGACY_INPUT_NAMES" in source
+        assert "input only" in source.lower()
 
 
 # ---------------------------------------------------------------------------
@@ -472,7 +493,6 @@ class TestExpectedMarker:
         bundle_names = [
             "AuthorityHierarchy",
             "ClosingProcedure",
-            "ProtocolConstraints",
             "ErrorHandlingCommon",
             "ExecutionPhilosophyCommon",
         ]
@@ -632,7 +652,7 @@ class TestTagPatternCompoundNameAcceptance:
         )
 
     def test_simple_injection_open_tag_still_matches(self) -> None:
-        assert TAG_PATTERN.match('<IdentityExtension type="project">') is not None, (
+        assert TAG_PATTERN.match('<CodebaseContext type="project">') is not None, (
             "Simple project open tag must still match TAG_PATTERN"
         )
 
@@ -705,7 +725,7 @@ class TestTagPatternCompoundNameAcceptance:
         bundle_section_tags = [
             '<AuthorityHierarchy type="core" name="Subagent">',
             '<ClosingProcedure type="core" name="Subagent">',
-            '<ProtocolConstraints type="core" name="Subagent">',
+            '<HarnessConstraints type="core" name="Subagent">',
             '<ErrorHandlingCommon type="core" name="Subagent">',
             '<ExecutionPhilosophyCommon type="core" name="Subagent">',
         ]
@@ -719,7 +739,7 @@ class TestTagPatternCompoundNameAcceptance:
         bundle_section_close_tags = [
             "</AuthorityHierarchy>",
             "</ClosingProcedure>",
-            "</ProtocolConstraints>",
+            "</HarnessConstraints>",
             "</ErrorHandlingCommon>",
             "</ExecutionPhilosophyCommon>",
         ]
@@ -817,7 +837,7 @@ class TestTagBaseName:
         bundle_names = [
             ("AuthorityHierarchy:Subagent",       "AuthorityHierarchy"),
             ("ClosingProcedure:Subagent",          "ClosingProcedure"),
-            ("ProtocolConstraints:Subagent",       "ProtocolConstraints"),
+            ("HarnessConstraints:Subagent",       "HarnessConstraints"),
             ("ErrorHandlingCommon:Subagent",       "ErrorHandlingCommon"),
             ("ExecutionPhilosophyCommon:Subagent", "ExecutionPhilosophyCommon"),
         ]
@@ -1089,7 +1109,7 @@ class TestTagPatternCustomKindAcceptance:
     def test_existing_kinds_still_match_after_custom_verified(self) -> None:
         """Verifying CUSTOM acceptance must not break existing kind acceptance."""
         assert TAG_PATTERN.match('<Identity type="core">') is not None
-        assert TAG_PATTERN.match('<IdentityExtension type="project">') is not None
+        assert TAG_PATTERN.match('<CodebaseContext type="project">') is not None
         assert TAG_PATTERN.match('<CommunicationProtocol type="managed">') is not None
 
 

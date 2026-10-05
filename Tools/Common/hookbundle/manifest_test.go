@@ -483,7 +483,7 @@ func TestLoad_RealMosaicLoggerBundle_GhcpCliFileCount(t *testing.T) {
 	if !ok {
 		t.Fatal(`Variants["ghcp-cli"] not found`)
 	}
-	const want = 10 // 9 Python adapter modules plus the self-deployed hook.yaml
+	const want = 12 // 11 Python adapter modules (including the Runner-mode pair) plus the self-deployed hook.yaml
 	if len(v.Files) != want {
 		t.Errorf(`Variants["ghcp-cli"].Files has %d entries, want %d`, len(v.Files), want)
 	}

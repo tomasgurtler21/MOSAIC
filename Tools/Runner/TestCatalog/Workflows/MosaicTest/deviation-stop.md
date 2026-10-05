@@ -53,12 +53,11 @@ This workflow does not test the resume itself — that is a manual procedure doc
 
 ## Expected Run
 
-Two Orchestration.md log rows. The stop consultation is not logged.
+One Orchestration.md log row. Pre-run consultation and the stop consultation both dispatch to the orchestrator, but neither allocates a `Seq` or leaves a row — they surface only in the dispatch log, and the stop additionally as a `session.consult.stop` RunnerLogs entry.
 
-| Log `Seq` | `Agent` | Kind | `Phase` | `Status` | `Summary` shows |
-|:---:|---|---|---|---|---|
-| 0 | `orchestrator-script#pre_consultation#1` | consultation | — | "" | pre-run consultation response |
-| 1 | `mosaictest-scripted#1` | workflow step | RESEARCH | BLOCKED | fixture-declared tool unavailable, E501 |
+| Log `Seq` | `Agent` | `Phase` | `Status` | `Summary` shows |
+|:---:|---|---|---|---|
+| 1 | `mosaictest-scripted#1` | RESEARCH | BLOCKED | fixture-declared tool unavailable, E501 |
 
 **Run outcome:** stopped by the orchestrator (`RunStoppedByConsultant`), with the fixture's stop reason surfaced in the exit message.
 
@@ -81,6 +80,7 @@ Two Orchestration.md log rows. The stop consultation is not logged.
 | Consultation succeeds but the run does not stop | The stop instruction was not parsed correctly — check the wire response format |
 | `current_state` does not match the last log entry | The artifact was corrupted during the stop path — the session may have written an inconsistent state |
 | No log rows at all | The BLOCKED was caught before the Execution Log was written — check that Store.Apply runs before deviation handling |
+| An `orchestrator-script` row appears in `Orchestration.md` | Consultations must leave no row in the artifact; a consultation wrongly called `Store.Apply` or allocated a `Seq` |
 
 ---
 

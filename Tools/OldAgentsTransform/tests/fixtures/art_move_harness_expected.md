@@ -15,8 +15,6 @@ role: subagent
 
 You are the **ArtifactMoveHarnessAgent** agent.
 
-<IdentityExtension type="project">
-</IdentityExtension>
 <ClosingProcedure type="managed">
 </ClosingProcedure>
 <AuthorityHierarchy type="managed">
@@ -50,8 +48,6 @@ Your output artifact must follow this structure:
 
 <Constraints type="core">
 ## Constraints
-<ProtocolConstraints type="managed">
-</ProtocolConstraints>
 
 - Stay within scope
 <HarnessConstraints type="managed">
@@ -68,8 +64,6 @@ Your output artifact must follow this structure:
 
 - Retry transient errors
 
-<ErrorHandlingExtension type="project">
-</ErrorHandlingExtension>
 
 </ErrorHandling>
 ---

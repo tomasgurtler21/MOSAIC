@@ -2560,3 +2560,41 @@ Three subagents reported no `# MCP Server Instructions` block. Their probes insp
 #85307's "inverted routing" framing is partly accurate: scoping is wrong (CC-080), and delivery to subagents is late rather than absent. Additional leads: #85230 (background subagents lose MCP resource tools), #79728 (subagent `tools:` allowlist collapses when MCP server unavailable at spawn), #84638 (concurrent identical inline `mcpServers:` share one server process).
 
 ---
+
+### CC-082: Async hooks are killed when a `-p` process exits - an async `Stop` hook is cut off mid-execution and an async `SessionEnd` hook writes nothing
+
+| Field | Value |
+|-------|-------|
+| **Classification** | Limitation |
+| **Source** | MOSAIC experiments, 2026-10-03 (Windows 11); no upstream issue filed |
+| **Reported** | 2026-10-03 (MOSAIC) |
+| **Last Activity** | 2026-10-03 |
+| **Confidence** | Confirmed (reproduced at MOSAIC) |
+| **Orchestration Impact** | HIGH for any hook whose output the Runner reads after the process exits; LOW otherwise |
+| **Reproduced at MOSAIC** | Yes |
+| **MOSAIC Response** | Mitigated: the mosaic-logger registers `Stop` and `SessionEnd` synchronous (and Runner sessions run with session persistence on) |
+| **Version(s) Affected** | 2.1.288 (unknown for other versions) |
+| **Latest Platform Version** | v2.1.288 (2026-10-03) |
+| **Labels** | `area:hooks`, `area:non-interactive` |
+
+**Summary:**
+In `claude -p`, hooks registered `async` do not delay process exit and are killed when the process exits. An async `Stop` hook was killed mid-execution about 230 ms before exit, and an async `SessionEnd` hook produced no record at all. Synchronous hooks completed and delayed process exit until they finished.
+
+Related transcript timing observed in the same experiments: the session transcript is still being written when `Stop` fires and is final by `SessionEnd`, so transcript-dependent work (usage records, transcript export) must happen at `SessionEnd`, not `Stop`. Under `--no-session-persistence`, the `transcript_path` field is present in hook input but the file never exists.
+
+**Impact on Orchestration:**
+The Runner waits for the harness process to exit and then reads the MOSAIC logs. Final-event hooks registered async can leave a session's `invocation_end`, final turn, usage records or transcript export missing. Hooks that need the transcript cannot work under `--no-session-persistence`.
+
+**Evidence:**
+- Timestamped hook-side logging in `-p` runs: the async `Stop` hook started but was killed about 230 ms before process exit; the async `SessionEnd` hook never wrote its record; the same hooks registered synchronous completed and process exit waited for them.
+- Transcript inspected from inside the hooks: incomplete at `Stop`, final at `SessionEnd`; with `--no-session-persistence` the path is reported but no file is ever created.
+
+**Workaround(s):**
+1. Register hooks whose effects must survive process exit (`Stop`, `SessionEnd`) synchronous. Measured cost for the mosaic-logger handlers is about 200 ms (`Stop`) and about 60 ms (`SessionEnd`).
+2. Do transcript-dependent work at `SessionEnd`.
+3. Keep session persistence on for sessions whose transcript is needed.
+
+**Notes:**
+Not probed: other Claude Code versions, Linux/macOS, interactive sessions. See also OC-099 (OpenCode handler not awaited on exit) and GC-020 (GHCP CLI hooks not loaded in untrusted folders) for the same class of "hook output cannot be assumed" behaviour in the other harnesses.
+
+---

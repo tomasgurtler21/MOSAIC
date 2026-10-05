@@ -14,8 +14,6 @@ You are the **TestAgent** agent in a multi-agent orchestration system.
 
 **Goal:** Test the communication protocol transformer path.
 
-<IdentityExtension type="project">
-</IdentityExtension>
 <ClosingProcedure type="managed">
 </ClosingProcedure>
 <AuthorityHierarchy type="managed">
@@ -48,8 +46,6 @@ You are the **TestAgent** agent in a multi-agent orchestration system.
 
 <Constraints type="core">
 ## Constraints
-<ProtocolConstraints type="managed">
-</ProtocolConstraints>
 
 - Do NOT do bad things
 
@@ -64,8 +60,6 @@ You are the **TestAgent** agent in a multi-agent orchestration system.
 <ErrorHandlingCommon type="managed">
 </ErrorHandlingCommon>
 
-<ErrorHandlingExtension type="project">
-</ErrorHandlingExtension>
 
 </ErrorHandling>
 ---

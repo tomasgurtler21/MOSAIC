@@ -15,6 +15,7 @@ vars:
   CMD_PKG: ./cmd/mosaic-run
   LDFLAGS: -s -w
   DIST_DIR: ./dist
+  COVERAGE_DIR: ./.coverage
 
 tasks:
 
@@ -61,6 +62,22 @@ tasks:
   # Import-boundary check
   # ---------------------------------------------------------------------------
 
+  check:size:
+    desc: Verify file (<=500 lines) and function (<=150 lines) size limits; -exports prints per-package export counts
+    cmds:
+      - go run ./tools/sizecheck {{.CLI_ARGS}}
+
+  # ---------------------------------------------------------------------------
+  # Coverage
+  # ---------------------------------------------------------------------------
+
+  coverage:
+    desc: Run the full suite with per-package coverage and print per-package and total percentages
+    cmds:
+      - mkdir -p {{.COVERAGE_DIR}}
+      - go test ./... -coverprofile={{.COVERAGE_DIR}}/coverage.out
+      - go tool cover -func={{.COVERAGE_DIR}}/coverage.out
+
   check:imports:
     desc: Verify import-boundary rules (dependency direction + I/O ban on engine)
     cmds:
@@ -71,9 +88,10 @@ tasks:
   # ---------------------------------------------------------------------------
 
   build-checked:
-    desc: Run import-boundary check then cross-compile for all platforms
+    desc: Run import-boundary and size checks then cross-compile for all platforms
     cmds:
       - task: check:imports
+      - task: check:size
       - task: build:all
 
   # ---------------------------------------------------------------------------

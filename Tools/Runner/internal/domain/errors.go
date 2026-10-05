@@ -52,6 +52,32 @@ type RefusalError struct {
 	Component string // which component refused (e.g. "orchfile", "compat", "artifact")
 	Resource  string // what was being examined (file path, workflow id, row index)
 	Reason    string // specific condition (e.g. "no version comment", "forward dependency")
+	Cause     error  // optional underlying cause; exposed through Unwrap
+}
+
+// Unwrap returns the optional underlying cause.
+func (e *RefusalError) Unwrap() error { return e.Cause }
+
+// RunIdentityProblem names why an artifact's run identity is unusable.
+type RunIdentityProblem string
+
+const (
+	RunIdentityAbsent         RunIdentityProblem = "absent"
+	RunIdentityEmpty          RunIdentityProblem = "empty"
+	RunIdentityMalformed      RunIdentityProblem = "malformed"
+	RunIdentityFolderMismatch RunIdentityProblem = "folder-mismatch"
+)
+
+// RunIdentityError names why an artifact's run identity is unusable. It is
+// carried as the Cause of a *RefusalError.
+type RunIdentityError struct {
+	Problem RunIdentityProblem
+	RunID   string // as found ("" when absent/empty)
+	Folder  string // enclosing folder base name; set for folder-mismatch
+}
+
+func (e *RunIdentityError) Error() string {
+	return fmt.Sprintf("run identity %s: %q", e.Problem, e.RunID)
 }
 
 func (e *RefusalError) Error() string {
@@ -135,6 +161,14 @@ const (
 	// CauseAmbiguousRow: several rows match and the sequence-based
 	// disambiguation could not settle between them.
 	CauseAmbiguousRow
+
+	// CauseNoRecordedRow: the agent fills several EXECUTION rows, and the
+	// Execution Log holds no entry for it, or the entry records no row.
+	CauseNoRecordedRow
+
+	// CauseRecordedRowInvalid: the recorded row is outside the table, holds a
+	// different agent, or lies in another group than the entry's stage.
+	CauseRecordedRowInvalid
 )
 
 // PositionUnresolvedError is returned when the workflow position cannot be
@@ -145,6 +179,7 @@ type PositionUnresolvedError struct {
 	Phase         string // the recorded phase, as stored
 	Stage         string // the recorded stage, as stored
 	Cause         PositionUnresolvedCause
+	RecordedRow   WorkflowRow // the row number recorded in the log; NoWorkflowRow when none
 }
 
 // Error states the cause, not merely the symptom. For CauseAgentNotInWorkflow
@@ -165,6 +200,16 @@ func (e *PositionUnresolvedError) Error() string {
 		return fmt.Sprintf(
 			"position unresolved: multiple routing rows match agent %q at phase %q, stage %q, and sequence-based disambiguation could not settle between them",
 			e.AgentInstance, e.Phase, e.Stage,
+		)
+	case CauseNoRecordedRow:
+		return fmt.Sprintf(
+			"position unresolved: agent %q fills several execution rows, but the execution log holds no recorded workflow row for it (phase %q, stage %q)",
+			e.AgentInstance, e.Phase, e.Stage,
+		)
+	case CauseRecordedRowInvalid:
+		return fmt.Sprintf(
+			"position unresolved: recorded workflow row %d for agent %q does not match the routing table (phase %q, stage %q)",
+			int(e.RecordedRow), e.AgentInstance, e.Phase, e.Stage,
 		)
 	default:
 		return fmt.Sprintf("position unresolved for agent %q at phase %q, stage %q", e.AgentInstance, e.Phase, e.Stage)

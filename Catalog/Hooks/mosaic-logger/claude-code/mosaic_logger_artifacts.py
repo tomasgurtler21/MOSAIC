@@ -61,12 +61,16 @@ def render_output(ctx: "core.HookContext",
                   agent_instance_id: str,
                   response: "str | None",
                   status_code: "str | None",
-                  facts) -> str:
+                  facts,
+                  completion_source: "str | None" = None,
+                  response_format: "str | None" = None) -> str:
     """Render the 02_output.md body: metadata table followed by raw response content.
 
     Returns markdown text. Performs no I/O.
     Rows with unresolvable (None) values are omitted from the table entirely.
     `facts` is a TurnFacts-compatible object with .model and .token_usage attributes.
+    `completion_source` and `response_format` add their rows only when supplied
+    (hand-back completions); the default output is unchanged.
     """
     lines = []
     lines.append(f"# Invocation Output: {agent_instance_id}\n\n")
@@ -83,6 +87,8 @@ def render_output(ctx: "core.HookContext",
     lines.append(_row("Harness", core.HARNESS))
     lines.append(_row("Captured At", ctx.timestamp))
     lines.append(_row("Status Code", status_code))
+    lines.append(_row("Completion Source", completion_source))
+    lines.append(_row("Response Format", response_format))
 
     model = getattr(facts, "model", None)
     lines.append(_row("Model", model))

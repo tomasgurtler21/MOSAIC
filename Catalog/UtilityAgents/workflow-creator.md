@@ -163,6 +163,9 @@ Collaborate with the user on each design decision:
 **Routing Rules:** Define On Success and On Findings for each subagent:
 - Every subagent has a clear next step on SUCCESS
 - Review/validation subagents have On Findings targets for the most common fix path — the orchestrator can route elsewhere based on the actual finding, but the table documents the typical case
+- On Findings routes to the nearest row *above* the row that ran whose agent is the target. The row that ran is never a candidate, and group and stage boundaries are ignored. A target with no preceding row counts as "no target" (deviation or escalation). Place every On Findings target above its reviewer
+- Never write a `Row` column. mosaic-deploy adds a first-column `Row` (1..N) when it rebuilds workflows into an orchestrator, so catalog sources do not contain it
+- Bump the workflow `version` whenever you edit a routing table. A run is pinned to its workflow only by the version string, and the table is re-read on every start, including resume. The Runner refuses to resume older runs against a changed table unless version drift is explicitly allowed
 
 **Artifact Flow:** Document what gets created and consumed at each step.
 
@@ -172,7 +175,7 @@ Before writing, verify the workflow design:
 
 - Every subagent referenced in the table exists in the `Catalog/Subagents/` category README files (or is flagged as needing creation)
 - On Success targets are valid (a subagent name in the table, or COMPLETE)
-- On Findings targets exist in the table or are clearly identified
+- On Findings targets exist in the table or are clearly identified, and each sits above the reviewer that names it
 - No orphan subagents — every row is reachable from the workflow's first row
 - Artifact flow is complete — no subagent reads an artifact that nothing upstream creates
 - The workflow is domain-free — no row, artifact name, or note encodes one project's conventions, formats, vocabulary, or thresholds. Anything that would be identical on every run belongs in an injection on the consuming agent, not in the table

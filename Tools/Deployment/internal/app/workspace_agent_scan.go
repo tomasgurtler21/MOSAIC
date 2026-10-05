@@ -164,8 +164,12 @@ func scanWorkspaceAgents(workspace, agentsDir string, c catalog.Catalog) Workspa
 
 		// Parse the document. Unparseable bytes trigger a filename-key fallback before skipping.
 		doc, err := docformat.Parse(data)
-		if err != nil {
-			// Parse failed — attempt filename-key fallback before skipping.
+		var fm *docformat.Frontmatter
+		if err == nil {
+			fm = doc.Frontmatter()
+		}
+		if err != nil || !fm.Present() {
+			// Parse failed or no frontmatter — attempt filename-key fallback before skipping.
 			// If the filename matches a catalog agent, surface the file as parse-failed
 			// so it can be classified as CONFLICT downstream instead of silently skipped.
 			derivedKey := agentKeyFromFileName(name)
@@ -180,12 +184,6 @@ func scanWorkspaceAgents(workspace, agentsDir string, c catalog.Catalog) Workspa
 					ParseFailed: true,
 				})
 			}
-			continue
-		}
-
-		fm := doc.Frontmatter()
-		if !fm.Present() {
-			// No frontmatter block — skip silently.
 			continue
 		}
 

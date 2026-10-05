@@ -19,7 +19,7 @@ type Interaction = interaction.Interaction
 type HarnessAdapter interface {
 	// Invoke dispatches a single subagent invocation and blocks until it completes,
 	// is cancelled, or fails. The agent reference identifies the target; the request
-	// carries the Communication Protocol v1.7 message.
+	// carries the Communication Protocol v1.12 message.
 	//
 	// On success, returns the parsed protocol response.
 	// On harness-level failure (timeout, crash, malformed output, missing response),
@@ -30,16 +30,22 @@ type HarnessAdapter interface {
 
 // CompletedStep carries everything needed to record one completed invocation.
 type CompletedStep struct {
-	Seq             int
-	AgentInstance   string     // "{AgentName}#{Seq}"
-	Phase           string
-	Stage           string     // "Stage-N" during EXECUTION, "" otherwise
-	Status          StatusCode
-	ErrorCode       ErrorCode  // populated only when Status == StatusBLOCKED
-	Summary         string     // from ProtocolResponse.StatusMessage, truncated per format spec
-	Timestamp       time.Time
-	Checkpoint      string   // empty unless a checkpoint was taken
-	OutputArtifacts []string // paths exactly as dispatched
+	Seq           int
+	AgentInstance string // "{AgentName}#{Seq}"
+	Phase         string
+	Stage         string // "Stage-N" during EXECUTION, "" otherwise
+	// WorkflowRow is the dispatched routing-table row, 1-based.
+	// NoWorkflowRow for infrastructure and out-of-band steps.
+	WorkflowRow WorkflowRow
+	Status      StatusCode
+	ErrorCode   ErrorCode // populated only when Status == StatusBLOCKED
+	Summary     string    // from ProtocolResponse.StatusMessage, truncated per format spec
+	Timestamp   time.Time
+	Checkpoint  string // empty unless a checkpoint was taken
+	// WrittenArtifacts are the concrete paths, in dispatched form, that the
+	// invocation created or modified, as reported by OutputWriteDetector.
+	// Ignored when HITLRejected is true.
+	WrittenArtifacts []string
 	// Inputs carries the formatted comma-separated input_artifacts for the
 	// Inputs column of the Execution Log row. Empty string when no inputs.
 	Inputs string
@@ -63,6 +69,34 @@ type CompletedStep struct {
 	// The zero value (false) preserves backward compatibility: all existing
 	// CompletedStep construction sites produce HITLRejected=false.
 	HITLRejected bool
+
+	// Routed, when non-nil, is the status/error code current_state records and
+	// routing uses, instead of Status/ErrorCode. Set only for a
+	// gate-discharging re-dispatch that returned SUCCESS.
+	Routed *RoutedOutcome
+}
+
+// RoutedOutcome is the status and error code a step is routed on when they
+// differ from what the recorded row shows.
+type RoutedOutcome struct {
+	Status    StatusCode
+	ErrorCode ErrorCode
+}
+
+// RoutedStatus returns c.Routed.Status when c.Routed != nil, else c.Status.
+func (c CompletedStep) RoutedStatus() StatusCode {
+	if c.Routed != nil {
+		return c.Routed.Status
+	}
+	return c.Status
+}
+
+// RoutedErrorCode returns c.Routed.ErrorCode when c.Routed != nil, else c.ErrorCode.
+func (c CompletedStep) RoutedErrorCode() ErrorCode {
+	if c.Routed != nil {
+		return c.Routed.ErrorCode
+	}
+	return c.ErrorCode
 }
 
 // ArtifactStore is the single component that touches Orchestration.md.
@@ -81,21 +115,30 @@ type ArtifactStore interface {
 	Create(ctx context.Context, info WorkflowInfo, task string, settings RunSettings, now time.Time, runID string) (ArtifactState, error)
 
 	// Apply records a completed step: appends an execution log entry, upserts
-	// artifact registry entries for each output artifact, and bumps
+	// artifact registry entries for the step's WrittenArtifacts only (declared
+	// outputs the agent did not write are never registered), and bumps
 	// global_sequence and last_updated. The write is atomic
-	// (write-temp-then-rename). The step's output artifact paths are recorded
-	// exactly as provided. Workflow Notes are preserved unchanged.
+	// (write-temp-then-rename). Workflow Notes are preserved unchanged.
 	//
-	// current_state is updated only when step.IsInfrastructure is false.
-	// An infrastructure step leaves phase, stage, last_status, last_agent,
-	// and error_code exactly as they were, on disk as well as in the
-	// returned state, so the recorded workflow position continues to name
-	// the last workflow step. Everything else above applies to
-	// infrastructure steps unchanged: the invocation is fully recorded.
+	// Recording rules:
+	//   - HITLRejected step: the execution log row only. current_state and
+	//     the artifact registry are unchanged (such steps carry no
+	//     WrittenArtifacts).
+	//   - IsInfrastructure step: log row, registry upsert of WrittenArtifacts,
+	//     and sequence bump, but current_state (phase, stage, last_status,
+	//     last_agent, error_code) is left exactly as it was, on disk and in
+	//     the returned state, so the recorded workflow position continues to
+	//     name the last workflow step.
+	//   - Accepted workflow step: log row, registry upsert of WrittenArtifacts,
+	//     sequence bump, and current_state updated.
+	//
+	// Apply refuses (returns an error, writes nothing) when step.Seq is not
+	// strictly above the highest sequence already in the execution log, or
+	// when step.AgentInstance does not end in "#<Seq>".
 	Apply(ctx context.Context, state ArtifactState, step CompletedStep) (ArtifactState, error)
 
-	// SetPhase updates only current_state.phase (and bumps last_updated and
-	// global_sequence) without appending an execution log entry or modifying
+	// SetPhase updates only current_state.phase (and bumps last_updated;
+	// global_sequence is not changed) without appending an execution log entry or modifying
 	// the artifact registry. The write is atomic (write-temp-then-rename).
 	//
 	// This is the designated path for writing the COMPLETED phase marker after
@@ -103,9 +146,25 @@ type ArtifactStore interface {
 	// synthetic CompletedStep with meaningless values, producing a spurious
 	// execution log row.
 	//
-	// Returns the updated ArtifactState with the new phase, bumped sequence,
-	// and updated timestamp.
+	// Returns the updated ArtifactState with the new phase and updated
+	// timestamp; the sequence is unchanged.
 	SetPhase(ctx context.Context, state ArtifactState, phase string, now time.Time) (ArtifactState, error)
+
+	// SetCommitBranch re-reads the artifact from disk, sets commit_branch
+	// (set-once) and last_updated, and writes atomically. Log, registry,
+	// current_state, global_sequence and notes are unchanged.
+	// Returns *RefusalError when commits are disabled in the artifact, when
+	// commit_branch is already present, or when branch is empty.
+	SetCommitBranch(ctx context.Context, branch string, now time.Time) (ArtifactState, error)
+
+	// AdoptRunnerSettings re-reads the artifact from disk and records the
+	// three Runner-owned settings once (first Runner resume of a
+	// native-created artifact). Only last_updated changes besides the three
+	// fields; review_loop_limit, infrastructure_selections and commit_branch
+	// are never written by adoption. Returns *RefusalError when the artifact
+	// already records runner settings (Mode != ExecutionModeUnset) or when
+	// mode is ExecutionModeUnset.
+	AdoptRunnerSettings(ctx context.Context, mode ExecutionMode, preConsultation, manualResolution bool, now time.Time) (ArtifactState, error)
 }
 
 // RoutingConsultant answers "what happens next" when the Runner cannot or
@@ -338,12 +397,12 @@ const (
 	EventSessionFilterUnmatched = "session.filter.unmatched"
 
 	// Snapshot event names.
-	EventSnapshotCleanupFailed  = "session.snapshot.cleanup_failed"
-	EventSnapshotRestored       = "session.snapshot.restored"
-	EventSnapshotLockAcquired   = "session.snapshot.lock_acquired"
-	EventSnapshotLockReleased   = "session.snapshot.lock_released"
-	EventSnapshotBackupCreated  = "session.snapshot.backup_created"  // Stage 8: creator wrote backup
-	EventSnapshotRecovery       = "session.snapshot.recovery"        // Stage 9: recovery ran at startup
+	EventSnapshotCleanupFailed = "session.snapshot.cleanup_failed"
+	EventSnapshotRestored      = "session.snapshot.restored"
+	EventSnapshotLockAcquired  = "session.snapshot.lock_acquired"
+	EventSnapshotLockReleased  = "session.snapshot.lock_released"
+	EventSnapshotBackupCreated = "session.snapshot.backup_created" // Stage 8: creator wrote backup
+	EventSnapshotRecovery      = "session.snapshot.recovery"       // Stage 9: recovery ran at startup
 
 	// Graceful-stop lifecycle event names. Silent in a run where no stop is
 	// requested: nothing here is emitted on a negative poll or an ignored key.
@@ -369,3 +428,36 @@ const (
 	// resolution succeeds at suite startup.
 	EventTestrunResolvePath = "testrun.resolve.path"
 )
+
+// OutputQuery names the declared outputs of one invocation and the directory
+// their paths are relative to.
+type OutputQuery struct {
+	Root     string   // absolute directory the declared paths are relative to (parent of the run folder)
+	Declared []string // output_artifacts exactly as dispatched; may contain wildcard segments
+}
+
+// OutputBaseline is produced by OutputWriteDetector.Baseline and consumed by
+// Written of the same detector. Only Query is part of the contract.
+type OutputBaseline struct {
+	Query    OutputQuery
+	Snapshot any // detector-private state
+}
+
+// OutputWriteDetector determines which of an invocation's declared output
+// artifacts the invocation actually created or modified.
+//
+// Contract: implementations never return an error and never panic. A path
+// whose post-invocation content cannot be read is reported as written.
+type OutputWriteDetector interface {
+	// Baseline records the pre-invocation state of every concrete path the
+	// query's declared outputs denote at this moment (wildcards expanded
+	// against the filesystem).
+	Baseline(ctx context.Context, q OutputQuery) OutputBaseline
+
+	// Written returns the concrete paths, in dispatched form, created (absent
+	// in baseline, present now) or modified (content digest differs) since
+	// baseline. Wildcards are re-expanded at call time. A path absent now is
+	// never returned. Order: declared order; matches of one wildcard entry
+	// sorted lexically; duplicates removed. Nil when nothing was written.
+	Written(ctx context.Context, baseline OutputBaseline) []string
+}

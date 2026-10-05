@@ -38,7 +38,7 @@ Run the following from the `Tools/AgentTest/` directory.
 
 Each `dist:*` task:
 1. Cross-compiles the binary for its target platform into `dist/`.
-2. Runs `stage:bundle` — copies `hook.yaml` and the `claude-code/` Python files from `.claude/hooks/` into `dist/logger-bundle/`.
+2. Runs `stage:bundle` — copies `Catalog/Hooks/mosaic-logger` (`hook.yaml` and the harness variant files, e.g. `claude-code/*.py`) into `dist/logger-bundle/`.
 3. Copies the cost-analysis tool from `../LogAnalyzer/dist/` into `dist/`.
 4. Copies the deployment tool from `../Deployment/dist/` into `dist/`.
 
@@ -65,7 +65,7 @@ dist/
 
 `logger-bundle/hook.yaml` is the manifest file the harness provisioner reads at startup. The `claude-code/` subdirectory holds the harness-specific Python scripts. If the bundle directory is absent or the manifest is unreadable, the tool reports a pre-flight environment failure naming what it searched for and which override changes the path.
 
-Note: the logger bundle sources live at `.claude/hooks/` in the repository and are **only copied into `dist/`** by the `stage:bundle` task. Running the binary from any location that does not have a staged `logger-bundle/` beside it will fail pre-flight.
+Note: the logger bundle source is `Catalog/Hooks/mosaic-logger/` in the repository and is **only copied into `dist/`** by the `stage:bundle` task. The default is `<selfDir>/logger-bundle`, overridden by `--logger-bundle` or `MOSAIC_AGENT_TEST_LOGGER_BUNDLE`. Running the binary from any location that does not have a staged `logger-bundle/` beside it (and no override) will fail pre-flight.
 
 ---
 
@@ -200,7 +200,7 @@ C:\Catalog\HarnessInjections\Claude Code\HarnessInjections.md: The system cannot
 The two defaults that break are computed differently:
 
 - `LoggerBundleDir` = `selfDir/logger-bundle` → `C:\AI\MOSAIC\MOSAIC\logger-bundle`
-  This directory does not exist. The logger bundle source lives at `.claude/hooks/` and is only copied into `dist/logger-bundle/` by the `stage:bundle` task. There is no `logger-bundle/` folder at the repository root.
+  This directory does not exist. The logger bundle source is `Catalog/Hooks/mosaic-logger/` and is only copied into `dist/logger-bundle/` by the `stage:bundle` task. There is no `logger-bundle/` folder at the repository root.
 
 - `MosaicRoot` = `selfDir/../../..` → `C:\`
   Three `..` segments above the repository root reach the drive root on Windows. The deploy tool then looks for `C:\Catalog\HarnessInjections\...`, which does not exist, producing the second error.

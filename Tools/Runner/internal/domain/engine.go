@@ -74,6 +74,9 @@ const (
 	DeviationNonSuccess     DeviationKind = "non-success-status"
 	DeviationAmbiguousRoute DeviationKind = "ambiguous-routing"
 	DeviationHarnessError   DeviationKind = "harness-error"
+	// DeviationReviewLoopLimit: Mode 3 stopped auto-routing a reviewer's findings
+	// because its COMPLETED_NEEDS_ACTION count reached review_loop_limit.
+	DeviationReviewLoopLimit DeviationKind = "review-loop-limit"
 )
 
 // DeviationInfo carries everything the deviation resolver needs.
@@ -108,8 +111,8 @@ type ResumeInfo struct {
 	// execution group (0 or 1), or -1 when the row is outside the staged phase.
 	GroupIndex int
 
-	// Seq is the global sequence number to use for the next invocation.
-	// Derived from the artifact's global_sequence field.
+	// Seq is the last allocated global sequence number; the next invocation
+	// uses Seq + 1. Derived from the artifact's (reconciled) global_sequence field.
 	Seq int
 
 	// RerunLast is true when the last logged invocation did not complete

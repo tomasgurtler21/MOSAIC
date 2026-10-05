@@ -15,8 +15,6 @@ tier_rationale: "TODO: state why this tier"
 
 You are the **ArtifactTemplateAgent** agent.
 
-<IdentityExtension type="project">
-</IdentityExtension>
 <ClosingProcedure type="managed">
 </ClosingProcedure>
 <AuthorityHierarchy type="managed">
@@ -65,8 +63,6 @@ Your output artifact MUST follow this structure:
 
 <Constraints type="core">
 ## Constraints
-<ProtocolConstraints type="managed">
-</ProtocolConstraints>
 
 - Stay within scope
 
@@ -83,8 +79,6 @@ Your output artifact MUST follow this structure:
 
 - Retry transient errors
 
-<ErrorHandlingExtension type="project">
-</ErrorHandlingExtension>
 
 </ErrorHandling>
 ---

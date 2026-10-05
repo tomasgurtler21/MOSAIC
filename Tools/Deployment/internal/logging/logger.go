@@ -150,6 +150,9 @@ func (l *loggerImpl) Action(ar domain.ActionRecord) {
 	if ar.BackupPath != "" {
 		fmt.Fprintf(&sb, " backup=%s", ar.BackupPath)
 	}
+	if ar.FormatChange != nil {
+		fmt.Fprintf(&sb, " format_change=%q", ar.FormatChange.String())
+	}
 	if ar.Err != "" {
 		fmt.Fprintf(&sb, " error=%s", ar.Err)
 	}

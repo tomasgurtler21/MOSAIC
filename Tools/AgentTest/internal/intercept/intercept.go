@@ -186,6 +186,10 @@ type Decision struct {
 //     reply on a harness whose post point fires at launch (see
 //     domain.PhaseCompletion's doc comment).
 //
+// Completion idempotency: a post or completion call whose AgentID already
+// appears in RunState.CompletedAgents is a bare passthrough with no records,
+// no state change and no cutoff; the first such call marks the agent.
+//
 // Neither post nor completion ever halts or denies: both fire after the
 // collaborator has already run, so refusing either can only damage the
 // subject's run.
@@ -460,7 +464,20 @@ func groupFor(id domain.CollaboratorIdentity, groups []domain.ParallelGroup) str
 // an end record, and clears the in-flight entry. It always resolves to
 // OutcomePassthrough — the collaborator has already run by this point, so
 // refusing it can only damage the subject's run.
+//
+// Completion is idempotent per agent: when the call carries an AgentID that
+// state already lists in CompletedAgents, the result is a bare passthrough
+// (no records, no delta, no cutoff). On an agent's first completion the
+// AgentID, when non-empty, is added to CompletedAgents whatever the token
+// source, so a later completion for the same agent is ignored. Calls with an
+// empty AgentID are never guarded and never marked.
 func decidePost(in Input) Decision {
+	if in.Call.AgentID != "" && in.State.CompletedAgents[in.Call.AgentID] {
+		return Decision{
+			Outcome: domain.InterceptionOutcome{Kind: domain.OutcomePassthrough},
+		}
+	}
+
 	// Resolve the correlation token. For PhaseCompletion, the call may carry
 	// no token directly; ResolveToken checks the call's own token first, then
 	// the agent-dispatch binding (when an agent-start event established one),
@@ -495,6 +512,10 @@ func decidePost(in Input) Decision {
 	// the agent identifier does not match a later dispatch erroneously.
 	if tokenSource == TokenFromAgent && in.Call.AgentID != "" {
 		delta.ReleaseAgents = []string{in.Call.AgentID}
+	}
+	// Remember the agent so a later completion for it is ignored.
+	if in.Call.AgentID != "" {
+		delta.CompleteAgents = []string{in.Call.AgentID}
 	}
 
 	// Identity for the end record: prefer the call's own identity; fall

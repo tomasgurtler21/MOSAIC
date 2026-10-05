@@ -152,8 +152,6 @@ When appending correction stages to KBProgress.md, use this format:
 <Constraints type="core">
 ## Constraints
 
-<ProtocolConstraints type="managed">
-</ProtocolConstraints>
 - Stay within your defined role — organize and sort, don't validate or correct
 - **Do NOT validate flags against the codebase** — you organize what generators reported; the correction agent validates. Attempting to validate would duplicate work and exceed your scope
 - **Do NOT discard or filter flags** — every flag must appear in the report regardless of whether you think it's valid. Flags are signals for the correction agent, not verdicts you adjudicate

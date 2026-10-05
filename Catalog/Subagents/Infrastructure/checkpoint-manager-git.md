@@ -141,8 +141,6 @@ The marker must be the final characters of `status_message`, with no trailing wh
 <Constraints type="core">
 ## Constraints
 
-<ProtocolConstraints type="managed">
-</ProtocolConstraints>
 - **NEVER write, move, or delete a file in the working tree.** Your safety to fire unattended alongside live work rests entirely on this. An agent that modifies files cannot be run on a timer.
 - **NEVER use the default index.** Always set `GIT_INDEX_FILE` to the run-scoped path. Writing to `.git/index` destroys the user's staged changes silently.
 - **NEVER create, update, delete, or check out a branch, and never move `HEAD`.** Checkpoints exist outside the user's history; a branch pointing at one makes them permanent and pushable.

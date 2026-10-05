@@ -4,14 +4,15 @@ package domain_test
 //
 // Coverage:
 //
-//   Short-circuit cases that produce HITLAccept without examining Approvals:
-//   - EffectiveHITL=false → HITLAccept regardless of Status and Approvals.
-//   - EffectiveHITL=true, Status=BLOCKED → HITLAccept (non-SUCCESS deviates
-//     through a separate path and does not need HITL verification).
-//   - EffectiveHITL=true, Status=COMPLETED_NEEDS_ACTION → HITLAccept.
-//   - EffectiveHITL=true, Status=PARTIALLY_DONE → HITLAccept.
-//   - EffectiveHITL=true, Status=NEEDS_CLARIFICATION → HITLAccept.
-//   - EffectiveHITL=true, Status=CAPABILITY_EXCEEDED → HITLAccept.
+//   Short-circuit:
+//   - EffectiveHITL=false -> HITLAccept regardless of Status and Approvals.
+//
+//   Every response status is gated (there is no non-SUCCESS shortcut):
+//   - An unapproved written output triggers HITLRedispatch for SUCCESS,
+//     COMPLETED_NEEDS_ACTION, PARTIALLY_DONE, NEEDS_CLARIFICATION,
+//     CAPABILITY_EXCEEDED and BLOCKED; HITLEscalate once the re-dispatch is spent.
+//   - Approved or empty approvals accept for non-SUCCESS statuses too.
+//   - Read-failure values stay distinct in NonCompliant.
 //
 //   Empty Approvals list:
 //   - EffectiveHITL=true, Status=SUCCESS, nil Approvals → HITLAccept (nothing
@@ -84,20 +85,21 @@ func TestDecideHITLCompliance_HITLFalse_AlwaysAccept(t *testing.T) {
 	}
 }
 
-func TestDecideHITLCompliance_NonSuccessStatus_AlwaysAccept(t *testing.T) {
-	// When the status is not SUCCESS, HITL verification is bypassed. The
-	// non-SUCCESS routing path handles the outcome separately.
-	nonSuccessStatuses := []domain.StatusCode{
-		domain.StatusBLOCKED,
+func TestDecideHITLCompliance_EveryStatus_UnapprovedWrittenOutput_Redispatches(t *testing.T) {
+	// The gate runs for every response status: a written output that is not
+	// approved triggers the single re-dispatch whatever the agent returned.
+	statuses := []domain.StatusCode{
+		domain.StatusSUCCESS,
 		domain.StatusCOMPLETED_NEEDS_ACTION,
 		domain.StatusPARTIALLY_DONE,
 		domain.StatusNEEDS_CLARIFICATION,
 		domain.StatusCAPABILITY_EXCEEDED,
+		domain.StatusBLOCKED,
 	}
 	falseApproval := []domain.ArtifactApproval{
 		{Path: "artifact.md", Approval: domain.ApprovalFalse},
 	}
-	for _, status := range nonSuccessStatuses {
+	for _, status := range statuses {
 		t.Run(string(status), func(t *testing.T) {
 			in := domain.HITLComplianceInput{
 				EffectiveHITL:  true,
@@ -106,10 +108,109 @@ func TestDecideHITLCompliance_NonSuccessStatus_AlwaysAccept(t *testing.T) {
 				RedispatchUsed: false,
 			}
 			got := domain.DecideHITLCompliance(in)
-			if got.Outcome != domain.HITLAccept {
-				t.Errorf("status=%s: got %v, want HITLAccept", status, got.Outcome)
+			if got.Outcome != domain.HITLRedispatch {
+				t.Errorf("status=%s: got %v, want HITLRedispatch", status, got.Outcome)
+			}
+			if len(got.NonCompliant) != 1 || got.NonCompliant[0].Path != "artifact.md" {
+				t.Errorf("status=%s: NonCompliant = %v, want the unapproved artifact", status, got.NonCompliant)
 			}
 		})
+	}
+}
+
+func TestDecideHITLCompliance_EveryStatus_RedispatchSpent_Escalates(t *testing.T) {
+	statuses := []domain.StatusCode{
+		domain.StatusSUCCESS,
+		domain.StatusCOMPLETED_NEEDS_ACTION,
+		domain.StatusPARTIALLY_DONE,
+		domain.StatusNEEDS_CLARIFICATION,
+		domain.StatusCAPABILITY_EXCEEDED,
+		domain.StatusBLOCKED,
+	}
+	for _, status := range statuses {
+		t.Run(string(status), func(t *testing.T) {
+			in := domain.HITLComplianceInput{
+				EffectiveHITL:  true,
+				Status:         status,
+				Approvals:      []domain.ArtifactApproval{{Path: "artifact.md", Approval: domain.ApprovalFalse}},
+				RedispatchUsed: true,
+			}
+			got := domain.DecideHITLCompliance(in)
+			if got.Outcome != domain.HITLEscalate {
+				t.Errorf("status=%s: got %v, want HITLEscalate", status, got.Outcome)
+			}
+		})
+	}
+}
+
+func TestDecideHITLCompliance_NonSuccessStatus_ApprovedOrNothingWritten_Accepts(t *testing.T) {
+	// A non-SUCCESS response passes the gate when every written output is
+	// approved, and when nothing was written (empty approvals).
+	statuses := []domain.StatusCode{
+		domain.StatusCOMPLETED_NEEDS_ACTION,
+		domain.StatusPARTIALLY_DONE,
+		domain.StatusNEEDS_CLARIFICATION,
+		domain.StatusCAPABILITY_EXCEEDED,
+	}
+	cases := []struct {
+		name      string
+		approvals []domain.ArtifactApproval
+	}{
+		{"all approved", []domain.ArtifactApproval{{Path: "a.md", Approval: domain.ApprovalTrue}}},
+		{"nothing written", nil},
+	}
+	for _, status := range statuses {
+		for _, tc := range cases {
+			t.Run(string(status)+"/"+tc.name, func(t *testing.T) {
+				in := domain.HITLComplianceInput{
+					EffectiveHITL: true,
+					Status:        status,
+					Approvals:     tc.approvals,
+				}
+				got := domain.DecideHITLCompliance(in)
+				if got.Outcome != domain.HITLAccept {
+					t.Errorf("got %v, want HITLAccept", got.Outcome)
+				}
+			})
+		}
+	}
+}
+
+func TestDecideHITLCompliance_NonSuccessStatus_EveryReadFailure_StaysDistinctAndNonCompliant(t *testing.T) {
+	// The read-failure values keep their identity in NonCompliant, so the
+	// operator message can tell them apart, and each blocks acceptance.
+	failures := []domain.HumanApproval{
+		domain.ApprovalUnreadable,
+		domain.ApprovalNoFrontmatter,
+		domain.ApprovalMalformed,
+		domain.ApprovalAbsent,
+		domain.ApprovalFalse,
+	}
+	for _, f := range failures {
+		in := domain.HITLComplianceInput{
+			EffectiveHITL: true,
+			Status:        domain.StatusPARTIALLY_DONE,
+			Approvals:     []domain.ArtifactApproval{{Path: "a.md", Approval: f}},
+		}
+		got := domain.DecideHITLCompliance(in)
+		if got.Outcome != domain.HITLRedispatch {
+			t.Errorf("approval=%v: got %v, want HITLRedispatch", f, got.Outcome)
+			continue
+		}
+		if len(got.NonCompliant) != 1 || got.NonCompliant[0].Approval != f {
+			t.Errorf("approval=%v: NonCompliant = %v, want the read result preserved", f, got.NonCompliant)
+		}
+	}
+}
+
+func TestDecideHITLCompliance_HITLFalse_NonSuccessStatus_Accepts(t *testing.T) {
+	in := domain.HITLComplianceInput{
+		EffectiveHITL: false,
+		Status:        domain.StatusCOMPLETED_NEEDS_ACTION,
+		Approvals:     []domain.ArtifactApproval{{Path: "a.md", Approval: domain.ApprovalFalse}},
+	}
+	if got := domain.DecideHITLCompliance(in); got.Outcome != domain.HITLAccept {
+		t.Errorf("EffectiveHITL=false: got %v, want HITLAccept", got.Outcome)
 	}
 }
 

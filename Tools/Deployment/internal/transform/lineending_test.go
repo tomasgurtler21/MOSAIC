@@ -209,10 +209,11 @@ func fixtureProtocolCRLF(version string) domain.ProtocolContent {
 // carries CRLF line endings, the assembled CommunicationProtocol region content contains
 // no lone LF: every '\n' in the region content is immediately preceded by '\r'. Because
 // the version is now a tag attribute (not an inline comment), this check is exclusively
-// about the block content bytes — no version marker line can introduce a lone LF.
+// about the block content bytes — no version marker line can introduce a lone LF. The
+// source is CRLF: the output follows the source's line ending.
 func TestProtocol_CRLFBlock_RegionContainsNoLoneLF(t *testing.T) {
 	req := transform.Request{
-		Source:   []byte(sourceWithProtocol),
+		Source:   crlfBytes(sourceWithProtocol),
 		Kind:     domain.ArtifactAgent,
 		Key:      "protocol-test",
 		Module:   newFixtureModule(t),

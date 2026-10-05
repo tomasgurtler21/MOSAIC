@@ -2,7 +2,7 @@
 
 > **Status:** Draft for review — consolidated against the concrete agent designs
 > **Created:** 2026-07-31
-> **Last Updated:** 2026-08-01
+> **Last Updated:** 2026-09-27
 > **Scope:** Defines the infrastructure agent class — agents that belong to no workflow but are executed on triggers during orchestration. Covers how they are declared, discovered, triggered, invoked, recorded, and how their failures are handled. Does not specify any concrete infrastructure agent; those have their own designs.
 
 > **Authoring note.** This document was first drafted ahead of the concrete infrastructure agents, then revised against them. That order mattered: designing the instances removed a trigger (`PRE_ROLLBACK`) that had no consumer, changed the justification for another (`PHASE_END`) from anticipated need to deliberate framework generality, and moved three misplaced schema amendments out of §10 and into the design that actually owns them. Sections that generalise beyond what the instances demonstrate now say so explicitly rather than presenting themselves as established.
@@ -41,10 +41,10 @@ That last point is the load-bearing one. Infrastructure agents are a new *reason
 
 ### 3.1 The runtime contract
 
-An orchestrator declares its infrastructure agents in a dedicated injection region. This region, in the **deployed** orchestrator file, is the single authoritative statement of what fires and when:
+An orchestrator declares its infrastructure agents in a dedicated tool-managed region. The deployment tool assembles that region's content from the declarations the deployment selected, so it is `type="managed"` rather than `type="project"`: where the tool is used, content there is regenerated from the deployment's own selections rather than preserved. That does not weaken the hand-deployable principle in §2 — a person writing the region by hand and never running the tool keeps exactly what they wrote. This region, in the **deployed** orchestrator file, is the single authoritative statement of what fires and when:
 
 ```markdown
-<InfrastructureAgents type="project">
+<InfrastructureAgents type="managed">
 
 <InfrastructureAgent type="core" name="checkpoint-manager-git" version="1.0.0">
 | Class | Trigger | Param | On Failure | Description |
@@ -74,10 +74,10 @@ The structure deliberately mirrors how workflows are already embedded in the sam
 
 - The section name after the `InfrastructureAgent:` prefix is the agent name, and is what the executor dispatches to. An empty identifier is invalid.
 - Duplicate identifiers within one file are invalid. An executor encountering them must refuse to start rather than pick one.
-- **Multiple same-class agents are permitted in the declaration region; the executor selects one per gated class at run start.** A class is gated when concurrent operation of multiple agents of that class would be ambiguous or harmful — currently `checkpoint`, `commit`, and `restore`. Declaring two or more differently-named agents of a gated class is valid. When a run starts and the declaration region contains more than one agent of the same gated class, the executor prompts the user to select which one to use for that class; only the selected agent's triggers are evaluated for the life of the run. When exactly one agent of a gated class is declared, it is auto-selected without prompting. This selection model resolves the "both fire on the same boundary" concern without a deployment-time prohibition: the executor enforces that at most one agent per gated class is active per run, but allows a deployment to offer several options — for example, alternative checkpoint storage backends or restore mechanisms — and defers the choice to the moment when the user actually knows which they want. Non-gated classes are unrestricted and never subject to selection; multiple `review`-class agents with different remits may all fire concurrently. Note that gating is decoupled from activation switches (§6.1): `checkpoint` and `commit` are both gated and carry activation switches; `restore` is gated but carries no activation switch (it uses a `MANUAL` trigger instead). The gating criterion is "ambiguity or harm from concurrent operation", not "carries an activation switch".
+- **Multiple same-class agents are permitted in the declaration region; the executor selects one per gated class at run start.** A class is gated when concurrent operation of multiple agents of that class would be ambiguous or harmful — currently `checkpoint`, `commit`, and `restore`. Declaring two or more differently-named agents of a gated class is valid. When a run starts and the declaration region contains more than one agent of the same gated class, the executor prompts the user to select which one to use for that class and records the class-to-agent choice in `Orchestration.md` under `infrastructure_selections`; only the selected agent's triggers are evaluated for the life of the run. A resumed executor reads that set-once map rather than asking again. When exactly one agent of a gated class is declared, it is auto-selected without prompting and needs no map entry. This selection model resolves the "both fire on the same boundary" concern without a deployment-time prohibition: the executor enforces that at most one agent per gated class is active per run, but allows a deployment to offer several options — for example, alternative checkpoint storage backends or restore mechanisms — and defers the choice to the moment when the user actually knows which they want. Non-gated classes are unrestricted and never subject to selection; multiple `review`-class agents with different remits may all fire concurrently. Note that gating is decoupled from activation switches (§6.1): `checkpoint` and `commit` are both gated and carry activation switches; `restore` is gated but carries no activation switch (it uses a `MANUAL` trigger instead). The gating criterion is "ambiguity or harm from concurrent operation", not "carries an activation switch".
 - The `version` attribute is required on each region's opening tag, for the same staleness-detection reason workflow regions carry one.
 - **A section may contain more than one row**, one per trigger the agent declares. `Class` and `On Failure` must be identical across those rows — they are properties of the agent, not of a trigger — and a section whose rows disagree on either is invalid. Duplicate triggers within one section are invalid for the same reason duplicate identifiers are: an executor must refuse rather than pick one.
-- An absent or empty `<InfrastructureAgents type="project">` region means this orchestrator has no infrastructure agents. This is valid and must not be treated as an error — it is the correct state for a minimal deployment.
+- An absent or empty `<InfrastructureAgents type="managed">` region means this orchestrator has no infrastructure agents. This is valid and must not be treated as an error — it is the correct state for a minimal deployment.
 
 **`Class` and `Description` address different readers, and neither substitutes for the other.**
 
@@ -85,11 +85,11 @@ The structure deliberately mirrors how workflows are already embedded in the sam
 
 `Description` is prose, read by the orchestrator. It states how the response should be treated — that `orchestration-review` returns observations rather than instructions, that `checkpoint-manager-git` never touches the working tree. `class: review` alone does not convey that; the orchestrator would have to know what the class name implies, which is exactly the kind of carried-elsewhere knowledge this document avoids. It also makes the region legible to a person deploying by hand, who otherwise sees only agent names and triggers.
 
-**The region is also read by `orchestration-review`.** It needs the list of declared agent names to avoid reporting infrastructure agent invocations as agents the workflow table does not name (that agent's design, §6). This is the only consumer of the region other than the executor itself.
+**The region is also read by `orchestration-review`.** It needs the list of declared agent names to avoid reporting infrastructure agent invocations as agents the workflow table does not name (that agent's design, §6). The script-mode orchestrator also reads it, but not to fire anything: the declaration's class and `On Failure` policy let it interpret a deviation an infrastructure agent raised. The Runner, as executor, evaluates the triggers.
 
 ### 3.2 The assembly source
 
-An infrastructure agent declares its own default trigger in its own frontmatter, alongside the fields agent files already carry:
+An infrastructure agent declares its own default trigger in its own frontmatter, alongside the fields agent files already carry. **The three fields below the standard set are the only additions**; everything above them is the ordinary agent frontmatter schema, which `AgentTemplateArchitecture.md` §3.1 owns and which this document does not restate. `role: subagent` is among them and is not optional — an infrastructure agent is an ordinary subagent by file shape, and role is what selects the canonical text a deployment writes into it.
 
 ```yaml
 ---
@@ -97,9 +97,11 @@ id: 36
 version: 1.0.0
 name: checkpoint-manager-git
 description: Commits a restorable checkpoint of the working tree
+role: subagent
 model: {model-identifier}
 tools: [file_read, terminal]
 recommended_tier: LOW
+tier_rationale: fixed command sequence with no branching judgment
 required_skills: []
 infrastructure: checkpoint
 triggers:
@@ -138,7 +140,7 @@ A closed vocabulary is the point: an open one could not support §6.1's validati
 
 **This supersedes an earlier `infrastructure: true`.** The boolean marked membership but not kind, which left §6.1's activation rule undecidable: an executor could see that agents existed without being able to tell whether any of them was the checkpoint mechanism the run's configuration required. Carrying the class instead answers both questions with one field.
 
-**`user_interaction` is deliberately absent from `checkpoint-manager-git`'s tools.** It fires unattended on a trigger; an agent that could prompt mid-run would be able to block a run at an arbitrary point with no human expecting it. Infrastructure agents that genuinely need a human — none currently — would declare `human_in_the_loop` at dispatch (§8) rather than reaching for the user on their own initiative.
+**`user_interaction` is deliberately absent from `checkpoint-manager-git`'s tools.** It fires unattended on a trigger; an agent that could prompt mid-run would be able to block a run at an arbitrary point with no human expecting it. Infrastructure agents are dispatched without HITL (§8). An infrastructure agent that genuinely needs a human (none currently does) would require a declared mechanism for dispatching it with `human_in_the_loop: true`, rather than reaching for the user on its own initiative.
 
 These fields are the **default** a deployment tool reads when assembling §3.1's region. They are not consulted at runtime by anything. A person deploying by hand may write the region directly and never look at them; a project may override them at deployment time; and a run may override the parameter at run start (§6).
 
@@ -151,8 +153,8 @@ Four triggers. Each is decidable from `Orchestration.md` alone.
 | Trigger | Param | Fires when |
 |---|---|---|
 | `INVOCATION_INTERVAL` | `n` (positive integer) | `global_sequence` minus the `Seq` of this agent's most recent Execution Log row is ≥ `n`. If the agent has no prior row, `global_sequence` ≥ `n`. |
-| `PHASE_END` | — | The just-completed invocation's routing changes `current_state.phase`. |
-| `STAGE_END` | — | The just-completed invocation's routing changes `current_state.stage` (only meaningful in `EXECUTION`). |
+| `PHASE_END` | — | The last agent of the current phase returned `SUCCESS`, accepted by the HITL gate where it applies. In `EXECUTION` this is the last agent of the last stage. |
+| `STAGE_END` | — | The last agent of the current stage returned `SUCCESS`, accepted by the HITL gate where it applies (only meaningful in `EXECUTION`). Any other status leaves the stage open: a non-`SUCCESS` status never routes downstream, so the work is not finished. |
 | `MANUAL` | — | Never fires automatically. Invoked only by explicit user or orchestrator request. |
 
 **On `PHASE_END` having no current consumer.** Neither concrete infrastructure agent declares it: checkpointing defaults to `STAGE_END`, periodic review to `INVOCATION_INTERVAL`. It is retained anyway, on the principle that MOSAIC is a framework rather than an application. Phases are a construct the system already has, and a workflow without stages has no other boundary to act on; offering the trigger costs one row in this table and lets users make that call for themselves, rather than the framework deciding on their behalf that no one will ever want it.
@@ -180,7 +182,7 @@ Writing first is not incidental. Triggers are defined against artifact state (§
 **Procedure, after each workflow invocation:**
 
 1. Write the invocation's Execution Log row, then its `current_state` update, in the order the orchestration artifact schema already requires.
-2. Evaluate each declared infrastructure agent's trigger against the updated artifact, in the order the agents appear in the `<InfrastructureAgents type="project">` region.
+2. Evaluate each declared infrastructure agent's trigger against the updated artifact, in the order the agents appear in the `<InfrastructureAgents type="managed">` region.
 3. For each trigger that fired, dispatch that agent as an ordinary invocation (§8) and process its response fully — including writing its own Execution Log row — before evaluating the next.
 4. Do **not** evaluate triggers after an infrastructure agent completes.
 
@@ -244,6 +246,8 @@ Overrides deliberately **cannot** change `on_failure` or `Class`, and cannot act
 
 Recording overrides in the artifact rather than passing them as executor arguments keeps the run self-describing: an orchestrator resuming a run started by a different executor fires the same triggers, because the configuration travelled with the run rather than with the process that started it.
 
+The same persistence rule applies to gated-class selection. `infrastructure_selections` is a separate set-once map because it answers which declared mechanism is active, while `infrastructure_overrides` answers which triggers that mechanism uses. Combining them would make a trigger override mandatory merely to preserve a selection. On resume, every mapped agent and class is validated against the current declaration region before execution continues; an unavailable or reclassified selection is a configuration error rather than permission to substitute another mechanism.
+
 ## 7. Failure Policy
 
 Each infrastructure agent declares `on_failure` as either `halt` or `continue`. It applies when the agent returns any status code other than `SUCCESS`.
@@ -270,14 +274,14 @@ Infrastructure agents are ordinary subagents in every protocol respect. Specific
 - They echo `agent_instance_id` and `run_id` like any other agent.
 - They receive orchestration artifacts through `input_artifacts` / `output_artifacts` and are bound by the same strict-access rule.
 - They stamp provenance on artifacts they produce, under the same rules as any other agent.
-- They may be dispatched with `human_in_the_loop: true`, and honour it identically.
+- They are dispatched with `human_in_the_loop: false`. Workflow and Plan-stage HITL govern workflow dispatches only, so a trigger firing inside an HITL stage does not inherit the stage's review gate. The protocol's HITL rules would apply unchanged to an infrastructure agent dispatched with `true`, but no current mechanism dispatches one that way.
 
-**On the strict-access rule and workspace inspection.** The rule governs *orchestration artifacts*: an agent writes only what `output_artifacts` names, and treats orchestration artifacts not listed in `input_artifacts` as out of bounds. It has never governed the workspace at large — subagents read project files, search directories, and run tools as a matter of course, which is most of what they exist to do.
+**On the strict-access rule and workspace inspection.** The rule governs *orchestration artifacts*: an agent reads only what `input_artifacts` or `output_artifacts` names in the current run's directory, writes only what `output_artifacts` authorizes, and treats every other orchestration file, including every file of another run, as out of bounds (`CommunicationProtocol.md` §3.4). It has never governed the workspace at large — subagents read project files, search directories, and run tools as a matter of course, which is most of what they exist to do.
 
 Two consequences the concrete designs rely on, stated here once so they are not re-argued per agent:
 
 - **Reading a file that is not an orchestration artifact needs no exception.** An infrastructure agent searching the workspace for the deployed orchestrator, or inspecting the repository it is checkpointing, is doing ordinary subagent work.
-- **Reading an orchestration artifact does need one, and it must be stated in both places.** `Orchestration.md` belongs to the orchestrator, and the orchestrator's own instructions say subagents never access it. An agent that reads one — its own run's or another's — must have that exception written into its design *and* into the orchestrator's constraint, so the two never silently disagree. The rationale behind the original rule is that subagents must not make routing decisions from orchestration state; an exception is only defensible where the agent makes no routing decisions at all.
+- **Reading an orchestration artifact does need one, and it must be stated in both places.** `Orchestration.md` belongs to the orchestrator, and the orchestrator's own instructions say subagents never access it. An agent that reads its own run's `Orchestration.md` must have that exception written into its design *and* into the orchestrator's constraint, so the two never silently disagree. Another run's orchestration state remains off limits to every agent. No exception covers it. The rationale behind the original rule is that subagents must not make routing decisions from orchestration state; an exception is only defensible where the agent makes no routing decisions at all.
 The one thing an executor does differently is *why* it dispatched them and *what it does with the response* — both governed by §5 and §7 rather than by a workflow routing table.
 
 **They are not exempt from the sequence counter.** Exempting them would require a second identifier scheme for their instances, would leave gaps or collisions in the Execution Log's `Seq` column, and would break the artifact schema's existing recovery rule that `global_sequence` is reconcilable against the highest `Seq` in the log. The cost of including them is one extra row per firing; the cost of excluding them is a special case in every consumer.
@@ -295,7 +299,7 @@ No new column marks a row as infrastructure. The agent name already identifies i
 
 **This is not an argument against columns in general.** The orchestration review agent's design adds an `Inputs` column to this same table, and does so correctly: it records what a dispatch was given, which is a fact nothing anywhere else preserves. The distinction is whether the column adds information or restates it. An infrastructure flag restates the agent name; `Inputs` has no other source. The examples above are shown with `Inputs` populated, since both changes land together.
 
-**The checkpoint reference goes on the infrastructure agent's own row.** This is a deliberate change from the orchestration artifact schema as currently written, and §10 records it as an amendment. The reasoning: that schema describes a checkpoint as taken "right after invocation N" and its reference recorded in *invocation N's own row*, which is coherent only if the orchestrator preserves content itself, inline, while processing that invocation. Once checkpointing is an infrastructure agent, the checkpoint necessarily happens after row N has already been appended — so recording it on row N means editing a written row, in a section the same schema declares strictly append-only and never revisited.
+**The checkpoint reference goes on the infrastructure agent's own row.** This is a deliberate change from the orchestration artifact schema as originally written; the amendment is a property of checkpointing, so the checkpoint agents' own design records it (§10). The reasoning: that schema describes a checkpoint as taken "right after invocation N" and its reference recorded in *invocation N's own row*, which is coherent only if the orchestrator preserves content itself, inline, while processing that invocation. Once checkpointing is an infrastructure agent, the checkpoint necessarily happens after row N has already been appended — so recording it on row N means editing a written row, in a section the same schema declares strictly append-only and never revisited.
 
 Putting the reference on the checkpoint agent's own row avoids the contradiction entirely. Nothing is ever edited, the append-only guarantee holds without exception, and a deterministic runner never needs to seek back and rewrite. The row sits immediately after invocation N in any case, so nothing is lost in interpretation: the checkpoint restores the state as of the point in the log where its row appears.
 

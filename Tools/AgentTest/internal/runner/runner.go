@@ -26,12 +26,6 @@ import (
 	"mosaic-agent-test/internal/workspace"
 )
 
-// protocolVersion is the Communication Protocol version evidence-building
-// checks messages against. Named rather than threaded through as a setting:
-// no test definition declares one, and protocolcheck's rules do not yet vary
-// by version.
-const protocolVersion protocolcheck.Version = "1.10"
-
 // Deps are the collaborators one attempt needs. Every one is a port or a
 // pure package: this package spawns nothing directly and names no harness.
 type Deps struct {
@@ -178,6 +172,9 @@ func Run(ctx context.Context, d Deps, req Request, eval domain.AttemptEvaluator)
 		snap.StubModel = snap.SubjectModel
 	}
 	snap.HarnessID = d.Adapter.ID()
+	if vr, ok := d.Adapter.(domain.HarnessVersionReporter); ok {
+		snap.HarnessVersion = vr.HarnessVersion(ctx)
+	}
 
 	costReport, costErr := d.Cost.Cost(ctx, domain.CostQuery{
 		LogRoot:  snap.LogRoot,
@@ -206,6 +203,7 @@ func Run(ctx context.Context, d Deps, req Request, eval domain.AttemptEvaluator)
 		result.SubjectVersion = evidence.SubjectVersion
 		result.SubjectModel = evidence.SubjectModel
 		result.StubModel = evidence.StubModel
+		result.HarnessVersion = evidence.HarnessVersion
 	}
 
 	retention, _ := Teardown(d, ledger, AttemptOutcome{Policy: req.Retention, Failed: failed})
@@ -873,6 +871,9 @@ type Snapshot struct {
 	// this run, set from d.Adapter.ID() at the same point SubjectModel is
 	// captured so BuildEvidence can carry it into RunEvidence.
 	HarnessID string
+
+	// HarnessVersion is the adapter's reported harness version, or empty.
+	HarnessVersion string
 }
 
 // TakeSnapshot captures everything the verdict engine will need, before
@@ -996,9 +997,10 @@ func BuildEvidence(req Request, snap Snapshot, cost domain.CostReport, dur time.
 		// to the subject tier, so snap.StubModel matches what ran rather than
 		// reporting an empty string. The "" → "unknown" display mapping is the
 		// report layer's responsibility; the runner carries the resolved string.
-		SubjectModel: snap.SubjectModel,
-		StubModel:    snap.StubModel,
-		HarnessID:    snap.HarnessID,
+		SubjectModel:   snap.SubjectModel,
+		StubModel:      snap.StubModel,
+		HarnessID:      snap.HarnessID,
+		HarnessVersion: snap.HarnessVersion,
 	}
 }
 
@@ -1027,7 +1029,7 @@ func collaboratorProtocolViolations(records []domain.LogRecord) map[domain.Viola
 			ctx = protocolcheck.ResponseContextFor(inv)
 		}
 
-		result := protocolcheck.CheckResponse(rec.Echo.Observed, protocolVersion, ctx)
+		result := protocolcheck.CheckResponse(rec.Echo.Observed, ctx)
 		for class, n := range result.CountByClass() {
 			counts[domain.ViolationClassKey(class)] += n
 		}
@@ -1047,13 +1049,13 @@ func subjectProtocolViolations(subject domain.SubjectUnderTest, res domain.Subje
 	}
 
 	ctx := protocolcheck.UnknownRequest
-	if protocolcheck.CheckInvocation(subject.OpeningMessage, protocolVersion).Parsed {
+	if protocolcheck.CheckInvocation(subject.OpeningMessage).Parsed {
 		if inv, ok := parseTaskMessage(subject.OpeningMessage); ok {
 			ctx = protocolcheck.ResponseContextFor(inv)
 		}
 	}
 
-	result := protocolcheck.CheckResponse(res.ProtocolMessage, protocolVersion, ctx)
+	result := protocolcheck.CheckResponse(res.ProtocolMessage, ctx)
 	counts := map[domain.ViolationClassKey]int{}
 	for class, n := range result.CountByClass() {
 		counts[domain.ViolationClassKey(class)] += n

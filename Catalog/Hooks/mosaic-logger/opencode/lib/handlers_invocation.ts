@@ -236,7 +236,7 @@ export function createInvocationHandlers(deps: HandlerDependencies): {
     const record = store.get(sessionId);
     if (!record) return;
 
-    const agentInstanceId = record.agentInstanceId;
+    const recordedInstanceId = record.agentInstanceId;
 
     // Guard: emit invocation_end only when invocation_start was previously emitted
     // (tracked by the invocationStarted flag set in handleInvocationStart). For
@@ -245,10 +245,14 @@ export function createInvocationHandlers(deps: HandlerDependencies): {
     // agentInstanceId is set to a non-fallback value — this preserves the previous
     // behaviour for those sessions without requiring a mandatory handleInvocationStart
     // call in every test that exercises handleInvocationEnd.
-    if (!record.invocationStarted && (!agentInstanceId || agentInstanceId.startsWith("unmapped_"))) {
+    if (!record.invocationStarted && (!recordedInstanceId || recordedInstanceId.startsWith("unmapped_"))) {
       debugLog(`handleInvocationEnd: skipping session ${sessionId} — no invocation_start was emitted`);
       return;
     }
+
+    // Sessions marked started without a recorded id (e.g. Runner mode) get one
+    // fallback id, shared by every output of this invocation.
+    const agentInstanceId: string = recordedInstanceId ?? fallbackInstanceId();
 
     store.markEnded(sessionId);
 

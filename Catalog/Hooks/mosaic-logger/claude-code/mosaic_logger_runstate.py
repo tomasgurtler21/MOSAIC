@@ -4,12 +4,14 @@ Owns: run_id and agent_instance_id extraction from dispatch content,
 agent_id -> agent_instance_id mapping files.
 """
 
+import collections
 import datetime
 import json
 import os
 import random
 import re
 import sys
+import tempfile
 
 import mosaic_logger_core as core
 
@@ -645,3 +647,101 @@ def resolve_invocation_id(paths: "core.LogPaths",
     None. Never misattributes to the orchestrator.
     """
     return resolve_invocation(paths, run_id, agent_id)[0]
+
+
+# ---------------------------------------------------------------------------
+# Completion claim: exactly one completion per agent cycle
+# ---------------------------------------------------------------------------
+
+CLAIM_SOURCE_HANDBACK = "handback"
+CLAIM_SOURCE_SUBAGENT_STOP = "subagent_stop"
+
+# outcome is 'claimed' (caller owns the completion), 'held' (another firing
+# already owns it; holder is its claim document or None when unreadable), or
+# 'error' (the claim could not be attempted; holder is None).
+ClaimResult = collections.namedtuple("ClaimResult", ["outcome", "holder"])
+
+
+def get_completion_claim(paths: "core.LogPaths",
+                         run_id: str,
+                         agent_id: str) -> "dict | None":
+    """Read an agent's completion claim. Returns None when absent,
+    unreadable, or malformed. Never raises."""
+    try:
+        data = json.loads(
+            paths.completion_claim_entry(run_id, agent_id).read_text(encoding="utf-8")
+        )
+        return data if isinstance(data, dict) else None
+    except Exception:
+        return None
+
+
+def claim_completion(paths: "core.LogPaths",
+                     run_id: str,
+                     agent_id: str,
+                     source: str,
+                     claimed_at: "str | None",
+                     agent_transcript_path: "str | None" = None) -> ClaimResult:
+    """Atomically claim the completion of an agent's current cycle.
+
+    The claim document is written to a temporary file and hard-linked to the
+    claim path, so the claim either does not exist or is complete, and
+    exactly one of any number of concurrent claimers wins. Never raises.
+    """
+    try:
+        entry = paths.completion_claim_entry(run_id, agent_id)
+        entry.parent.mkdir(parents=True, exist_ok=True)
+        doc = {"agent_id": agent_id, "source": source}
+        if claimed_at:
+            doc["claimed_at"] = claimed_at
+        if agent_transcript_path:
+            doc["agent_transcript_path"] = agent_transcript_path
+        data = json.dumps(doc, ensure_ascii=False).encode("utf-8")
+
+        fd, tmp_str = tempfile.mkstemp(dir=entry.parent, suffix=".tmp")
+        tmp_path = entry.parent / os.path.basename(tmp_str)
+        try:
+            with os.fdopen(fd, "wb") as fh:
+                fh.write(data)
+            try:
+                os.link(tmp_path, entry)
+            except FileExistsError:
+                return ClaimResult("held", get_completion_claim(paths, run_id, agent_id))
+            except OSError:
+                # Filesystem without hard links: exclusive create instead.
+                try:
+                    fd2 = os.open(entry, os.O_CREAT | os.O_EXCL | os.O_WRONLY)
+                except FileExistsError:
+                    return ClaimResult("held", get_completion_claim(paths, run_id, agent_id))
+                with os.fdopen(fd2, "wb") as fh:
+                    fh.write(data)
+            return ClaimResult("claimed", None)
+        finally:
+            try:
+                tmp_path.unlink()
+            except Exception:
+                pass
+    except Exception as exc:
+        core.debug_log(
+            f"completion-claim: error for run_id={run_id!r} agent_id={agent_id!r}", exc
+        )
+        return ClaimResult("error", None)
+
+
+def clear_completion_claim(paths: "core.LogPaths",
+                           run_id: str,
+                           agent_id: str) -> bool:
+    """Remove an agent's completion claim so a new cycle can claim afresh.
+
+    True when no claim remains afterwards (including when none existed);
+    creates nothing. Never raises."""
+    try:
+        paths.completion_claim_entry(run_id, agent_id).unlink()
+        return True
+    except FileNotFoundError:
+        return True
+    except Exception as exc:
+        core.debug_log(
+            f"completion-claim: clear failed for run_id={run_id!r} agent_id={agent_id!r}", exc
+        )
+        return False

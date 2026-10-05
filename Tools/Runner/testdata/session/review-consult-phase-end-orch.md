@@ -28,7 +28,7 @@ and re-dispatches row 0 before the workflow can advance to row 1.
 | REVIEW | agent-b | FALSE | COMPLETE | - | - | - |
 </Workflow>
 
-<InfrastructureAgents type="project">
+<InfrastructureAgents type="managed">
 <InfrastructureAgent type="core" name="review-agent-a" version="1.0.0">
 | Class | Trigger | Param | On Failure | Description |
 |-------|---------|-------|------------|-------------|

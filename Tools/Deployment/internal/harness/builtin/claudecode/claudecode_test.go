@@ -20,7 +20,7 @@ package claudecode_test
 //   - Any non-project scope returns domain.ErrUnsupportedScope (via the shared contracttest universal invariant)
 //
 //   Harness-level injections:
-//   - HarnessConstraints injection is filled with empty content (Claude Code has no constraint)
+//   - HarnessConstraints injection is filled with the output-artifacts constraint text
 //   - LanguagePatterns is not filled — it is a project-authored injection name, not declared
 //     by this harness
 //   - injections_version is stamped from the descriptor's injections_version field
@@ -43,6 +43,10 @@ import (
 	"mosaic-deploy/internal/harness/registry"
 	"mosaic-deploy/internal/transform"
 )
+
+// claudeHarnessConstraints is the expected shared content of the HarnessConstraints injection
+// for Claude Code, as declared in Catalog/HarnessInjections/Claude Code/HarnessInjections.md.
+const claudeHarnessConstraints = "**Output Artifacts Are Not Report Files:** Every file listed in `output_artifacts` is an orchestration artifact, not a report file. The orchestrator passes it as input to other agents, and your final message never reaches those agents. Write every listed output artifact as a file — review and findings documents included — even where general guidance tells you to return findings in your final message instead of writing them to a file."
 
 // updateGolden regenerates the golden files from current engine output when -update is passed.
 // Run: go test ./internal/harness/builtin/claudecode/... -run TestGoldenFile -update
@@ -419,16 +423,16 @@ func TestTargetPath_ClaudeCode_HookProjectScope(t *testing.T) {
 // Harness-level injection tests
 // ---------------------------------------------------------------------------
 
-// TestInjection_ClaudeCode_HarnessConstraintsIsEmpty verifies that Claude Code declares
-// HarnessConstraints with empty content (no constraint injection).
-func TestInjection_ClaudeCode_HarnessConstraintsIsEmpty(t *testing.T) {
+// TestInjection_ClaudeCode_HarnessConstraintsFilled verifies that Claude Code provides the
+// output-artifacts constraint in its shared HarnessConstraints injection.
+func TestInjection_ClaudeCode_HarnessConstraintsFilled(t *testing.T) {
 	mod := newModule(t)
 	content, ok := mod.Injection(domain.InjectionRequest{Name: "HarnessConstraints", AgentKey: ""})
 	if !ok {
 		t.Fatal("Injection(\"HarnessConstraints\") returned ok=false; Claude Code must declare this injection")
 	}
-	if content != "" {
-		t.Errorf("Injection(\"HarnessConstraints\") = %q; want empty string (Claude Code has no constraint injection)", content)
+	if content != claudeHarnessConstraints {
+		t.Errorf("Injection(\"HarnessConstraints\"):\n  got:  %q\n  want: %q", content, claudeHarnessConstraints)
 	}
 }
 
@@ -578,7 +582,7 @@ func TestContract_ClaudeCode(t *testing.T) {
 				},
 				Expected: domain.FrontmatterPlan{
 					Set:      nil,
-					Remove:   []string{"recommended_tier", "tier_rationale", "required_skills"},
+					Remove:   []string{"recommended_tier", "tier_rationale", "required_skills", "infrastructure", "triggers", "on_failure"},
 					KeyOrder: []string{"mosaic_id", "version", "mosaic_transform_version", "mosaic_injections_version", "name", "description", "model", "tools"},
 				},
 			},
@@ -587,12 +591,12 @@ func TestContract_ClaudeCode(t *testing.T) {
 		AgentInjectionCases: []contracttest.InjectionCase{
 			{
 				// subagent_shared_content: a non-orchestrator agent receives only shared content.
-				// For Claude Code, HarnessConstraints shared content is empty (declared-but-empty).
+				// For Claude Code, HarnessConstraints shared content is the output-artifacts constraint.
 				Name:    "subagent_shared_content",
 				AgentKey: "some-subagent",
 				// Role is zero value (non-orchestrator)
 				Filled: map[string]string{
-					"HarnessConstraints": "",
+					"HarnessConstraints": claudeHarnessConstraints,
 				},
 				NotFilled: []string{
 					"IdentityExtension",
@@ -620,7 +624,7 @@ func TestContract_ClaudeCode(t *testing.T) {
 				// shared content only (backward compatibility with existing callers that
 				// construct InjectionRequest without Role).
 				Filled: map[string]string{
-					"HarnessConstraints": "",
+					"HarnessConstraints": claudeHarnessConstraints,
 				},
 				NotFilled: []string{
 					"IdentityExtension",

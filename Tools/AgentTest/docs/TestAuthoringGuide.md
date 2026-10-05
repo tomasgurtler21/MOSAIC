@@ -615,13 +615,13 @@ current_state:
 ---
 
 <ExecutionLog type="core">
-| Seq | Agent | Phase | Stage | Status | Timestamp | Summary | Inputs | Checkpoint |
-|-----|-------|-------|-------|--------|-----------|---------|--------|------------|
-| 1 | codebase-research#1 | RESEARCH | - | SUCCESS | 2026-01-01T00:05:00Z | Analyzed gateway codebase. | - | - |
-| 2 | requirements-refinement#2 | RESEARCH | - | SUCCESS | 2026-01-01T00:10:00Z | Refined requirements. | Research.md | - |
-| 3 | requirements-review#3 | RESEARCH | - | SUCCESS | 2026-01-01T00:15:00Z | Requirements review passed. | Requirements.md | - |
-| 4 | planner-tdd-soft#4 | PLANNING | - | SUCCESS | 2026-01-01T00:20:00Z | Created 2-stage plan. | Research.md, Requirements.md | - |
-| 5 | plan-review#5 | PLANNING | - | SUCCESS | 2026-01-01T00:25:00Z | Plan review passed. | Plan.md, Stage-1/Plan.md | - |
+| Seq | Agent | Phase | Stage | WorkflowRow | Status | Timestamp | Summary | Inputs | Checkpoint |
+|-----|-------|-------|-------|-------------|--------|-----------|---------|--------|------------|
+| 1 | codebase-research#1 | RESEARCH | - | 1 | SUCCESS | 2026-01-01T00:05:00Z | Analyzed gateway codebase. | - | - |
+| 2 | requirements-refinement#2 | RESEARCH | - | 2 | SUCCESS | 2026-01-01T00:10:00Z | Refined requirements. | Research.md | - |
+| 3 | requirements-review#3 | RESEARCH | - | 3 | SUCCESS | 2026-01-01T00:15:00Z | Requirements review passed. | Requirements.md | - |
+| 4 | planner-tdd-soft#4 | PLANNING | - | 4 | SUCCESS | 2026-01-01T00:20:00Z | Created 2-stage plan. | Research.md, Requirements.md | - |
+| 5 | plan-review#5 | PLANNING | - | 5 | SUCCESS | 2026-01-01T00:25:00Z | Plan review passed. | Plan.md, Stage-1/Plan.md | - |
 </ExecutionLog>
 
 <Artifacts type="core">
@@ -647,6 +647,8 @@ current_state:
 **Frontmatter fields that matter for assertions:**
 - `current_state.phase` and `current_state.last_status` — what the `final_state` assertion checks against
 - `global_sequence` — must be consistent with the Execution Log; the orchestrator increments from this value
+
+**`WorkflowRow` column:** each workflow step records the workflow-table row it ran, matching the table's `Row` column. Infrastructure, out-of-band and ad-hoc steps record `-`. Seeded logs should carry it, because live routing and resume identify the last row from it and stop and report when the agent or group at that row no longer matches.
 
 **Region tags** (e.g. `<ExecutionLog type="core">` / `</ExecutionLog>`) — must be present and intact, each on its own line. The parser uses them to locate sections, not heading structure.
 
@@ -1129,13 +1131,13 @@ current_state:
 ---
 
 <ExecutionLog type="core">
-| Seq | Agent | Phase | Stage | Status | Timestamp | Summary | Inputs | Checkpoint |
-|-----|-------|-------|-------|--------|-----------|---------|--------|------------|
-| 1 | codebase-research#1 | RESEARCH | - | SUCCESS | 2026-01-01T00:05:00Z | Analyzed gateway codebase. | - | - |
-| 2 | requirements-refinement#2 | RESEARCH | - | SUCCESS | 2026-01-01T00:10:00Z | Refined requirements. | Research.md | - |
-| 3 | requirements-review#3 | RESEARCH | - | SUCCESS | 2026-01-01T00:15:00Z | Requirements review passed. | Requirements.md | - |
-| 4 | planner-tdd-soft#4 | PLANNING | - | SUCCESS | 2026-01-01T00:20:00Z | Created 2-stage plan. | Research.md, Requirements.md | - |
-| 5 | plan-review#5 | PLANNING | - | SUCCESS | 2026-01-01T00:25:00Z | Plan review passed. | Plan.md, Stage-1/Plan.md | - |
+| Seq | Agent | Phase | Stage | WorkflowRow | Status | Timestamp | Summary | Inputs | Checkpoint |
+|-----|-------|-------|-------|-------------|--------|-----------|---------|--------|------------|
+| 1 | codebase-research#1 | RESEARCH | - | 1 | SUCCESS | 2026-01-01T00:05:00Z | Analyzed gateway codebase. | - | - |
+| 2 | requirements-refinement#2 | RESEARCH | - | 2 | SUCCESS | 2026-01-01T00:10:00Z | Refined requirements. | Research.md | - |
+| 3 | requirements-review#3 | RESEARCH | - | 3 | SUCCESS | 2026-01-01T00:15:00Z | Requirements review passed. | Requirements.md | - |
+| 4 | planner-tdd-soft#4 | PLANNING | - | 4 | SUCCESS | 2026-01-01T00:20:00Z | Created 2-stage plan. | Research.md, Requirements.md | - |
+| 5 | plan-review#5 | PLANNING | - | 5 | SUCCESS | 2026-01-01T00:25:00Z | Plan review passed. | Plan.md, Stage-1/Plan.md | - |
 </ExecutionLog>
 
 <Artifacts type="core">

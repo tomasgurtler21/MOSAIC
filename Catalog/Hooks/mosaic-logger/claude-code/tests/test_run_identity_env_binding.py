@@ -501,7 +501,7 @@ class TestPreDispatchFallbackAcceptedLimit(unittest.TestCase):
             {"hook_event_name": "PreToolUse", "session_id": session_id,
              "tool_name": "Bash", "tool_input": {"command": "ls"}},
             {"hook_event_name": "PostToolUse", "session_id": session_id,
-             "tool_name": "Bash", "tool_output": "file.txt"},
+             "tool_name": "Bash", "tool_response": "file.txt"},
         ]
         for payload in payloads:
             try:
@@ -601,7 +601,7 @@ class TestNonCompliantSessionDegradation(unittest.TestCase):
             {"hook_event_name": "PreToolUse", "session_id": session_id,
              "tool_name": "Bash", "tool_input": {}},
             {"hook_event_name": "PostToolUse", "session_id": session_id,
-             "tool_name": "Bash", "tool_output": "output"},
+             "tool_name": "Bash", "tool_response": "output"},
             {"hook_event_name": "Stop", "session_id": session_id,
              "last_assistant_message": "done"},
             {"hook_event_name": "SessionEnd", "session_id": session_id,

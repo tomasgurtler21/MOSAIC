@@ -11,15 +11,24 @@ usage emission entirely; the subagent-stop handler is the sole source of a
 subagent's own usage records, reading the subagent's own transcript at stop.
 """
 
+import json
 import mosaic_logger_core as core
 import mosaic_logger_runstate as runstate
 import mosaic_logger_usage as usage
+import mosaic_logger_handlers_invocation as invocation
+import mosaic_logger_runner_mode as runner_mode
+
+HANDBACK_TOOL_NAME = "SubagentHandback"
 
 
 def resolve_destination(ctx: "core.HookContext"):
     """Route tool event to orchestrator or subagent stream based on agent_id presence."""
     run_id = core.effective_run_id(ctx)
     if not ctx.agent_id:
+        mode = runner_mode.read_runner_mode()
+        if mode is not None and mode.agent_instance_id:
+            # Runner subagent role: the primary session is the invocation.
+            return ctx.paths.invocation_events(run_id, mode.agent_instance_id)
         return ctx.paths.orchestrator_events(run_id)
     agent_instance_id, _mapped = runstate.resolve_invocation(
         ctx.paths, run_id, ctx.agent_id
@@ -61,6 +70,9 @@ def _emit_tool_usage_records(ctx: "core.HookContext") -> None:
         return
     if not usage.tool_capture_enabled():
         return
+    mode = runner_mode.read_runner_mode()
+    if mode is not None and mode.agent_instance_id:
+        return  # Runner subagent role emits usage once, at SessionEnd.
     agent_instance_id, source = _resolve_usage_scope(ctx)
     usage.emit_usage_records(ctx, ctx.transcript_path, agent_instance_id, source)
 
@@ -130,21 +142,39 @@ def handle_pre_tool_use(ctx: "core.HookContext") -> None:
     _emit_tool_usage_records(ctx)
 
 
+def _output_text(ctx: "core.HookContext"):
+    """Return the tool's output from the payload's tool_response, or None.
+
+    Strings are kept as-is; structured values (objects, content-block lists)
+    are serialised to JSON text so nested empty members survive the event
+    builder's pruning unchanged.
+    """
+    value = ctx.field("tool_response")
+    if value is None or isinstance(value, str):
+        return value
+    try:
+        return json.dumps(value, ensure_ascii=False)
+    except (TypeError, ValueError):
+        return str(value)
+
+
 def handle_post_tool_use(ctx: "core.HookContext") -> None:
     """Emit tool_call_end with status 'success'."""
     event = core.build_event(
         "tool_call_end", ctx,
         call_id=resolve_call_id(ctx),
         status="success",
-        tool_output=ctx.field("tool_output"),
+        tool_output=_output_text(ctx),
     )
     core.append_event(resolve_destination(ctx), event)
     _emit_tool_usage_records(ctx)
+    if ctx.field("tool_name") == HANDBACK_TOOL_NAME:
+        invocation.complete_from_handback(ctx)
 
 
 def handle_post_tool_use_failure(ctx: "core.HookContext") -> None:
     """Emit tool_call_end with status 'error'."""
-    tool_output = ctx.field("tool_output")
+    tool_output = _output_text(ctx)
     error = ctx.field("error") or (str(tool_output) if tool_output is not None else None)
     event = core.build_event(
         "tool_call_end", ctx,

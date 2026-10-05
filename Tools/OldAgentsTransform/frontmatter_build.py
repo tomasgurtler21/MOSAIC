@@ -16,6 +16,7 @@ import re
 from collections.abc import Sequence
 
 from document_kind import DocumentKind
+from frontmatter_input import is_frontmatter_fence
 from non_conformance import NC_MESSAGES, NC_TIER_PLACEHOLDER, NonConformance
 
 
@@ -405,7 +406,7 @@ def read_generic_id(generic_ref_lines: Sequence[str]) -> str | None:
     in_fm = False
     for line in generic_ref_lines:
         stripped = line.strip()
-        if stripped == "---":
+        if is_frontmatter_fence(line):
             if not in_fm:
                 in_fm = True
                 continue

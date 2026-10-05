@@ -4,6 +4,8 @@ Handles: SubagentStart, SubagentStop. Writes invocation_start, invocation_end,
 boundary turn events, artifact files, and transcript exports for each subagent.
 """
 
+import json
+import os
 import re
 
 import mosaic_logger_core as core
@@ -65,6 +67,157 @@ def extract_status_code(message: "str | None") -> "str | None":
         return None
 
 
+def extract_handback_message(ctx: "core.HookContext") -> "str | None":
+    """Return the report string of a SubagentHandback call, verbatim.
+
+    The message is tool_input.message. Returns None when tool_input is not an
+    object or message is absent or not a string; an empty string is returned
+    as-is. Never raises.
+    """
+    try:
+        tool_input = ctx.field("tool_input")
+        if not isinstance(tool_input, dict):
+            return None
+        message = tool_input.get("message")
+        return message if isinstance(message, str) else None
+    except Exception:
+        return None
+
+
+def classify_handback_message(message: str) -> "str | None":
+    """Classify a hand-back message: 'empty' (blank), 'non_json' (text that
+    does not parse as JSON), or None for a well-formed JSON message."""
+    if not message.strip():
+        return "empty"
+    try:
+        json.loads(message)
+    except Exception:
+        return "non_json"
+    return None
+
+
+def complete_from_handback(ctx: "core.HookContext") -> None:
+    """Complete a mapped invocation from its SubagentHandback PostToolUse firing.
+
+    The hand-back is the delivery of the subagent's reply, so invocation_end,
+    the final assistant turn and 02_output.md are written here, stamped with
+    the hand-back time, and the invocation's completion claim is taken so a
+    later SubagentStop does not complete it again. model/token_usage come from
+    the agent transcript located by derive_agent_transcript_path; when it is
+    not readable yet they are omitted (never fabricated) and the fact is
+    reported. Every outcome that does not complete is reported through
+    core.debug_log. Never raises.
+    """
+    try:
+        _complete_from_handback(ctx)
+    except Exception as exc:
+        core.debug_log(f"handback: completion failed for agent_id={ctx.agent_id!r}", exc)
+
+
+def _complete_from_handback(ctx: "core.HookContext") -> None:
+    agent_id = ctx.agent_id
+    if not agent_id:
+        core.debug_log("handback: observed without an agent_id; no completion")
+        return
+
+    run_id = core.effective_run_id(ctx)
+    agent_instance_id, mapped = runstate.resolve_invocation(ctx.paths, run_id, agent_id)
+    if not mapped:
+        core.debug_log(
+            f"handback: observed for unmapped agent_id={agent_id!r} "
+            f"run_id={run_id!r}; no completion"
+        )
+        return
+
+    message = extract_handback_message(ctx)
+    if message is None:
+        core.debug_log(
+            f"handback: no usable tool_input.message for agent_id={agent_id!r}; "
+            f"no completion, SubagentStop remains the delivery point"
+        )
+        return
+
+    agent_transcript_path = transcript.derive_agent_transcript_path(
+        ctx.transcript_path, agent_id
+    )
+
+    claim = runstate.claim_completion(
+        ctx.paths, run_id, agent_id, runstate.CLAIM_SOURCE_HANDBACK,
+        ctx.timestamp, agent_transcript_path,
+    )
+    if claim.outcome == "held":
+        holder_source = (claim.holder or {}).get("source")
+        core.debug_log(
+            f"handback: completion already claimed by {holder_source!r} for "
+            f"agent_id={agent_id!r}; no second completion"
+        )
+        return
+    if claim.outcome == "error":
+        core.debug_log(
+            f"handback: completion claim failed for agent_id={agent_id!r}; "
+            f"completing without dedup protection"
+        )
+
+    if agent_transcript_path is None:
+        core.debug_log(
+            f"handback: agent transcript path not derivable for "
+            f"agent_id={agent_id!r} (transcript_path={ctx.transcript_path!r}); "
+            f"model/token_usage omitted"
+        )
+        facts = transcript.TurnFacts()
+    else:
+        facts = transcript.read_last_assistant_facts(agent_transcript_path)
+        if facts.model is None and facts.token_usage is None:
+            core.debug_log(
+                f"handback: agent transcript not readable or without assistant "
+                f"records for agent_id={agent_id!r} at {agent_transcript_path!r}; "
+                f"model/token_usage omitted"
+            )
+
+    response_format = classify_handback_message(message)
+    if response_format:
+        core.debug_log(
+            f"handback: {response_format} message for agent_id={agent_id!r}; "
+            f"still recorded as the delivery"
+        )
+
+    status_code = extract_status_code(message)
+    sink = ctx.paths.invocation_events(run_id, agent_instance_id)
+
+    core.append_event(sink, core.build_event(
+        "invocation_end", ctx,
+        agent_instance_id=agent_instance_id,
+        status_code=status_code,
+        response=message,
+        model=facts.model,
+        token_usage=facts.token_usage,
+        completion_source=runstate.CLAIM_SOURCE_HANDBACK,
+        response_format=response_format,
+    ))
+
+    if message.strip():
+        core.append_event(sink, core.build_event(
+            "turn", ctx,
+            role="assistant",
+            content=message,
+            model=facts.model,
+            token_usage=facts.token_usage,
+        ))
+
+    artifacts.write_artifact(
+        ctx.paths.invocation_output(run_id, agent_instance_id),
+        artifacts.render_output(
+            ctx, agent_instance_id, message, status_code, facts,
+            completion_source=runstate.CLAIM_SOURCE_HANDBACK,
+            response_format=response_format,
+        ),
+    )
+
+    # Count what the agent has used so far; SubagentStop adds later usage and
+    # the usage state prevents duplicates.
+    usage.emit_usage_records(ctx, agent_transcript_path, agent_instance_id, "agent_transcript")
+
+
 # ---------------------------------------------------------------------------
 # Handlers
 # ---------------------------------------------------------------------------
@@ -116,6 +269,10 @@ def handle_subagent_start(ctx: "core.HookContext") -> None:
         extracted = runstate.extract_instance_id(agent_prompt)
         agent_instance_id = extracted if extracted else "unknown-agent"
     agent_type = ctx.agent_type
+
+    # 5b. A new cycle for this agent_id (first start or a resume) must be able
+    #     to complete: drop any completion claim left by a previous cycle.
+    runstate.clear_completion_claim(ctx.paths, run_id, ctx.agent_id)
 
     # 6. Persist mapping FIRST — before any event write
     runstate.put_agent_mapping(
@@ -231,39 +388,72 @@ def handle_subagent_stop(ctx: "core.HookContext") -> None:
 
     sink = events_path
 
-    # 3. Read transcript facts once; reuse for both invocation_end and final turn
+    # 2b. Take the completion claim. When a hand-back (or an earlier stop)
+    #     already completed this cycle, invocation_end, the final turn and
+    #     02_output.md are not written again; usage and exports still are.
+    #     A quarantined stop has no invocation cycle and takes no claim.
     agent_transcript_path = ctx.field("agent_transcript_path")
-    facts = transcript.read_last_assistant_facts(agent_transcript_path)
+    already_completed = False
+    if not quarantined:
+        claim = runstate.claim_completion(
+            ctx.paths, run_id, ctx.agent_id, runstate.CLAIM_SOURCE_SUBAGENT_STOP,
+            ctx.timestamp, agent_transcript_path,
+        )
+        if claim.outcome == "held":
+            already_completed = True
+            holder = claim.holder or {}
+            core.debug_log(
+                f"subagent-stop: completion already claimed by "
+                f"{holder.get('source')!r} for agent_id={ctx.agent_id!r}; "
+                f"skipping invocation_end, final turn and 02_output.md"
+            )
+            held_path = holder.get("agent_transcript_path")
+            if (held_path and agent_transcript_path
+                    and os.path.normpath(held_path) != os.path.normpath(agent_transcript_path)):
+                core.debug_log(
+                    f"subagent-stop: agent transcript path drift for "
+                    f"agent_id={ctx.agent_id!r}: derived {held_path!r}, "
+                    f"reported {agent_transcript_path!r}"
+                )
+        elif claim.outcome == "error":
+            core.debug_log(
+                f"subagent-stop: completion claim failed for "
+                f"agent_id={ctx.agent_id!r}; completing without dedup protection"
+            )
 
-    last_msg = ctx.field("last_assistant_message")
-    status_code = extract_status_code(last_msg)
+    if not already_completed:
+        # 3. Read transcript facts once; reuse for both invocation_end and final turn
+        facts = transcript.read_last_assistant_facts(agent_transcript_path)
 
-    # 4. Emit invocation_end
-    event = core.build_event(
-        "invocation_end", ctx,
-        agent_instance_id=agent_instance_id,
-        status_code=status_code,
-        response=last_msg,
-        model=facts.model,
-        token_usage=facts.token_usage,
-        attribution="quarantined" if quarantined else None,
-    )
-    core.append_event(sink, event)
+        last_msg = ctx.field("last_assistant_message")
+        status_code = extract_status_code(last_msg)
 
-    # 5. Emit final assistant turn (only when last_assistant_message is present)
-    if last_msg is not None:
-        turn = core.build_event(
-            "turn", ctx,
-            role="assistant",
-            content=last_msg,
+        # 4. Emit invocation_end
+        event = core.build_event(
+            "invocation_end", ctx,
+            agent_instance_id=agent_instance_id,
+            status_code=status_code,
+            response=last_msg,
             model=facts.model,
             token_usage=facts.token_usage,
+            attribution="quarantined" if quarantined else None,
         )
-        core.append_event(sink, turn)
+        core.append_event(sink, event)
 
-    # 6. Write 02_output.md
-    output_text = artifacts.render_output(ctx, agent_instance_id, last_msg, status_code, facts)
-    artifacts.write_artifact(output_path, output_text)
+        # 5. Emit final assistant turn (only when last_assistant_message is present)
+        if last_msg is not None:
+            turn = core.build_event(
+                "turn", ctx,
+                role="assistant",
+                content=last_msg,
+                model=facts.model,
+                token_usage=facts.token_usage,
+            )
+            core.append_event(sink, turn)
+
+        # 6. Write 02_output.md
+        output_text = artifacts.render_output(ctx, agent_instance_id, last_msg, status_code, facts)
+        artifacts.write_artifact(output_path, output_text)
 
     # 6b. Emit raw usage_record events from both transcripts this firing has
     #     access to, each routed to exactly one stream:

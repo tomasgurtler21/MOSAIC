@@ -6,9 +6,9 @@
  * are swallowed and returned as ExportResult with ok: false.
  */
 
-import * as nodeFsPromises from "node:fs/promises";
+import * as nodeFs from "node:fs";
 import * as nodePath from "node:path";
-import { atomicReplace, currentTimestamp, debugLog, LogPaths } from "./core";
+import { atomicReplaceSync, currentTimestamp, debugLog, LogPaths } from "./core";
 
 // ---------------------------------------------------------------------------
 // Types
@@ -84,8 +84,11 @@ export function buildSidecar(params: {
  * Export a session's messages via the OpenCode SDK client.
  *
  * Calls client.session.messages() to retrieve the full message history,
- * writes the JSON result to the target path via atomicReplace, and writes
- * a .meta.json sidecar. Never throws -- failures are swallowed and logged.
+ * then, once the SDK promise settles, synchronously creates the directory,
+ * writes the raw file, and finally writes the .meta.json sidecar (no event-loop
+ * turn in between, so a hard process exit cannot interrupt the writes after the
+ * SDK result). The sidecar is written last and acts as the commit marker.
+ * Never throws -- failures are swallowed and logged.
  *
  * @param sdkClient - The OpenCode SDK client from the plugin context
  * @param sessionId - The OpenCode session ID to export
@@ -120,10 +123,10 @@ export async function exportSession(
 
     // Ensure parent directory exists
     const dir = nodePath.dirname(targetPath);
-    await nodeFsPromises.mkdir(dir, { recursive: true });
+    nodeFs.mkdirSync(dir, { recursive: true });
 
     // Write raw file atomically
-    const rawOk = await atomicReplace(targetPath, data);
+    const rawOk = atomicReplaceSync(targetPath, data);
     if (!rawOk) {
       return { ok: false, reason: "Failed to write raw export file" };
     }
@@ -137,7 +140,7 @@ export async function exportSession(
     });
     const metaPath = metaPathFor(targetPath);
     const metaData = Buffer.from(JSON.stringify(sidecar), "utf-8");
-    const metaOk = await atomicReplace(metaPath, metaData);
+    const metaOk = atomicReplaceSync(metaPath, metaData);
     if (!metaOk) {
       return { ok: false, reason: "Failed to write sidecar file" };
     }

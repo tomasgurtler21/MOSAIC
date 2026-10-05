@@ -8,6 +8,6 @@ description: Invalid file - INJECTION open tag with no matching close tag (E001)
 <Identity type="core">
 # TestAgent Agent
 
-<IdentityExtension type="project">
+<CodebaseContext type="project">
 Extension content with no closing tag for the injection.
 </Identity>

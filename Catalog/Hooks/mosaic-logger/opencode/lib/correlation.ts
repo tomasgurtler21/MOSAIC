@@ -159,7 +159,7 @@ export class SessionCorrelationStore {
     if (existing) {
       // Merge: only keys present in `record` are applied.
       for (const key of Object.keys(record) as Array<keyof SessionRecord>) {
-        (existing as Record<string, unknown>)[key] = record[key];
+        (existing as unknown as Record<string, unknown>)[key] = record[key];
       }
     } else {
       // New record. Ensure required fields have defaults.

@@ -35,6 +35,36 @@ def _long_path_safe(path_str):
 
 
 # ---------------------------------------------------------------------------
+# Agent transcript location
+# ---------------------------------------------------------------------------
+
+_SESSION_EXT = ".jsonl"
+
+
+def derive_agent_transcript_path(transcript_path, agent_id):
+    """Return the path of a subagent's transcript, or None when underivable.
+
+    The harness keeps a subagent's transcript in a directory named like the
+    session transcript without its extension:
+    <session minus .jsonl>/subagents/agent-<agent_id>.jsonl. Pure string
+    derivation: performs no I/O, never scans directories, never raises.
+    """
+    try:
+        if not isinstance(transcript_path, str) or not isinstance(agent_id, str):
+            return None
+        if not transcript_path or not agent_id:
+            return None
+        if not transcript_path.endswith(_SESSION_EXT):
+            return None
+        base = transcript_path[:-len(_SESSION_EXT)]
+        if not base:
+            return None
+        return os.path.join(base, "subagents", f"agent-{agent_id}{_SESSION_EXT}")
+    except Exception:
+        return None
+
+
+# ---------------------------------------------------------------------------
 # Data structures
 # ---------------------------------------------------------------------------
 

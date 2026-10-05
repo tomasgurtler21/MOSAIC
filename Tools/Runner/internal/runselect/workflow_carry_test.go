@@ -288,3 +288,115 @@ func TestResolve_RunRecordingNothing_HasNoPosition(t *testing.T) {
 		t.Errorf("Identity.Position = %+v for a run recording nothing, want nil", id.Position)
 	}
 }
+
+// ---------------------------------------------------------------------------
+// Runner settings adoption
+// ---------------------------------------------------------------------------
+
+// A resumed run whose artifact records no runner settings needs them obtained
+// by the frontend; one that records them does not. A new run never does.
+func TestResolve_ResumedRun_NeedsRunnerAdoptionMirrorsWhatTheArtifactRecords(t *testing.T) {
+	tests := []struct {
+		name     string
+		recorded bool
+		want     bool
+	}{
+		{"native-created artifact", false, true},
+		{"runner-created artifact", true, false},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			cand := recordedWorkflowCandidate("quick-fix")
+			cand.RunnerSettingsRecorded = tc.recorded
+
+			id := resolveByRunID(t, cand)
+
+			if id.NeedsRunnerAdoption != tc.want {
+				t.Errorf("NeedsRunnerAdoption = %v, want %v", id.NeedsRunnerAdoption, tc.want)
+			}
+		})
+	}
+}
+
+func TestAnswer_ResumedRun_NeedsRunnerAdoptionMirrorsWhatTheArtifactRecords(t *testing.T) {
+	cand := recordedWorkflowCandidate("quick-fix")
+	cand.RunnerSettingsRecorded = false
+	q := runselect.Question{Choices: []runselect.Choice{{
+		ID:         carryRunID,
+		Kind:       runselect.ChoiceResume,
+		Run:        cand.RunInfo,
+		Selectable: true,
+	}}}
+
+	id, err := runselect.Answer(q, carryRunID, failingMinter(t))
+
+	if err != nil {
+		t.Fatalf("Answer: unexpected error: %v", err)
+	}
+	if !id.NeedsRunnerAdoption {
+		t.Error("NeedsRunnerAdoption = false, want true for a run that records no runner settings")
+	}
+}
+
+func TestResolve_NewRun_NeverNeedsRunnerAdoption(t *testing.T) {
+	dec, err := runselect.Resolve(runselect.Request{WorkDir: "/ws", NewRun: true},
+		func() (string, string) { return carryRunID, carryFolder })
+
+	if err != nil || dec.Resolved == nil {
+		t.Fatalf("Resolve: %v, %+v", err, dec)
+	}
+	if dec.Resolved.NeedsRunnerAdoption {
+		t.Error("NeedsRunnerAdoption = true for a new run, want false")
+	}
+}
+
+// ---------------------------------------------------------------------------
+// Commit setup pending
+// ---------------------------------------------------------------------------
+
+// A resumed run carries the scan's commit-setup-pending flag so the frontend
+// can require a commit branch variant; a new run never has setup pending.
+func TestResolve_ResumedRun_CommitSetupPendingMirrorsTheScan(t *testing.T) {
+	for _, pending := range []bool{true, false} {
+		cand := recordedWorkflowCandidate("quick-fix")
+		cand.CommitSetupPending = pending
+
+		id := resolveByRunID(t, cand)
+
+		if id.CommitSetupPending != pending {
+			t.Errorf("scan pending=%v: CommitSetupPending = %v", pending, id.CommitSetupPending)
+		}
+	}
+}
+
+func TestAnswer_ResumedRun_CommitSetupPendingMirrorsTheScan(t *testing.T) {
+	cand := recordedWorkflowCandidate("quick-fix")
+	cand.CommitSetupPending = true
+	q := runselect.Question{Choices: []runselect.Choice{{
+		ID:         carryRunID,
+		Kind:       runselect.ChoiceResume,
+		Run:        cand.RunInfo,
+		Selectable: true,
+	}}}
+
+	id, err := runselect.Answer(q, carryRunID, failingMinter(t))
+
+	if err != nil {
+		t.Fatalf("Answer: unexpected error: %v", err)
+	}
+	if !id.CommitSetupPending {
+		t.Error("CommitSetupPending = false, want true for a run whose commit setup is pending")
+	}
+}
+
+func TestResolve_NewRun_NeverHasCommitSetupPending(t *testing.T) {
+	dec, err := runselect.Resolve(runselect.Request{WorkDir: "/ws", NewRun: true},
+		func() (string, string) { return carryRunID, carryFolder })
+
+	if err != nil || dec.Resolved == nil {
+		t.Fatalf("Resolve: %v, %+v", err, dec)
+	}
+	if dec.Resolved.CommitSetupPending {
+		t.Error("CommitSetupPending = true for a new run, want false")
+	}
+}

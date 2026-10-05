@@ -29,8 +29,6 @@ Capabilities content.
 
 <Constraints type="core">
 Constraints content.
-<ProtocolConstraints type="managed">
-</ProtocolConstraints>
 <HarnessConstraints type="managed">
 </HarnessConstraints>
 <CustomConstraints type="managed">

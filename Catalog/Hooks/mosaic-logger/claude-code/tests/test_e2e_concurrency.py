@@ -430,7 +430,7 @@ class TestConcurrentDispatchers(unittest.TestCase):
                 "agent_id": invocations[i][0],
                 "tool_name": "Write",
                 "tool_use_id": call_ids[i],
-                "tool_output": f"Wrote file_{i}.txt successfully.",
+                "tool_response": f"Wrote file_{i}.txt successfully.",
             }
             for i in range(_CONCURRENCY)
         ]

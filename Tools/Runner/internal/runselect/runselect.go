@@ -75,6 +75,15 @@ type Identity struct {
 	// the run as what it already is rather than asking again. Always "" when
 	// IsNewRun is true.
 	Workflow string
+
+	// NeedsRunnerAdoption is true for a resumed run whose artifact records no
+	// runner settings. Always false when IsNewRun is true.
+	NeedsRunnerAdoption bool
+
+	// CommitSetupPending is true for a resumed run that enables commits but
+	// records no commit branch, so the resume must retry commit setup. Always
+	// false when IsNewRun is true.
+	CommitSetupPending bool
 }
 
 // Decision is the outcome of Resolve. Exactly one field is non-nil.
@@ -114,6 +123,10 @@ type Choice struct {
 
 	// Reason is why the choice is not selectable. Empty when Selectable.
 	Reason runscan.UnresumableReason
+
+	// Detail is the refusal reason text for a run refused with
+	// runscan.ReasonInvalidRunIdentity. Empty otherwise.
+	Detail string
 }
 
 // Question is an unsettled selection, carrying every outcome available.
@@ -156,6 +169,9 @@ func Resolve(req Request, mint Minter) (Decision, error) {
 		}
 		for _, u := range req.Scan.Unresumable {
 			if u.RunID == req.RunIDFlag {
+				if u.Reason == runscan.ReasonInvalidRunIdentity {
+					return Decision{}, fmt.Errorf("%w: run %s cannot be resumed: %s", ErrUsage, req.RunIDFlag, u.Detail)
+				}
 				return Decision{}, fmt.Errorf("%w: run %s is %s and cannot be resumed", ErrUsage, req.RunIDFlag, u.Reason)
 			}
 		}
@@ -168,6 +184,8 @@ func Resolve(req Request, mint Minter) (Decision, error) {
 			if c.RunID == req.RunIDFlag {
 				id.Position = positionFromRunInfo(c.RunInfo)
 				id.Workflow = workflowFromPosition(id.Position)
+				id.NeedsRunnerAdoption = !c.RunnerSettingsRecorded
+				id.CommitSetupPending = c.CommitSetupPending
 				break
 			}
 		}
@@ -203,6 +221,7 @@ func buildQuestion(scan runscan.ScanResult) *Question {
 			Run:        u.RunInfo,
 			Selectable: false,
 			Reason:     u.Reason,
+			Detail:     u.Detail,
 		})
 	}
 	return &Question{Choices: choices}
@@ -256,6 +275,9 @@ func Answer(q Question, choiceID string, mint Minter) (Identity, error) {
 			continue
 		}
 		if !c.Selectable {
+			if c.Detail != "" {
+				return Identity{}, fmt.Errorf("choice %q is not selectable (%s): %s", choiceID, c.Reason, c.Detail)
+			}
 			return Identity{}, fmt.Errorf("choice %q is not selectable (%s)", choiceID, c.Reason)
 		}
 		pos := positionFromRunInfo(c.Run)
@@ -265,6 +287,9 @@ func Answer(q Question, choiceID string, mint Minter) (Identity, error) {
 			IsNewRun:  false,
 			Position:  pos,
 			Workflow:  workflowFromPosition(pos),
+
+			NeedsRunnerAdoption: !c.Run.RunnerSettingsRecorded,
+			CommitSetupPending:  c.Run.CommitSetupPending,
 		}, nil
 	}
 	return Identity{}, fmt.Errorf("no such choice %q", choiceID)

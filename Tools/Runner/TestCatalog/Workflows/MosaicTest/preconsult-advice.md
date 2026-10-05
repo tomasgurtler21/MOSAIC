@@ -59,21 +59,19 @@ The default is `true`. This workflow NEEDS pre-consultation to run — it is tes
 
 ## Expected Run
 
-Five Orchestration.md log rows.
+Three Orchestration.md log rows. Pre-consultation and the deviation-routing consultation both dispatch to the orchestrator, but neither allocates a `Seq` or leaves a row — they surface only in the dispatch log and the consultant call.
 
-| Log `Seq` | `Agent` | Kind | `Phase` | `Status` | `Summary` shows |
-|:---:|---|---|---|---|---|
-| 0 | `orchestrator-script#pre_consultation#1` | consultation | — | "" | pre-consultation advice strings (PRECONSULT-ADVICE-MARKER, PRECONSULT-CONSTRAINT-MARKER) |
-| 1 | `mosaictest-scripted#1` | workflow step | RESEARCH | BLOCKED | marker absent, returning BLOCKED E401, wrote marker |
-| 2 | `orchestrator-script#2` | consultation | — | "" | dispatch instruction for re-dispatch (orchestrator's own task_description) |
-| 3 | `mosaictest-scripted#3` | workflow step | RESEARCH | SUCCESS | marker present, echoes task_description — should NOT contain PRECONSULT-ADVICE-MARKER |
-| 4 | `mosaictest-scripted#4` | workflow step | PLANNING | SUCCESS | echoes task_description — SHOULD contain PRECONSULT-ADVICE-MARKER |
+| Log `Seq` | `Agent` | `Phase` | `Status` | `Summary` shows |
+|:---:|---|---|---|---|
+| 1 | `mosaictest-scripted#1` | RESEARCH | BLOCKED | marker absent, returning BLOCKED E401, wrote marker |
+| 2 | `mosaictest-scripted#2` | RESEARCH | SUCCESS | marker present, echoes task_description — should NOT contain PRECONSULT-ADVICE-MARKER |
+| 3 | `mosaictest-scripted#3` | PLANNING | SUCCESS | echoes task_description — SHOULD contain PRECONSULT-ADVICE-MARKER |
 
-**Run outcome:** COMPLETE. Row 1 SUCCESS routes via `next`; row 2 SUCCESS routes to COMPLETE.
+**Run outcome:** COMPLETE. Row 2 SUCCESS routes via `next`; row 3 SUCCESS routes to COMPLETE.
 
 **The proof (two observations):**
-1. Row 3's `status_message` echoes the orchestrator's task_description. It should contain `MOSAICTEST-PRECONSULT-REDISPATCH` (the orchestrator's own text) and should NOT contain `PRECONSULT-ADVICE-MARKER`.
-2. Row 4's `status_message` echoes the auto-routed task_description. It SHOULD contain `PRECONSULT-ADVICE-MARKER` because the Runner appended the pre-consultation advice.
+1. Row 2's `status_message` echoes the orchestrator's task_description. It should contain `MOSAICTEST-PRECONSULT-REDISPATCH` (the orchestrator's own text) and should NOT contain `PRECONSULT-ADVICE-MARKER`.
+2. Row 3's `status_message` echoes the auto-routed task_description. It SHOULD contain `PRECONSULT-ADVICE-MARKER` because the Runner appended the pre-consultation advice.
 
 ---
 
@@ -81,12 +79,13 @@ Five Orchestration.md log rows.
 
 | Observation | Where to look |
 |---|---|
-| Row 4's echo does NOT contain PRECONSULT-ADVICE-MARKER | The Runner is not appending pre-consultation strings to auto-routed dispatches — the session state is empty or the append path is broken |
-| Row 3's echo DOES contain PRECONSULT-ADVICE-MARKER | The Runner is appending pre-consultation strings to orchestrator-written dispatches — the guard that skips orchestrator dispatches is missing |
-| Pre-consultation row (Seq 0) is absent | Pre-consultation is disabled or the harness adapter's pre-consultation path is broken |
-| Pre-consultation row returns empty `{}` | The routing fixture's Pre-Consultation section is not being parsed — check MosaicTestRouting.md |
+| Row 3's echo does NOT contain PRECONSULT-ADVICE-MARKER | The Runner is not appending pre-consultation strings to auto-routed dispatches — the session state is empty or the append path is broken |
+| Row 2's echo DOES contain PRECONSULT-ADVICE-MARKER | The Runner is appending pre-consultation strings to orchestrator-written dispatches — the guard that skips orchestrator dispatches is missing |
+| No pre-consultation call appears in the dispatch log | Pre-consultation is disabled or the harness adapter's pre-consultation path is broken |
+| Pre-consultation returns empty `{}` | The routing fixture's Pre-Consultation section is not being parsed — check MosaicTestRouting.md |
 | Run stops after Seq 1 with deviation unresolved | The orchestrator consultation path is not wired for this harness |
-| Row 3 returns BLOCKED again | The marker was not written on the first pass — check the script's Write section |
+| Row 2 returns BLOCKED again | The marker was not written on the first pass — check the script's Write section |
+| An `orchestrator-script` row appears in `Orchestration.md` | Consultations must leave no row in the artifact; a consultation wrongly called `Store.Apply` or allocated a `Seq` |
 
 ---
 

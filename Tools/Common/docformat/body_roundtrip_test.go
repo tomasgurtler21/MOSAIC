@@ -69,7 +69,7 @@ func TestBodyRoundTrip_GenericAgent_ByteIdentical(t *testing.T) {
 }
 
 func TestBodyRoundTrip_Orchestrator_ByteIdentical(t *testing.T) {
-	// Orchestrator contains <AvailableWorkflows type="project"> inside the Identity section.
+	// Orchestrator contains <AvailableWorkflows type="managed"> inside the Identity section.
 	// Uses a local fixture to avoid depending on the live Catalog entry.
 	fpath := filepath.Join(bodyRoundtripDir, "orchestrator.md")
 	src, err := os.ReadFile(fpath)

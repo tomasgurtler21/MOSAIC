@@ -131,6 +131,9 @@ frontmatter:
     - "tier_rationale"
     - "required_skills"
     - "tools"
+    - "infrastructure"
+    - "triggers"
+    - "on_failure"
   add:
     - key: "mode"
       value_by_role:

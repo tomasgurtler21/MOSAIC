@@ -1,6 +1,6 @@
 schema_version: "1"
 id: mosaic-logger
-version: 1.3.0
+version: 1.5.1
 description: >-
   Captures hook events across four harnesses — Claude Code (12 events), GHCP
   CLI (14 events), VS Code Chat Extension (8 events), and OpenCode (5 hooks:
@@ -10,6 +10,23 @@ description: >-
   invocations, usage records, notifications, and compaction events.
   Produces structured JSONL event streams, per-invocation markdown artifacts,
   and byte-identical transcript exports under OrchestrationLogs/.
+  The Claude Code, GHCP CLI, and OpenCode adapters also support Runner mode:
+  when the Runner starts a session it sets MOSAIC_ROLE (orchestrator or
+  subagent), MOSAIC_RUN_ID, and MOSAIC_AGENT_INSTANCE_ID in the harness
+  environment, and the adapter then logs that session under the Runner's run
+  and agent identity instead of deriving them from the harness. Without
+  MOSAIC_ROLE the adapters behave as native adapters; the deployed
+  registration is identical in both modes. GHCP CLI note: repository hooks in
+  .github/hooks/*.json load only when the working directory equals or is inside
+  a trustedFolders entry of $COPILOT_HOME/config.json (or
+  ~/.copilot/config.json when COPILOT_HOME is unset); settings.json is
+  ignored, --yolo and --add-dir do not help, and an untrusted folder fails
+  silently, so the Runner warns at session start when the folder is untrusted.
+  OpenCode note: under opencode run the session.idle handler is not awaited on
+  process exit, so the plugin writes invocation_end before its first await and
+  exports the transcript during the session, and the Runner appends an
+  invocation_end after the process exits if none exists. Existing deployments
+  keep the previous registration and file set until redeployed.
 
 # placeholder is absent: all four variants — claude-code, vscode-ghcp, ghcp-cli, and
 # opencode — carry real, deployable adapters. The schema has no per-variant placeholder
@@ -46,8 +63,24 @@ variants:
         target: mosaic_logger_artifacts.py
       - source: mosaic_logger_usage.py
         target: mosaic_logger_usage.py
+      - source: mosaic_logger_runner_mode.py
+        target: mosaic_logger_runner_mode.py
+      - source: mosaic_logger_handlers_runner.py
+        target: mosaic_logger_handlers_runner.py
       - source: ../hook.yaml
         target: hook.yaml
+    # Stop and SessionEnd are synchronous so that the Runner, which waits for
+    # the harness process to exit, finds the session's final events written
+    # when the process ends; an async hook can be cut off by process exit.
+    # The registration is identical in native and Runner mode (Runner mode is
+    # selected only by MOSAIC_ROLE), so native sessions pay the same cost.
+    # Measured handler wall time (py mosaic_logger.py per firing, includes
+    # interpreter start-up of about 30 ms), 2026-10-04, adapter version 1.5.0,
+    # synthetic transcript of 1200 records / 1.24 MB:
+    #   native Stop           about 200 ms
+    #   native SessionEnd     about 60 ms
+    #   Runner subagent-role SessionEnd  about 215 ms
+    # All are well below the 1 s guideline, so no handler speed-up was needed.
     registration:
       - id: settings-fragment
         target_path: .claude/settings.json
@@ -55,9 +88,14 @@ variants:
         instruction: >-
           Merge the hooks fragment into .claude/settings.json to register the
           mosaic-logger dispatcher as a handler for all 12 Claude Code hook
-          events. SubagentStart is synchronous so that the agent_id mapping is
-          written before the subagent's first tool call. All other events are
-          asynchronous so the adapter cannot block or deny operations.
+          events. SubagentStart, Stop, and SessionEnd are synchronous:
+          SubagentStart so that the agent_id mapping is written before the
+          subagent's first tool call, Stop and SessionEnd so that the final
+          events and transcript export are written before the session process
+          exits (required for Runner mode, harmless natively). All other events
+          are asynchronous so the adapter cannot block or deny operations. The
+          registration is the same in Runner mode, which is selected only by
+          the MOSAIC_ROLE environment variable.
         fragment: |
           {
             "hooks": {
@@ -81,7 +119,7 @@ variants:
                       "type": "command",
                       "command": "python3",
                       "args": ["${CLAUDE_PROJECT_DIR}/.claude/hooks/mosaic_logger.py"],
-                      "async": true,
+                      "async": false,
                       "timeout": 30
                     }
                   ]
@@ -107,7 +145,7 @@ variants:
                       "type": "command",
                       "command": "python3",
                       "args": ["${CLAUDE_PROJECT_DIR}/.claude/hooks/mosaic_logger.py"],
-                      "async": true,
+                      "async": false,
                       "timeout": 30
                     }
                   ]
@@ -245,6 +283,20 @@ variants:
         target: lib/handlers_messages.ts
       - source: lib/handlers_notifications.ts
         target: lib/handlers_notifications.ts
+      - source: lib/handlers_runner.ts
+        target: lib/handlers_runner.ts
+      - source: lib/runner_invocation.ts
+        target: lib/runner_invocation.ts
+      - source: lib/runner_messages.ts
+        target: lib/runner_messages.ts
+      - source: lib/runner_mode.ts
+        target: lib/runner_mode.ts
+      - source: lib/runner_ownership.ts
+        target: lib/runner_ownership.ts
+      - source: lib/runner_transcript.ts
+        target: lib/runner_transcript.ts
+      - source: lib/sync_append.ts
+        target: lib/sync_append.ts
       - source: ../hook.yaml
         target: hook.yaml
     registration: []
@@ -319,6 +371,10 @@ variants:
         target: mosaic_logger_handlers_tools.py
       - source: mosaic_logger_artifacts.py
         target: mosaic_logger_artifacts.py
+      - source: mosaic_logger_runner_mode.py
+        target: mosaic_logger_runner_mode.py
+      - source: mosaic_logger_handlers_runner.py
+        target: mosaic_logger_handlers_runner.py
       - source: ../hook.yaml
         target: hook.yaml
     registration:
@@ -331,7 +387,12 @@ variants:
           hook events. subagentStart is synchronous so that the agent_id mapping
           is written before the subagent's first tool call. Other events include
           async: true for forward-compatibility, but note that GHCP CLI does not
-          currently honor async execution (github/copilot-cli#3063).
+          currently honor async execution (github/copilot-cli#3063). The
+          configuration is the same in Runner mode (selected only by the
+          MOSAIC_ROLE environment variable). GHCP CLI loads repository hooks
+          only from a trusted folder: the working directory must equal or be a
+          descendant of a trustedFolders entry in $COPILOT_HOME/config.json (or
+          ~/.copilot/config.json); otherwise the hooks silently do not run.
         fragment: |
           {
             "hooks": {

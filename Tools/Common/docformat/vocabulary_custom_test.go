@@ -97,7 +97,6 @@ func TestClassifyRegion_Custom_NeverReturnsError_ForAnyName(t *testing.T) {
 		"HarnessConstraints",
 		"AuthorityHierarchy",
 		"ClosingProcedure",
-		"ProtocolConstraints",
 		"ErrorHandlingCommon",
 		"ExecutionPhilosophyCommon",
 	}

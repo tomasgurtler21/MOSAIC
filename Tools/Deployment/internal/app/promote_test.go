@@ -168,9 +168,9 @@ func sourceWithPopulatedDeployedRegions() []byte {
 		"---\n" +
 		"<Constraints type=\"core\">\n" +
 		"Constraints prose.\n" +
-		"<ProtocolConstraints type=\"managed\">\n" +
-		"Never skip the JSON response block.\n" +
-		"</ProtocolConstraints>\n" +
+		"<HarnessConstraints type=\"managed\">\n" +
+		"Harness-specific constraint.\n" +
+		"</HarnessConstraints>\n" +
 		"</Constraints>\n")
 }
 
@@ -564,7 +564,7 @@ func TestBuildGenericAgent_DeployedRegions_TagPairsArePresentInOutput(t *testing
 		"CommunicationProtocol",
 		"ClosingProcedure",
 		"AuthorityHierarchy",
-		"ProtocolConstraints",
+		"HarnessConstraints",
 	} {
 		openTag := "<" + name + " type=\"managed\">"
 		closeTag := "</" + name + ">"

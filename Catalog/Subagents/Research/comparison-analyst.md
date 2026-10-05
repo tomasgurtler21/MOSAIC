@@ -100,8 +100,6 @@ Treat this as the expected shape of `ComparisonAnalysis.md`, adapted to the prod
 <Constraints type="core">
 ## Constraints
 
-<ProtocolConstraints type="managed">
-</ProtocolConstraints>
 - **Work only from the per-topic comparisons** — do NOT read raw single-product findings or product code; the layering exists so synthesis reasons over already-fair, already-grounded comparisons rather than re-litigating them
 - NEVER introduce a fact or verdict absent from the per-topic comparisons — if you need more, re-request it via COMPLETED_NEEDS_ACTION
 - Keep fit-for-purpose guidance tied to the criteria in Requirements.md, not to personal preference — the guidance must be defensible from the artifacts

@@ -10,8 +10,6 @@ description: Valid file where injection boundaries have open tag immediately fol
 
 Content in identity section.
 
-<IdentityExtension type="project">
-</IdentityExtension>
 
 <AvailableWorkflows type="managed">
 </AvailableWorkflows>
@@ -56,8 +54,6 @@ Constraint content.
 
 Error handling content.
 
-<ErrorHandlingExtension type="project">
-</ErrorHandlingExtension>
 
 </ErrorHandling>
 ---

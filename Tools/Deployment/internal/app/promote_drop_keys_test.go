@@ -764,3 +764,37 @@ func TestPromoteHarnessDropKeys_ReturnedSetIsUsableByBuildGenericAgent(t *testin
 		}
 	}
 }
+
+// TestPromoteHarnessDropKeys_InfrastructureFieldsInDropListExcluded verifies that the three
+// infrastructure-agent fields, when a harness lists them in FrontmatterSpec.Drop and
+// FrontmatterPlan.Remove, do not enter the harness-derived promote drop set. They are
+// removed from deployed files by the harness, not added by it, so promote must not treat
+// them as harness-only keys.
+func TestPromoteHarnessDropKeys_InfrastructureFieldsInDropListExcluded(t *testing.T) {
+	infra := []string{"infrastructure", "triggers", "on_failure"}
+	mod := &configuredFrontmatterModule{
+		desc: domain.HarnessDescriptor{
+			Frontmatter: domain.FrontmatterSpec{
+				ModelKey: "llm_model",
+				ToolsKey: "tool_list",
+				Drop:     append([]string{"recommended_tier", "tier_rationale", "required_skills"}, infra...),
+			},
+		},
+		planSet:    []domain.FrontmatterField{{Key: "agent_mode", Value: domain.ScalarValue("fast", domain.QuotePlain)}},
+		planRemove: infra,
+	}
+
+	got, err := promoteHarnessDropKeys(mod, domain.ArtifactAgent, "infra-agent")
+	if err != nil {
+		t.Fatalf("promoteHarnessDropKeys returned unexpected error: %v", err)
+	}
+
+	if !got["agent_mode"] {
+		t.Fatal("guard: drop set is missing the harness's own plan key; cannot trust exclusion assertions")
+	}
+	for _, key := range infra {
+		if got[key] {
+			t.Errorf("drop set contains infrastructure field %q; it must not be treated as a harness-only key", key)
+		}
+	}
+}

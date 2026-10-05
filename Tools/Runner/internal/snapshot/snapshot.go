@@ -6,9 +6,10 @@ import (
 	"path/filepath"
 
 	"mosaic-run/internal/domain"
+	"mosaic-run/internal/snapshot/transform"
 )
 
-// CreateSnapshot copies the flat agents directory at srcDir to dstDir and
+// NewSnapshot copies the flat agents directory at srcDir to dstDir and
 // applies the given transformation rules to every copied file's YAML
 // frontmatter.
 //
@@ -26,9 +27,9 @@ import (
 // Returns other errors if removal or creation of dstDir fails (filesystem or
 // system errors, not business-logic refusals).
 //
-// On any error, CreateSnapshot attempts to remove a partially-created dstDir
+// On any error, NewSnapshot attempts to remove a partially-created dstDir
 // (best-effort cleanup of partial state).
-func CreateSnapshot(srcDir, dstDir string, rules []TransformRule) error {
+func NewSnapshot(srcDir, dstDir string, rules []transform.TransformRule) error {
 	// If snapshot already exists, remove it completely before recreating.
 	// This enables recovery from prior failed runs without blocking on collision.
 	// Best-effort: if removal fails, return error (not RefusalError) so caller
@@ -76,7 +77,7 @@ func CreateSnapshot(srcDir, dstDir string, rules []TransformRule) error {
 			}
 		}
 
-		content = TransformFile(content, rules)
+		content = transform.TransformFile(content, rules)
 
 		if err := os.WriteFile(dstPath, content, 0o644); err != nil {
 			_ = os.RemoveAll(dstDir)

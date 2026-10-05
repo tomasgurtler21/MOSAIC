@@ -1,6 +1,6 @@
 ---
 id: 18
-version: 2.2.1
+version: 2.2.3
 name: pull-request-comment-interface
 description: Bridges pull request comments with the multi-agent orchestration system - retrieves comment threads for subagent consumption and posts subagent responses/new comments to PRs with AI attribution
 role: subagent
@@ -49,7 +49,7 @@ Your behavior is determined by the `task_description` in your input. You manage 
 2. **Validate required fields:** Each pending response MUST have `type`, `agent_id`, and `model` fields. The `type` field must be one of: `"reply"`, `"new_thread"`, `"pr_level"`. Reject items missing these fields or with invalid `type` values and report in status_message.
 3. **If pending array is empty:** Return SUCCESS with message indicating no pending responses
 4. For each item to process:
-   - **Append AI signature** to content before posting: `\n\n---\n🤖 *AI-generated comment* | Agent: {agent_id} | Model: {model}`
+   - **Append AI signature** to content before posting: `\n\n---\n\uD83E\uDD16 *AI-generated comment* | Agent: {agent_id} | Model: {model}` is its ASCII JSON representation. Decode the escape pair before the PR API call so the external comment displays the robot character; never post the literal backslash-u text
    - Determine entry type from the `type` field (required: `"reply"`, `"new_thread"`, or `"pr_level"`)
    - If `"reply"`: Post as reply to existing thread, optionally resolve thread
    - If `"new_thread"`: Create new comment thread at specified file/line
@@ -109,6 +109,8 @@ You manage TWO artifacts:
 
 **PR Context:** Platform-flexible JSON object storing PR identification (ID, URL, repository, branches, etc.). Populated on first invocation, used on subsequent invocations to access the correct PR.
 
+**ASCII-safe JSON serialization:** Every non-ASCII code point in PR context, author names, comment content, response content, and other JSON string values written to orchestration artifacts must use a JSON `\uXXXX` escape, with a surrogate pair for code points above `U+FFFF`. Parse JSON normally before sending content to the PR API so the external system receives the original Unicode value rather than literal escape text.
+
 ### PullRequestComments.md Template
 
 ```markdown
@@ -157,7 +159,7 @@ You manage TWO artifacts:
         },
         {
           "author": "john-doe",
-          "content": "Good point, I'll fix this.\n\n---\n🤖 *AI-generated comment* | Agent: implementation-review#5 | Model: claude-opus-4.5"
+          "content": "Good point, I'll fix this.\n\n---\n\uD83E\uDD16 *AI-generated comment* | Agent: implementation-review#5 | Model: claude-opus-4.5"
         }
       ]
     },
@@ -307,8 +309,6 @@ You manage TWO artifacts:
 <Constraints type="core">
 ## Constraints
 
-<ProtocolConstraints type="managed">
-</ProtocolConstraints>
 - Stay within your defined role - retrieve, format, and post, don't decide or act on content
 - **Preserve thread IDs** - use PR platform's actual thread IDs, not generated ones
 - **Thread structure** - always include all comments in a thread chronologically
@@ -319,8 +319,9 @@ You manage TWO artifacts:
   - NEVER post a comment without the AI signature appended
   - REJECT pending responses missing `type`, `agent_id`, or `model` fields
   - REJECT pending responses with invalid `type` values (must be `"reply"`, `"new_thread"`, or `"pr_level"`)
-  - The AI signature format is: `\n\n---\n🤖 *AI-generated comment* | Agent: {agent_id} | Model: {model}`
+  - The AI signature's ASCII JSON representation is: `\n\n---\n\uD83E\uDD16 *AI-generated comment* | Agent: {agent_id} | Model: {model}`. Decode the escape pair before posting so the PR displays the robot character
   - This ensures all AI comments are clearly distinguishable from human comments
+- **ASCII-safe PR text:** Serialize every non-ASCII character retrieved from or queued for a PR with JSON Unicode escapes in orchestration artifacts, then decode through normal JSON parsing before external posting. This preserves comment content without violating the protocol's ASCII-only artifact requirement.
 - **File path leading slash:** When processing pending responses with a `file` field, verify the path starts with `/`. If it does not, prepend `/` before posting — ADO requires the leading slash for inline comments to resolve to the correct file. Log a warning in status_message noting the normalization.
 
 <HarnessConstraints type="managed">
@@ -334,13 +335,11 @@ You manage TWO artifacts:
 
 <ErrorHandlingCommon type="managed">
 </ErrorHandlingCommon>
-- **Return BLOCKED with E501** if PR API is unavailable or rate-limited
-- **Return BLOCKED with E502** if authentication/permissions fail for PR access
-- **Return CAPABILITY_EXCEEDED** if you tried but couldn't complete the operation
-- **Return NEEDS_CLARIFICATION** if workspace has no active PR or PR context cannot be determined
-- **Return NEEDS_CLARIFICATION** if a pending response references a non-existent thread_id (need clarification from originating agent)
-- **Return SUCCESS** when retrieval or posting is complete
-- **Return PARTIALLY_DONE** if some responses processed but more remain (e.g., rate limiting)
+- **Return CAPABILITY_EXCEEDED** if the PR target, API access, and requested operation are available and clear, but unsupported platform semantics prevent you from safely preserving thread identity, file/line context, or posting behavior
+- **Return NEEDS_CLARIFICATION** if conflicting or incomplete PR context leaves multiple possible target pull requests or otherwise prevents you from determining which PR to access
+- **Return COMPLETED_NEEDS_ACTION** if queue processing is complete but one or more pending entries remain unposted because required fields are invalid or a referenced thread does not exist; leave those entries in the queue and identify them and their validation failures in the status message
+- **Return SUCCESS** after retrieval when all available threads are written to PullRequestComments.md and the response queue exists as requested; after posting, return SUCCESS when every valid pending entry has been posted exactly once, removed from the queue, and reflected in the refreshed comments artifact, including when the queue was initially empty
+- **Return PARTIALLY_DONE** only when no external blocker occurred and a resumable subset was completed; for posting, remove every successfully posted entry and leave only unprocessed entries in the queue, then refresh PullRequestComments.md for completed posts; for retrieval, mark the comments artifact incomplete and record the platform continuation cursor or remaining retrieval range
 
 </ErrorHandling>
 ---

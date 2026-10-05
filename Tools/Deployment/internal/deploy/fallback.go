@@ -28,21 +28,23 @@ type ContentError struct {
 // contentErrors lists items whose Content callback failed; they were skipped as probe
 // candidates but must be surfaced to the user. usedItem is the item whose content was
 // actually used for the writability probe. When all items fail, usedItem is the zero value.
+// probeFormat is the formatting change the workspace probe write made to usedItem's target
+// (nil when none, or when the probe did not land in the workspace).
 //
 // journal, when non-nil, is recorded for the workspace probe path immediately before the
 // probe write. Recording before the write ensures that when atomic reversal deletes or
 // restores the file, it correctly treats the probe as a new file (existed=false) rather
 // than a pre-existing one. The journal is passed through from the executor so the probe
 // write participates in the same reversal scope as the rest of the run.
-func resolveDeploymentRoot(req ExecRequest, journal *writeJournal) (root string, fallback domain.FallbackTier, probeErr error, contentErrors []ContentError, usedItem domain.PlanItem, err error) {
+func resolveDeploymentRoot(req ExecRequest, journal *writeJournal) (root string, fallback domain.FallbackTier, probeErr error, contentErrors []ContentError, usedItem domain.PlanItem, probeFormat *domain.FormatChange, err error) {
 	if req.DryRun {
-		return req.Plan.WorkspacePath, domain.FallbackNone, nil, nil, domain.PlanItem{}, nil
+		return req.Plan.WorkspacePath, domain.FallbackNone, nil, nil, domain.PlanItem{}, nil, nil
 	}
 
 	eligible := probeEligibleItems(req.Plan.Items)
 	if len(eligible) == 0 {
 		// No Create/Update items; use workspace as the deployment root.
-		return req.Plan.WorkspacePath, domain.FallbackNone, nil, nil, domain.PlanItem{}, nil
+		return req.Plan.WorkspacePath, domain.FallbackNone, nil, nil, domain.PlanItem{}, nil, nil
 	}
 
 	// Iterate through eligible items, skipping those whose content rendering fails.
@@ -63,7 +65,7 @@ func resolveDeploymentRoot(req ExecRequest, journal *writeJournal) (root string,
 	// If every eligible item failed content rendering, return a distinct error (not
 	// ErrNoWritableLocation, which signals a filesystem problem, not a content problem).
 	if !found {
-		return "", "", nil, contentErrors, domain.PlanItem{}, fmt.Errorf("content rendering failed for all probe-eligible items")
+		return "", "", nil, contentErrors, domain.PlanItem{}, nil, fmt.Errorf("content rendering failed for all probe-eligible items")
 	}
 
 	// Tier 1: workspace. Journal the probe path before writing so atomic reversal can
@@ -72,8 +74,10 @@ func resolveDeploymentRoot(req ExecRequest, journal *writeJournal) (root string,
 	if journal != nil {
 		_ = journal.record(workspaceDest)
 	}
+	// The probe write replaces the item's real target, so its formatting change must be read first.
+	probeFormat = formatChangeOnOverwrite(workspaceDest, probeContent)
 	if writeErr := mkdirAndWrite(workspaceDest, probeContent); writeErr == nil {
-		return req.Plan.WorkspacePath, domain.FallbackNone, nil, contentErrors, usedItem, nil
+		return req.Plan.WorkspacePath, domain.FallbackNone, nil, contentErrors, usedItem, probeFormat, nil
 	} else {
 		probeErr = writeErr
 	}
@@ -82,17 +86,17 @@ func resolveDeploymentRoot(req ExecRequest, journal *writeJournal) (root string,
 	mosaicFallback := mosaicFallbackRoot(req.MosaicRoot, req.Plan.WorkspacePath)
 	mosaicDest := filepath.Join(mosaicFallback, usedItem.TargetPath)
 	if writeErr := mkdirAndWrite(mosaicDest, probeContent); writeErr == nil {
-		return mosaicFallback, domain.FallbackMosaicRoot, probeErr, contentErrors, usedItem, nil
+		return mosaicFallback, domain.FallbackMosaicRoot, probeErr, contentErrors, usedItem, nil, nil
 	}
 
 	// Tier 3: OS-temp fallback.
 	tempFallback := tempFallbackRoot(req.Plan.WorkspacePath)
 	tempDest := filepath.Join(tempFallback, usedItem.TargetPath)
 	if writeErr := mkdirAndWrite(tempDest, probeContent); writeErr == nil {
-		return tempFallback, domain.FallbackTemp, probeErr, contentErrors, usedItem, nil
+		return tempFallback, domain.FallbackTemp, probeErr, contentErrors, usedItem, nil, nil
 	}
 
-	return "", "", nil, contentErrors, domain.PlanItem{}, ErrNoWritableLocation
+	return "", "", nil, contentErrors, domain.PlanItem{}, nil, ErrNoWritableLocation
 }
 
 // probeEligibleItems returns all plan items eligible for use as a writability probe,

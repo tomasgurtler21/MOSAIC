@@ -35,6 +35,10 @@ An adapter's `Provision` then writes everything else the harness needs entirely 
 
 `Provision` must refuse — return an error — rather than proceed whenever the composed configuration would contain more than one entry that rewrites the intercepted call's input (`ErrMultipleRewriters`). This is checked once, over the whole composed set, before any subject is spawned; it is not an assumption enforced elsewhere. On any failure partway through, `Provision` still returns the ledger of what it created before the failure, so the caller can still tear down exactly that partial state. The adapter's returned `Provisioning` is merged into the setup ledger (not assigned over it), so rendered paths already recorded there survive.
 
+### Completion and harness version (claudecode)
+
+On Claude Code 2.1.271+ in auto mode the completion event is the `PostToolUse` of the subagent's `SubagentHandback` call (report in `tool_input.message`); later `SubagentStop` events and repeated hand-backs are ignored, and `SubagentStop` is the completion event only when no hand-back occurs. The adapter also implements the optional `domain.HarnessVersionReporter` capability (`version.go`, from `claude --version`); the version flows through run evidence into each run's `harness_version` report field, omitted when unknown.
+
 ### Translating a call, both directions
 
 `TranslateCall` turns a native payload (the harness's own wire format) into `domain.InterceptedCall`; `TranslateOutcome` turns a `domain.InterceptionOutcome` decision back into a native reply. Both directions must degrade gracefully — an unrecognised or malformed native payload is always a returned error, never a panic and never a zero-valued call passed off as success. This obligation is what keeps an interceptor failure from crashing or hanging the live subject turn it runs inside (see the System-Wide Patterns entry on this in the project Index).

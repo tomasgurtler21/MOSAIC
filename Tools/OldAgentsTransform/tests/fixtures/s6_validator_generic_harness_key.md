@@ -11,8 +11,6 @@ mode: subagent
 
 You are the **ValidatorGenericTest** agent.
 
-<IdentityExtension type="project">
-</IdentityExtension>
 
 </Identity>
 ---

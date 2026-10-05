@@ -127,6 +127,9 @@ frontmatter:
     - "recommended_tier"
     - "tier_rationale"
     - "required_skills"
+    - "infrastructure"
+    - "triggers"
+    - "on_failure"
   key_order:
     - "mosaic_id"
     - "version"

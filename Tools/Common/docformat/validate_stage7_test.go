@@ -56,12 +56,12 @@ package docformat_test
 //     - A document without <CommunicationProtocol type="managed"> produces a "missing-contract-region"
 //       issue at SeverityError.
 //
-//   Rule 8b: The five conduct regions must be present for role: subagent — Warning.
-//     - A subagent document with all five conduct regions produces no "missing-conduct-region"
+//   Rule 8b: The four conduct regions must be present for role: subagent — Warning.
+//     - A subagent document with all four conduct regions produces no "missing-conduct-region"
 //       issue.
 //     - A subagent document missing at least one conduct region produces a
 //       "missing-conduct-region" issue at SeverityWarning.
-//     - An orchestrator document missing all five conduct regions produces no
+//     - An orchestrator document missing all four conduct regions produces no
 //       "missing-conduct-region" issue (not required for orchestrators).
 //
 //   Rule 8c: No region present that the role forbids — Warning.
@@ -69,7 +69,7 @@ package docformat_test
 //       "role-forbidden-region" issue.
 //     - An orchestrator document containing a subagent-only bundle region produces a
 //       "role-forbidden-region" issue at SeverityWarning.
-//     - A subagent document with the five bundle regions produces no "role-forbidden-region"
+//     - A subagent document with the four bundle regions produces no "role-forbidden-region"
 //       issue (the bundle regions are permitted for subagents).
 //
 // Coverage (T7.3 — Structure rule 12):
@@ -183,7 +183,7 @@ Content.
 </CommunicationProtocol>
 `
 
-// subagentWithAllConductRegions has all five conduct regions required for subagents.
+// subagentWithAllConductRegions has all four conduct regions required for subagents.
 const subagentWithAllConductRegions = `---
 id: "1"
 version: 1.0.0
@@ -204,8 +204,7 @@ required_skills: []
 </CommunicationProtocol>
 
 <Constraints type="core">
-<ProtocolConstraints type="managed">
-</ProtocolConstraints>
+Constraints content.
 </Constraints>
 
 <ErrorHandling type="core">
@@ -240,8 +239,7 @@ required_skills: []
 </CommunicationProtocol>
 
 <Constraints type="core">
-<ProtocolConstraints type="managed">
-</ProtocolConstraints>
+Constraints content.
 </Constraints>
 
 <ErrorHandling type="core">
@@ -1020,12 +1018,12 @@ func TestValidate_Rule8a_OrchestratorWithoutProtocol_ReportsMissingContractRegio
 }
 
 // ---------------------------------------------------------------------------
-// T7.2 — Rule 8b: Five conduct regions required for role: subagent
+// T7.2 — Rule 8b: Four conduct regions required for role: subagent
 // ---------------------------------------------------------------------------
 
 func TestValidate_Rule8b_SubagentWithAllConductRegions_NoMissingConductRegionIssue(t *testing.T) {
-	// A subagent document with all five conduct regions (AuthorityHierarchy, ClosingProcedure,
-	// ProtocolConstraints, ErrorHandlingCommon, ExecutionPhilosophyCommon) must produce no
+	// A subagent document with all four conduct regions (AuthorityHierarchy, ClosingProcedure,
+	// ErrorHandlingCommon, ExecutionPhilosophyCommon) must produce no
 	// "missing-conduct-region" issue.
 	doc := parseInlineDoc(t, subagentWithAllConductRegions)
 
@@ -1034,12 +1032,12 @@ func TestValidate_Rule8b_SubagentWithAllConductRegions_NoMissingConductRegionIss
 	})
 
 	if hasIssueWithCode(issues, "missing-conduct-region") {
-		t.Errorf("subagent with all five conduct regions produced unexpected \"missing-conduct-region\" issue; issues: %v", issues)
+		t.Errorf("subagent with all four conduct regions produced unexpected \"missing-conduct-region\" issue; issues: %v", issues)
 	}
 }
 
 func TestValidate_Rule8b_SubagentMissingOneConductRegion_ReportsMissingConductRegion(t *testing.T) {
-	// A subagent document missing at least one of the five conduct regions must produce a
+	// A subagent document missing at least one of the four conduct regions must produce a
 	// "missing-conduct-region" issue. The fixture is missing ExecutionPhilosophyCommon.
 	doc := parseInlineDoc(t, subagentMissingOneConductRegion)
 
@@ -1056,7 +1054,7 @@ func TestValidate_Rule8b_SubagentMissingOneConductRegion_ReportsMissingConductRe
 }
 
 func TestValidate_Rule8b_OrchestratorMissingConductRegions_NoMissingConductRegionIssue(t *testing.T) {
-	// An orchestrator document is not required to carry the five subagent-only conduct regions.
+	// An orchestrator document is not required to carry the four subagent-only conduct regions.
 	// Rule 8b must not produce a "missing-conduct-region" issue for role: orchestrator.
 	doc := parseInlineDoc(t, orchestratorConformingDoc)
 
@@ -1119,7 +1117,7 @@ func TestValidate_Rule8c_OrchestratorWithSubagentBundleRegion_ReportsRoleForbidd
 }
 
 func TestValidate_Rule8c_SubagentWithBundleRegions_NoRoleForbiddenRegionIssue(t *testing.T) {
-	// A subagent document with the five bundle conduct regions must produce no
+	// A subagent document with the four bundle conduct regions must produce no
 	// "role-forbidden-region" issue. These regions are permitted for subagents.
 	doc := parseInlineDoc(t, subagentWithAllConductRegions)
 

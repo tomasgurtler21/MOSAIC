@@ -35,7 +35,7 @@ import (
 // ---------------------------------------------------------------------------
 
 // recordedWorkflowID is the workflow the resumed runs below were created under.
-// It matches the workflow recorded by makeCandidate, so a run chosen from the
+// It matches the workflow recorded by newTestCandidate, so a run chosen from the
 // run-selection screen and a run set up by hand agree on what they are.
 const recordedWorkflowID = "test-workflow"
 
@@ -116,7 +116,7 @@ func newNewRunModelAtHarness(t *testing.T) *rootModel {
 func TestRunSelect_ResumingARun_AdoptsItsRecordedWorkflow(t *testing.T) {
 	// Arrange
 	candidates := []runscan.RunCandidate{
-		makeCandidate("20260701T120000Z-a3f9", "/ws/Orchestration-20260701T120000Z-a3f9"),
+		newTestCandidate("20260701T120000Z-a3f9", "/ws/Orchestration-20260701T120000Z-a3f9"),
 	}
 	m := newModelWithScan(candidates)
 	if m.screen != screenRunSelect {
@@ -301,7 +301,7 @@ func TestRunSelect_ResumingARun_ReachesConfigurationWithoutAnsweringEitherQuesti
 	// Arrange
 	orchPath := writeOrchestratorFixture(t)
 	candidates := []runscan.RunCandidate{
-		makeCandidate("20260701T120000Z-a3f9", "/ws/Orchestration-20260701T120000Z-a3f9"),
+		newTestCandidate("20260701T120000Z-a3f9", "/ws/Orchestration-20260701T120000Z-a3f9"),
 	}
 	m := newModelWithScanAndDiscoverer(candidates, func(string, string) (string, error) {
 		return orchPath, nil

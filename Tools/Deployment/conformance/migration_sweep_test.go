@@ -56,7 +56,6 @@ var toolManagedNames = []string{
 	"ClosingProcedure",
 	"AvailableWorkflows",
 	"InfrastructureAgents",
-	"ProtocolConstraints",
 	"HarnessConstraints",
 	"ErrorHandlingCommon",
 	"ExecutionPhilosophyCommon",

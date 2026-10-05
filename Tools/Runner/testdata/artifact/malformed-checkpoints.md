@@ -1,5 +1,6 @@
 ---
 type: orchestration-artifact
+run_id: 20260727T170000Z-a3f9
 workflow: test
 workflow_version: "1.0"
 task: "test task"

@@ -36,10 +36,20 @@ func TestHarness_IsRecognised_KnownValues(t *testing.T) {
 		domain.HarnessClaudeCode,
 		domain.HarnessOpenCode,
 		domain.HarnessVSCodeGHCP,
+		domain.HarnessGHCPCLI,
 	}
 	for _, h := range known {
 		if !h.IsRecognised() {
 			t.Errorf("Harness %q must be recognised", h)
+		}
+	}
+}
+
+func TestHarness_IsRecognised_NearMissValues_NotRecognised(t *testing.T) {
+	// Comparison is exact and case-sensitive.
+	for _, v := range []string{"GHCP-CLI", "ghcp_cli", "ghcp", "some-new-harness"} {
+		if domain.Harness(v).IsRecognised() {
+			t.Errorf("Harness %q must not be recognised", v)
 		}
 	}
 }
@@ -68,6 +78,9 @@ func TestHarness_Constants_WireValues(t *testing.T) {
 	}
 	if domain.HarnessVSCodeGHCP != "vscode-ghcp" {
 		t.Errorf("HarnessVSCodeGHCP = %q, want %q", domain.HarnessVSCodeGHCP, "vscode-ghcp")
+	}
+	if domain.HarnessGHCPCLI != "ghcp-cli" {
+		t.Errorf("HarnessGHCPCLI = %q, want %q", domain.HarnessGHCPCLI, "ghcp-cli")
 	}
 }
 

@@ -16,6 +16,8 @@ This guide is for **project authors** who want to run multi-agent workflows with
 | **Supported harnesses** | `claude-code`, `opencode`, `ghcp-cli` |
 | **State file** | `Orchestration-{run_id}/Orchestration.md` — atomic writes, crash-safe, resumable |
 
+> **Known issue — GHCP CLI:** Runner runs on `ghcp-cli` are currently unreliable. With recent GHCP CLI versions (observed on 1.0.91), GHCP CLI sometimes ignores the requested `--agent` and runs its default agent instead, which shows up as protocol or parsing errors in the run. The failures are intermittent and the cause is not yet confirmed. In limited testing GHCP CLI 1.0.87 did not show the problem, so pinning it may help, but this is not verified. For reliable runs, use `claude-code` or `opencode`.
+
 **Why not just use the orchestrator agent?** A persistent orchestrator session accumulates context with every dispatch — every tool call, artifact edit, and subagent response stays in the context window. Cost grows roughly quadratically with run length. The Runner offloads all mechanical work (artifact writes, sequence tracking, harness invocations) and keeps orchestrator calls bounded: each starts a fresh session reading only the compact `Orchestration.md`.
 
 ---
@@ -138,6 +140,13 @@ Every run creates an `Orchestration-{run_id}/` folder in the working directory. 
 ```
 
 The Runner reads the existing `Orchestration.md`, determines where the run left off, and continues from there.
+
+### Workflow table, rows and resume
+
+- **Row column.** mosaic-deploy adds a first-column `Row` (1..N) to each workflow routing table it rebuilds into an orchestrator; authors never write it. The Runner accepts tables with or without the column and refuses a table whose `Row` numbers do not match row positions, for example after a hand edit.
+- **WorkflowRow in the Execution Log.** Each workflow step records the table row it ran in a `WorkflowRow` column directly after `Stage` (`Seq | Agent | Phase | Stage | WorkflowRow | Status | Timestamp | Summary | Inputs | Checkpoint`). Infrastructure, out-of-band and ad-hoc steps record `-`. Live routing and resume identify the last row from this value, and stop and report when the agent or group at that row no longer matches.
+- **On Findings.** The target is the nearest row above the row that ran whose agent is the target. The row that ran is not a candidate, and group and stage boundaries are ignored. A target with no preceding row is treated as no target (deviation or escalation), so On Findings targets must sit above their reviewer.
+- **Version drift.** A run is pinned to its workflow only by the `workflow_version` string, and the table is re-read on every start, including resume. The recorded-row check catches only edits that change the agent or group at a recorded row. Workflow authors must bump the workflow version whenever they edit a routing table; the Runner then refuses to resume older runs against the changed table unless version drift is explicitly allowed (`--allow-version-drift`).
 
 ---
 

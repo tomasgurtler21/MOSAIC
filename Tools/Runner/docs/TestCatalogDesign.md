@@ -2,7 +2,7 @@
 
 > **Status:** Draft
 > **Created:** 2026-08-17
-> **Scope:** How the `mosaic-run` end-to-end test suite works: what it tests, what stub agents it uses, how their behaviour is fixed by fixture files, which test workflows exist, and how a run is checked. Assumes the production defects in `Requirements.md` (RUN-1 … RUN-8, DEP-1) are fixed.
+> **Scope:** How the `mosaic-run` end-to-end test suite works: what it tests, what stub agents it uses, how their behaviour is fixed by fixture files, which test workflows exist, and how a run is checked. Assumes the production defects in `Requirements.md` (RUN-1 through RUN-8, DEP-1) are fixed.
 
 ---
 
@@ -49,7 +49,7 @@ The test catalogue is harness-agnostic, exactly like the normal catalogue. It co
 
 So the plan is:
 
-1. Deploy the test catalogue to a workspace, once per harness, using the normal deploy tool.
+1. Deploy the test catalogue to a workspace, once per harness, using the normal deploy tool. Runner TestCatalog runs deploy through the `mosaic-deploy` binary (`Tools/Runner/internal/testdeploy`), so that binary must be rebuilt or reinstalled before catalogue runs exercise the workflow `Row` column, which mosaic-deploy adds when it rebuilds workflows.
 2. Run the same suite against each one.
 3. Expect the same results everywhere. A difference between harnesses **is** a finding — that is largely why the suite exists.
 
@@ -132,9 +132,9 @@ Structurally identical to `mosaictest-checkpoint`: zero tools, hardcoded behavio
 
 **Two invocation contexts, same response:**
 
-1. **Run-start setup dispatch** (Design.md §4.2): The Runner dispatches the commit-class agent once before the dispatch loop. The stub returns SUCCESS with `[branch:mosaictest-run]` at the end of `status_message`. The Runner extracts `commit_branch` from the marker and records it in the artifact frontmatter. If the marker is missing, the run refuses to start.
+1. **Run-start setup dispatch** (Design.md §4.2): The Runner dispatches the commit-class agent once after artifact creation and before the workflow loop. The stub returns SUCCESS with `[branch:mosaictest-run]` at the end of `status_message`. The Runner extracts `commit_branch` from the marker and records it in the artifact frontmatter. If the marker is missing, the run stops before the first workflow invocation and retains the failed setup row in the artifact.
 
-2. **Trigger dispatches** (during the run): Fired by `STAGE_END`. Same SUCCESS, same marker. The Runner records the commit row as an infrastructure-flagged execution log entry.
+2. **Trigger dispatches** (during the run): Fired by `STAGE_END`. Same SUCCESS, same marker. The Runner records the commit row as a non-workflow Execution Log entry whose agent name matches the infrastructure declaration.
 
 **Message template** (for `mosaictest-commit#3`):
 
@@ -191,7 +191,7 @@ Suppose the Runner has a bug and consults one extra time, or one time fewer. Wit
 
 With state matching, that same bug produces a state no rule covers, and the stub stops and reports it. **The bug becomes visible instead of being absorbed.**
 
-A useful side effect: the stub never has to recognise its own past invocations, so it does not care how consultation rows are labelled in the log. That removes a dependency on RUN-6.
+A useful side effect: the stub never has to recognise its own past invocations, and since a consultation leaves no row in the log at all, there is no labelling question to depend on. That removes a dependency on RUN-6.
 
 ### 5.4 What the Fixture Contains
 
@@ -281,6 +281,7 @@ The remaining workflows test Runner modes, routing mechanisms, and edge cases. T
 | `staged-multigroup` | Auto | Multi-group staged execution (TDD approach: Test group → Implementation group); exercises `EXECUTION.Test.[StageNumber]` and `EXECUTION.Implementation.[StageNumber]` phase parsing through a real harness (§7.4) | **Implemented** |
 | `hitl-escalate` | Auto | The approval check uses up its re-dispatch and escalates to a deviation. Uses stub enhancements E1 + E3 (§7.8) | **Implemented** |
 | `deviation-chain` | Auto | Two consecutive deviations requiring two orchestrator consultations before the run completes; exercises the single-decision chain through a real harness (§7.5) | **Implemented** |
+| `staged-findings-loop` | Auto-review | After an On Findings route-back inside a staged EXECUTION group whose rows share one agent, the engine continues from the row that actually ran, not from a row derived from the invocation count | **Implemented** |
 
 ### 7.1 `findings-loop` — One Workflow, Run Under Two Modes
 
@@ -292,6 +293,8 @@ Auto and Auto-review differ in exactly one way. When a reviewer reports findings
 The clearest way to prove this is **the same workflow and the same fixtures, run twice — once per mode — producing two different, separately documented runs.** If we used two different workflows instead, we would only be proving that two different definitions behave differently, not that the *mode* is what changed it.
 
 In Auto-review, the routing fixture's findings rule simply never fires. That the run finishes without ever firing it is the proof.
+
+The workflow has two rows: a creator, then a reviewer whose `On Findings` names the creator. A one-row workflow whose reviewer names itself does not work: the findings target resolves to the nearest row *above* the row that ran, and that row is never its own candidate (Design.md §2.4, nearest-preceding rule). A self-target therefore counts as no target, and Auto-review deviates just as Auto does.
 
 ### 7.2 `preconsult-advice` Needs Both Kinds of Dispatch
 
@@ -335,11 +338,11 @@ A staged Auto-mode workflow (at least 2 stages) with both checkpoint-class and c
 - `STAGE_END` fires exactly at stage boundaries for both checkpoint and commit agents
 - Trigger evaluation fires after workflow steps (not after infrastructure steps — no cascading)
 - Checkpoint marker is recorded in the execution log
-- Infrastructure steps are recorded as infrastructure-flagged rows (don't update `current_state`)
+- Infrastructure steps are recorded as non-workflow rows identified from the declaration region; they do not update `current_state`
 
 **Shape:** 2 stages × 1 row per stage = 2 workflow steps. After stage 1 completes, `STAGE_END` fires for both checkpoint and commit. After stage 2 completes (end of run), `STAGE_END` fires again for both. Plus the commit setup dispatch at run start. Minimal workflow that exercises both classes.
 
-**Run configuration:** `--checkpoints enabled --commits enabled --commit-branch mosaic-owned`. The commit setup dispatch is the first thing that fires (before any workflow step), which is itself a key assertion — if the setup fails or the branch marker is missing, the run refuses to start.
+**Run configuration:** `--checkpoints enabled --commits enabled --commit-branch mosaic-owned`. The commit setup dispatch is the first thing that fires after artifact creation (before any workflow step), which is itself a key assertion — if setup fails or the branch marker is missing, the run stops with that setup attempt preserved in the artifact.
 
 ### 7.7 `infra-review-consult` — Review Trigger and Orchestrator Follow-Up
 
@@ -522,7 +525,7 @@ Run the smoke set on any change to the Runner or an adapter. Run the full suite 
 
 ## 12. Decisions Worth Recording
 
-**Match fixtures on run state, not on invocation number.** A numbered list keeps answering plausibly when the Runner consults an unexpected number of times, so the exact bug we want to catch produces a green run. State matching stops loudly instead. It also means the stub does not care how consultation rows are labelled in the log.
+**Match fixtures on run state, not on invocation number.** A numbered list keeps answering plausibly when the Runner consults an unexpected number of times, so the exact bug we want to catch produces a green run. State matching stops loudly instead. It also means the stub reads only workflow rows: consultations leave no row in the log at all, so there is nothing to label.
 
 **A fixed filename for the routing fixture.** `mosaictest-scripted` finds its fixture through its input artifact paths. A consultation carries no artifact paths, so that trick is unavailable and a fixed filename in the run folder is the only option left.
 

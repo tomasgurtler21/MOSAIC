@@ -12,8 +12,6 @@ mode: subagent
 
 You are the **ValidatorHarnessTest** agent.
 
-<IdentityExtension type="project">
-</IdentityExtension>
 
 </Identity>
 ---

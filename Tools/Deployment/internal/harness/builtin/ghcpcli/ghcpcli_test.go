@@ -923,7 +923,7 @@ func TestContract_GHCP(t *testing.T) {
 					Set: []domain.FrontmatterField{
 						{Key: "user-invocable", Value: domain.ScalarValue("false", domain.QuotePlain)},
 					},
-					Remove:   []string{"recommended_tier", "tier_rationale", "required_skills"},
+					Remove:   []string{"recommended_tier", "tier_rationale", "required_skills", "infrastructure", "triggers", "on_failure"},
 					KeyOrder: []string{"mosaic_id", "version", "mosaic_transform_version", "mosaic_injections_version", "name", "description", "model", "tools", "user-invocable"},
 				},
 			},
@@ -950,7 +950,7 @@ func TestContract_GHCP(t *testing.T) {
 					Set: []domain.FrontmatterField{
 						{Key: "user-invocable", Value: domain.ScalarValue("true", domain.QuotePlain)},
 					},
-					Remove:   []string{"recommended_tier", "tier_rationale", "required_skills"},
+					Remove:   []string{"recommended_tier", "tier_rationale", "required_skills", "infrastructure", "triggers", "on_failure"},
 					KeyOrder: []string{"mosaic_id", "version", "mosaic_transform_version", "mosaic_injections_version", "name", "description", "model", "tools", "user-invocable"},
 				},
 			},
@@ -976,7 +976,7 @@ func TestContract_GHCP(t *testing.T) {
 					Set: []domain.FrontmatterField{
 						{Key: "user-invocable", Value: domain.ScalarValue("true", domain.QuotePlain)},
 					},
-					Remove:   []string{"recommended_tier", "tier_rationale", "required_skills"},
+					Remove:   []string{"recommended_tier", "tier_rationale", "required_skills", "infrastructure", "triggers", "on_failure"},
 					KeyOrder: []string{"mosaic_id", "version", "mosaic_transform_version", "mosaic_injections_version", "name", "description", "model", "tools", "user-invocable"},
 				},
 			},
@@ -1002,7 +1002,7 @@ func TestContract_GHCP(t *testing.T) {
 					Set: []domain.FrontmatterField{
 						{Key: "user-invocable", Value: domain.ScalarValue("true", domain.QuotePlain)},
 					},
-					Remove:   []string{"recommended_tier", "tier_rationale", "required_skills"},
+					Remove:   []string{"recommended_tier", "tier_rationale", "required_skills", "infrastructure", "triggers", "on_failure"},
 					KeyOrder: []string{"mosaic_id", "version", "mosaic_transform_version", "mosaic_injections_version", "name", "description", "model", "tools", "user-invocable"},
 				},
 			},
@@ -1026,7 +1026,7 @@ func TestContract_GHCP(t *testing.T) {
 				},
 				Expected: domain.FrontmatterPlan{
 					Set:      []domain.FrontmatterField{},
-					Remove:   []string{"recommended_tier", "tier_rationale", "required_skills"},
+					Remove:   []string{"recommended_tier", "tier_rationale", "required_skills", "infrastructure", "triggers", "on_failure"},
 					KeyOrder: []string{"mosaic_id", "version", "mosaic_transform_version", "mosaic_injections_version", "name", "description", "model", "tools", "user-invocable"},
 				},
 			},

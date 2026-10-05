@@ -28,6 +28,9 @@ var modeItems = []widgets.ListItem{
 		Description: "Update an existing workspace deployment to the latest source versions.",
 		Detail: "Compares the deployed files against the current source versions.\n" +
 			"Stale files are updated; locally-modified files prompt for a decision.\n\n" +
+			"Infrastructure agent declarations in the orchestrator are refreshed when\n" +
+			"their catalog definition changed; new or hand-added declarations are\n" +
+			"never added or touched.\n\n" +
 			"Use this after updating the generic agents or when a harness\n" +
 			"descriptor has changed.",
 	},
@@ -48,10 +51,14 @@ var modeItems = []widgets.ListItem{
 		Description: "Deploy a chosen mix of subagents, utility agents, and standalone agents.",
 		Detail: "Presents a single browsable list spanning all subagents (including\n" +
 			"Infrastructure-category subagents), utility agents, and standalone agents.\n\n" +
-			"No workflow, hook, or orchestrator work is performed — only the selected\n" +
-			"agents and the skills they require are deployed.\n\n" +
+			"Only the selected agents and the skills they require are deployed. No\n" +
+			"workflow or hook work is performed.\n\n" +
+			"If an orchestrator is already present, declarations for newly deployed\n" +
+			"infrastructure agents are added to it. Existing declarations, including\n" +
+			"hand-added ones, are kept. No orchestrator is created, and its workflows\n" +
+			"are not changed.\n\n" +
 			"Use this to add or update individual agents across any catalog category\n" +
-			"without disturbing workflows, hooks, or the orchestrator.",
+			"without disturbing workflows or hooks.",
 	},
 	{
 		ID:          string(domain.ModeDeployHooks),

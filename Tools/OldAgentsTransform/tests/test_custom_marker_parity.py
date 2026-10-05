@@ -250,7 +250,7 @@ class TestFourMarkerParityTagPattern:
         """All four kinds must be in the TAG_PATTERN alternation."""
         examples = {
             "SECTION":   '<Identity type="core">',
-            "INJECTION": '<IdentityExtension type="project">',
+            "INJECTION": '<CodebaseContext type="project">',
             "DEPLOYED":  '<CommunicationProtocol type="managed">',
             "CUSTOM":    '<ProjectNotes type="custom">',
         }

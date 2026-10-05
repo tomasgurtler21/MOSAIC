@@ -164,27 +164,13 @@ Action: recommend re-deploy (layers 1 and 2 outdated)
 
 ---
 
-## Current Implementation vs This Design
+## Implementation Status
 
-The current codebase (`agentfields` registry, `staleness.go`, `frontmatter.go`) has three divergences from this design:
+The current deployment implementation follows this design:
 
-### 1. `version` not renamed to `mosaic_version`
-
-The current implementation carries the generic source `version` field through to deployed files unprefixed. It should be renamed to `mosaic_version` on deploy, parallel to how `id` → `mosaic_id` and `role` → `mosaic_role`.
-
-**Migration path:** Add `mosaic_version` to the `agentfields` registry as a rename of the generic `version` field. The read path should accept both `version` and `mosaic_version` (preferring the prefixed form). On next deploy, the field is written as `mosaic_version`. Existing deployed files with unprefixed `version` are read correctly and migrated transparently on their next update.
-
-### 2. `mosaic_transform_version` naming
-
-The current field name `mosaic_transform_version` (legacy: `transform_version`) is confusing — it is too easily conflated with `version`. This design renames it to `mosaic_harness_version` (legacy: `harness_version`) to make the layer it tracks immediately obvious.
-
-**Migration path:** Add `harness_version` / `mosaic_harness_version` as a new entry in the `agentfields` registry. The read path should accept `mosaic_transform_version`, `transform_version`, `mosaic_harness_version`, and `harness_version` (preferring the new prefixed form). On next deploy, the field is written under the new name. A legacy-to-current migration happens transparently.
-
-### 3. Injection versions in frontmatter instead of on region tags
-
-The current implementation writes `mosaic_injections_version` and `mosaic_orchestrator_injections_version` as frontmatter fields. This design moves them to `version` attributes on the corresponding injection region tags, consistent with how the protocol version already works.
-
-**Migration path:** The staleness reader already parses region tag attributes for protocol and workflow versions. Extend that to read injection region version attributes. On next deploy, write the version on the region tag and stop writing the frontmatter field. The read path should check both locations during the transition period.
+- Generic source `version` deploys as `mosaic_version`; readers accept the legacy unprefixed name during migration.
+- New deployments use `mosaic_harness_version`; readers also accept the former transform-version names.
+- Injection versions live on the corresponding managed-region tags; legacy frontmatter forms remain readable during migration.
 
 ---
 

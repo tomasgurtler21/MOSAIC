@@ -1,6 +1,6 @@
 package docformat_test
 
-// Tests for Stage 2 vocabulary: the six-slot canonical order, nine-name deployed
+// Tests for Stage 2 vocabulary: the six-slot canonical order, eight-name deployed
 // set, revised parent tables, and classification behaviour after CanonicalInjections
 // is removed.
 //
@@ -14,14 +14,14 @@ package docformat_test
 //   - OutputFormat and ArtifactProvenance are absent from CanonicalOrder.
 //   - Every CanonicalSection appears in CanonicalOrder.
 //
-// Coverage (CanonicalDeployed — 9 names, ArtifactProvenance/LanguagePatterns/CustomConstraints removed):
-//   - CanonicalDeployed contains exactly 9 names.
+// Coverage (CanonicalDeployed — 8 names, ArtifactProvenance/LanguagePatterns/CustomConstraints removed):
+//   - CanonicalDeployed contains exactly 8 names.
 //   - CanonicalDeployed includes all expected names including AuthorityHierarchy,
-//     ClosingProcedure, ProtocolConstraints, ErrorHandlingCommon, ExecutionPhilosophyCommon.
-//   - ArtifactProvenance is absent from CanonicalDeployed.
+//     ClosingProcedure, ErrorHandlingCommon, ExecutionPhilosophyCommon.
+//   - ArtifactProvenance and ProtocolConstraints are absent from CanonicalDeployed.
 //
-// Coverage (DeployedParent — 9 entries):
-//   - DeployedParent maps all 9 tool-managed names to their required parents.
+// Coverage (DeployedParent — 8 entries):
+//   - DeployedParent maps all 8 tool-managed names to their required parents.
 //   - ArtifactProvenance is absent from DeployedParent.
 //   - New bundle names map to their required parent sections.
 //
@@ -42,7 +42,7 @@ package docformat_test
 //   - AvailableWorkflows under NodeDeployed → InjectionWorkflow.
 //   - InfrastructureAgents under NodeDeployed → InjectionInfrastructure.
 //   - HarnessConstraints under NodeDeployed → InjectionHarness.
-//   - AuthorityHierarchy, ClosingProcedure, ProtocolConstraints, ErrorHandlingCommon,
+//   - AuthorityHierarchy, ClosingProcedure, ErrorHandlingCommon,
 //     ExecutionPhilosophyCommon under NodeDeployed → InjectionBundle.
 //   - Any tool-managed name under NodeInjection → ErrMarkerMismatch (new bundle names included).
 //   - Any name not in CanonicalDeployed under NodeDeployed → ErrUnknownDeployedName.
@@ -209,14 +209,14 @@ func TestCanonicalOrder_Stage2_AllCanonicalSectionsPresent(t *testing.T) {
 // CanonicalDeployed — 9 names, ArtifactProvenance/LanguagePatterns/CustomConstraints removed
 // ---------------------------------------------------------------------------
 
-func TestCanonicalDeployed_Stage2_ContainsNineNames(t *testing.T) {
+func TestCanonicalDeployed_Stage2_ContainsEightNames(t *testing.T) {
 	// The vocabulary correction removes LanguagePatterns and CustomConstraints from
 	// the tool-managed closed set (on top of the ArtifactProvenance removal and five
 	// bundle-name additions from the earlier Stage 2 work). The closed set is now
-	// 9 names.
+	// 8 names.
 	got := docformat.CanonicalDeployed
-	if len(got) != 9 {
-		t.Fatalf("CanonicalDeployed length: want 9, got %d: %v", len(got), got)
+	if len(got) != 8 {
+		t.Fatalf("CanonicalDeployed length: want 8, got %d: %v", len(got), got)
 	}
 }
 
@@ -227,7 +227,6 @@ func TestCanonicalDeployed_Stage2_IncludesAllExpectedNames(t *testing.T) {
 		"ClosingProcedure",
 		"AvailableWorkflows",
 		"InfrastructureAgents",
-		"ProtocolConstraints",
 		"HarnessConstraints",
 		"ErrorHandlingCommon",
 		"ExecutionPhilosophyCommon",
@@ -262,7 +261,6 @@ func TestCanonicalDeployed_Stage2_IncludesNewBundleNames(t *testing.T) {
 	bundleNames := []string{
 		"AuthorityHierarchy",
 		"ClosingProcedure",
-		"ProtocolConstraints",
 		"ErrorHandlingCommon",
 		"ExecutionPhilosophyCommon",
 	}
@@ -287,7 +285,7 @@ func TestDeployedParent_Stage2_IsNotNil(t *testing.T) {
 	}
 }
 
-func TestDeployedParent_Stage2_MapsAllNineNames(t *testing.T) {
+func TestDeployedParent_Stage2_MapsAllEightNames(t *testing.T) {
 	// An empty string value means the boundary must appear at body top level.
 	wantMap := map[string]string{
 		"CommunicationProtocol":     "", // top level
@@ -295,7 +293,6 @@ func TestDeployedParent_Stage2_MapsAllNineNames(t *testing.T) {
 		"ClosingProcedure":          "Identity",
 		"AvailableWorkflows":        "Identity",
 		"InfrastructureAgents":      "Identity",
-		"ProtocolConstraints":       "Constraints",
 		"HarnessConstraints":        "Constraints",
 		"ErrorHandlingCommon":       "ErrorHandling",
 		"ExecutionPhilosophyCommon": "ExecutionPhilosophy",
@@ -323,13 +320,13 @@ func TestDeployedParent_Stage2_ArtifactProvenance_IsAbsent(t *testing.T) {
 	}
 }
 
-func TestDeployedParent_Stage2_ContainsExactlyNineEntries(t *testing.T) {
+func TestDeployedParent_Stage2_ContainsExactlyEightEntries(t *testing.T) {
 	got := docformat.DeployedParent
 	if got == nil {
 		t.Fatal("DeployedParent is nil")
 	}
-	if len(got) != 9 {
-		t.Fatalf("DeployedParent length: want 9, got %d: %v", len(got), got)
+	if len(got) != 8 {
+		t.Fatalf("DeployedParent length: want 8, got %d: %v", len(got), got)
 	}
 }
 
@@ -344,7 +341,6 @@ func TestDeployedParent_Stage2_NewBundleNames_HaveCorrectParents(t *testing.T) {
 	}{
 		{"AuthorityHierarchy", "Identity"},
 		{"ClosingProcedure", "Identity"},
-		{"ProtocolConstraints", "Constraints"},
 		{"ErrorHandlingCommon", "ErrorHandling"},
 		{"ExecutionPhilosophyCommon", "ExecutionPhilosophy"},
 	}
@@ -400,17 +396,15 @@ func TestInjectionParent_Stage2_ArtifactProvenanceExtension_IsAbsent(t *testing.
 
 func TestInjectionParent_Stage2_FullAdvisoryMap(t *testing.T) {
 	// InjectionParent is now advisory only (no enforcement of an allowlist).
-	// The eight entries are the usual parents used for advisory reporting.
+	// The six entries are the usual parents used for advisory reporting.
 	// ProtocolExtension is removed in Stage 2 — projects use <ProtocolExtension type="custom">.
 	// LanguagePatterns is included here after moving out of the tool-managed CanonicalDeployed set.
 	wantMap := map[string]string{
-		"IdentityExtension":      "Identity",
 		"CodebaseContext":        "Capabilities",
 		"LanguagePatterns":       "Capabilities", // moved from CanonicalDeployed
 		"OutputArtifactTemplate": "Capabilities",
 		"SeverityThresholds":     "Capabilities",
 		"SeverityDefinitions":    "Capabilities",
-		"ErrorHandlingExtension": "ErrorHandling",
 		"ContextLimits":          "ExecutionPhilosophy",
 	}
 	got := docformat.InjectionParent
@@ -424,6 +418,9 @@ func TestInjectionParent_Stage2_FullAdvisoryMap(t *testing.T) {
 		} else if gotParent != wantParent {
 			t.Errorf("InjectionParent[%q]: want %q, got %q", name, wantParent, gotParent)
 		}
+	}
+	if len(got) != len(wantMap) {
+		t.Errorf("InjectionParent length: want %d, got %d: %v", len(wantMap), len(got), got)
 	}
 	// ProtocolExtension must be absent from the advisory map after Stage 2.
 	if _, ok := got["ProtocolExtension"]; ok {
@@ -441,7 +438,6 @@ func TestInjectionParent_Stage2_DoesNotContainToolManagedNames(t *testing.T) {
 		"ClosingProcedure",
 		"AvailableWorkflows",
 		"InfrastructureAgents",
-		"ProtocolConstraints",
 		"HarnessConstraints",
 		"ErrorHandlingCommon",
 		"ExecutionPhilosophyCommon",
@@ -480,7 +476,6 @@ func TestExpectedMarker_Stage2_NewBundleNames_ReturnNodeDeployedAndKnownTrue(t *
 	bundleNames := []string{
 		"AuthorityHierarchy",
 		"ClosingProcedure",
-		"ProtocolConstraints",
 		"ErrorHandlingCommon",
 		"ExecutionPhilosophyCommon",
 	}
@@ -523,7 +518,7 @@ func TestExpectedMarker_Stage2_ArtifactProvenance_IsNotKnown(t *testing.T) {
 	if known {
 		t.Error("ExpectedMarker(\"ArtifactProvenance\"): known=true, want false — " +
 			"ArtifactProvenance is removed from the vocabulary in Stage 2")
-}
+	}
 }
 
 func TestExpectedMarker_Stage2_UnknownName_IsNotKnown(t *testing.T) {
@@ -621,7 +616,6 @@ func TestClassifyRegion_Stage2_BundleNames_ReturnBundleClass(t *testing.T) {
 	bundleNames := []string{
 		"AuthorityHierarchy",
 		"ClosingProcedure",
-		"ProtocolConstraints",
 		"ErrorHandlingCommon",
 		"ExecutionPhilosophyCommon",
 	}
@@ -744,5 +738,48 @@ func TestInjectionBundle_ValueIsBundleString(t *testing.T) {
 	const wantValue domain.InjectionClass = "bundle"
 	if domain.InjectionBundle != wantValue {
 		t.Errorf("InjectionBundle: want %q, got %q", wantValue, domain.InjectionBundle)
+	}
+}
+
+// ---------------------------------------------------------------------------
+// Retired names: ProtocolConstraints, IdentityExtension, ErrorHandlingExtension
+// ---------------------------------------------------------------------------
+
+func TestVocabulary_RetiredNames_AreAbsentFromEveryList(t *testing.T) {
+	retired := []string{"ProtocolConstraints", "IdentityExtension", "ErrorHandlingExtension"}
+	for _, name := range retired {
+		for _, d := range docformat.CanonicalDeployed {
+			if d == name {
+				t.Errorf("CanonicalDeployed must not contain retired name %q", name)
+			}
+		}
+		if _, ok := docformat.DeployedParent[name]; ok {
+			t.Errorf("DeployedParent must not contain retired name %q", name)
+		}
+		if _, ok := docformat.InjectionParent[name]; ok {
+			t.Errorf("InjectionParent must not contain retired name %q", name)
+		}
+	}
+}
+
+func TestClassifyRegion_RetiredNames_UnderDeployed_ReturnUnknownDeployedError(t *testing.T) {
+	// A managed region named after a retired name is an unrecognised deployed name,
+	// not a region silently resolved to a parent or a bundle class.
+	retired := []string{"ProtocolConstraints", "IdentityExtension", "ErrorHandlingExtension"}
+	for _, name := range retired {
+		class, err := docformat.ClassifyRegion(docformat.NodeDeployed, name)
+		if err == nil {
+			t.Errorf("ClassifyRegion(NodeDeployed, %q): want error wrapping ErrUnknownDeployedName, got class %q", name, class)
+			continue
+		}
+		if !errors.Is(err, docformat.ErrUnknownDeployedName) {
+			t.Errorf("ClassifyRegion(NodeDeployed, %q): error does not wrap ErrUnknownDeployedName: %v", name, err)
+		}
+	}
+}
+
+func TestExpectedMarker_ProtocolConstraints_IsNotKnown(t *testing.T) {
+	if _, known := docformat.ExpectedMarker("ProtocolConstraints"); known {
+		t.Error("ExpectedMarker(\"ProtocolConstraints\"): known=true, want false - the name is retired")
 	}
 }

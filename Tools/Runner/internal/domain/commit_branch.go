@@ -50,6 +50,19 @@ func ParseCommitBranchVariant(s string) (CommitBranchVariant, error) {
 	}
 }
 
+// DeriveCommitBranchVariant returns CommitBranchMOSAICOwned exactly when
+// commitBranch == MOSAICRunBranchName(runID), CommitBranchUserOwn for any
+// other non-empty value, and "" when commitBranch is "".
+func DeriveCommitBranchVariant(commitBranch, runID string) CommitBranchVariant {
+	if commitBranch == "" {
+		return ""
+	}
+	if commitBranch == MOSAICRunBranchName(runID) {
+		return CommitBranchMOSAICOwned
+	}
+	return CommitBranchUserOwn
+}
+
 // MOSAICRunBranchName returns the MOSAIC-owned branch name for a run id:
 // "mosaic/run/" + runID.
 func MOSAICRunBranchName(runID string) string {

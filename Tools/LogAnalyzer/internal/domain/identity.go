@@ -10,12 +10,13 @@ const (
 	HarnessClaudeCode Harness = "claude-code"
 	HarnessOpenCode   Harness = "opencode"
 	HarnessVSCodeGHCP Harness = "vscode-ghcp"
+	HarnessGHCPCLI    Harness = "ghcp-cli"
 )
 
 // IsRecognised reports whether the harness value is one of the known adapters.
 // Unrecognised harness values are tolerated (not rejected) by the decoder.
 func (h Harness) IsRecognised() bool {
-	return h == HarnessClaudeCode || h == HarnessOpenCode || h == HarnessVSCodeGHCP
+	return h == HarnessClaudeCode || h == HarnessOpenCode || h == HarnessVSCodeGHCP || h == HarnessGHCPCLI
 }
 
 // ModelID is a model identifier as it appears in the logs and as it keys the

@@ -18,9 +18,9 @@ current_state:
 ---
 
 <ExecutionLog type="core">
-| Seq | Agent | Phase | Stage | Status | Timestamp | Summary | Inputs | Checkpoint |
-|-----|-------|-------|-------|--------|-----------|---------|--------|------------|
-| 1 | codebase-research#1 | RESEARCH | - | SUCCESS | 2026-01-15T10:05:00Z | Identified CLI entry point, flag parsing with pflag, existing diagnostic pattern. | - | - |
+| Seq | Agent | Phase | Stage | WorkflowRow | Status | Timestamp | Summary | Inputs | Checkpoint |
+|-----|-------|-------|-------|-------------|--------|-----------|---------|--------|------------|
+| 1 | codebase-research#1 | RESEARCH | - | 1 | SUCCESS | 2026-01-15T10:05:00Z | Identified CLI entry point, flag parsing with pflag, existing diagnostic pattern. | - | - |
 </ExecutionLog>
 
 <Artifacts type="core">

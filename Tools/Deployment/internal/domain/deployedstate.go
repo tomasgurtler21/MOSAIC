@@ -22,6 +22,10 @@ type DeployedArtifactState struct {
 	ProtocolVersion               string            // version from the `version` attribute on the deployed <CommunicationProtocol type="managed"> region's opening tag; "" when absent, region missing, or file unparseable
 	BundleVersion                 string            // frontmatter `bundle_version` scalar, verbatim; "" when absent, unparseable, or the file received no bundle region
 
+	// InfrastructureDeclarations lists the infrastructure agent declarations found in the file;
+	// non-nil only when the file declares at least one.
+	InfrastructureDeclarations DeployedInfrastructureDeclarations
+
 	// HasInjectionRegion reports whether the deployed file's body contains at least one region
 	// whose class is mosaic.InjectionHarness. When false, AgentStaleness skips the
 	// InjectionsVersion comparison to prevent false-positive staleness reports for agents
@@ -30,6 +34,12 @@ type DeployedArtifactState struct {
 	// Populated by the probe layer (app/deployedstate.go) during extraction.
 	// The zero value (false) means "no injection region found or file absent."
 	HasInjectionRegion bool
+
+	// ParseProblem describes why a present file at the planned target path could not be
+	// used: the parse error text (for docformat format errors: "frontmatter: line N: ...: \"excerpt\""),
+	// "no frontmatter", or "frontmatter has no id". Non-empty only when ParseFailed is true;
+	// "" for every other state.
+	ParseProblem string
 }
 
 // HasVersionInfo reports whether the deployed file carries at least one readable version stamp.

@@ -130,7 +130,7 @@ The search target is a long, unusual literal string, which makes this an ordinar
 
 ### 5.3 The infrastructure agent declaration region
 
-`<InfrastructureAgents type="project">`, in the same deployed orchestrator file located by §5.2, read in the same pass.
+`<InfrastructureAgents type="managed">`, in the same deployed orchestrator file located by §5.2, read in the same pass.
 
 It supplies one thing: the names of the infrastructure agents this orchestrator may dispatch. Tier B reports agents appearing in the Execution Log that the workflow table does not name, and infrastructure agents are never in a workflow table — without this list, every `checkpoint-manager-git` row, and every one of this agent's own rows, would be reported as an anomaly. A drift detector whose most frequent finding is itself would be ignored within one run, taking its real findings with it.
 
@@ -156,6 +156,7 @@ Internal coherence of the artifact against the contracts the orchestrator's inst
 - `Checkpoint` populated on any row while `checkpoints` is `disabled`.
 - Workflow Notes: duplicated or accumulating entries.
 - `current_state.error_code` populated without `last_status` being `BLOCKED`, or absent when it is.
+- `WorkflowRow` column contract, when the Execution Log header has that column: every workflow-participant entry carries a positive integer; infrastructure, out-of-band and ad-hoc-run entries carry `-`. A log without the column (written before it existed) is valid and is not a finding.
 
 These are the cheap, mechanical checks the agent is reliably right about. They also catch the specific failure this agent was conceived for: an orchestrator that starts writing the artifact carelessly as its context degrades — restating notes, duplicating rows, letting frontmatter drift from the log.
 
@@ -175,6 +176,8 @@ Comparison of the recorded execution against the workflow table, limited to case
 - **Agents appearing in the Execution Log that nothing accounts for.** Three sources are legitimate and must be subtracted before anything is reported: the workflow table (§5.2), the infrastructure agent declaration region (§5.3), and human dispatch out of band.
 
   The third cannot be enumerated — there is no list of what a human may legitimately dispatch, and `checkpoint-restore-git` is exactly such an agent. So an unexplained name is reported as an **observation**, in the same register as the repetition check: the agent states that a name appears which it cannot account for, and asks. It does not assert a violation. This is the honest shape of the check, because the agent genuinely cannot distinguish a routing error from a deliberate human intervention, and a recovery action taken during an incident is precisely when a false accusation is least welcome.
+- **Recorded row against the table.** For each entry with an integer `WorkflowRow`, the agent named at that row of the deployed workflow table must match the entry's agent, and the row's group must match the entry's recorded Stage group (for example `Test.1`). The table row number is the table's `Row` column value, or the 1-based data-row position when the deployed table has no `Row` column. A deployed table whose `Row` values do not match row positions is itself a finding. Entries recording `-` and logs without the column are skipped silently.
+- **Route-back target.** After a `COMPLETED_NEEDS_ACTION` that was routed back, the next workflow dispatch must have gone to the nearest row above the reviewing row whose agent is the On Findings target, regardless of group or stage boundaries.
 - Advancing on a non-`SUCCESS` status with no routing target in the table that accounts for it.
 - Phase or stage transitions the workflow table does not permit.
 - Repetition worth noticing — the same agent recurring many times in a short span. **Reported as an observation, never as a conclusion.** The agent states the count and asks; it does not decide whether a loop is pathological, because sometimes it is exactly what the workflow prescribes.
@@ -201,7 +204,7 @@ An artifact would be written for nobody: the orchestrator is forbidden from read
 
 **Always `SUCCESS`**, whether or not anything was found. `BLOCKED` only when the agent genuinely cannot function — no access to the artifact it was given.
 
-Every other status code invokes orchestrator routing machinery. `COMPLETED_NEEDS_ACTION` routes to a fix target; `NEEDS_CLARIFICATION` stops for input. Both convert an observation into an instruction to act, which is the exact inversion of authority this agent exists to avoid. `SUCCESS` means the orchestrator auto-advances and the observation is simply present — in its context now, and in the log permanently.
+The other statuses describe outcomes this assignment does not have. Its completed observations are normal output rather than an agent-specific action condition, so they are `SUCCESS`; unavailable required input is `BLOCKED`. Returning another status would misdescribe the invocation and send orchestration policy down a route class unsupported by what happened.
 
 This is what makes the agent advisory as a matter of mechanism rather than manners. There is no code path by which its output becomes a command.
 
@@ -254,6 +257,7 @@ Layer 1 is the one that holds if the others fail, which is why the status code p
 | Orchestrator file found but declaration region unreadable | Skip the unknown-agent check only — reporting it without the exclusion list would produce noise. Every other Tier B check is unaffected. `SUCCESS`. |
 | Artifact unreadable or unparseable | `BLOCKED`, `E101`. The one case where the agent genuinely cannot function. |
 | Artifact well-formed but nearly empty (early in a run) | Nothing to check yet. Say so. `SUCCESS`. |
+| `WorkflowRow` column absent, on an artifact predating it | Skip the column check and the recorded-row and route-back checks silently; not a finding. Every other check is unaffected. `SUCCESS`. |
 | Findings exceed what a `status_message` holds | Report the most significant, count the rest. |
 
 The first row is a direct consequence of §2's split. Because Tier A's rules are carried by the agent rather than read from anywhere, artifact-consistency checking never depends on discovery succeeding — and artifact consistency is precisely the failure this agent was conceived for, an orchestrator writing its blackboard carelessly as its context degrades. Only routing conformance needs the workflow table, and only routing conformance is lost when it cannot be found.
@@ -267,6 +271,8 @@ The first row is a direct consequence of §2's split. Because Tier A's rules are
 | Orchestrator system instructions | The constraint that `Orchestration.md` is never accessed by subagents gains a stated exception for this agent, read-only. Leaving it unstated would put the orchestrator's own constraints in silent contradiction with a deployed agent's behaviour. |
 | Orchestration artifact schema §5 | The Execution Log gains an **`Inputs`** column, inserted between `Summary` and `Checkpoint`, recording the `input_artifacts` list of that dispatch. |
 | Orchestrator system instructions | The orchestrator writes the `Inputs` column when appending each row. |
+| Orchestration artifact schema §5 | The Execution Log gains a **`WorkflowRow`** column, inserted directly after `Stage` (column count 9 to 10), recording the `Row` value of the workflow table row the invocation ran; `-` for infrastructure, out-of-band and ad-hoc-run entries. Consumers bind by column name; logs written before the column remain valid and are not findings. Defined in OrchestrationArtifactFormat.md. |
+| Orchestration-review agent | Tier A checks the column contract; Tier B checks recorded row against the deployed table and route-back targets (§6). |
 
 **This changes a fixed column contract, which is a breaking change for parsers.** The schema declares the Execution Log's columns fixed, so a consumer written against the current 8-column shape will mis-read a 9-column row. Three consequences follow, and none should be discovered later:
 

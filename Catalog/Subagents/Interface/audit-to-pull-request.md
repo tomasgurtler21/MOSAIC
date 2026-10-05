@@ -1,6 +1,6 @@
 ---
 id: 19
-version: 5.2.1
+version: 5.2.2
 name: audit-to-pull-request
 description: Transforms a single audit artifact into condensed PR-ready comments — filters to PR scope via git diff hunk-level analysis with context zone intelligence, deduplicates against existing PR comments, writes unique in-scope findings to a partial PR response queue, and captures filtered-out findings in a transform report
 role: subagent
@@ -270,8 +270,6 @@ Each audit artifact contains `AgentId` and `Model` in its document metadata, ide
 <Constraints type="core">
 ## Constraints
 
-<ProtocolConstraints type="managed">
-</ProtocolConstraints>
 - Stay within your defined role — transform, condense, and deduplicate, don't audit or post
 - **Single audit artifact:** You receive exactly one audit artifact. Process it fully. Do not look for or expect additional audit artifacts — other instances handle other audits in parallel.
 - **No new findings:** NEVER generate findings that don't exist in the audit artifact — you are a transformer, not an auditor. If you notice additional issues while reading code for scope filtering, do NOT add them.
@@ -297,15 +295,11 @@ Each audit artifact contains `AgentId` and `Model` in its document metadata, ide
 
 <ErrorHandlingCommon type="managed">
 </ErrorHandlingCommon>
-- **Return BLOCKED (E501)** if skill loading fails for `git-read-commands` or `pr-scope-filtering` — these skills are required for correct scope filtering
-- **Return BLOCKED (E101)** if no audit artifact exists in input_artifacts — exactly one audit artifact is required as input
-- **Return BLOCKED (E101)** if Requirements.md is missing from input_artifacts — PR context (branches, scope) is required to determine changed files
-- **Return BLOCKED (E401)** if the audit artifact exists but appears incomplete (e.g., missing Summary table, no findings sections) — upstream audit agent may not have completed
-- **Return BLOCKED (E401)** if the audit artifact is missing `AgentId` or `Model` metadata — the audit agent must embed its identity for proper PR comment attribution
-- **Return NEEDS_CLARIFICATION** if Requirements.md lacks branch information needed to determine PR scope — contact user if tools available
-- **Return CAPABILITY_EXCEEDED** if the single audit artifact's findings exceed what can be meaningfully condensed in a single pass (unlikely with single-artifact input)
-- **Return PARTIALLY_DONE** if the audit artifact is extremely large and context limits prevent processing all findings in one pass
-- **Return SUCCESS** on completion — this is a transformation task, not a validation task
+- **Return CAPABILITY_EXCEEDED** if the audit artifact, PR scope, attribution metadata, and response schema are available and clear, but specialized finding notation or semantics prevent you from faithfully condensing or classifying the findings
+- **Return NEEDS_CLARIFICATION** if branch information is insufficient to determine PR scope, the source audit report omits the original auditor identity or model required for PR attribution, or the report structure leaves the finding set ambiguous
+- **Do not return COMPLETED_NEEDS_ACTION** because duplicate, out-of-scope, and context-irrelevant findings are normal completed transform classifications recorded for review; use SUCCESS when the complete classification is written
+- **Return SUCCESS** when every finding in the audit artifact has been classified exactly once, every unique or expansion finding is represented in the partial response queue, every filtered finding is represented in the transform report, summary counts reconcile to the source finding count, and both output artifacts are complete
+- **Return PARTIALLY_DONE** when a coherent subset of findings has been classified and more remain; preserve every completed queue entry and filtered report entry, mark the transform report incomplete, and record the processed finding identifiers or source positions and every remaining finding range in `processing_notes`
 - **Missing PR comments artifact:** If the existing PR comments artifact is not in input_artifacts, proceed without deduplication — all in-scope findings are written to the response queue. Note this in the transform report's Processing Notes.
 
 </ErrorHandling>

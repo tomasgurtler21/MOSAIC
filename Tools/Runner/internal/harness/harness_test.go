@@ -4,7 +4,7 @@ package harness_test
 //
 // Coverage (T8.1 / AC8.1):
 //
-//   FakeAdapter — scripted response delivery:
+//   MockAdapter — scripted response delivery:
 //   - Returns the scripted ProtocolResponse for a queued success entry.
 //   - Returns the scripted error for a queued error entry.
 //   - Returns an error when the queue for a given agent is exhausted.
@@ -12,11 +12,11 @@ package harness_test
 //   - Multiple agents share the same adapter; each has its own FIFO queue.
 //   - Records all invocations in call order (agent and request preserved).
 //
-//   FakeAdapter — malformed response:
+//   MockAdapter — malformed response:
 //   - RawJSON with invalid JSON returns an error (not a panic).
 //   - RawJSON with valid JSON returns the parsed ProtocolResponse.
 //
-//   FakeAdapter — context cancellation:
+//   MockAdapter — context cancellation:
 //   - A context cancelled before Invoke is called returns ctx.Err().
 //   - A valid scripted entry is NOT consumed when the context is cancelled.
 //
@@ -69,12 +69,12 @@ func successEntry(agentID string) harness.ScriptedEntry {
 	}
 }
 
-// ===== FakeAdapter: scripted response delivery =====
+// ===== MockAdapter: scripted response delivery =====
 
-// TestFakeAdapter_ReturnsScriptedResponse verifies that Invoke returns the
+// TestMockAdapter_ReturnsScriptedResponse verifies that Invoke returns the
 // scripted ProtocolResponse for a queued success entry.
-func TestFakeAdapter_ReturnsScriptedResponse(t *testing.T) {
-	f := harness.NewFakeAdapter()
+func TestMockAdapter_ReturnsScriptedResponse(t *testing.T) {
+	f := harness.NewMockAdapter()
 	f.Queue("agent-a", successEntry("agent-a"))
 
 	resp, err := f.Invoke(context.Background(), agentRef("agent-a"), minimalRequest("agent-a#1"))
@@ -87,10 +87,10 @@ func TestFakeAdapter_ReturnsScriptedResponse(t *testing.T) {
 	}
 }
 
-// TestFakeAdapter_ReturnsScriptedError verifies that Invoke returns the
+// TestMockAdapter_ReturnsScriptedError verifies that Invoke returns the
 // scripted error for a queued error entry.
-func TestFakeAdapter_ReturnsScriptedError(t *testing.T) {
-	f := harness.NewFakeAdapter()
+func TestMockAdapter_ReturnsScriptedError(t *testing.T) {
+	f := harness.NewMockAdapter()
 	sentinel := errors.New("simulated harness crash")
 	f.Queue("agent-a", harness.ScriptedEntry{Err: sentinel})
 
@@ -101,11 +101,11 @@ func TestFakeAdapter_ReturnsScriptedError(t *testing.T) {
 	}
 }
 
-// TestFakeAdapter_ExhaustedQueue_ReturnsError verifies that Invoke returns an
+// TestMockAdapter_ExhaustedQueue_ReturnsError verifies that Invoke returns an
 // error when the queue for an agent has been exhausted, rather than blocking
 // or panicking.
-func TestFakeAdapter_ExhaustedQueue_ReturnsError(t *testing.T) {
-	f := harness.NewFakeAdapter()
+func TestMockAdapter_ExhaustedQueue_ReturnsError(t *testing.T) {
+	f := harness.NewMockAdapter()
 	// No entries queued for "agent-a".
 
 	_, err := f.Invoke(context.Background(), agentRef("agent-a"), minimalRequest("agent-a#1"))
@@ -115,10 +115,10 @@ func TestFakeAdapter_ExhaustedQueue_ReturnsError(t *testing.T) {
 	}
 }
 
-// TestFakeAdapter_FIFOOrder verifies that entries are consumed in the order
+// TestMockAdapter_FIFOOrder verifies that entries are consumed in the order
 // they were added (first-in, first-out).
-func TestFakeAdapter_FIFOOrder(t *testing.T) {
-	f := harness.NewFakeAdapter()
+func TestMockAdapter_FIFOOrder(t *testing.T) {
+	f := harness.NewMockAdapter()
 	f.Queue("agent-a",
 		harness.ScriptedEntry{Response: &domain.ProtocolResponse{StatusCode: domain.StatusSUCCESS, StatusMessage: "first"}},
 		harness.ScriptedEntry{Response: &domain.ProtocolResponse{StatusCode: domain.StatusBLOCKED, StatusMessage: "second"}},
@@ -135,10 +135,10 @@ func TestFakeAdapter_FIFOOrder(t *testing.T) {
 	}
 }
 
-// TestFakeAdapter_MultipleAgents_IndependentQueues verifies that different
+// TestMockAdapter_MultipleAgents_IndependentQueues verifies that different
 // agents each have their own independent FIFO queue.
-func TestFakeAdapter_MultipleAgents_IndependentQueues(t *testing.T) {
-	f := harness.NewFakeAdapter()
+func TestMockAdapter_MultipleAgents_IndependentQueues(t *testing.T) {
+	f := harness.NewMockAdapter()
 	f.Queue("agent-a", harness.ScriptedEntry{Response: &domain.ProtocolResponse{StatusMessage: "a-response"}})
 	f.Queue("agent-b", harness.ScriptedEntry{Response: &domain.ProtocolResponse{StatusMessage: "b-response"}})
 
@@ -153,10 +153,10 @@ func TestFakeAdapter_MultipleAgents_IndependentQueues(t *testing.T) {
 	}
 }
 
-// TestFakeAdapter_RecordsInvocationsInOrder verifies that all calls are
+// TestMockAdapter_RecordsInvocationsInOrder verifies that all calls are
 // recorded in call order with the agent and request preserved.
-func TestFakeAdapter_RecordsInvocationsInOrder(t *testing.T) {
-	f := harness.NewFakeAdapter()
+func TestMockAdapter_RecordsInvocationsInOrder(t *testing.T) {
+	f := harness.NewMockAdapter()
 	f.Queue("agent-a", successEntry("agent-a"))
 	f.Queue("agent-b", successEntry("agent-b"))
 
@@ -181,14 +181,14 @@ func TestFakeAdapter_RecordsInvocationsInOrder(t *testing.T) {
 	}
 }
 
-// ===== FakeAdapter: malformed response =====
+// ===== MockAdapter: malformed response =====
 
-// TestFakeAdapter_MalformedRawJSON_ReturnsError verifies that a RawJSON entry
+// TestMockAdapter_MalformedRawJSON_ReturnsError verifies that a RawJSON entry
 // with invalid JSON returns an error from Invoke rather than causing a panic.
 // This exercises the "surface malformed responses as handleable deviations"
 // requirement (AC8.1).
-func TestFakeAdapter_MalformedRawJSON_ReturnsError(t *testing.T) {
-	f := harness.NewFakeAdapter()
+func TestMockAdapter_MalformedRawJSON_ReturnsError(t *testing.T) {
+	f := harness.NewMockAdapter()
 	f.Queue("agent-a", harness.ScriptedEntry{RawJSON: []byte(`{not valid json`)})
 
 	_, err := f.Invoke(context.Background(), agentRef("agent-a"), minimalRequest("agent-a#1"))
@@ -202,10 +202,10 @@ func TestFakeAdapter_MalformedRawJSON_ReturnsError(t *testing.T) {
 	}
 }
 
-// TestFakeAdapter_ValidRawJSON_ReturnsParsedResponse verifies that a RawJSON
+// TestMockAdapter_ValidRawJSON_ReturnsParsedResponse verifies that a RawJSON
 // entry with valid JSON returns the parsed ProtocolResponse.
-func TestFakeAdapter_ValidRawJSON_ReturnsParsedResponse(t *testing.T) {
-	f := harness.NewFakeAdapter()
+func TestMockAdapter_ValidRawJSON_ReturnsParsedResponse(t *testing.T) {
+	f := harness.NewMockAdapter()
 	raw, _ := json.Marshal(domain.ProtocolResponse{
 		AgentInstanceID: "agent-a#1",
 		StatusCode:      domain.StatusSUCCESS,
@@ -223,12 +223,12 @@ func TestFakeAdapter_ValidRawJSON_ReturnsParsedResponse(t *testing.T) {
 	}
 }
 
-// ===== FakeAdapter: context cancellation =====
+// ===== MockAdapter: context cancellation =====
 
-// TestFakeAdapter_CancelledContext_ReturnsCancellationError verifies that
+// TestMockAdapter_CancelledContext_ReturnsCancellationError verifies that
 // Invoke returns ctx.Err() when the context is already cancelled on entry.
-func TestFakeAdapter_CancelledContext_ReturnsCancellationError(t *testing.T) {
-	f := harness.NewFakeAdapter()
+func TestMockAdapter_CancelledContext_ReturnsCancellationError(t *testing.T) {
+	f := harness.NewMockAdapter()
 	f.Queue("agent-a", successEntry("agent-a"))
 
 	ctx, cancel := context.WithCancel(context.Background())
@@ -241,11 +241,11 @@ func TestFakeAdapter_CancelledContext_ReturnsCancellationError(t *testing.T) {
 	}
 }
 
-// TestFakeAdapter_CancelledContext_DoesNotConsumeEntry verifies that a
+// TestMockAdapter_CancelledContext_DoesNotConsumeEntry verifies that a
 // cancelled context does not consume a scripted entry from the queue. The
 // entry should remain available for the next (non-cancelled) call.
-func TestFakeAdapter_CancelledContext_DoesNotConsumeEntry(t *testing.T) {
-	f := harness.NewFakeAdapter()
+func TestMockAdapter_CancelledContext_DoesNotConsumeEntry(t *testing.T) {
+	f := harness.NewMockAdapter()
 	f.Queue("agent-a", successEntry("agent-a"))
 
 	ctx, cancel := context.WithCancel(context.Background())
@@ -265,7 +265,7 @@ func TestFakeAdapter_CancelledContext_DoesNotConsumeEntry(t *testing.T) {
 // ===== Protocol serialisation =====
 
 // TestMarshalRequest_ProducesExpectedFieldNames verifies that MarshalRequest
-// produces JSON with the Communication Protocol v1.7 snake_case field names.
+// produces JSON with the Communication Protocol v1.12 snake_case field names.
 func TestMarshalRequest_ProducesExpectedFieldNames(t *testing.T) {
 	req := domain.ProtocolRequest{
 		AgentInstanceID:      "writer#1",
@@ -389,6 +389,30 @@ func TestUnmarshalResponse_ReturnsErrorOnInvalidJSON(t *testing.T) {
 	_, err := harness.UnmarshalResponse([]byte(`not json`))
 	if err == nil {
 		t.Fatal("want error for invalid JSON, got nil")
+	}
+}
+
+// TestUnmarshalResponse_E100OmittingAgentInstanceID_StillParses verifies the
+// one tolerance response parsing keeps: an invalid-invocation response whose
+// cause is an unusable identifier cannot echo that identifier, so it omits it
+// and must still be understood. Artifacts get no such tolerance (an artifact
+// without a usable run_id is refused when parsed).
+func TestUnmarshalResponse_E100OmittingAgentInstanceID_StillParses(t *testing.T) {
+	raw := `{"status_code":"BLOCKED","status_message":"invalid invocation","error_code":"E100","error_reason":"agent_instance_id is absent"}`
+
+	resp, err := harness.UnmarshalResponse([]byte(raw))
+
+	if err != nil {
+		t.Fatalf("UnmarshalResponse: want an E100 response without agent_instance_id to parse, got %v", err)
+	}
+	if resp.StatusCode != domain.StatusBLOCKED {
+		t.Errorf("want StatusCode=BLOCKED, got %q", resp.StatusCode)
+	}
+	if resp.ErrorCode != domain.ErrorINVALID_INVOCATION {
+		t.Errorf("want ErrorCode=E100, got %q", resp.ErrorCode)
+	}
+	if resp.AgentInstanceID != "" {
+		t.Errorf("want no AgentInstanceID invented for the response, got %q", resp.AgentInstanceID)
 	}
 }
 

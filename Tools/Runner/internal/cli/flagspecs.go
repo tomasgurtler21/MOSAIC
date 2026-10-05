@@ -37,6 +37,7 @@ func RegisterRunFlags(fs *pflag.FlagSet) {
 	fs.String("commit-branch", "", "Commit branch variant (mosaic-owned|user-own); default mosaic-owned")
 	fs.Bool("pre-consult", true, "Enable one-shot run-start pre-consultation (auto and auto-review only); use --pre-consult=false to disable")
 	fs.Bool("manual-resolution", false, "Put the user in the resolver's place on consultation failure")
+	fs.String("review-loop-limit", "", "Maximum review loop iterations: a positive integer, or \"none\" for no limit. Required for a new run; fixed once the run exists")
 	fs.String("run", "", "Resume a specific run by run_id")
 	fs.Bool("new-run", false, "Force creation of a new run")
 	fs.String("harness", harness.FakeHarnessID, fmt.Sprintf("Harness adapter to use (%s)", harness.FlagValues()))

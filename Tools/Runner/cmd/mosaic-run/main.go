@@ -11,14 +11,10 @@ package main
 
 import (
 	"context"
-	"errors"
 	"fmt"
 	"os"
 	"path/filepath"
-	"strings"
 	"time"
-
-	"github.com/mattn/go-isatty"
 
 	commonharness "mosaic-common/harness"
 
@@ -27,15 +23,12 @@ import (
 	"mosaic-run/internal/debuglog"
 	"mosaic-run/internal/dispatchlog"
 	"mosaic-run/internal/domain"
-	"mosaic-run/internal/harness"
-	"mosaic-run/internal/runscan"
-	"mosaic-run/internal/runselect"
 	"mosaic-run/internal/session"
-	"mosaic-run/internal/tui"
-	"mosaic-run/internal/tui/screens"
+
+	"github.com/mattn/go-isatty"
 )
 
-const ToolVersion = "1.1.0"
+const ToolVersion = "1.4.0"
 
 // wantsTUI reports whether mosaic-run should launch the interactive TUI.
 // The TUI is launched when:
@@ -76,22 +69,37 @@ func main() {
 	// resolution, session construction, etc.). The test subcommand manages its own
 	// dependency construction from its flags.
 	if devMode && firstPositionalArg(cobraArgs) == "test" {
-		testWorkDir, wdErr := os.Getwd()
-		if wdErr != nil {
-			fmt.Fprintf(os.Stderr, "error: getting working directory: %v\n", wdErr)
-			os.Exit(1)
-		}
-		os.Exit(cli.RunTestCommand(context.Background(), cobraArgs, testWorkDir, os.Stdout, os.Stderr))
-		return
+		os.Exit(runDevTestMode(cobraArgs))
 	}
 
+	os.Exit(runCLIMode(args, cobraArgs))
+}
+
+// runDevTestMode routes to the --dev test subcommand entry point. The test
+// subcommand manages its own dependency construction from its flags, so no
+// run-specific wiring (run identity resolution, session construction) happens
+// before this call.
+func runDevTestMode(cobraArgs []string) int {
+	testWorkDir, wdErr := os.Getwd()
+	if wdErr != nil {
+		fmt.Fprintf(os.Stderr, "error: getting working directory: %v\n", wdErr)
+		return 1
+	}
+	return cli.RunTestCommand(context.Background(), cobraArgs, testWorkDir, os.Stdout, os.Stderr)
+}
+
+// runCLIMode performs the non-interactive CLI frontend's dependency wiring and
+// returns the process exit code. args is the full, unstripped argument list
+// (used for pre-scans that must see --dev-adjacent flags exactly as main()
+// received them); cobraArgs is the --dev-stripped list handed to cli.Run.
+func runCLIMode(args, cobraArgs []string) int {
 	// Resolve the working directory as early as possible so the debug logger can
 	// be constructed before any other operation, capturing failures that occur
 	// before run identity is known.
 	workDir, err := os.Getwd()
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "error: getting working directory: %v\n", err)
-		os.Exit(1)
+		return 1
 	}
 
 	// Construct the process-level debug logger. One logger per process; the file
@@ -146,7 +154,7 @@ func main() {
 	if identErr != nil {
 		logger.Log(domain.EventRunnerError, identErr.Error())
 		fmt.Fprintf(os.Stderr, "error: %v\n", identErr)
-		os.Exit(2)
+		return 2
 	}
 
 	// Associate the run_id with both log files now that identity is resolved.
@@ -170,16 +178,16 @@ func main() {
 	// In CLI mode the flag must be supplied when the harness is ghcp-cli.
 	if harnessStr == commonharness.HarnessIDGHCPCLI && ghcpPermissionMode == "" {
 		fmt.Fprintf(os.Stderr, "error: --ghcp-permission-mode is required when --harness=ghcp-cli (accepted values: blanket, allowlist)\n")
-		os.Exit(2)
+		return 2
 	}
 	if ghcpPermissionMode != "" && ghcpPermissionMode != "blanket" && ghcpPermissionMode != "allowlist" {
 		fmt.Fprintf(os.Stderr, "error: --ghcp-permission-mode must be \"blanket\" or \"allowlist\", got %q\n", ghcpPermissionMode)
-		os.Exit(2)
+		return 2
 	}
 
 	// Build the harness adapter via buildAdapter, passing the process logger
 	// so that invocation I/O is captured in the debug log.
-	h := buildAdapter(harnessStr, execPathStr, ghcpPermissionMode, invocationTimeout, logger)
+	h := buildAdapter(runIdentity.RunFolder, harnessStr, execPathStr, ghcpPermissionMode, invocationTimeout, logger)
 
 	// Extract the raw-JSON transport if the selected harness adapter implements it.
 	// Production adapters implement both HarnessAdapter and RawInvoker over the same
@@ -203,7 +211,7 @@ func main() {
 	// Wire the session with the resolved run-scoped store and all port dependencies.
 	// The store path matches runIdentity.RunFolder, so session I/O and the COMPLETED
 	// marker write both target the same Orchestration-{run_id}/Orchestration.md file.
-	sess := session.New(session.Deps{
+	var sess session.Session = session.New(session.Deps{
 		Harness:     h,
 		Store:       store,
 		Clock:       &realClock{},
@@ -214,567 +222,15 @@ func main() {
 		Manual:      routingDeps.Manual,
 		PreConsult:  routingDeps.PreConsult,
 		Approvals:   routingDeps.Approvals,
+		Outputs:     artifact.NewOutputWriteDetector(),
 	})
 
 	// Pass the pre-resolved store and identity so that cli.Run skips its own
 	// resolution step and uses the same run folder that was used to wire the session.
 	// Use cobraArgs (not args) so the entry-point-only --dev flag does not reach cobra.
-	os.Exit(cli.Run(context.Background(), cobraArgs, store, runIdentity, sess, os.Stdout, os.Stderr))
+	sess = withGHCPTrustPreflight(sess, runIdentity.RunFolder, harnessStr, interact, false, logger)
+	sess = newRunLifecycleSession(sess, runLogConfig{RunFolder: runIdentity.RunFolder, HarnessID: harnessStr, Debug: logger, Clock: &realClock{}})
+	runCtx, releaseRunCtx := newCLIRunContext(context.Background(), osInterrupt)
+	defer releaseRunCtx()
+	return cli.Run(runCtx, cobraArgs, store, runIdentity, sess, os.Stdout, os.Stderr)
 }
-
-// runTUIMode launches the interactive TUI frontend. All session dependencies are
-// constructed here; the TUI's ProgramRef provides the Interaction port and the
-// TUIDeviationResolver handles deviation resolution through the TUI's deviation screen.
-//
-// devMode enables the test-mode flow in the TUI (DevMode field on tui.Options).
-// When true, a "Run Tests" entry point is visible in the TUI; when false, the
-// test flow is hidden.
-func runTUIMode(args []string, devMode bool) {
-	workDir, err := os.Getwd()
-	if err != nil {
-		fmt.Fprintf(os.Stderr, "error: getting working directory: %v\n", err)
-		os.Exit(1)
-	}
-
-	// Construct the process-level debug logger once here, before any other
-	// operation, so that failures occurring before run identity is resolved are
-	// still captured. The logger is shared across all session constructions (the
-	// factory runs more than once per process), ensuring exactly one log file per run.
-	logger := debuglog.New(workDir)
-	logger.SetToolVersion(ToolVersion)
-	defer logger.Close()
-
-	// Construct the process-level dispatch logger once here, shared across all
-	// session constructions, ensuring exactly one dispatch log file per process/run.
-	dispLogger := dispatchlog.New(workDir)
-	dispLogger.SetToolVersion(ToolVersion)
-	defer dispLogger.Close()
-
-	// Pre-scan --executable-path so it is available to the session factory.
-	execPathTUI := scanFlag(args, "--executable-path")
-
-	programRef := tui.NewProgramRef()
-
-	// The graceful-stop flag is constructed exactly once per process, here,
-	// alongside the loggers and the ProgramRef and for the same reason: the
-	// session factory runs more than once per process (eager placeholder
-	// construction, config-screen completion, exec-override retry, done-screen
-	// continue), and every rebuilt session must observe the flag the TUI arms.
-	// Constructing it inside the factory would leave each rebuilt session on
-	// its own orphan flag.
-	stopSignal := session.NewStopSignal()
-
-	// minter mints run identity for new runs created from inside the TUI (run-select
-	// screen's "new run" choice). It is also used as the defensive fallback inside
-	// the session factory when an unresolved run folder is encountered.
-	minter := newTUIRunIdentityMinter(workDir)
-
-	// Resolve run identity from flags and working-directory scan.
-	identity, identErr := resolveRunIdentityForTUI(args, workDir)
-	if identErr != nil {
-		logger.Log(domain.EventRunnerError, identErr.Error())
-		if errors.Is(identErr, errTUIUsage) {
-			fmt.Fprintf(os.Stderr, "error: %v\n", identErr)
-			os.Exit(2)
-		}
-		fmt.Fprintf(os.Stderr, "error: %v\n", identErr)
-		os.Exit(1)
-	}
-
-	// Associate the run_id with both log files if identity is already resolved
-	// (single-candidate auto-resume, --run flag, or --new-run flag). When
-	// identity is deferred to the run-select screen (multi-candidate), the
-	// run_id will be associated via a separate SetRunID call once selected.
-	if identity.RunID != "" {
-		logger.SetRunID(identity.RunID)
-		dispLogger.SetRunID(identity.RunID)
-	}
-
-	// Assemble the interactive composition. The seam is the single place where
-	// the interactive session.Deps and the tui.Options are constructed, so the
-	// stop signal reaches both consumers from one source. Nothing below adds to
-	// either value.
-	wiring := buildInteractiveWiring(interactiveWiringInput{
-		ExecutablePath: execPathTUI,
-		ProgramRef:     programRef,
-		Minter:         minter,
-		Identity:       identity,
-		StopSignal:     stopSignal,
-		Debug:          logger,
-		DispatchLog:    dispLogger,
-		Clock:          &realClock{},
-		DevMode:        devMode,
-		// The run-id association needs SetRunID on the two concrete loggers,
-		// which are in scope here and not inside the seam.
-		OnRunIDResolved: func(runID string) {
-			logger.SetRunID(runID)
-			dispLogger.SetRunID(runID)
-		},
-	})
-
-	// Construct the initial session using the resolved identity (or placeholder for multi-candidate).
-	// Harness config is not yet known (config screen has not run); defaults to fake adapter.
-	// Built through the seam's own factory so no second construction path exists.
-	initSess := wiring.Options.SessionFactory(identity.RunFolder, identity.IsNewRun, "", screens.ConfigSelection{})
-
-	ctx := context.Background()
-	if err := tui.Run(ctx, initSess, wiring.Options); err != nil {
-		fmt.Fprintf(os.Stderr, "tui: %v\n", err)
-		os.Exit(1)
-	}
-}
-
-// resolveRunIdentityForCLI pre-scans --run / --new-run and the working directory
-// to determine the run folder before the session is constructed. It mirrors the
-// pre-scan pattern used for --mode and --manual-resolution.
-//
-// When --run <run_id> is present, the folder is Orchestration-{run_id} under the
-// working directory. When --new-run is present, a new run_id is minted here so
-// that the same id is used by both the session's store and cli.Run's RunConfig.
-// When neither flag is present, the working directory is scanned for resumable
-// candidates; zero candidates mints a new run_id, one candidate uses that folder,
-// and multiple candidates return an error (the multi-candidate rejection cannot be
-// deferred to cli.Run because a non-nil identity skips cli.Run's internal check).
-//
-// The second return value is always nil. Callers are responsible for constructing
-// the artifact store after identity is resolved, using the process logger so that
-// path anomalies are captured in the debug log. The nil return preserves the
-// three-value signature for call-site compatibility.
-//
-// An optional workDir may be passed as the last argument to avoid a redundant
-// os.Getwd syscall when the caller has already resolved the working directory.
-// When omitted, os.Getwd is called internally.
-func resolveRunIdentityForCLI(args []string, workDirs ...string) (*cli.RunIdentity, domain.ArtifactStore, error) {
-	var workDir string
-	if len(workDirs) > 0 {
-		workDir = workDirs[0]
-	} else {
-		var err error
-		workDir, err = os.Getwd()
-		if err != nil {
-			return nil, nil, fmt.Errorf("getting working directory: %w", err)
-		}
-	}
-
-	runIDFlag := scanFlag(args, "--run")
-	isNewRunFlag := scanBoolFlag(args, "--new-run")
-
-	// Refuse --input together with --run before any run-folder access. This check
-	// must precede the switch so the refusal cannot come from reading Orchestration.md.
-	if hasFlag(args, "--input") && runIDFlag != "" {
-		return nil, nil, fmt.Errorf("--input and --run are mutually exclusive")
-	}
-
-	var runID, runFolder string
-	var isNewRun bool
-	var position *runselect.Position
-
-	switch {
-	case runIDFlag != "":
-		// --run <run_id>: validate format, verify the run folder exists on disk,
-		// and reject completed runs. These checks must be done here rather than
-		// deferred to cli.Run, because cli.Run skips its own resolution step
-		// whenever a non-nil identity is supplied (which is always the case in
-		// production). Omitting them here would silently bypass AC5.3.
-		if !domain.IsValidRunID(runIDFlag) {
-			return nil, nil, fmt.Errorf("invalid run_id format %q; expected {YYYYMMDD}T{HHMMSS}Z-{4-hex}", runIDFlag)
-		}
-		folderPath := filepath.Join(workDir, domain.RunScopedFolder(runIDFlag))
-		artifactPath := filepath.Join(folderPath, "Orchestration.md")
-		data, readErr := os.ReadFile(artifactPath)
-		if readErr != nil {
-			if errors.Is(readErr, os.ErrNotExist) {
-				return nil, nil, fmt.Errorf("no run found with id %s", runIDFlag)
-			}
-			return nil, nil, fmt.Errorf("reading run artifact for %s: %w", runIDFlag, readErr)
-		}
-		// Treat parse errors as resumable: the session layer will surface real
-		// format problems when it calls store.Read. Only reject when we can
-		// confirm the run is completed. A successful parse also yields the
-		// recorded position directly, so cli.Run's announcement need not read
-		// the artifact a second time.
-		if state, parseErr := artifact.Parse(data); parseErr == nil {
-			if strings.EqualFold(state.CurrentState.Phase, "COMPLETED") {
-				return nil, nil, fmt.Errorf("run %s is completed and cannot be resumed", runIDFlag)
-			}
-			position = &runselect.Position{
-				Phase:       state.CurrentState.Phase,
-				Stage:       state.CurrentState.Stage,
-				LastAgent:   state.CurrentState.LastAgent,
-				LastUpdated: state.LastUpdated,
-			}
-		}
-		runID = runIDFlag
-		runFolder = folderPath
-		isNewRun = false
-
-	case isNewRunFlag:
-		// --new-run: mint the run_id here so both the session's store and the
-		// RunConfig use the same path. cli.Run receives the identity and skips
-		// its own mint.
-		newID := domain.NewRunID(&realClock{}, domain.DefaultRandomSource())
-		runID = newID
-		runFolder = filepath.Join(workDir, domain.RunScopedFolder(newID))
-		isNewRun = true
-
-	default:
-		// Neither flag: the selection is never inferred from what the
-		// workspace happens to contain, whatever that is -- zero candidates
-		// included (Plan.md: "Minting a new run because none existed is
-		// exactly the inference this stage removes."). Scan the working
-		// directory and ask runselect for the decision; a non-nil identity
-		// returned to cli.Run would bypass cli.Run's own resolution step, so
-		// the refusal must happen here rather than being deferred (AC2.2,
-		// AC2.6, AC2.9).
-		scanner := runscan.NewDirScanner()
-		result, scanErr := scanner.Scan(workDir)
-		if scanErr != nil {
-			return nil, nil, fmt.Errorf("scanning for runs: %w", scanErr)
-		}
-		dec, resErr := runselect.Resolve(runselect.Request{Scan: result, WorkDir: workDir}, mainMinter(workDir))
-		if resErr != nil {
-			return nil, nil, resErr
-		}
-		if dec.Question != nil {
-			return nil, nil, fmt.Errorf("%s", formatSelectionRefusal(*dec.Question))
-		}
-		runID = dec.Resolved.RunID
-		runFolder = dec.Resolved.RunFolder
-		isNewRun = dec.Resolved.IsNewRun
-		position = dec.Resolved.Position
-	}
-
-	identity := &cli.RunIdentity{
-		RunID:     runID,
-		RunFolder: runFolder,
-		IsNewRun:  isNewRun,
-		Position:  position,
-	}
-	// Return nil for the store. The caller constructs the authoritative store
-	// via newLoggedArtifactStore with the process logger, ensuring path anomalies
-	// are captured in the debug log. Store construction here would require a
-	// no-op logger (process logger not in scope) and would be immediately
-	// discarded at the call site anyway.
-	return identity, nil, nil
-}
-
-// stripBoolFlag returns a copy of args with all occurrences of the named
-// boolean flag removed. It handles the bare "--flag" form and the
-// "--flag=true"/"--flag=false" forms. This is used to remove entry-point-only
-// flags (like --dev) before passing args to a cobra command that does not
-// register them.
-func stripBoolFlag(args []string, flag string) []string {
-	prefix := flag + "="
-	result := make([]string, 0, len(args))
-	for _, arg := range args {
-		if arg == flag || strings.HasPrefix(arg, prefix) {
-			continue // drop this token
-		}
-		result = append(result, arg)
-	}
-	return result
-}
-
-// firstPositionalArg returns the first genuine positional argument in args —
-// a token that is neither a flag nor the value of a preceding value-bearing
-// flag — or "" when no positional argument is found. Uses the combined
-// value-bearing flag set (run and test subcommands) via cli.AllValueBearingFlagNames()
-// so that test subcommand values like "--catalog /some/path" are not
-// misidentified as positional arguments.
-func firstPositionalArg(args []string) string {
-	valueBearing := make(map[string]bool)
-	for _, name := range cli.AllValueBearingFlagNames() {
-		valueBearing[name] = true
-	}
-
-	skipNext := false
-	for _, arg := range args {
-		if skipNext {
-			skipNext = false
-			continue
-		}
-		if !strings.HasPrefix(arg, "-") {
-			return arg
-		}
-		if !strings.Contains(arg, "=") && valueBearing[arg] {
-			skipNext = true
-		}
-	}
-	return ""
-}
-
-// scanBoolFlag reports whether a boolean flag (e.g. "--tui") appears anywhere in args.
-func scanBoolFlag(args []string, flag string) bool {
-	for _, arg := range args {
-		if arg == flag {
-			return true
-		}
-	}
-	return false
-}
-
-// boolFlagState is the tri-state outcome of pre-scanning a boolean flag, needed
-// because a flag whose cobra default is true cannot be pre-scanned with a
-// two-state helper: "absent" and "explicitly false" must be distinguishable.
-type boolFlagState int
-
-const (
-	boolFlagAbsent boolFlagState = iota // flag not present in args
-	boolFlagTrue                        // "--flag" or "--flag=true"
-	boolFlagFalse                       // "--flag=false"
-)
-
-// scanBoolFlagState classifies a boolean flag's presence in args, understanding
-// the bare "--flag" form and the "--flag=true"/"--flag=false" forms. It mirrors
-// cobra's boolean flag parsing for pre-scan purposes only.
-func scanBoolFlagState(args []string, flag string) boolFlagState {
-	prefix := flag + "="
-	for _, arg := range args {
-		if arg == flag {
-			return boolFlagTrue
-		}
-		if strings.HasPrefix(arg, prefix) {
-			val := strings.ToLower(strings.TrimPrefix(arg, prefix))
-			if val == "false" {
-				return boolFlagFalse
-			}
-			return boolFlagTrue
-		}
-	}
-	return boolFlagAbsent
-}
-
-// scanBoolFlagDefault is the default-aware version of scanBoolFlag. It returns
-// def when the flag is absent, true for the bare flag form, and honours
-// --flag=true / --flag=false forms explicitly.
-//
-// Every boolean pre-scan in this file must pass the same def as the cobra flag
-// declaration's default, so the pre-scan and the parsed flag cannot disagree.
-func scanBoolFlagDefault(args []string, flag string, def bool) bool {
-	switch scanBoolFlagState(args, flag) {
-	case boolFlagTrue:
-		return true
-	case boolFlagFalse:
-		return false
-	default: // boolFlagAbsent
-		return def
-	}
-}
-
-// preConsultFromArgs resolves the effective pre-consultation setting from args,
-// applying the same default (true) that the --pre-consult cobra flag declaration
-// uses. This is the call site whose default literal pins agreement: any change
-// to the cobra default that does not also update this call is caught by the
-// TestPreConsultFromArgs_* tests.
-func preConsultFromArgs(args []string) bool {
-	return scanBoolFlagDefault(args, "--pre-consult", true)
-}
-
-// hasFlag reports whether args contains the named flag in either the
-// "--flag value" or "--flag=value" form. Unlike scanFlag it returns no value,
-// and unlike scanBoolFlag it matches the "--flag=value" form; it exists for
-// flags whose mere presence is decisive during the pre-scan.
-func hasFlag(args []string, flag string) bool {
-	prefix := flag + "="
-	for _, arg := range args {
-		if arg == flag {
-			return true
-		}
-		if strings.HasPrefix(arg, prefix) {
-			return true
-		}
-	}
-	return false
-}
-
-// hasPositionalArg reports whether args contains at least one genuine positional
-// argument — a token that is neither a flag nor the value of a preceding
-// value-bearing flag. The value-bearing set comes from cli.AllValueBearingFlagNames(),
-// which covers both the run and test subcommands' flags so that neither
-// subcommand's value arguments are misidentified as positional arguments.
-//
-// Scan rules (left to right):
-//   - A token that starts with "-" and is in the value-bearing set consumes the
-//     following token as its value; that value is not positional.
-//   - A token that starts with "-" and contains "=" has its value embedded; no
-//     following token is consumed.
-//   - A token that starts with "-" otherwise (boolean flag or unknown flag)
-//     consumes nothing.
-//   - A token that does not start with "-" and was not consumed as a value is a
-//     genuine positional argument.
-func hasPositionalArg(args []string) bool {
-	valueBearing := make(map[string]bool)
-	for _, name := range cli.AllValueBearingFlagNames() {
-		valueBearing[name] = true
-	}
-
-	skipNext := false
-	for _, arg := range args {
-		if skipNext {
-			skipNext = false
-			continue // consumed as the value of the preceding value-bearing flag
-		}
-		if !strings.HasPrefix(arg, "-") {
-			return true // not a flag and not consumed as a value: genuine positional
-		}
-		// It is a flag token. If it contains "=" the value is embedded; if not
-		// and it names a value-bearing flag, the next token is its value.
-		if !strings.Contains(arg, "=") && valueBearing[arg] {
-			skipNext = true
-		}
-	}
-	return false
-}
-
-// scanFlag does a minimal pre-scan of args for a named flag. It understands both
-// "--flag value" and "--flag=value" forms, consistent with cobra's flag parsing.
-func scanFlag(args []string, flag string) string {
-	for i, arg := range args {
-		if arg == flag && i+1 < len(args) {
-			return args[i+1]
-		}
-		prefix := flag + "="
-		if strings.HasPrefix(arg, prefix) {
-			return strings.TrimPrefix(arg, prefix)
-		}
-	}
-	return ""
-}
-
-// newLoggedArtifactStore builds the run's artifact store and records a debug
-// entry when the store path is anomalous. It is the single owner of the
-// artifact.path.* event family: no other function in any package emits those
-// events, and the artifact package itself never logs.
-//
-// Behaviour is identical to calling artifact.NewFileStore(path) directly — the
-// returned store is always non-nil and no path is ever rewritten, substituted
-// or rejected here. Emission is a pure side effect.
-//
-// At most one event is emitted per call; the two conditions are mutually
-// exclusive so a log reader can distinguish a hard failure from an informational
-// note by event name alone.
-func newLoggedArtifactStore(path string, logger domain.DebugLogger) domain.ArtifactStore {
-	if !filepath.IsAbs(path) {
-		// Non-absolute path: every subsequent Create call will return an error
-		// and nothing will be written. Record this so the failure is diagnosable.
-		logger.Log(domain.EventArtifactPathRejected, "artifact store path is not absolute",
-			domain.F("path", path))
-	} else if !artifact.IsRunScopedArtifactPath(path) {
-		// Absolute but not under an Orchestration-{run_id} folder: artifacts will
-		// be written, but the path is outside the expected run-scoped hierarchy.
-		logger.Log(domain.EventArtifactPathNonRunScoped, "artifact store path is not run-scoped",
-			domain.F("path", path))
-	}
-	return artifact.NewFileStore(path)
-}
-
-// buildAdapter constructs the HarnessAdapter specified by harnessStr.
-//
-// When harnessStr is "claude-code", "opencode", or "ghcp-cli", the
-// corresponding CLI adapter is created with execPathStr as the executable
-// path and timeout as the invocation limit. A zero or negative timeout is
-// treated as the default (30 minutes). execPathStr is the executable path
-// override supplied via --executable-path; when empty, each harness uses its
-// own per-harness default binary name.
-// For any other value (including "fake" and unknown strings), FakeAdapter is
-// returned. Unknown values are not rejected here; cli.Run validates the
-// --harness flag and surfaces usage errors for unknown values (AC3.8).
-//
-// ghcpMode selects the GHCP CLI permission strategy when harnessStr is
-// "ghcp-cli". Accepted values are "blanket" and "allowlist". An empty or
-// unrecognised value defaults to GHCPCLIModeBlanket (preserving pre-Stage-4
-// behavior). The TUI path always supplies a resolved mode; the CLI path
-// resolves it from --ghcp-permission-mode.
-//
-// An optional logger may be passed as the last argument. When provided, the
-// CLI adapter is constructed with the logger so that invocation I/O is
-// captured in the debug log. When omitted, the adapter uses a no-op logger.
-// The fake adapter ignores the logger in all cases.
-func buildAdapter(harnessStr, execPathStr, ghcpMode string, timeout time.Duration, loggers ...domain.DebugLogger) domain.HarnessAdapter {
-	var logger domain.DebugLogger = domain.NopDebugLogger{}
-	if len(loggers) > 0 && loggers[0] != nil {
-		logger = loggers[0]
-	}
-	switch harnessStr {
-	case commonharness.HarnessIDClaudeCode:
-		exe := execPathStr
-		if exe == "" {
-			exe = "claude"
-		}
-		if timeout <= 0 {
-			timeout = 30 * time.Minute
-		}
-		return harness.NewClaudeCodeAdapterWithLogger(exe, timeout, logger)
-	case commonharness.HarnessIDOpenCode:
-		exe := execPathStr
-		if exe == "" {
-			exe = "opencode"
-		}
-		if timeout <= 0 {
-			timeout = 30 * time.Minute
-		}
-		return harness.NewOpenCodeAdapterWithLogger(exe, timeout, logger)
-	case commonharness.HarnessIDGHCPCLI:
-		exe := execPathStr
-		if exe == "" {
-			exe = "copilot"
-		}
-		if timeout <= 0 {
-			timeout = 30 * time.Minute
-		}
-		mode := commonharness.GHCPCLIPermissionMode(ghcpMode)
-		if mode != commonharness.GHCPCLIModeBlanket && mode != commonharness.GHCPCLIModePartialAllowlist {
-			mode = commonharness.GHCPCLIModeBlanket
-		}
-		return harness.NewGHCPCLIAdapterWithMode(exe, timeout, logger, mode)
-	default: // "fake" or unknown
-		return harness.NewFakeAdapter()
-	}
-}
-
-// mainMinter returns a runselect.Minter that mints a new run_id rooted at workDir.
-func mainMinter(workDir string) runselect.Minter {
-	return func() (string, string) {
-		newID := domain.NewRunID(&realClock{}, domain.DefaultRandomSource())
-		return newID, filepath.Join(workDir, domain.RunScopedFolder(newID))
-	}
-}
-
-// formatSelectionRefusal renders the non-interactive refusal message for an
-// unsettled selection: every resumable run_id the caller may pass to --run,
-// every unresumable run with the reason it cannot be resumed (AC2.5), and
-// --new-run as the always-available way to start fresh (AC2.3, AC2.6). This
-// mirrors internal/cli.formatSelectionRefusal; it is duplicated here rather
-// than exported across the package boundary because cli.Run and
-// resolveRunIdentityForCLI are independent resolution sites that share the
-// runselect decision but not their output plumbing.
-func formatSelectionRefusal(q runselect.Question) string {
-	var resumable []string
-	var unresumable []string
-	for _, c := range q.Choices {
-		switch c.Kind {
-		case runselect.ChoiceResume:
-			resumable = append(resumable, c.ID)
-		case runselect.ChoiceUnresumable:
-			unresumable = append(unresumable, fmt.Sprintf("%s (%s)", c.ID, c.Reason.Description()))
-		}
-	}
-	var sb strings.Builder
-	sb.WriteString("run selection is required; ")
-	if len(resumable) > 0 {
-		sb.WriteString("use --run <run_id> to resume one of: ")
-		sb.WriteString(strings.Join(resumable, ", "))
-		sb.WriteString(", or ")
-	}
-	sb.WriteString("use --new-run to start a new run")
-	if len(unresumable) > 0 {
-		sb.WriteString("; cannot be resumed: ")
-		sb.WriteString(strings.Join(unresumable, ", "))
-	}
-	return sb.String()
-}
-
-// realClock provides the current UTC time.
-type realClock struct{}
-
-func (c *realClock) Now() time.Time { return time.Now().UTC() }

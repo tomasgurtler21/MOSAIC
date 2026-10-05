@@ -6,7 +6,7 @@ package docformat_test
 //   - CanonicalManagedBlocks contains exactly one entry.
 //   - CanonicalManagedBlocks contains "Workflow".
 //   - CanonicalManagedBlocks is disjoint from CanonicalDeployed.
-//   - CanonicalDeployed still contains exactly 9 names (registry blast radius is zero).
+//   - CanonicalDeployed still contains exactly 8 names (registry blast radius is zero).
 //
 // Coverage (ManagedBlockParent — parent requirement map for managed blocks):
 //   - ManagedBlockParent is not nil.
@@ -89,13 +89,13 @@ func TestCanonicalManagedBlocks_DisjointFromCanonicalDeployed(t *testing.T) {
 	}
 }
 
-func TestCanonicalDeployed_Stage4_StillContainsNineNames(t *testing.T) {
-	// Adding CanonicalManagedBlocks must not change CanonicalDeployed. The closed nine-name
-	// set must remain exactly nine so that RefreshScope.Regions(), bundle-target validation,
+func TestCanonicalDeployed_Stage4_StillContainsEightNames(t *testing.T) {
+	// Adding CanonicalManagedBlocks must not change CanonicalDeployed. The closed eight-name
+	// set must remain exactly eight so that RefreshScope.Regions(), bundle-target validation,
 	// and generator sweep tests remain unaffected.
 	got := docformat.CanonicalDeployed
-	if len(got) != 9 {
-		t.Fatalf("CanonicalDeployed length: want 9 (unchanged by Stage 4), got %d: %v", len(got), got)
+	if len(got) != 8 {
+		t.Fatalf("CanonicalDeployed length: want 8 (unchanged by Stage 4), got %d: %v", len(got), got)
 	}
 }
 
@@ -356,7 +356,7 @@ func TestExpectedMarker_CompoundWorkflow_QuickFix_ReturnsNodeDeployedAndKnownTru
 }
 
 func TestExpectedMarker_Stage4_AllCanonicalDeployed_Unaffected(t *testing.T) {
-	// Stage 4 must not change the existing nine-name CanonicalDeployed behaviour.
+	// Stage 4 must not change the existing eight-name CanonicalDeployed behaviour.
 	for _, name := range docformat.CanonicalDeployed {
 		kind, known := docformat.ExpectedMarker(name)
 		if !known {

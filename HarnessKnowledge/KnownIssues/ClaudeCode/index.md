@@ -1,9 +1,9 @@
 # Claude Code — Issue Index
 
-> Last updated: 2026-09-13 (run 19: CC-079 reframed Bug→Limitation after Round 5 live tests)
+> Last updated: 2026-10-04 (CC-082 added from MOSAIC experiments)
 > Latest platform version: v2.1.270 (tested 2026-09-13)
 
-## Active Issues (66)
+## Active Issues (67)
 
 | ID | Title | Type | Confidence | Impact | Workaround | Reproduced | Response |
 |----|-------|------|------------|--------|------------|------------|----------|
@@ -73,6 +73,7 @@
 | CC-079 | `mcpServers:` does not bypass `tools:` allowlist — server connects (instructions delivered) but tools not granted unless `mcp__<server>__*` is in `tools:`. Reframed from "silently ignored" after Round 5 showed the server IS connected; the allowlist behavior is consistent/by-design. Original framing from v2.1.269; re-tested v2.1.270. Workaround: use `mcp__<server>__*` in `tools:` (the correct pattern). | Limitation | Confirmed | LOW | Yes | Yes | Awareness |
 | CC-080 | MCP server instructions routed by session, not by agent tool scope — primary/`--agent` gets every connected server's block at start; subagents also get every server's block (late, see CC-081), even with zero MCP tools. Partial workaround: define subagent-only servers inline in `mcpServers:` so they never connect in the main session (#85307 open, 4 more stale-closed) | Bug | Confirmed | LOW | Partial | Yes | Awareness |
 | CC-081 | Subagents receive MCP server instructions late — as a mid-conversation reminder after their first tool turn, not at start. MCP tools themselves work from turn one (foreground and background); an MCP call in the first turn runs without guidance, and the late block may be distrusted as injection. Re-tested on v2.1.270 — the earlier "no instructions, MCP unusable" finding was a probe artifact (#85307, #29655) | Bug | Confirmed | LOW | Yes | Yes | Awareness |
+| CC-082 | Async hooks are killed when a `-p` process exits (async `Stop` cut off mid-execution, async `SessionEnd` writes nothing); sync hooks complete and delay exit. Transcript is still being written at `Stop`, final at `SessionEnd`; under `--no-session-persistence` the file never exists. | Limitation | Confirmed | HIGH | Yes | Yes | Mitigated |
 
 ## Resolved / Retired Issues (1)
 

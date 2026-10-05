@@ -30,16 +30,16 @@ import (
 // AgentKey == "orchestrator" rather than Role == domain.RoleOrchestrator.
 //
 // For Claude Code HarnessConstraints:
-//   - Shared content: "" (empty -- Claude Code has no shared constraint text)
+//   - Shared content: the output-artifacts constraint
 //   - Orchestrator content: non-empty (skills-path and security-warning instructions)
-//   - Merged result for orchestrator role: orchestrator-only content (since shared is empty)
+//   - Merged result for orchestrator role: shared content + "\n\n" + orchestrator content
 //
 // RED: FAILS until I1.1 (add Role field to InjectionRequest) and I1.2 (switch
 // Injection gate from AgentKey to Role) are both complete.
 func TestInjection_OrchestratorRole_NonOrchestratorKey_ReturnsMergedContent(t *testing.T) {
 	mod := newModule(t)
 
-	// Baseline: what a genuine subagent receives (shared content only, empty for Claude Code).
+	// Baseline: what a genuine subagent receives (shared content only).
 	subagentContent, subagentOK := mod.Injection(domain.InjectionRequest{
 		Name:     "HarnessConstraints",
 		AgentKey: "some-subagent",
@@ -60,9 +60,9 @@ func TestInjection_OrchestratorRole_NonOrchestratorKey_ReturnsMergedContent(t *t
 			"orchestrator-role agents must receive content (ok=true) for HarnessConstraints")
 	}
 
-	// An orchestrator-role agent must receive more than the subagent receives.
-	// Claude Code's shared HarnessConstraints content is empty; the orchestrator-only
-	// content is non-empty. So the merged result must differ from the (empty) subagent content.
+	// An orchestrator-role agent must receive more than the subagent receives: the
+	// orchestrator-only content is non-empty, so the merged result must differ from the
+	// shared-only subagent content.
 	if orchContent == subagentContent {
 		t.Errorf("orchestrator-role agent with AgentKey=%q received identical content to subagent (%q); "+
 			"role-based gating must return orchestrator-merged content when Role == domain.RoleOrchestrator, "+
@@ -72,10 +72,10 @@ func TestInjection_OrchestratorRole_NonOrchestratorKey_ReturnsMergedContent(t *t
 
 	// The merged content must include the skills-path instruction that distinguishes
 	// orchestrator content from shared content for Claude Code.
-	if !strings.Contains(orchContent, "cwd/.claude/skills") {
+	if !strings.Contains(orchContent, ".claude/skills/ in the workspace root") {
 		t.Errorf("orchestrator-role HarnessConstraints content is missing the skills-path instruction\n"+
 			"got:  %q\n"+
-			"want: content containing \"cwd/.claude/skills\"\n\n"+
+			"want: content containing \".claude/skills/ in the workspace root\"\n\n"+
 			"The orchestrator injection must be served to any agent with Role == domain.RoleOrchestrator, "+
 			"not only to agents with AgentKey == \"orchestrator\"",
 			orchContent)
@@ -102,9 +102,9 @@ func TestInjection_OrchestratorRole_WithOrchestratorKey_StillReturnsMergedConten
 		t.Fatal("Injection(HarnessConstraints, orchestrator, RoleOrchestrator) returned ok=false; " +
 			"orchestrator must receive content (ok=true) for HarnessConstraints")
 	}
-	if !strings.Contains(content, "cwd/.claude/skills") {
+	if !strings.Contains(content, ".claude/skills/ in the workspace root") {
 		t.Errorf("Injection(HarnessConstraints, orchestrator, RoleOrchestrator) missing skills-path instruction\n"+
-			"got: %q\nwant: content containing \"cwd/.claude/skills\"", content)
+			"got: %q\nwant: content containing \".claude/skills/ in the workspace root\"", content)
 	}
 }
 
@@ -131,13 +131,12 @@ func TestInjection_ZeroRole_ReturnsSharedContentOnly(t *testing.T) {
 	})
 	if !ok {
 		t.Fatal("Injection(HarnessConstraints, orchestrator, zero-Role) returned ok=false; " +
-			"Claude Code declares HarnessConstraints even when shared content is empty (ok=true)")
+			"Claude Code declares HarnessConstraints (ok=true)")
 	}
-	// Shared content for HarnessConstraints is "" (empty string) for Claude Code.
 	// With zero Role, the orchestrator-only content must NOT be merged in.
-	if content != "" {
-		t.Errorf("Injection(HarnessConstraints, orchestrator, zero-Role) = %q, want \"\" (shared content only); "+
+	if content != claudeHarnessConstraints {
+		t.Errorf("Injection(HarnessConstraints, orchestrator, zero-Role) = %q, want %q (shared content only); "+
 			"zero Role must not trigger orchestrator-merged content -- Role == domain.RoleOrchestrator is required",
-			content)
+			content, claudeHarnessConstraints)
 	}
 }

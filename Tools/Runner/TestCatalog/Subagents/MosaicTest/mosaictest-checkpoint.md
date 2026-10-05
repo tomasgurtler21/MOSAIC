@@ -6,7 +6,7 @@ description: Harness conformance test fixture — a checkpoint-class infrastruct
 role: subagent
 model: {model-identifier}
 tools: []
-recommended_tier: LOW
+recommended_tier: MEDIUM
 tier_rationale: emits one fixed-shape string; no branching and no tool use
 required_skills: []
 infrastructure: checkpoint

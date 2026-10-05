@@ -75,6 +75,8 @@ func Apply(req Request) (Result, error) {
 	}
 
 	// Serialise the transformed document to bytes.
+	// The source BOM is a file-format detail, not content: deployed output never carries one.
+	doc.StripBOM()
 	output := doc.Bytes()
 
 	// Merge frontmatter gaps with region gaps into one ordered slice.
@@ -87,6 +89,7 @@ func Apply(req Request) (Result, error) {
 		Gaps:                 allGaps,
 		Workflows:            workflowIDs,
 		InfrastructureAgents: infraAgentKeys,
+		InfrastructureMerge:  infrastructureMergeReport(req, regionOutcomes),
 		OutputBytes:          len(output),
 	}
 

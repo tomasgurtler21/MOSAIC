@@ -75,3 +75,44 @@ model: one `notification` event is emitted per `permission.ask` firing, with no
 will ever pair with would be worse than omitting it. If the hook proves to fire
 twice, the implementation should be updated to mint a `notification_id` and pair
 the ask and resolution events.
+
+## `session.idle` is not awaited on `opencode run` exit
+
+Verified on OpenCode 1.18.18: when `opencode run` finishes, the process exits without
+awaiting the plugin's `session.idle` handler. Any work after the handler's first
+`await` is lost, including SDK calls such as `client.session.messages()`. This
+affects every `opencode run` session, native or Runner-hosted, and cannot be fixed
+inside the adapter.
+
+Runner mode (selected by the `MOSAIC_ROLE`, `MOSAIC_RUN_ID` and
+`MOSAIC_AGENT_INSTANCE_ID` environment variables the Runner sets) works around it:
+
+- `invocation_end` is written synchronously, before the first `await` of the
+  `session.idle` path, from state accumulated during the session (status, and the
+  last assistant text observed through message events).
+- The session transcript (`04_session.raw`, or the session-scoped orchestrator
+  transcript) is refreshed while the session runs, not exported at the end; each
+  refresh writes the raw file and then the sidecar synchronously, with no await, as soon as the SDK returns the
+  messages (the sidecar is written last and acts as the commit marker, and no
+  `.tmp_*` file is left behind). The final refresh is lost only if that SDK call has
+  not returned when the process exits, which has not been observed on OpenCode
+  1.18.18 (31 of 31 cases). `02_output.md` is best-effort.
+- As a safety net, after an OpenCode subagent process exits the Runner appends an
+  `invocation_end` (`agent_instance_id`, `status_code`, `response`) when the
+  invocation folder holds none.
+
+Re-evaluation condition: drop the Runner safety net (and its call in the Runner's
+adapter construction) once live Runner runs on OpenCode show that it never fires, that
+is, every invocation folder already holds the plugin's own `invocation_end`.
+
+Transcript export exit mechanism: `opencode run` breaks out of its event loop when the session goes
+idle, and the CLI wraps every command in `try ... finally { process.exit() }`.
+Pending plugin promises are dropped, but synchronous code cannot be interrupted.
+If live runs still show a final transcript with an incomplete last message, a
+raw/sidecar mismatch, or a `.tmp_*` file, implement a Runner-side repair that runs
+`opencode export --pure <sessionID>` after the process exits (option 3 in
+`Issue-OpenCode-RunnerTranscriptExport.md`).
+
+Known Runner-mode field gaps for this adapter are listed in
+`Development/Designs/MosaicLogFormat.md` section 4.6 and in the header of
+`lib/handlers_runner.ts`.

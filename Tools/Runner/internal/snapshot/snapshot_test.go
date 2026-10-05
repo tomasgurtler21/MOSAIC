@@ -1,6 +1,6 @@
 package snapshot_test
 
-// Tests for CreateSnapshot.
+// Tests for NewSnapshot.
 //
 // Coverage:
 //
@@ -13,7 +13,7 @@ package snapshot_test
 //   - Non-.md files in the source are not copied (agentresolve convention).
 //
 //   Happy path - copy with transformation:
-//   - After CreateSnapshot with opencode rules, every .md file in the target
+//   - After NewSnapshot with opencode rules, every .md file in the target
 //     that originally had "mode: subagent" now has "mode: primary".
 //   - Files without "mode: subagent" in the source are copied byte-for-byte.
 //   - Files without any frontmatter are copied byte-for-byte.
@@ -23,7 +23,7 @@ package snapshot_test
 //     Component "snapshot".
 //   - Target directory already exists: returns *domain.RefusalError with
 //     Component "snapshot" (collision guard).
-//   - On error, CreateSnapshot performs best-effort cleanup of a partially
+//   - On error, NewSnapshot performs best-effort cleanup of a partially
 //     created target directory.
 
 import (
@@ -35,6 +35,7 @@ import (
 
 	"mosaic-run/internal/domain"
 	"mosaic-run/internal/snapshot"
+	"mosaic-run/internal/snapshot/transform"
 )
 
 // ---------------------------------------------------------------------------
@@ -76,7 +77,7 @@ func assertRefusalError(t *testing.T, err error, wantComponent string) {
 // Flat copy (no transformations)
 // ---------------------------------------------------------------------------
 
-func TestCreateSnapshot_CopiesAllMdFiles(t *testing.T) {
+func TestNewSnapshot_CopiesAllMdFiles(t *testing.T) {
 	src := t.TempDir()
 	dst := filepath.Join(t.TempDir(), "snapshot")
 
@@ -84,8 +85,8 @@ func TestCreateSnapshot_CopiesAllMdFiles(t *testing.T) {
 	writeFile(t, filepath.Join(src, "agent-b.md"), []byte("# Agent B\n"))
 	writeFile(t, filepath.Join(src, "agent-c.md"), []byte("# Agent C\n"))
 
-	if err := snapshot.CreateSnapshot(src, dst, nil); err != nil {
-		t.Fatalf("CreateSnapshot: %v", err)
+	if err := snapshot.NewSnapshot(src, dst, nil); err != nil {
+		t.Fatalf("NewSnapshot: %v", err)
 	}
 
 	for _, name := range []string{"agent-a.md", "agent-b.md", "agent-c.md"} {
@@ -95,15 +96,15 @@ func TestCreateSnapshot_CopiesAllMdFiles(t *testing.T) {
 	}
 }
 
-func TestCreateSnapshot_FileContentsMatchSource(t *testing.T) {
+func TestNewSnapshot_FileContentsMatchSource(t *testing.T) {
 	src := t.TempDir()
 	dst := filepath.Join(t.TempDir(), "snapshot")
 
 	content := []byte("---\ntitle: My Agent\n---\n\nBody content.\n")
 	writeFile(t, filepath.Join(src, "my-agent.md"), content)
 
-	if err := snapshot.CreateSnapshot(src, dst, nil); err != nil {
-		t.Fatalf("CreateSnapshot: %v", err)
+	if err := snapshot.NewSnapshot(src, dst, nil); err != nil {
+		t.Fatalf("NewSnapshot: %v", err)
 	}
 
 	got := readFile(t, filepath.Join(dst, "my-agent.md"))
@@ -112,7 +113,7 @@ func TestCreateSnapshot_FileContentsMatchSource(t *testing.T) {
 	}
 }
 
-func TestCreateSnapshot_SubdirectoriesAreNotCopied(t *testing.T) {
+func TestNewSnapshot_SubdirectoriesAreNotCopied(t *testing.T) {
 	src := t.TempDir()
 	dst := filepath.Join(t.TempDir(), "snapshot")
 
@@ -124,8 +125,8 @@ func TestCreateSnapshot_SubdirectoriesAreNotCopied(t *testing.T) {
 	writeFile(t, filepath.Join(subdir, "nested.md"), []byte("# Nested\n"))
 	writeFile(t, filepath.Join(src, "top-level.md"), []byte("# Top\n"))
 
-	if err := snapshot.CreateSnapshot(src, dst, nil); err != nil {
-		t.Fatalf("CreateSnapshot: %v", err)
+	if err := snapshot.NewSnapshot(src, dst, nil); err != nil {
+		t.Fatalf("NewSnapshot: %v", err)
 	}
 
 	// The subdirectory itself should not appear in the snapshot.
@@ -138,7 +139,7 @@ func TestCreateSnapshot_SubdirectoriesAreNotCopied(t *testing.T) {
 	}
 }
 
-func TestCreateSnapshot_NonMdFilesAreNotCopied(t *testing.T) {
+func TestNewSnapshot_NonMdFilesAreNotCopied(t *testing.T) {
 	src := t.TempDir()
 	dst := filepath.Join(t.TempDir(), "snapshot")
 
@@ -146,8 +147,8 @@ func TestCreateSnapshot_NonMdFilesAreNotCopied(t *testing.T) {
 	writeFile(t, filepath.Join(src, "README.txt"), []byte("readme\n"))
 	writeFile(t, filepath.Join(src, "config.yaml"), []byte("key: value\n"))
 
-	if err := snapshot.CreateSnapshot(src, dst, nil); err != nil {
-		t.Fatalf("CreateSnapshot: %v", err)
+	if err := snapshot.NewSnapshot(src, dst, nil); err != nil {
+		t.Fatalf("NewSnapshot: %v", err)
 	}
 
 	// Only .md files should be copied.
@@ -162,12 +163,12 @@ func TestCreateSnapshot_NonMdFilesAreNotCopied(t *testing.T) {
 	}
 }
 
-func TestCreateSnapshot_EmptySourceDir_ProducesEmptySnapshot(t *testing.T) {
+func TestNewSnapshot_EmptySourceDir_ProducesEmptySnapshot(t *testing.T) {
 	src := t.TempDir()
 	dst := filepath.Join(t.TempDir(), "snapshot")
 
-	if err := snapshot.CreateSnapshot(src, dst, nil); err != nil {
-		t.Fatalf("CreateSnapshot on empty source: %v", err)
+	if err := snapshot.NewSnapshot(src, dst, nil); err != nil {
+		t.Fatalf("NewSnapshot on empty source: %v", err)
 	}
 
 	entries, err := os.ReadDir(dst)
@@ -183,16 +184,16 @@ func TestCreateSnapshot_EmptySourceDir_ProducesEmptySnapshot(t *testing.T) {
 // Copy with transformation (opencode rules)
 // ---------------------------------------------------------------------------
 
-func TestCreateSnapshot_AppliesTransformationToSubagentFiles(t *testing.T) {
+func TestNewSnapshot_AppliesTransformationToSubagentFiles(t *testing.T) {
 	src := t.TempDir()
 	dst := filepath.Join(t.TempDir(), "snapshot")
 
-	rules := snapshot.TransformationsFor("opencode")
+	rules := transform.TransformationsFor("opencode")
 	content := []byte("---\nmode: subagent\ntitle: Worker\n---\n\nBody.\n")
 	writeFile(t, filepath.Join(src, "worker.md"), content)
 
-	if err := snapshot.CreateSnapshot(src, dst, rules); err != nil {
-		t.Fatalf("CreateSnapshot: %v", err)
+	if err := snapshot.NewSnapshot(src, dst, rules); err != nil {
+		t.Fatalf("NewSnapshot: %v", err)
 	}
 
 	got := readFile(t, filepath.Join(dst, "worker.md"))
@@ -204,16 +205,16 @@ func TestCreateSnapshot_AppliesTransformationToSubagentFiles(t *testing.T) {
 	}
 }
 
-func TestCreateSnapshot_FilesWithoutSubagentModeAreCopiedUnchanged(t *testing.T) {
+func TestNewSnapshot_FilesWithoutSubagentModeAreCopiedUnchanged(t *testing.T) {
 	src := t.TempDir()
 	dst := filepath.Join(t.TempDir(), "snapshot")
 
-	rules := snapshot.TransformationsFor("opencode")
+	rules := transform.TransformationsFor("opencode")
 	content := []byte("---\nmode: primary\ntitle: Orchestrator\n---\n\nBody.\n")
 	writeFile(t, filepath.Join(src, "orchestrator.md"), content)
 
-	if err := snapshot.CreateSnapshot(src, dst, rules); err != nil {
-		t.Fatalf("CreateSnapshot: %v", err)
+	if err := snapshot.NewSnapshot(src, dst, rules); err != nil {
+		t.Fatalf("NewSnapshot: %v", err)
 	}
 
 	got := readFile(t, filepath.Join(dst, "orchestrator.md"))
@@ -222,16 +223,16 @@ func TestCreateSnapshot_FilesWithoutSubagentModeAreCopiedUnchanged(t *testing.T)
 	}
 }
 
-func TestCreateSnapshot_FilesWithoutFrontmatterAreCopiedUnchanged(t *testing.T) {
+func TestNewSnapshot_FilesWithoutFrontmatterAreCopiedUnchanged(t *testing.T) {
 	src := t.TempDir()
 	dst := filepath.Join(t.TempDir(), "snapshot")
 
-	rules := snapshot.TransformationsFor("opencode")
+	rules := transform.TransformationsFor("opencode")
 	content := []byte("# No Frontmatter Agent\n\nJust markdown, no YAML block.\n")
 	writeFile(t, filepath.Join(src, "no-fm.md"), content)
 
-	if err := snapshot.CreateSnapshot(src, dst, rules); err != nil {
-		t.Fatalf("CreateSnapshot: %v", err)
+	if err := snapshot.NewSnapshot(src, dst, rules); err != nil {
+		t.Fatalf("NewSnapshot: %v", err)
 	}
 
 	got := readFile(t, filepath.Join(dst, "no-fm.md"))
@@ -240,11 +241,11 @@ func TestCreateSnapshot_FilesWithoutFrontmatterAreCopiedUnchanged(t *testing.T) 
 	}
 }
 
-func TestCreateSnapshot_MixedFiles_OnlySubagentFilesTransformed(t *testing.T) {
+func TestNewSnapshot_MixedFiles_OnlySubagentFilesTransformed(t *testing.T) {
 	src := t.TempDir()
 	dst := filepath.Join(t.TempDir(), "snapshot")
 
-	rules := snapshot.TransformationsFor("opencode")
+	rules := transform.TransformationsFor("opencode")
 	subagentContent := []byte("---\nmode: subagent\n---\n\nWorker body.\n")
 	primaryContent := []byte("---\nmode: primary\n---\n\nOrchestrator body.\n")
 	noFmContent := []byte("# Plain markdown\n")
@@ -253,8 +254,8 @@ func TestCreateSnapshot_MixedFiles_OnlySubagentFilesTransformed(t *testing.T) {
 	writeFile(t, filepath.Join(src, "orchestrator.md"), primaryContent)
 	writeFile(t, filepath.Join(src, "plain.md"), noFmContent)
 
-	if err := snapshot.CreateSnapshot(src, dst, rules); err != nil {
-		t.Fatalf("CreateSnapshot: %v", err)
+	if err := snapshot.NewSnapshot(src, dst, rules); err != nil {
+		t.Fatalf("NewSnapshot: %v", err)
 	}
 
 	workerGot := readFile(t, filepath.Join(dst, "worker.md"))
@@ -277,18 +278,18 @@ func TestCreateSnapshot_MixedFiles_OnlySubagentFilesTransformed(t *testing.T) {
 // Failure cases
 // ---------------------------------------------------------------------------
 
-func TestCreateSnapshot_SourceDirNotExist_ReturnsRefusalError(t *testing.T) {
+func TestNewSnapshot_SourceDirNotExist_ReturnsRefusalError(t *testing.T) {
 	src := filepath.Join(t.TempDir(), "does-not-exist")
 	dst := filepath.Join(t.TempDir(), "snapshot")
 
-	err := snapshot.CreateSnapshot(src, dst, nil)
+	err := snapshot.NewSnapshot(src, dst, nil)
 	if err == nil {
 		t.Fatal("expected error for non-existent source dir, got nil")
 	}
 	assertRefusalError(t, err, "snapshot")
 }
 
-func TestCreateSnapshot_TargetAlreadyExists_RecreatesSnapshot(t *testing.T) {
+func TestNewSnapshot_TargetAlreadyExists_RecreatesSnapshot(t *testing.T) {
 	src := t.TempDir()
 	base := t.TempDir()
 	dst := filepath.Join(base, "snapshot") // will be created then removed then recreated
@@ -305,10 +306,10 @@ func TestCreateSnapshot_TargetAlreadyExists_RecreatesSnapshot(t *testing.T) {
 	// Write source file.
 	writeFile(t, filepath.Join(src, "agent.md"), []byte("# Agent\n"))
 
-	// CreateSnapshot should remove the old directory and recreate it from source.
-	err := snapshot.CreateSnapshot(src, dst, nil)
+	// NewSnapshot should remove the old directory and recreate it from source.
+	err := snapshot.NewSnapshot(src, dst, nil)
 	if err != nil {
-		t.Fatalf("CreateSnapshot: %v", err)
+		t.Fatalf("NewSnapshot: %v", err)
 	}
 
 	// The new snapshot should exist.
@@ -332,12 +333,12 @@ func TestCreateSnapshot_TargetAlreadyExists_RecreatesSnapshot(t *testing.T) {
 // .agent.md copy (existing filter behaviour confirmed by test)
 // ---------------------------------------------------------------------------
 
-// TestCreateSnapshot_CopiesAgentMdFiles confirms that CreateSnapshot copies
+// TestNewSnapshot_CopiesAgentMdFiles confirms that NewSnapshot copies
 // files with the .agent.md compound extension. Because filepath.Ext returns
 // ".md" for "foo.agent.md", the existing ".md" filter already matches these
 // files. This test documents that the behaviour is correct and guards against
 // regressions if the copy filter is ever changed.
-func TestCreateSnapshot_CopiesAgentMdFiles(t *testing.T) {
+func TestNewSnapshot_CopiesAgentMdFiles(t *testing.T) {
 	src := t.TempDir()
 	dst := filepath.Join(t.TempDir(), "snapshot")
 
@@ -345,8 +346,8 @@ func TestCreateSnapshot_CopiesAgentMdFiles(t *testing.T) {
 	// Also include a plain .md file to confirm no regression.
 	writeFile(t, filepath.Join(src, "bar.md"), []byte("# Bar\n"))
 
-	if err := snapshot.CreateSnapshot(src, dst, nil); err != nil {
-		t.Fatalf("CreateSnapshot: %v", err)
+	if err := snapshot.NewSnapshot(src, dst, nil); err != nil {
+		t.Fatalf("NewSnapshot: %v", err)
 	}
 
 	if _, err := os.Stat(filepath.Join(dst, "foo.agent.md")); err != nil {
@@ -357,14 +358,14 @@ func TestCreateSnapshot_CopiesAgentMdFiles(t *testing.T) {
 	}
 }
 
-func TestCreateSnapshot_SourceDirNotExist_TargetNotCreated(t *testing.T) {
-	// When source does not exist, CreateSnapshot must not leave a partial
+func TestNewSnapshot_SourceDirNotExist_TargetNotCreated(t *testing.T) {
+	// When source does not exist, NewSnapshot must not leave a partial
 	// target directory behind.
 	base := t.TempDir()
 	src := filepath.Join(base, "missing-src")
 	dst := filepath.Join(base, "snapshot")
 
-	_ = snapshot.CreateSnapshot(src, dst, nil)
+	_ = snapshot.NewSnapshot(src, dst, nil)
 
 	if _, err := os.Stat(dst); !os.IsNotExist(err) {
 		t.Error("expected snapshot dir to be absent after source-not-found error")

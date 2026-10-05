@@ -1,5 +1,5 @@
 ---
-version: 0.2
+version: 0.3
 name: Knowledge Base Correction Workflow
 description: Apply known corrections to an existing knowledge base. Input is user-provided correction instructions in Requirements.md — could be pasted verification findings, direct feedback, or change descriptions.
 hint: "Theoretical — no confirmed real use. Its niche may be narrower than it looks: kb-generation already refreshes an existing KB and flags drift on re-run, and in practice a planner can often fold small doc corrections into a normal feature plan without a dedicated pass. Consider whether generation's own refresh path already covers your case before reaching for this."
@@ -13,17 +13,17 @@ artifacts:
   - KBProgress.md
 ---
 
-<Workflow type="core" name="kb-correction" version="0.2">
+<Workflow type="core" name="kb-correction" version="0.3">
 ## Knowledge Base Correction Workflow
 
-**Use when:** Apply known corrections to an existing knowledge base. Input is user-provided correction instructions in Requirements.md — could be pasted verification findings, direct feedback, or change descriptions. Generator navigates existing KB via KnowledgeBase/Index.md, determines what needs updating, and applies corrections.
+**Use when:** Apply known corrections to an existing knowledge base. Input is user-provided correction instructions in Requirements.md — could be pasted verification findings, direct feedback, or change descriptions. Generator navigates the existing KB via CodeKnowledgeBase/Index.md, determines what needs updating, and applies corrections.
 
 | Phase | Subagent | HITL | On Success | On Findings | Input | Output |
 |-------|----------|:----:|------------|-------------|-------|--------|
 | EXECUTION.[StageNumber] | knowledge-base-generator(update) | TRUE | knowledge-base-index-assembler | - | Requirements.md | KBProgress.md |
 | COMPLETION | knowledge-base-index-assembler | FALSE | COMPLETE | - | KBProgress.md | KBProgress.md |
 
-**EXECUTION Stages:** First invocation reads Requirements.md and existing KB structure (KnowledgeBase/Index.md), creates KBProgress.md with one stage per KB document that needs updating. Subsequent stages update one KB document each.
+**EXECUTION Stages:** First invocation reads Requirements.md and the existing KB structure (`CodeKnowledgeBase/Index.md`), creates KBProgress.md with one stage per KB document that needs updating. Subsequent stages update one KB document each.
 
 **Notes:**
 - **Requirements.md is user-created** — must contain correction instructions (verification findings, feedback, change descriptions)
@@ -48,6 +48,7 @@ Its actual necessity is unclear. `kb-generation` already handles refreshing an e
 |---------|------|--------|---------|
 | 0.1 | 2026-08-17 | MOSAIC | Changelog tracking begins here; earlier revisions predate this record. |
 | 0.2 | 2026-08-26 | MOSAIC | Replace Unicode emoji with ASCII tokens in HITL column (TRUE/FALSE). |
+| 0.3 | 2026-10-04 | MOSAIC | Align the existing-KB index path with the generator and catalog convention: CodeKnowledgeBase/Index.md. |
 
 ---
 

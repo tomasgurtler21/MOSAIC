@@ -49,9 +49,11 @@ type HITLComplianceInput struct {
 	// Status is the status code the agent returned.
 	Status StatusCode
 
-	// Approvals holds one entry per artifact in the dispatch's effective
-	// output_artifacts list, in dispatch order. An empty or nil slice means
-	// the agent was tasked with no output artifact for this step.
+	// ErrorCode is the error code the agent returned (BLOCKED only).
+	ErrorCode ErrorCode
+
+	// Approvals holds one entry per output artifact the invocation wrote, in
+	// detector order. An empty or nil slice means nothing was written.
 	Approvals []ArtifactApproval
 
 	// RedispatchUsed reports whether this step has already consumed its one
@@ -99,24 +101,24 @@ const (
 // Decision table:
 //
 //	EffectiveHITL false                       -> HITLAccept
-//	Status != StatusSUCCESS                   -> HITLAccept (the non-SUCCESS
-//	                                             path already deviates)
-//	len(Approvals) == 0                       -> HITLAccept (nothing to verify)
+//	BLOCKED with E503                         -> HITLAccept (gate could not run)
+//	len(Approvals) == 0                       -> HITLAccept (nothing written)
 //	every Approval.IsApproved()               -> HITLAccept
 //	any !IsApproved() && !RedispatchUsed      -> HITLRedispatch
 //	any !IsApproved() && RedispatchUsed       -> HITLEscalate
 //
-// ApprovalFileMissing is treated identically to ApprovalFalse: a SUCCESS whose
-// declared output artifact does not exist has not closed its gate either.
+// There is no status short-circuit: the gate runs for every response status.
+// Approvals hold only outputs the invocation actually wrote. ApprovalFileMissing
+// is treated identically to ApprovalFalse.
 func DecideHITLCompliance(in HITLComplianceInput) HITLComplianceDecision {
 	// Short-circuit: HITL was not required for this dispatch.
 	if !in.EffectiveHITL {
 		return HITLComplianceDecision{Outcome: HITLAccept}
 	}
 
-	// Short-circuit: non-SUCCESS results are handled by the deviation path;
-	// HITL verification only applies to SUCCESS.
-	if in.Status != StatusSUCCESS {
+	// BLOCKED/E503 means the agent could not reach the user, so the gate could
+	// not run: accept it whatever the written outputs are stamped.
+	if in.Status == StatusBLOCKED && in.ErrorCode == ErrorUSER_CONTACT {
 		return HITLComplianceDecision{Outcome: HITLAccept}
 	}
 

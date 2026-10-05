@@ -2,7 +2,7 @@
 
 > **Status:** Draft for review
 > **Created:** 2026-07-27
-> **Last Updated:** 2026-08-10
+> **Last Updated:** 2026-10-04
 > **Scope:** The canonical log event schema, the on-disk artifact layout, run identity, and the merge utility's contract. 
 
 ---
@@ -126,9 +126,11 @@ No `duration_ms` field — see §3.5.
 |---|---|---|---|
 | `agent_instance_id` | string | Required | Correlation key back to `invocation_start`. |
 | `status_code` | enum: `SUCCESS`, `COMPLETED_NEEDS_ACTION`, `PARTIALLY_DONE`, `NEEDS_CLARIFICATION`, `CAPABILITY_EXCEEDED`, `BLOCKED` | Optional | Populated when the adapter can determine the subagent's returned status; absent if the harness gives no access to response content. A failed invocation is reported here, never as a separate error event. |
-| `response` | string | Optional | Full final response text from the subagent. |
-| `model` | string | Optional | Model identifier used for the invocation. |
-| `token_usage` | object | Optional | Present only if at least one sub-field is available. Sub-fields, each independently optional: `input_tokens`, `output_tokens`, `cache_read_tokens`, `cache_creation_tokens` (all numbers). |
+| `response` | string | Optional | Full final response text from the subagent. On Claude Code 2.1.271+ in auto mode this is the report the subagent delivers through its `SubagentHandback` tool call (`tool_input.message`, verbatim), and the event timestamp is the hand-back's PostToolUse time; the delivery to the caller happens just before that hook fires. Without a hand-back (older CLI, non-auto mode, or Haiku as the main model, which silently falls back from auto to default) the response is `SubagentStop`'s `last_assistant_message` and the timestamp is the stop time. After a hand-back, a later `SubagentStop` carries only post-hand-back commentary and produces no second `invocation_end`. |
+| `model` | string | Optional | Model identifier used for the invocation. For a Claude Code hand-back it is read from the agent transcript at hand-back time. |
+| `token_usage` | object | Optional | Present only if at least one sub-field is available. Sub-fields, each independently optional: `input_tokens`, `output_tokens`, `cache_read_tokens`, `cache_creation_tokens` (all numbers). For a Claude Code hand-back it is read from the agent transcript at hand-back time. |
+
+Exactly one `invocation_end` is written per invocation. **Known limitation (Claude Code hand-back):** if the agent transcript has not been flushed at hand-back time, `invocation_end` omits `model` and `token_usage`, and they are never back-filled (no second `invocation_end`). `Tools/LogAnalyzer` reports the missing fields as an issue for that invocation. Tokens used after the hand-back are still counted through `usage_record` events.
 
 No `duration_ms` field — see §3.5.
 
@@ -160,7 +162,7 @@ No `call_index` field — see §3.5.
 | `call_id` | string | Required | Correlation key back to `tool_call_start`. |
 | `status` | enum: `"success"` \| `"error"` | Optional | Outcome of the call. Tool failures are reported here, never as a separate error event. |
 | `error` | string | Optional | Error detail when `status` is `"error"`. |
-| `tool_output` | object \| string | Optional | Result returned by the tool. Capture policy: §5. |
+| `tool_output` | object \| string | Optional | Result returned by the tool, not truncated. On Claude Code it is sourced from the PostToolUse payload's `tool_response`. Capture policy: §5. |
 
 No `duration_ms` field — see §3.5.
 
@@ -281,6 +283,67 @@ Two run-root files carry the orchestrator's own record, distinct in purpose:
 - **Input/output artifacts** (`01_input.md`, `02_output.md`) exist for human browsing, not for tooling — tooling reads the JSONL, which already carries the same content. Each is a metadata table (agent instance ID, session ID, timestamps, and other envelope-equivalent fields available at that point) plus the raw prompt or response content.
 - **Session transcript export** (`04_session.raw`) is the subagent's complete session history, sourced from whatever transcript/export mechanism the harness provides, stored **raw — byte-for-byte** with no parsing, re-rendering, or reformatting. Its role is an independent verification path: a cross-check that the JSONL capture is complete, not the primary record.
 - **Sidecar metadata** (`*.meta.json`) accompanies every raw transcript export, recording at minimum the emitting harness, the native format of the export, the source path/mechanism it came from, and the capture timestamp — since each harness exports a different, otherwise format-ambiguous native format.
+
+### 4.6 Runner-hosted mode
+
+The MOSAIC Runner (`Tools/Runner`) can host an orchestration run itself: it spawns each subagent as its own harness process and consults a script orchestrator as separate harness sessions. The hook adapters then log those sessions under the Runner's run and agent identity. The log format above is unchanged; this subsection records what differs.
+
+**Role variables.** The Runner sets three environment variables in every harness process it spawns:
+
+- `MOSAIC_RUN_ID` - the run identity (replaces extraction from dispatch content).
+- `MOSAIC_ROLE` - `subagent` (a protocol invocation) or `orchestrator` (a script-orchestrator consultation).
+- `MOSAIC_AGENT_INSTANCE_ID` - the invocation identity; set for the subagent role only.
+
+An adapter is in Runner mode only when `MOSAIC_ROLE` is set. Without it the adapter is in native mode and behaves as described in the rest of this document. The deployed hook registration is identical in both modes. A subagent role without an instance id, or an unrecognised role value, degrades to the orchestrator role.
+
+**Who writes which events.**
+
+- The Runner writes `run_start` and `run_end` to `00_orchestrator_events.jsonl`, once per Runner session; resuming a run writes a new pair. Adapters never write them in Runner mode. The Runner writes no `adapter_version` or `model` on these events unless it can resolve them. `run_end.outcome` is one of `completed`, `stopped`, `failed`, `aborted` or `interrupted`: cancellation of the Runner (Ctrl-C, signal) maps to `interrupted` and takes precedence; a refused run (for example the user declining to proceed) maps to `aborted`; a run that halts deliberately or awaiting a decision and can be resumed (stopped, stopped by the consultant, deviation unresolved) maps to `stopped`; a clean finish maps to `completed`; every other error or unknown status maps to `failed`.
+- The hooks write the invocation and session events, turns, tool calls, usage records and transcript exports.
+- For OpenCode the Runner additionally writes a fallback `invocation_end` (see "OpenCode safety net" below).
+
+**Subagent role.** The whole primary session of the spawned harness process is ONE invocation. It is placed in the invocation folder `{agent_instance_id}/` exactly as a native subagent session would be: `invocation_start`/`invocation_end`, turns, tool events and usage records go to `03_events.jsonl`, with `01_input.md`, `02_output.md` and `04_session.raw` beside it. Adapter state that must survive between hook processes lives in a dot-prefixed `.runner-session` directory of the run (consumers skip dot-prefixed entries).
+
+**Orchestrator role.** Each script-orchestrator consultation is its own harness session. Its events go to `00_orchestrator_events.jsonl` and its transcript is exported to a session-scoped name, `00_orchestrator_session__{scope}.raw` (scope formed as in §4.3), even in a real run folder, so consultations never overwrite each other. This is the §4.3 transcript-naming exception extended to Runner mode.
+
+**Exit-safety constraints.** The Runner waits for the harness process to exit and then reads the logs, so the final events must be written before exit:
+
+- Claude Code: `Stop` and `SessionEnd` are registered synchronous. An async hook is killed on `-p` exit (an async `Stop` hook was cut off mid-execution, an async `SessionEnd` hook wrote nothing). The transcript is still being written at `Stop` and is final by `SessionEnd`, so transcript-dependent work happens in `SessionEnd`. Runner sessions run with session persistence on, because under `--no-session-persistence` the transcript file never exists.
+- GHCP CLI: repo hooks load only when the working directory equals or is a descendant of a `trustedFolders` entry in `$COPILOT_HOME/config.json` (else `~/.copilot/config.json`). In an untrusted folder no hook runs and no warning is shown, so the Runner warns at session start (and in the TUI asks whether to proceed).
+- OpenCode: the plugin's `session.idle` handler is not awaited when `opencode run` exits; work after its first `await`, including SDK calls such as reading session messages, is lost. The plugin therefore writes `invocation_end` synchronously before the first await, from state accumulated during the session, and exports the transcript while the session is running; each refresh writes the raw file and then the sidecar synchronously once the SDK returns the messages, so the final refresh is lost only if that SDK call has not returned when the process exits (not observed on OpenCode 1.18.18).
+
+**Accepted topology-inherent differences** from a native run (properties of Runner-hosted orchestration, not defects):
+
+- One `session_start`/`session_end` pair and one session-scoped orchestrator transcript per script-orchestrator call, rather than one per run.
+- No orchestrator tool calls for dispatch: the Runner dispatches, so the orchestrator stream has no dispatching tool calls.
+- Orchestrator turns appear only where the script orchestrator is consulted.
+- `run_start`/`run_end` carry no `adapter_version` or `model` unless the Runner can resolve them.
+
+**Known Runner-mode field gaps** (what native mode produces that Runner mode cannot; the authoritative lists are in each adapter's subagent-role handler module):
+
+- Claude Code:
+  - `invocation_start`/`invocation_end` carry no harness `agent_id`, and no `.agent-map` entry is written.
+  - `agent_type` is derived from `MOSAIC_AGENT_INSTANCE_ID` (text before the last `#`) and omitted when empty.
+  - `invocation_end.completion_source` is `session_end` (native: `handback` or absent); `attribution` is never set.
+  - `invocation_end.token_usage` is summed over all assistant records of the session (a record seen twice counts once), whereas native `invocation_end` reads the last assistant record only. Token totals are therefore not directly comparable between modes; `model` is still taken from the last assistant record.
+  - No `session_start`/`session_end` in the invocation stream; `Notification`, `PreCompact` and `PostCompact` write nothing in the subagent role.
+  - No orchestrator-transcript usage stream or `00_orchestrator_session.raw` for a subagent-role run; `04_session.raw` holds the primary session transcript.
+  - A resumed invocation (same instance id, new session id) appends to the same `03_events.jsonl` but overwrites `01_input.md`, `02_output.md` and `04_session.raw`.
+- GHCP CLI:
+  - No harness `agent_id` and no `.agent-map` entry; `agent_type` derived from the instance id as above.
+  - `response`, `status_code`, `model` and `token_usage` come from the session transcript (the last assistant text and record) and are omitted when the transcript is missing, unreadable or holds no assistant text; `04_session.raw` is not written when no transcript can be read.
+  - No `session_start`/`session_end` in the invocation stream; a session without any prompt gets its `invocation_start` (without prompt) at completion.
+  - `Notification`, `preCompact`, `errorOccurred`, `permissionRequest`, `userPromptTransformed`, `subagentStart` and `subagentStop` write nothing in the subagent role.
+  - No `usage_record` events (native GHCP CLI emits none) and no `00_orchestrator_session.raw` for a subagent-role run.
+  - Resume behaves as for Claude Code (append events, overwrite the three files).
+- OpenCode:
+  - Subagent role: no `run_start`, `run_end`, `session_start` or `session_end`; nothing is written to `00_orchestrator_events.jsonl`.
+  - Subagent role: `invocation_end` carries `agent_instance_id`, `status_code` and `response` only; `response` is the last assistant text observed through message events, so it can lack text the harness never surfaced as events.
+  - Subagent role: no synthetic closing `tool_call_end` for a dispatching `task` call, and no orchestrator transcript refresh on invocation start/end.
+  - Orchestrator role: no `run_start`/`run_end`; `session_start` omits any run id extracted from history (`MOSAIC_RUN_ID` is authoritative); no durable closed-session marker (exactly-once is per process).
+  - `04_session.raw`/`04_session.meta.json` (and the session-scoped orchestrator transcript) exist only when the SDK returns messages during the session; each refresh writes the raw file and then the sidecar (the commit marker) synchronously once the SDK returns, so the final refresh is lost only if that SDK call has not returned when the process exits (not observed on OpenCode 1.18.18). `02_output.md` is best-effort.
+
+**OpenCode safety net.** After an OpenCode subagent process has exited, the Runner appends an `invocation_end` (`agent_instance_id`, `status_code` and `response` from the protocol response it received) when the invocation folder exists without one. It is re-evaluated, and dropped together with its call in the Runner's adapter construction, once live Runner runs on OpenCode show it never fires, that is, every invocation folder already holds the plugin's own `invocation_end`.
 
 ## 5. Tool Payload Capture Policy
 

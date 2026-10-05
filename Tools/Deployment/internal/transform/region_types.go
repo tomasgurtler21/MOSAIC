@@ -27,6 +27,10 @@ const (
 	// were provided (Update scenario). Symmetric with RegionAssembledInfra which covers
 	// the assembled-from-selections case.
 	RegionPreservedInfra RegionAction = "preserved-infrastructure"
+	// RegionMergedInfra means deployed InfrastructureAgents content was merged additively with blocks.
+	RegionMergedInfra RegionAction = "merged-infrastructure"
+	// RegionPreservedWorkflows means the AvailableWorkflows region was lifted from the deployed file.
+	RegionPreservedWorkflows RegionAction = "preserved-workflows"
 	// RegionProtocolFilled means the CommunicationProtocol region was filled with the
 	// role-matched protocol block plus its version marker.
 	RegionProtocolFilled RegionAction = "filled-from-protocol"

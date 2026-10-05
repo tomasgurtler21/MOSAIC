@@ -1,3 +1,55 @@
+# 0.6.0 (2026-10-05)
+
+## Tools
+
+### Runner v1.4.0
+#### Changes
+- Writes MOSAIC logs for runs, covering orchestrator turns and subagent invocations.
+- Workflow `On Findings` routing now runs in auto modes without help from the orchestrator.
+- New `--review-loop-limit` option (run config and Mode 3 auto-routing)
+- Runner settings (mode, pre-consultation, manual resolution) and gated-agent selections persist across resume
+- Warns when the working directory is not a trusted folder for GHCP CLI
+#### Bugfixes
+- Fix incorrect dispatch on route-backs in auto-review mode
+- `STAGE_END` / `PHASE_END` triggers fire only after HITL-accepted `SUCCESS`
+
+### Deploy v1.1.2
+#### Changes
+- `Deploy agents` mode adds infrastructure agent declarations to an existing orchestrator. `update` now refreshes already-declared catalog infrastructure agents whose version, class, triggers or on-failure changed (previously the region was kept as-is)
+- Rebuilt workflow tables get a `Row` column (1..N), which the Runner uses
+- More tolerant of source file formatting
+- Model lists updated (Opus 5.5, Sonnet 5.5, Fable 5.1, GPT-6 family, etc.)
+
+### AgentTest v1.0.2
+- Adapted to Claude Code's new subagent hand-back mechanism (2.1.271+, auto mode)
+
+### LogAnalyzer v1.0.1
+- Recognizes Runner-produced log shapes
+
+## Orchestration System
+- **Communication Protocol v1.13** (from v1.11): subagents should now always choose their status code based only on the outcome of their own task, not on what they think should happen next in the workflow, which makes status codes more deterministic. Stricter artifact access rules, a fuller HITL review request that lists every changed artifact.
+- **Deployed Sections Bundle v2.0.0**: managed instruction sections were rewritten to work better across model families, not only Claude. `ProtocolConstraints` was removed because it repeated the protocol.
+
+## Hooks
+- **mosaic-logger** (v1.5.1): captures subagent results via Claude Code's `SubagentHandback`, supports Runner mode on all harnesses, and fixes session export on OpenCode
+
+## Catalog
+- **Orchestrator** (v7.6.1) / **orchestrator-script** (v2.2.1): updated for protocol v1.13, with improved subagent invocation records in the orchestration log
+- **Requirements pair reworked**: **requirements-refinement** (v3.4.1) produces typed requirements at a depth the user declares, with explicit Delegated and Accepted Unknowns sections. **requirements-review** (v5.0.4) reviews against that declared depth and leaves delegated decisions alone, which cuts down on review spirals.
+- **build-review** (v4.0.0): tightened instructions on its responsibilities: import, build and deploy, record deployment metadata, and never run tests
+- **tests-review-tdd** (v3.4.1), **lean-tdd** skill (v1.2.0): RED-phase verification is now about discriminability (whether the failing tests tell correct and incorrect implementations apart)
+- All subagents: status-code guidance aligned with protocol v1.13, plus small fixes (patch/minor bumps across Research, Planning, Validation, Creation, Interface, Audit)
+- New model-family-agnostic creators: **subagent-creator** (utility, v3.0.0) and **agent-creator** (standalone, v1.0.0), alongside the existing `anthropic-*` variants
+- Workflows bumped for the updated agents: `brownfield-tdd`, `brownfield-tdd-build-verified`, `brownfield-design`, `brownfield-pr-fix`, `kb-correction`
+
+## Documentation
+- Deployment Guide: orchestrator declaration refresh, infrastructure injection in `agents` mode, workflow `Row` column
+- Runner Guide: workflow rows, `WorkflowRow`, On Findings targeting, and version drift on resume
+- New `docs/CODING-GUIDELINES.md`
+
+## Known Issues
+- **Runner with GHCP CLI is unreliable.** With recent GHCP CLI versions (observed on 1.0.91), GHCP CLI sometimes ignores the requested `--agent` in prompt mode and runs its default agent instead, so Runner invocations fail with protocol or parsing errors. The failures are intermittent and the cause is not yet confirmed. In limited testing GHCP CLI 1.0.87 did not show the problem, so pinning it may help, but this is not verified. Claude Code and OpenCode are not affected.
+
 # 0.5.0 (2026-09-23)
 
 ## Tools
@@ -20,6 +72,7 @@
 - **Plan Review** (v5.3.0): New stage sizing assessment section validates that execution groups fit in a single agent session. PARTIALLY_DONE guidance improved for large inputs.
 - **Contracts Designer** (v4.3.0): Now explicitly scoped to comply with the plan rather than silently overriding plan decisions. Tighter boundary between contract specification and implementation detail — private methods, algorithms, and pseudocode excluded to prevent review spirals.
 - **Contracts Review** (v4.4.0): Flags overspecification (implementation detail in contracts) for removal. Aggregates all findings before returning to reduce review-creator round-trips.
+- Removed option to skip DESIGN phase in relevant workflows, it was doing more harm than good.
 
 ## Documentation
 - GettingStarted guide: clarified how to add workflows to an existing deployment (Update workflows mode)

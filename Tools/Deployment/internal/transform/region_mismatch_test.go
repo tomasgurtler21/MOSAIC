@@ -246,11 +246,11 @@ required_skills: []
 <Constraints type="core">
 ## Constraints
 
-<ProtocolConstraints type="project">
-</ProtocolConstraints>
+<HarnessConstraints type="project">
+</HarnessConstraints>
 </Constraints>
 `,
-			regionName: "ProtocolConstraints",
+			regionName: "HarnessConstraints",
 		},
 		{
 			name: "user-owned under deployed",

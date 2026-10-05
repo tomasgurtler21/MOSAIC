@@ -1,7 +1,7 @@
 ---
 version: "1.2"
 name: "MosaicTest Infrastructure Checkpoint+Commit Workflow"
-description: "Runner mode fixture — Auto mode with checkpoint and commit infrastructure agents. Commit setup dispatch at run start, STAGE_END firing for both classes at each stage boundary. Proves the trigger-and-marker path works end to end through a real harness. Currently RED: exposes the STAGE_END timing gap."
+description: "Runner mode fixture — Auto mode with checkpoint and commit infrastructure agents. Commit setup dispatch at run start, STAGE_END firing for both classes at each stage boundary. Proves the trigger-and-marker path works end to end through a real harness. Also guards the STAGE_END timing fix: each infra pair must fire between stages, including after the final stage."
 hint: "Harness test — infrastructure triggers (STAGE_END), commit setup dispatch, marker extraction"
 author: MOSAIC
 id: infra-checkpoint-commit
@@ -36,7 +36,7 @@ commits: enabled
 - **`Plan.md` is a pre-placed fixture, not produced by the run.** Seed `Fixtures/infra-checkpoint-commit` as the single seed path.
 - The two infrastructure stubs (`mosaictest-checkpoint`, `mosaictest-commit`) both declare trigger `STAGE_END`. They fire on each observed stage transition, in catalog order (alphabetical by key: checkpoint before commit).
 - The commit setup dispatch fires once at run start, before the dispatch loop. It returns `[branch:mosaictest-run]`, which the runner records in the artifact's `commit_branch` frontmatter.
-- No deviations occur, so the orchestrator is consulted only for pre-consultation (no routing fixture needed).
+- No deviations occur, so the orchestrator is consulted only for pre-consultation. The routing fixture declares `Pre-Consultation: none` and no rules.
 
 </Workflow>
 
@@ -63,27 +63,23 @@ visibly bunches them afterwards.
 It also covers the final-stage case: stage 2 has no successor step, so it catches implementations
 that can only detect a boundary by looking backwards from the next stage.
 
-### Why no routing fixture
+### Why a routing fixture with no rules
 
-Auto mode with all-SUCCESS workflow steps needs no orchestrator consultation (except pre-consultation). The pre-consultation works without a routing fixture — the stub orchestrator returns `{}` when the fixture's Pre-Consultation section says `none`. If the orchestrator were consulted unexpectedly (e.g. after an infrastructure step, which would be a bug), the absence of a routing fixture causes the stub to stop with "fixture not found", making the bug visible.
+Auto mode with all-SUCCESS workflow steps needs no orchestrator consultation except the pre-consultation. The pre-consultation still needs a fixture: the stub returns `{}` only when it reads `Pre-Consultation: none`. With no fixture at all, the stub's only correct answer is a "fixture not found" stop. Whether the model writes that stop as JSON or as prose varies from run to run, so the run passed or failed at random (exit 7, "reply contains no JSON object").
+
+The fixture declares no rules. If the orchestrator is consulted unexpectedly (e.g. after an infrastructure step, which would be a bug), no rule matches and the stub stops, naming the state it saw. The bug stays visible.
 
 ---
 
 ## Expected Run
 
-> **This fixture is currently RED on purpose.** It describes the intended behaviour after the
-> `STAGE_END` timing fix (`Issue-Runner-TerminalStageEndTrigger.md`), not what the Runner does
-> today. Today the two infra pairs do not straddle the stage 2 step — the first pair fires late
-> (after stage 2's step) and the second never fires at all. Do not "fix" this file to match the
-> current output; the gap it exposes is the point.
-
-Eight dispatches total. Infrastructure agents fire in catalog order (alphabetical by key):
-checkpoint before commit.
+Seven Orchestration.md log rows plus one pre-run consultation. Infrastructure agents fire in
+catalog order (alphabetical by key): checkpoint before commit. Pre-consultation dispatches to the
+orchestrator but allocates no `Seq` and leaves no row — it surfaces only in the dispatch log.
 
 | Log `Seq` | `Agent` | Kind | `Phase` | `Status` | `Summary` shows |
 |:---:|---|---|---|---|---|
-| 0 | `mosaictest-commit#1` | commit setup | -- | SUCCESS | `[branch:mosaictest-run]` marker |
-| 1 | `orchestrator-script#pre_consultation#1` | consultation | -- | "" | pre-run consultation response |
+| 1 | `mosaictest-commit#1` | commit setup | -- | SUCCESS | `[branch:mosaictest-run]` marker |
 | 2 | `mosaictest-scripted#2` | workflow step | EXECUTION.1 | SUCCESS | stage 1 row, wrote Stage-1/MosaicTestStage.md |
 | 3 | `mosaictest-checkpoint#3` | infra trigger | -- | SUCCESS | STAGE_END at end of stage 1, `[checkpoint:...]` marker |
 | 4 | `mosaictest-commit#4` | infra trigger | -- | SUCCESS | STAGE_END at end of stage 1, `[branch:mosaictest-run]` marker |
@@ -94,20 +90,23 @@ checkpoint before commit.
 **Run outcome:** COMPLETE. All workflow steps succeed, both STAGE_END boundaries fire.
 
 **Key observations:**
-- Seq 0 is the commit setup dispatch — before any workflow step *and* before pre-consultation.
+- Seq 1 is the commit setup dispatch — before any workflow step *and* before pre-consultation.
   Per Design.md §4.2 the setup dispatch is run-start step 7a, while pre-consultation follows
   artifact creation (step 8) because its request carries the artifact path. This ordering is
-  correct today and is **not** part of the pending fix. The artifact's `commit_branch` field
-  should read `mosaictest-run`.
+  is separate from `STAGE_END` timing. The artifact's `commit_branch` field
+  should read `mosaictest-run`. Pre-consultation itself allocates no `Seq` and leaves no row, so
+  the first workflow step is `mosaictest-scripted#2`, immediately following the commit setup row.
 - **Each infra pair straddles a stage boundary.** Seq 3/4 fire after stage 1's step and before
   stage 2's step; Seq 6/7 fire after stage 2's step. This is what makes per-stage commits
   meaningful: the commit at Seq 4 sees only stage 1's files, and the commit at Seq 7 sees only
   stage 2's.
-- **Why this is RED today.** `STAGE_END` is currently evaluated by comparing the completed step's
-  stage against the *previous* step's stage, so it cannot fire until a step from the next stage
-  has already completed — the Seq 3/4 pair lands after Seq 5's work instead of before it, and
-  sweeps both stages' files into one commit. The final stage has no successor step, so Seq 6/7
-  never fire. Both symptoms have the same root cause.
+- **Regression guard for the `STAGE_END` timing fix.** `STAGE_END` used to be evaluated by
+  comparing the completed step's stage against the *previous* step's stage, so it could not fire
+  until a step from the next stage had already completed. The Seq 3/4 pair landed after Seq 5's
+  work instead of before it and swept both stages' files into one commit, and because the final
+  stage has no successor step, Seq 6/7 never fired. The fix evaluates `STAGE_END` when the last
+  step of a stage returns HITL-accepted `SUCCESS` (Runner `Design.md` §5). If either symptom
+  comes back, the fix has regressed.
 - Infrastructure rows are flagged `IsInfrastructure=true` in the log and do not update
   `current_state`.
 - No cascading: checkpoint's dispatch does not trigger a re-evaluation that fires commit, and
@@ -121,10 +120,11 @@ checkpoint before commit.
 |---|---|
 | Run refuses to start with "no commit-class infrastructure agent" | Infrastructure agents were not deployed — check deploy tool output for silent infra agent skip (ToolingGaps.md GAP-1) |
 | Run refuses with "checkpoints requested but no checkpoint provider" | Same as above — checkpoint agent missing from deployment |
-| Seq 0 missing (no commit setup row) | The commit setup dispatch did not fire; check `session.go` doCommitSetupDispatch |
+| Seq 1 missing (no commit setup row) | The commit setup dispatch did not fire; check `session.go` doCommitSetupDispatch |
+| An `orchestrator-script` row appears in `Orchestration.md` | Consultations must leave no row in the artifact; pre-consultation wrongly called `Store.Apply` or allocated a `Seq` |
 | Commit setup fires but `commit_branch` is empty | The `[branch:mosaictest-run]` marker was not extracted from the stub's response |
-| Only one infra pair, firing after stage 2's step | **The known gap this fixture exposes.** `STAGE_END` still compares backwards against the previous step's stage. See `Issue-Runner-TerminalStageEndTrigger.md` |
-| Two pairs, but both after stage 2's step | A terminal evaluation was added without fixing the timing — the last stage now fires, but the first commit still sweeps up both stages' files. Half a fix |
+| Only one infra pair, firing after stage 2's step | The `STAGE_END` timing fix has regressed: the trigger again compares backwards against the previous step's stage, so it fires late and never for the final stage |
+| Two pairs, but both after stage 2's step | Partial regression: the final stage still fires, but the stage 1 trigger is late again, so the first commit sweeps up both stages' files |
 | No infra triggers at all | No stage boundary was observed at all — the trigger evaluator may not be running between stages, or `prevWorkflowStep` is not being carried across steps |
 | Infra triggers fire but in wrong order (commit before checkpoint) | The InfrastructureAgents region is not in alphabetical order, or the evaluator iterates differently from the declaration order |
 | Three or more infra triggers at one stage boundary | Cascading: an infrastructure completion is triggering a re-evaluation, violating the no-cascades rule |
@@ -140,13 +140,13 @@ checkpoint before commit.
 | 1.0 | 2026-09-20 | MOSAIC | Initial version. Checkpoint + commit triggers, commit setup dispatch. |
 | 1.1 | 2026-09-22 | MOSAIC | Corrected the startup ordering: commit setup precedes pre-consultation (Design.md §4.2 step 7a). |
 | 1.2 | 2026-09-22 | MOSAIC | Expected Run restored to eight dispatches with each infra pair straddling a stage boundary. Deliberately RED pending the STAGE_END timing fix (`Issue-Runner-TerminalStageEndTrigger.md`); the v1.1 six-dispatch expectation documented the bug rather than the requirement. |
+| 1.3 | 2026-10-04 | MOSAIC | Added a rule-less `MosaicTestRouting.md` (`Pre-Consultation: none`). Without it the pre-consultation answer depended on how the stub happened to phrase "fixture not found", which made the run flaky. The `STAGE_END` timing fix has landed: the "RED on purpose" notes are replaced by regression notes, and the Expected Run is unchanged. |
 
 ---
 
 ## Open Ideas / Dead Ends
 
 **Ideas under consideration:**
-- (moved to `Issue-Runner-TerminalStageEndTrigger.md` — the STAGE_END timing fix is now committed work, and this fixture is RED until it lands.)
 - A variant with `INVOCATION_INTERVAL(2)` on the checkpoint agent instead of `STAGE_END`, so both trigger types fire in one run.
 - Adding a review-class agent to exercise all three infrastructure classes simultaneously.
 - Testing the `on_failure: halt` path by making a stub return BLOCKED (requires changes to the infrastructure stubs).

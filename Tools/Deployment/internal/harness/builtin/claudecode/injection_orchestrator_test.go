@@ -35,19 +35,18 @@ import (
 
 // TestInjection_SubagentKey_ReturnsSharedContentOnly verifies case (a): when AgentKey is
 // not "orchestrator", Injection returns only the shared (subagent-level) content.
-// For Claude Code HarnessConstraints, the shared content is empty (declared-but-empty).
+// For Claude Code HarnessConstraints, the shared content is the output-artifacts constraint.
 // This test passes in the RED phase: existing behavior is preserved for non-orchestrator keys.
 func TestInjection_SubagentKey_ReturnsSharedContentOnly(t *testing.T) {
 	mod := newModule(t)
 
-	// HarnessConstraints is declared-but-empty for Claude Code (no shared constraint content).
 	content, ok := mod.Injection(domain.InjectionRequest{Name: "HarnessConstraints", AgentKey: "some-subagent"})
 	if !ok {
-		t.Fatal("Injection(HarnessConstraints, some-subagent) returned ok=false; Claude Code declares this injection as empty (ok=true)")
+		t.Fatal("Injection(HarnessConstraints, some-subagent) returned ok=false; Claude Code declares this injection (ok=true)")
 	}
-	// Subagent must receive only shared content, which is empty for HarnessConstraints.
-	if content != "" {
-		t.Errorf("subagent should receive shared content only (empty string for HarnessConstraints); got %q", content)
+	// Subagent must receive only shared content, with no orchestrator-only content merged in.
+	if content != claudeHarnessConstraints {
+		t.Errorf("subagent should receive shared content only\ngot:  %q\nwant: %q", content, claudeHarnessConstraints)
 	}
 }
 
@@ -58,10 +57,10 @@ func TestInjection_SubagentKey_EmptyAgentKey_ReturnsSharedContentOnly(t *testing
 
 	content, ok := mod.Injection(domain.InjectionRequest{Name: "HarnessConstraints", AgentKey: ""})
 	if !ok {
-		t.Fatal("Injection(HarnessConstraints, \"\") returned ok=false; Claude Code declares this injection as empty (ok=true)")
+		t.Fatal("Injection(HarnessConstraints, \"\") returned ok=false; Claude Code declares this injection (ok=true)")
 	}
-	if content != "" {
-		t.Errorf("empty agent key should receive shared content only (empty string for HarnessConstraints); got %q", content)
+	if content != claudeHarnessConstraints {
+		t.Errorf("empty agent key should receive shared content only\ngot:  %q\nwant: %q", content, claudeHarnessConstraints)
 	}
 }
 
@@ -70,12 +69,12 @@ func TestInjection_SubagentKey_EmptyAgentKey_ReturnsSharedContentOnly(t *testing
 // from HarnessInjectionsOrchestrator.md.
 //
 // For Claude Code HarnessConstraints:
-//   - Shared content (HarnessInjections.md): "" (empty, Claude Code has no shared constraint)
+//   - Shared content (HarnessInjections.md): the output-artifacts constraint
 //   - Orchestrator-only content (HarnessInjectionsOrchestrator.md): the skills-path and
 //     Task-tool-fields instructions migrated from the hand-authored orchestrator file.
 //
-// Since shared is empty, merged result = orchestrator-only content. The skills-path
-// instruction ("cwd/.claude/skills") serves as the distinguishing marker that the
+// Merged result = shared content + "\n\n" + orchestrator-only content. The skills-path
+// instruction (".claude/skills/ in the workspace root") serves as the distinguishing marker that the
 // orchestrator file was loaded and merged.
 //
 // RED: FAILS until I4.2 (create HarnessInjectionsOrchestrator.md for Claude Code) and
@@ -89,8 +88,8 @@ func TestInjection_OrchestratorKey_ReceivesMergedContent(t *testing.T) {
 	}
 	// The orchestrator-only content must include the skills-path instruction.
 	// This is the content currently hand-authored at .claude/agents/orchestrator.md lines 504-507.
-	if !strings.Contains(content, "cwd/.claude/skills") {
-		t.Errorf("orchestrator HarnessConstraints content is missing the skills-path instruction\ngot:  %q\nwant: content containing \"cwd/.claude/skills\"", content)
+	if !strings.Contains(content, ".claude/skills/ in the workspace root") {
+		t.Errorf("orchestrator HarnessConstraints content is missing the skills-path instruction\ngot:  %q\nwant: content containing \".claude/skills/ in the workspace root\"", content)
 	}
 }
 

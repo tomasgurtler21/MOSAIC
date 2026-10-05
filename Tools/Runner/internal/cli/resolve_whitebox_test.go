@@ -77,9 +77,9 @@ func setResolveAndAnnounce(t *testing.T, fn func(
 	t.Cleanup(func() { resolveAndAnnounce = orig })
 }
 
-// makeTempCatalogRoot creates a minimal catalog directory structure under a
+// newTestTempCatalogRoot creates a minimal catalog directory structure under a
 // fresh temporary directory and returns the MOSAIC root path (the value for
-// the --catalog flag). It mirrors the pattern in test_test.go's makeCatalogRoot.
+// the --catalog flag). It mirrors the pattern in test_test.go's newTestCatalogRoot.
 //
 // The created structure is:
 //
@@ -87,7 +87,7 @@ func setResolveAndAnnounce(t *testing.T, fn func(
 //	  Tools/Runner/TestCatalog/Workflows/MosaicTest/
 //	    <workflowID>.md (with frontmatter)
 //	    Fixtures/<workflowID>/   (empty fixture directory)
-func makeTempCatalogRoot(t *testing.T, workflowID string, modes []string, smokeSet []string) string {
+func newTestTempCatalogRoot(t *testing.T, workflowID string, modes []string, smokeSet []string) string {
 	t.Helper()
 	root := t.TempDir()
 
@@ -133,7 +133,7 @@ func makeTempCatalogRoot(t *testing.T, workflowID string, modes []string, smokeS
 // resolution-failure fast-exit produces no stdout output.
 func TestRunTestSubcmd_ResolutionFailure_ReturnsExitFailure(t *testing.T) {
 	// Must not call t.Parallel(): overrides shared resolveAndAnnounce.
-	root := makeTempCatalogRoot(t, "smoke-single", []string{"auto"}, []string{"auto"})
+	root := newTestTempCatalogRoot(t, "smoke-single", []string{"auto"}, []string{"auto"})
 	injectedErr := errors.New("test: harness binary not found on PATH")
 	setResolveAndAnnounce(t, func(_ []string, _ func(string) (string, error), _ io.Writer, _ domain.DebugLogger) (map[string]string, error) {
 		return nil, injectedErr
@@ -169,7 +169,7 @@ func TestRunTestSubcmd_ResolutionFailure_ReturnsExitFailure(t *testing.T) {
 // orchestration step rather than the resolution step.
 func TestRunTestSubcmd_ResolutionFailure_NotExitUsage(t *testing.T) {
 	// Must not call t.Parallel(): overrides shared resolveAndAnnounce.
-	root := makeTempCatalogRoot(t, "smoke-single", []string{"auto"}, []string{"auto"})
+	root := newTestTempCatalogRoot(t, "smoke-single", []string{"auto"}, []string{"auto"})
 	setResolveAndAnnounce(t, func(_ []string, _ func(string) (string, error), _ io.Writer, _ domain.DebugLogger) (map[string]string, error) {
 		return nil, errors.New("test: injected resolution failure")
 	})
@@ -201,7 +201,7 @@ func TestRunTestSubcmd_ResolutionFailure_NotExitUsage(t *testing.T) {
 // This format is consistent with the existing error-print convention in test.go.
 func TestRunTestSubcmd_ResolutionFailure_WritesErrorToStderr(t *testing.T) {
 	// Must not call t.Parallel(): overrides shared resolveAndAnnounce.
-	root := makeTempCatalogRoot(t, "smoke-single", []string{"auto"}, []string{"auto"})
+	root := newTestTempCatalogRoot(t, "smoke-single", []string{"auto"}, []string{"auto"})
 	const errReason = "test: harness binary not found on PATH"
 	setResolveAndAnnounce(t, func(_ []string, _ func(string) (string, error), _ io.Writer, _ domain.DebugLogger) (map[string]string, error) {
 		return nil, errors.New(errReason)
@@ -229,7 +229,7 @@ func TestRunTestSubcmd_ResolutionFailure_WritesErrorToStderr(t *testing.T) {
 // convention for actionable error messages in the CLI test path.
 func TestRunTestSubcmd_ResolutionFailure_StderrStartsWithErrorPrefix(t *testing.T) {
 	// Must not call t.Parallel(): overrides shared resolveAndAnnounce.
-	root := makeTempCatalogRoot(t, "smoke-single", []string{"auto"}, []string{"auto"})
+	root := newTestTempCatalogRoot(t, "smoke-single", []string{"auto"}, []string{"auto"})
 	setResolveAndAnnounce(t, func(_ []string, _ func(string) (string, error), _ io.Writer, _ domain.DebugLogger) (map[string]string, error) {
 		return nil, errors.New("test: binary absent")
 	})
@@ -259,7 +259,7 @@ func TestRunTestSubcmd_ResolutionFailure_StderrStartsWithErrorPrefix(t *testing.
 // caused by a missing deploy binary (which produces stdout output before failing).
 func TestRunTestSubcmd_ResolutionFailure_WithFakeHarness_OverrideStillFails(t *testing.T) {
 	// Must not call t.Parallel(): overrides shared resolveAndAnnounce.
-	root := makeTempCatalogRoot(t, "smoke-single", []string{"auto"}, []string{"auto"})
+	root := newTestTempCatalogRoot(t, "smoke-single", []string{"auto"}, []string{"auto"})
 	setResolveAndAnnounce(t, func(_ []string, _ func(string) (string, error), _ io.Writer, _ domain.DebugLogger) (map[string]string, error) {
 		return nil, errors.New("test: always fail")
 	})
@@ -288,7 +288,7 @@ func TestRunTestSubcmd_ResolutionFailure_WithFakeHarness_OverrideStillFails(t *t
 // or summary output must appear on stdout. Only stderr carries the error message.
 func TestRunTestSubcmd_ResolutionFailure_StdoutIsEmpty(t *testing.T) {
 	// Must not call t.Parallel(): overrides shared resolveAndAnnounce.
-	root := makeTempCatalogRoot(t, "smoke-single", []string{"auto"}, []string{"auto"})
+	root := newTestTempCatalogRoot(t, "smoke-single", []string{"auto"}, []string{"auto"})
 	setResolveAndAnnounce(t, func(_ []string, _ func(string) (string, error), _ io.Writer, _ domain.DebugLogger) (map[string]string, error) {
 		return nil, errors.New("test: injected resolution failure")
 	})
@@ -313,7 +313,7 @@ func TestRunTestSubcmd_ResolutionFailure_StdoutIsEmpty(t *testing.T) {
 func TestRunTestSubcmd_SyntheticSuccessOverride_DoesNotReturnUsageError(t *testing.T) {
 	// Must not call t.Parallel(): uses the shared resolveAndAnnounce variable
 	// (set by TestMain; this test does NOT further override it).
-	root := makeTempCatalogRoot(t, "smoke-single", []string{"auto"}, []string{"auto"})
+	root := newTestTempCatalogRoot(t, "smoke-single", []string{"auto"}, []string{"auto"})
 
 	var out, errOut bytes.Buffer
 	code := RunTestCommand(

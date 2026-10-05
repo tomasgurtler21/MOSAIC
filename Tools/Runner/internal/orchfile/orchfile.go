@@ -135,7 +135,7 @@ func EnumerateWorkflows(path string) ([]domain.WorkflowRegion, error) {
 
 // EnumerateInfrastructureAgents reads the file at the given path and returns
 // all infrastructure agent declarations found in the
-// <InfrastructureAgents type="project"> region. Each agent is identified by its
+// <InfrastructureAgents type="managed"> region. Each agent is identified by its
 // <InfrastructureAgent type="core" name="{name}"> boundary tag.
 //
 // Returns an empty slice (not an error) when the injection region is absent or

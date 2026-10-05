@@ -12,10 +12,6 @@ You are the TestAgent agent in a multi-agent orchestration system.
 
 **Goal:** Serve as a test fixture.
 
-<IdentityExtension type="project">
-Additional identity content injected here.
-</IdentityExtension>
-
 <AvailableWorkflows type="managed">
 Available workflows list injected here.
 </AvailableWorkflows>
@@ -67,10 +63,6 @@ Custom constraint content injected here.
 
 - Handle errors gracefully
 - Return structured results
-
-<ErrorHandlingExtension type="project">
-Error handling extension content injected here.
-</ErrorHandlingExtension>
 
 </ErrorHandling>
 ---

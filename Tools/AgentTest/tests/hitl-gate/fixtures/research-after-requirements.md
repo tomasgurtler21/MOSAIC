@@ -18,10 +18,10 @@ current_state:
 ---
 
 <ExecutionLog type="core">
-| Seq | Agent | Phase | Stage | Status | Timestamp | Summary | Inputs | Checkpoint |
-|-----|-------|-------|-------|--------|-----------|---------|--------|------------|
-| 1 | codebase-research#1 | RESEARCH | - | SUCCESS | 2026-01-15T10:05:00Z | Identified CLI entry point, flag parsing with pflag, existing diagnostic pattern. | - | - |
-| 2 | requirements-refinement#2 | RESEARCH | - | SUCCESS | 2026-01-15T10:10:00Z | Requirements refined with verbose flag specifics. | Research.md | - |
+| Seq | Agent | Phase | Stage | WorkflowRow | Status | Timestamp | Summary | Inputs | Checkpoint |
+|-----|-------|-------|-------|-------------|--------|-----------|---------|--------|------------|
+| 1 | codebase-research#1 | RESEARCH | - | 1 | SUCCESS | 2026-01-15T10:05:00Z | Identified CLI entry point, flag parsing with pflag, existing diagnostic pattern. | - | - |
+| 2 | requirements-refinement#2 | RESEARCH | - | 2 | SUCCESS | 2026-01-15T10:10:00Z | Requirements refined with verbose flag specifics. | Research.md | - |
 </ExecutionLog>
 
 <Artifacts type="core">

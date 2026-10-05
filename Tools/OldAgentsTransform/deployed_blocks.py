@@ -16,6 +16,12 @@ import re
 from typing import TYPE_CHECKING
 
 from boundary_constants import TAG_PATTERN, tag_base_name
+from frontmatter_input import (
+    FrontmatterDecodeError,
+    is_frontmatter_fence,
+    read_frontmatter_text,
+    render_line_for_error,
+)
 
 _TOOLS_DIR = pathlib.Path(__file__).parent        # Tools/OldAgentsTransform
 _REPO_ROOT = _TOOLS_DIR.parent.parent             # repo root (two levels up)
@@ -101,12 +107,16 @@ def _find_frontmatter_bounds(lines: list[str]) -> int:
     Raises BundleError when the file does not start with '---' or has no
     closing delimiter.
     """
-    if not lines or lines[0].rstrip("\r\n") != "---":
-        raise BundleError("Bundle file does not start with a '---' frontmatter delimiter.")
+    if not lines or not is_frontmatter_fence(lines[0]):
+        first_line = render_line_for_error(lines[0] if lines else "")
+        raise BundleError(
+            "Bundle file does not start with a '---' frontmatter delimiter "
+            f"(line 1 is {first_line})."
+        )
     for i in range(1, len(lines)):
-        if lines[i].rstrip("\r\n") == "---":
+        if is_frontmatter_fence(lines[i]):
             return i
-    raise BundleError("Bundle frontmatter has no closing '---' delimiter.")
+    raise BundleError("Bundle frontmatter opened at line 1 has no closing '---' delimiter.")
 
 
 def _parse_frontmatter(
@@ -242,7 +252,11 @@ def load_bundle(path: pathlib.Path = DEFAULT_BUNDLE_PATH) -> Bundle:
     - a SECTION region in the body has no corresponding declaration.
     """
     try:
-        text = path.read_text(encoding="utf-8")
+        text = read_frontmatter_text(path)
+    except FrontmatterDecodeError as exc:
+        raise BundleError(
+            f"Cannot decode bundle file '{path}' at line {exc.line_number}: {exc.reason}"
+        ) from exc
     except OSError as exc:
         raise BundleError(f"Cannot read bundle file '{path}': {exc}") from exc
 

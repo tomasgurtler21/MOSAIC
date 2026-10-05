@@ -48,6 +48,16 @@ func renderHuman(out io.Writer, summary domain.RunSummary) {
 	default:
 		fmt.Fprintf(out, "outcome: %s\nworkspace: %s\n", string(summary.Outcome), summary.WorkspacePath)
 	}
+	writeFormatChanges(out, summary)
+}
+
+// writeFormatChanges lists each rewritten file whose BOM or line-ending style changed.
+func writeFormatChanges(out io.Writer, summary domain.RunSummary) {
+	for _, a := range summary.Actions {
+		if a.FormatChange != nil {
+			fmt.Fprintf(out, "formatting changed: %s: %s\n", a.TargetPath, a.FormatChange.String())
+		}
+	}
 }
 
 // outcomeExitCode maps a RunSummary Outcome to an exit code per the exit code contract.
@@ -183,6 +193,7 @@ func renderAgentsHuman(out io.Writer, dryRun bool, summary domain.RunSummary) {
 	default:
 		fmt.Fprintf(out, "%soutcome: %s\nworkspace: %s\n", prefix, string(summary.Outcome), summary.WorkspacePath)
 	}
+	writeFormatChanges(out, summary)
 }
 
 // renderHooksOutput writes the deploy-hooks run summary and returns the exit code.
@@ -216,6 +227,7 @@ func renderHooksHuman(out io.Writer, dryRun bool, summary domain.RunSummary) {
 	default:
 		fmt.Fprintf(out, "%soutcome: %s\nworkspace: %s\n", prefix, string(summary.Outcome), summary.WorkspacePath)
 	}
+	writeFormatChanges(out, summary)
 }
 
 // renderCheckIndexOutput writes the index-check result and returns the appropriate exit code.

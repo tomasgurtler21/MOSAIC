@@ -177,12 +177,11 @@ func isSemver(s string) bool {
 // Rules 8a, 8b, 8c: Communication protocol and conduct regions
 // ---------------------------------------------------------------------------
 
-// conductRegionNames lists the five bundle-sourced conduct regions that subagents
+// conductRegionNames lists the four bundle-sourced conduct regions that subagents
 // must carry. Orchestrators must not carry any of them.
 var conductRegionNames = []string{
 	"AuthorityHierarchy",
 	"ClosingProcedure",
-	"ProtocolConstraints",
 	"ErrorHandlingCommon",
 	"ExecutionPhilosophyCommon",
 }
@@ -200,7 +199,7 @@ func checkRule8a(body *Body) []Issue {
 	return nil
 }
 
-// checkConductRegions checks rule 8b (subagent must have all five conduct regions) and
+// checkConductRegions checks rule 8b (subagent must have all four conduct regions) and
 // rule 8c (orchestrator must not carry any of them).
 func checkConductRegions(body *Body, role string) []Issue {
 	var issues []Issue

@@ -15,8 +15,6 @@ tier_rationale: "TODO: state why this tier"
 
 You are the **FencedProvenanceAgent** agent.
 
-<IdentityExtension type="project">
-</IdentityExtension>
 <ClosingProcedure type="managed">
 </ClosingProcedure>
 <AuthorityHierarchy type="managed">
@@ -39,8 +37,6 @@ Capability description.
 
 <Constraints type="core">
 ## Constraints
-<ProtocolConstraints type="managed">
-</ProtocolConstraints>
 
 - Operate within defined scope.
 

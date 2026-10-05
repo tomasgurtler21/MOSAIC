@@ -54,18 +54,16 @@ The orchestrator could dispatch a different agent or stop. Re-dispatching the sa
 
 ## Expected Run
 
-Four Orchestration.md log rows.
+Two Orchestration.md log rows. Pre-run consultation and the deviation-routing consultation each dispatch to the orchestrator, but neither allocates a `Seq` or leaves a row in `Orchestration.md` — they are visible only in `Debug`/`DispatchLog` and the consultant call.
 
-| Log `Seq` | `Agent` | Kind | `Phase` | `Status` | `Summary` shows |
-|:---:|---|---|---|---|---|
-| 0 | `orchestrator-script#pre_consultation#1` | consultation | — | "" | pre-run consultation response |
-| 1 | `mosaictest-scripted#1` | workflow step | RESEARCH | BLOCKED | fixture-declared blocker, E401 |
-| 2 | `orchestrator-script#2` | consultation | — | "" | dispatch instruction for re-dispatch |
-| 3 | `mosaictest-scripted#3` | workflow step | RESEARCH | SUCCESS | marker present, returning SUCCESS |
+| Log `Seq` | `Agent` | `Phase` | `Status` | `Summary` shows |
+|:---:|---|---|---|---|
+| 1 | `mosaictest-scripted#1` | RESEARCH | BLOCKED | fixture-declared blocker, E401 |
+| 2 | `mosaictest-scripted#2` | RESEARCH | SUCCESS | marker present, returning SUCCESS |
 
 **Run outcome:** COMPLETE. The engine routes `SUCCESS` via `On Success = COMPLETE`.
 
-**Key observation:** The consultation row (Seq 2) proves the deviation-to-orchestrator path fired. The SUCCESS on row 3 proves the re-dispatch worked and the run completed normally.
+**Key observation:** The dispatch log shows an `orchestrator-script` consultation between the BLOCKED row and the SUCCESS row, proving the deviation-to-orchestrator path fired, but that consultation leaves no `Orchestration.md` row and does not consume a `Seq`. The re-dispatch is recorded as `mosaictest-scripted#2`, immediately following `#1`. The SUCCESS on row 2 proves the re-dispatch worked and the run completed normally.
 
 ---
 
@@ -74,8 +72,9 @@ Four Orchestration.md log rows.
 | Observation | Where to look |
 |---|---|
 | Run stops after row 1 with `RunDeviationUnresolved` | No routing consultant configured — the harness adapter's `InvokeRaw` path is missing (RUN-4) |
-| Consultation row appears but the re-dispatch fails | The orchestrator's dispatch instruction could not be parsed, or the named agent is not in the routing table |
-| Row 3 shows BLOCKED again instead of SUCCESS | The marker was not written on the first pass — check that the stub writes on BLOCKED outcomes |
+| Dispatch log shows a consultation but the re-dispatch fails | The orchestrator's dispatch instruction could not be parsed, or the named agent is not in the routing table |
+| An `orchestrator-script` row appears in `Orchestration.md` | Consultations must leave no row in the artifact; a routing consultation wrongly called `Store.Apply` or allocated a `Seq` |
+| Row 2 shows BLOCKED again instead of SUCCESS | The marker was not written on the first pass — check that the stub writes on BLOCKED outcomes |
 | No BLOCKED row at all, run completes in one step | The script's marker-absent branch was not taken — fixture seeding may have pre-placed the marker |
 | The stub stops with "no matching rule" | The routing fixture does not cover `after mosaictest-scripted BLOCKED` |
 

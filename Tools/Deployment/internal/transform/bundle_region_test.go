@@ -3,7 +3,7 @@ package transform_test
 // bundle_region_test.go covers bundle region delivery in the transform:
 //
 //   T6.3 — Verbatim filling of bundle regions:
-//     - A subagent source file with the five bundle regions filled byte-for-byte from the
+//     - A subagent source file with the four bundle regions filled byte-for-byte from the
 //       bundle content for its role. The test asserts the exact bytes, verifying "verbatim"
 //       rather than just "non-empty".
 //     - A bundle block present in the bundle but absent from the agent source is never an
@@ -45,20 +45,19 @@ import (
 // Shared fixtures
 // ---------------------------------------------------------------------------
 
-// bundleBlockContent returns distinct, identifiable content for each of the five bundle
+// bundleBlockContent returns distinct, identifiable content for each of the four bundle
 // targets. Using unique phrases per target lets tests assert that the correct block —
 // and only the correct block — appears in the corresponding region.
 func bundleBlockContent(target string) []byte {
 	return []byte("### " + target + "\n\nThis is the verbatim content for " + target + ".\n")
 }
 
-// fixtureBundle returns a BundleContent carrying all five canonical subagent blocks,
+// fixtureBundle returns a BundleContent carrying all four canonical subagent blocks,
 // each with identifiable content, and a known version string.
 func fixtureBundle(version string) domain.BundleContent {
 	targets := []string{
 		"AuthorityHierarchy",
 		"ClosingProcedure",
-		"ProtocolConstraints",
 		"ErrorHandlingCommon",
 		"ExecutionPhilosophyCommon",
 	}
@@ -78,7 +77,7 @@ func fixtureBundle(version string) domain.BundleContent {
 	}
 }
 
-// sourceWithAllBundleRegions is a minimal valid subagent source that declares all five
+// sourceWithAllBundleRegions is a minimal valid subagent source that declares all four
 // canonical bundle-sourced managed region regions, each empty (as required for source files).
 const sourceWithAllBundleRegions = `---
 id: 42
@@ -112,9 +111,6 @@ Bundle test agent.
 <Constraints type="core">
 ## Constraints
 
-<ProtocolConstraints type="managed">
-</ProtocolConstraints>
-
 <HarnessConstraints type="managed">
 </HarnessConstraints>
 
@@ -140,7 +136,7 @@ Bundle test agent.
 </ExecutionPhilosophy>
 `
 
-// sourceWithOnlyTwoBundleRegions is a subagent source with only two of the five bundle
+// sourceWithOnlyTwoBundleRegions is a subagent source with only two of the four bundle
 // regions. Used to verify that absent regions are not an error — only present regions
 // are filled.
 const sourceWithOnlyTwoBundleRegions = `---
@@ -209,7 +205,7 @@ Orchestrator agent.
 // ---------------------------------------------------------------------------
 
 // TestBundle_SubagentSource_BundleRegionsFilledVerbatim verifies that when a subagent source
-// declares the five canonical bundle-sourced regions, each region is filled byte-for-byte
+// declares the four canonical bundle-sourced regions, each region is filled byte-for-byte
 // with the matching block from the bundle. "Verbatim" means the exact bytes — not trimmed,
 // not reformatted, not preceded by a version marker.
 func TestBundle_SubagentSource_BundleRegionsFilledVerbatim(t *testing.T) {
@@ -235,7 +231,6 @@ func TestBundle_SubagentSource_BundleRegionsFilledVerbatim(t *testing.T) {
 	targets := []string{
 		"AuthorityHierarchy",
 		"ClosingProcedure",
-		"ProtocolConstraints",
 		"ErrorHandlingCommon",
 		"ExecutionPhilosophyCommon",
 	}
@@ -267,7 +262,7 @@ func TestBundle_AbsentRegionIsNotAnError(t *testing.T) {
 	bundle := fixtureBundle("1.0.0")
 
 	// sourceWithOnlyTwoBundleRegions declares only AuthorityHierarchy and ErrorHandlingCommon;
-	// the bundle carries all five. The missing three must not cause an error.
+	// the bundle carries all four. The missing two must not cause an error.
 	req := transform.Request{
 		Source:   []byte(sourceWithOnlyTwoBundleRegions),
 		Kind:     domain.ArtifactAgent,
@@ -334,7 +329,7 @@ func TestBundle_AbsentRegionFilled_ContentIsVerbatim(t *testing.T) {
 // Report.Regions with the RegionBundleFilled action. The report is the audit trail that
 // operators use to verify what happened; an incorrect action would mislead them.
 //
-// The test explicitly asserts that all five expected bundle targets appear in the report.
+// The test explicitly asserts that all four expected bundle targets appear in the report.
 // Without this completeness check, an implementation that forgets to append any outcome for
 // bundle-sourced regions would cause the assertion loop to iterate over zero entries and
 // report a false PASS.
@@ -369,7 +364,6 @@ func TestBundle_RegionReport_BundleFilledAction(t *testing.T) {
 	bundleTargets := []string{
 		"AuthorityHierarchy",
 		"ClosingProcedure",
-		"ProtocolConstraints",
 		"ErrorHandlingCommon",
 		"ExecutionPhilosophyCommon",
 	}

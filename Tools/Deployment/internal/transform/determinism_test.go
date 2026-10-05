@@ -47,9 +47,6 @@ Body content that must appear identically on every run.
 
 Some constraint text.
 
-<ProtocolConstraints type="managed">
-</ProtocolConstraints>
-
 </Constraints>
 `
 

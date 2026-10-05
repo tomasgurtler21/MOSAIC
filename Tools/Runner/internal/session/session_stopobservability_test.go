@@ -78,7 +78,7 @@ func TestSession_StopObserved_EngineStep_LogsCheckpointIdentifier(t *testing.T) 
 	writeAgentFile(t, dir, "agent-a")
 	writeAgentFile(t, dir, "agent-b")
 
-	f := harness.NewFakeAdapter()
+	f := harness.NewMockAdapter()
 	store := &memStore{}
 	logger := &sessionRecordingLogger{}
 
@@ -123,7 +123,7 @@ func TestSession_StopObserved_EngineHITLRedispatch_LogsCheckpointIdentifier(t *t
 	writeAgentFile(t, dir, "agent-a")
 	writeAgentFile(t, dir, "agent-b")
 
-	f := harness.NewFakeAdapter()
+	f := harness.NewMockAdapter()
 	store := &memStore{}
 	logger := &sessionRecordingLogger{}
 
@@ -174,7 +174,7 @@ func TestSession_StopObserved_EngineHITLRedispatch_LogsCheckpointIdentifier(t *t
 
 // TestSession_StopObserved_ConsultDispatch_LogsCheckpointIdentifier drives the
 // consultant-routed dispatch checkpoint: a stop confirmed after the
-// consultation record is persisted but before the routed agent is dispatched.
+// consultation has returned but before the routed agent is dispatched.
 func TestSession_StopObserved_ConsultDispatch_LogsCheckpointIdentifier(t *testing.T) {
 	// Arrange
 	dir := t.TempDir()
@@ -182,7 +182,7 @@ func TestSession_StopObserved_ConsultDispatch_LogsCheckpointIdentifier(t *testin
 	writeAgentFile(t, dir, "agent-a")
 	writeAgentFile(t, dir, "agent-b")
 
-	f := harness.NewFakeAdapter()
+	f := harness.NewMockAdapter()
 	store := &memStore{}
 	logger := &sessionRecordingLogger{}
 	consultant := &scriptedRoutingConsultant{}
@@ -195,14 +195,14 @@ func TestSession_StopObserved_ConsultDispatch_LogsCheckpointIdentifier(t *testin
 		Clock:    fixedClock{t: epoch},
 		Interact: &noopInteraction{},
 		Debug:    logger,
-		// True only once the consultation's own infrastructure-flagged Apply
-		// has happened -- strictly between the consultation record and the
-		// routed agent's dispatch.
-		StopRequested: func() bool { return len(store.Applied) >= 1 },
+		// True only once the consultation has been made -- strictly between the
+		// consultation and the routed agent's dispatch. The consultation writes
+		// nothing to the artifact, so the consultant's call count is the signal.
+		StopRequested: func() bool { return consultant.CallCount >= 1 },
 	})
 
 	// No scripted entry for agent-a: a dispatch despite the stop would surface
-	// as a FakeAdapter "no scripted response queued" error, not RunStopped.
+	// as a MockAdapter "no scripted response queued" error, not RunStopped.
 
 	// Act
 	got, err := ses.Start(context.Background(), baseOrchestratedConfig(orchPath))
@@ -228,7 +228,7 @@ func TestSession_StopObserved_ConsultHITLRedispatch_LogsCheckpointIdentifier(t *
 	writeAgentFile(t, dir, "agent-a")
 	writeAgentFile(t, dir, "agent-b")
 
-	f := harness.NewFakeAdapter()
+	f := harness.NewMockAdapter()
 	store := &memStore{}
 	logger := &sessionRecordingLogger{}
 	consultant := &scriptedRoutingConsultant{}
@@ -242,10 +242,9 @@ func TestSession_StopObserved_ConsultHITLRedispatch_LogsCheckpointIdentifier(t *
 		Clock:     fixedClock{t: epoch},
 		Interact:  &noopInteraction{},
 		Debug:     logger,
-		// True only once the rejected HITL attempt has been recorded -- not on
-		// the routing consultation's own (unrelated) infrastructure Apply that
-		// precedes it, which would land on the consult-dispatch checkpoint
-		// instead.
+		// True only once the rejected HITL attempt has been recorded, which
+		// lands on the consult HITL-redispatch checkpoint rather than the
+		// consult-dispatch one.
 		StopRequested: func() bool {
 			for _, applied := range store.Applied {
 				if applied.HITLRejected {
@@ -288,7 +287,7 @@ func TestSession_StopObserved_InfraDispatch_LogsCheckpointIdentifier(t *testing.
 	writeAgentFile(t, dir, "review-agent-a")
 	writeAgentFile(t, dir, "review-agent-b")
 
-	f := harness.NewFakeAdapter()
+	f := harness.NewMockAdapter()
 	store := &memStore{}
 	logger := &sessionRecordingLogger{}
 
@@ -345,7 +344,7 @@ func TestSession_StopObserved_AlwaysFalsePredicate_LogsNothing(t *testing.T) {
 	writeAgentFile(t, dir, "agent-a")
 	writeAgentFile(t, dir, "agent-b")
 
-	f := harness.NewFakeAdapter()
+	f := harness.NewMockAdapter()
 	store := &memStore{}
 	logger := &sessionRecordingLogger{}
 

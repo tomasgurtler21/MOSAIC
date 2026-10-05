@@ -26,6 +26,7 @@ from boundary_constants import (
     CANONICAL_SECTIONS,
     EXPECTED_MARKER,
     INJECTION_OLD_MARKER_MAP,
+    LEGACY_INPUT_NAMES,
     MARKER_TO_INJECTION_NAME,
     SECTION_HEADING_MAP,
     TAG_PATTERN,
@@ -41,6 +42,13 @@ from region_insertion import (
 )
 
 import file_classification as _fc
+from fence import fence_mask
+from frontmatter_input import (
+    FrontmatterDecodeError,
+    is_frontmatter_fence,
+    read_frontmatter_text,
+    render_line_for_error,
+)
 
 from document_kind import classify_document as _classify_document
 from non_conformance import NonConformance, detect_output_non_conformances
@@ -331,7 +339,18 @@ def transform_file(
             warnings=[msg],
         )
 
-    content = input_path.read_text(encoding="utf-8")
+    try:
+        content = read_frontmatter_text(input_path)
+    except FrontmatterDecodeError as exc:
+        return TransformResult(
+            success=False,
+            errors=[TransformError(line_number=exc.line_number, message=exc.reason)],
+            sections_added=[],
+            injections_added=[],
+            deployed_added=[],
+            version_before="",
+            version_after="",
+        )
     lines = content.splitlines(keepends=True)
 
     # Parse frontmatter leniently (without version requirement) so we can
@@ -432,7 +451,7 @@ def transform_file(
         _section_spans = find_section_spans(_body_for_regions)
         _region_result = apply_conduct_regions(_body_for_regions, _section_spans)
         transformed_body = dict(transformed_body)
-        transformed_body["lines"] = _region_result.lines
+        transformed_body["lines"] = _strip_retired_boundaries(_region_result.lines)
         transformed_body["deployed_added"] = (
             transformed_body.get("deployed_added", []) + _region_result.deployed_added
         )
@@ -487,8 +506,8 @@ def transform_file(
             success=True,
             errors=[],
             sections_added=transformed_body["sections_added"],
-            injections_added=transformed_body["injections_added"],
-            deployed_added=transformed_body.get("deployed_added", []),
+            injections_added=_without_retired(transformed_body["injections_added"]),
+            deployed_added=_without_retired(transformed_body.get("deployed_added", [])),
             version_before=version_before,
             version_after=version_after,
             degraded=True,
@@ -517,7 +536,21 @@ def transform_file(
 
     if is_harness:
         # Load and parse generic reference
-        generic_content = generic_ref_path.read_text(encoding="utf-8")
+        try:
+            generic_content = read_frontmatter_text(generic_ref_path)
+        except FrontmatterDecodeError as exc:
+            return TransformResult(
+                success=False,
+                errors=[TransformError(
+                    line_number=exc.line_number,
+                    message=f"Failed to read generic reference {generic_ref_path}: {exc.reason}"
+                )],
+                sections_added=[],
+                injections_added=[],
+                deployed_added=[],
+                version_before=version_before,
+                version_after=""
+            )
         generic_lines = generic_content.splitlines(keepends=True)
         generic_fm_result = _parse_frontmatter(generic_lines)
         if not generic_fm_result["success"]:
@@ -557,7 +590,7 @@ def transform_file(
     _section_spans = find_section_spans(_body_for_regions)
     _region_result = apply_conduct_regions(_body_for_regions, _section_spans)
     transformed_body = dict(transformed_body)
-    transformed_body["lines"] = _region_result.lines
+    transformed_body["lines"] = _strip_retired_boundaries(_region_result.lines)
     transformed_body["deployed_added"] = (
         transformed_body.get("deployed_added", []) + _region_result.deployed_added
     )
@@ -614,8 +647,8 @@ def transform_file(
         success=True,
         errors=[],
         sections_added=transformed_body["sections_added"],
-        injections_added=transformed_body["injections_added"],
-        deployed_added=transformed_body.get("deployed_added", []),
+        injections_added=_without_retired(transformed_body["injections_added"]),
+        deployed_added=_without_retired(transformed_body.get("deployed_added", [])),
         version_before=version_before,
         version_after=version_after,
         non_conformances=_region_ncs + _fm_ncs + _output_ncs,
@@ -648,17 +681,18 @@ def _parse_frontmatter(lines: list[str], require_version: bool = True) -> dict:
         error: str (if not success)
         line_number: int (if not success)
     """
-    if not lines or lines[0].strip() != "---":
+    if not lines or not is_frontmatter_fence(lines[0]):
+        first_line = render_line_for_error(lines[0] if lines else "")
         return {
             "success": False,
-            "error": "Missing opening --- for frontmatter",
+            "error": f"Missing opening --- for frontmatter; line 1 is {first_line}",
             "line_number": 1
         }
 
     # Find closing ---
     closing_line = None
     for i in range(1, len(lines)):
-        if lines[i].strip() == "---":
+        if is_frontmatter_fence(lines[i]):
             closing_line = i
             break
 
@@ -1234,6 +1268,32 @@ def _match_region_marker(line: str) -> Optional[dict]:
         }
 
     return None
+
+
+def _without_retired(names: list[str]) -> list[str]:
+    """Drop retired legacy-input names from a reported-names list."""
+    return [n for n in names if n not in LEGACY_INPUT_NAMES]
+
+
+def _strip_retired_boundaries(lines: list[str]) -> list[str]:
+    """Remove open/close boundary tag lines naming a retired name (outside fences).
+
+    Retired names (see LEGACY_INPUT_NAMES) are recognised on migration input only.
+    The body pass converts their legacy markers to boundary tags so that region
+    placement and prose deletion treat them as boundaries and conduct regions land
+    where the marker sat; the tags are removed here, after placement. Content
+    between a stripped open/close pair, or after a legacy marker, stays inline in
+    its section, so no retired region survives in migrated output.
+    """
+    mask = fence_mask(lines)
+    kept = []
+    for idx, ln in enumerate(lines):
+        if not mask[idx]:
+            m = TAG_PATTERN.match(ln.strip())
+            if m is not None and m.group("name") in LEGACY_INPUT_NAMES:
+                continue
+        kept.append(ln)
+    return kept
 
 
 # Keep the old name as an alias for backward compatibility with any external callers.
@@ -1869,7 +1929,7 @@ def resolve_cli_generic_ref(
         return explicit_ref
 
     try:
-        content = input_path.read_text(encoding="utf-8")
+        content = read_frontmatter_text(input_path)
         lines = content.splitlines(keepends=True)
         fm_result = _parse_frontmatter(lines, require_version=False)
         if not fm_result["success"]:
@@ -1958,7 +2018,7 @@ def _cli_would_skip(
     # the silent ALREADY_TRANSFORMED skip path there too.
     if generic_ref is None:
         try:
-            content = input_path.read_text(encoding="utf-8")
+            content = read_frontmatter_text(input_path)
             lines = content.splitlines(keepends=True)
             fm = _parse_frontmatter(lines, require_version=False)
             if fm["success"] and "transform_version" in fm["frontmatter"]:
@@ -1996,7 +2056,7 @@ def _main() -> int:
     # this check, letting the operator force a full re-transform.
     if args.generic_ref is None and generic_ref is not None:
         try:
-            _content = args.input.read_text(encoding="utf-8")
+            _content = read_frontmatter_text(args.input)
             _lines = _content.splitlines(keepends=True)
             _fm = _parse_frontmatter(_lines, require_version=False)
             if _fm["success"]:

@@ -16,7 +16,7 @@ The current harnesses are AI coding tools, but the orchestration model is not li
 
 > **Prerequisite:** You need a working AI coding tool — Claude Code, OpenCode, VS Code GitHub Copilot, or GitHub Copilot CLI — already installed and configured with model access.
 
-1. **Clone & get tools** — `git clone https://github.com/tomasgurtler21/MOSAIC.git` + download the [latest release](https://github.com/tomasgurtler21/MOSAIC/releases) for your platform and unpack into the repo root. Windows x64 builds are tested; Linux x64 builds are provided but currently untested — if you try them, [let us know how it goes](CONTRIBUTING.md).
+1. **Clone & get tools** — `git clone https://github.com/tomasgurtler21/MOSAIC.git` + download the [latest release](https://github.com/tomasgurtler21/MOSAIC/releases) for your platform and unpack into the repo root.
 2. **Deploy** — run `mosaic-deploy` from the MOSAIC repo root — pick your harness, select `kb-generation` workflow, assign models, and point it at your project workspace
 3. **Run** — open the orchestrator agent in your AI tool within the project workspace and tell it: `Use kb-generation workflow. Task: Generate knowledge base for this codebase. Checkpoints disabled.`
 

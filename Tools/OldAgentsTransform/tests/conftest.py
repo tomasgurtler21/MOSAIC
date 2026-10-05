@@ -207,9 +207,9 @@ def communication_protocol_input(fixtures_dir: pathlib.Path) -> pathlib.Path:
 @pytest.fixture
 def communication_protocol_expected(fixtures_dir: pathlib.Path) -> pathlib.Path:
     """Expected output for communication_protocol_input: <CommunicationProtocol type="managed">
-    at top level between </Identity> and <Capabilities type="core">, IdentityExtension
-    relocated inside Identity, ProtocolExtension as an empty top-level injection pair, old prose
-    discarded.
+    at top level between </Identity> and <Capabilities type="core">, no IdentityExtension
+    region (retired; the legacy marker is recognised as input only), ProtocolExtension as an
+    empty top-level injection pair, old prose discarded.
     """
     return fixtures_dir / "communication_protocol_expected.md"
 
@@ -517,17 +517,17 @@ def s3_harness_eh_ep_generic_ref(fixtures_dir: pathlib.Path) -> pathlib.Path:
 
 
 # ---------------------------------------------------------------------------
-# Constraints section region fixtures (ProtocolConstraints + HarnessConstraints)
+# Constraints section region fixtures (legacy conduct bullets + HarnessConstraints)
 # ---------------------------------------------------------------------------
 
 @pytest.fixture
 def s4_generic_constraints_regions_input(fixtures_dir: pathlib.Path) -> pathlib.Path:
-    """Generic agent file whose Constraints section carries all five ProtocolConstraints
+    """Generic agent file whose Constraints section carries all five legacy conduct
     bullets and both legacy [INJECTION: harness_constraints] and
     [INJECTION: custom_constraints] markers.
 
-    Used to verify that ProtocolConstraints and HarnessConstraints are emitted
-    and the superseded bullets are deleted on the generic transform path.
+    Used to verify that HarnessConstraints is emitted, no ProtocolConstraints region is
+    emitted, and the legacy bullets are deleted on the generic transform path.
     """
     return fixtures_dir / "s4_generic_constraints_regions_input.md"
 
@@ -535,10 +535,10 @@ def s4_generic_constraints_regions_input(fixtures_dir: pathlib.Path) -> pathlib.
 @pytest.fixture
 def s4_harness_constraints_regions_input(fixtures_dir: pathlib.Path) -> pathlib.Path:
     """Harness agent file (has transform_version) whose Constraints section carries
-    all five ProtocolConstraints bullets and a [INJECTION: custom_constraints] marker.
+    all five legacy conduct bullets and a [INJECTION: custom_constraints] marker.
 
-    Used to verify that ProtocolConstraints and HarnessConstraints are emitted
-    and the superseded bullets are deleted on the harness transform path.
+    Used to verify that HarnessConstraints is emitted, no ProtocolConstraints region is
+    emitted, and the legacy bullets are deleted on the harness transform path.
     """
     return fixtures_dir / "s4_harness_constraints_regions_input.md"
 
@@ -555,11 +555,11 @@ def s4_harness_constraints_regions_generic_ref(fixtures_dir: pathlib.Path) -> pa
 
 @pytest.fixture
 def s4_generic_no_custom_constraints_input(fixtures_dir: pathlib.Path) -> pathlib.Path:
-    """Generic agent file whose Constraints section carries all five ProtocolConstraints
+    """Generic agent file whose Constraints section carries all five legacy conduct
     bullets but NO harness_constraints or custom_constraints markers.
 
-    Used to verify that HarnessConstraints falls back to the section content end
-    when CustomConstraints is absent from the output.
+    Used to verify that HarnessConstraints is anchored at the start of the Constraints
+    section when no legacy marker supplies it.
     """
     return fixtures_dir / "s4_generic_no_custom_constraints_input.md"
 
@@ -595,11 +595,11 @@ def s8_generic_drift_probe_only_bullet_input(fixtures_dir: pathlib.Path) -> path
 
 @pytest.fixture
 def s4_generic_critical_tool_usage_input(fixtures_dir: pathlib.Path) -> pathlib.Path:
-    """Generic agent file whose Constraints section carries all five ProtocolConstraints
+    """Generic agent file whose Constraints section carries all five legacy conduct
     bullets AND a hand-written '### Critical Tool Usage Constraint' heading block.
 
     Used to verify that the Critical Tool Usage Constraint block is left untouched
-    by the ProtocolConstraints and HarnessConstraints emission logic.
+    by the HarnessConstraints emission and legacy bullet deletion logic.
     """
     return fixtures_dir / "s4_generic_critical_tool_usage_input.md"
 
@@ -607,7 +607,7 @@ def s4_generic_critical_tool_usage_input(fixtures_dir: pathlib.Path) -> pathlib.
 @pytest.fixture
 def s4_harness_no_legacy_hc_input(fixtures_dir: pathlib.Path) -> pathlib.Path:
     """Harness agent file (has transform_version) whose Constraints section carries
-    all five ProtocolConstraints bullets and a [INJECTION: custom_constraints] marker,
+    all five legacy conduct bullets and a [INJECTION: custom_constraints] marker,
     but NO [INJECTION: harness_constraints] legacy marker.
 
     Used to verify that HarnessConstraints is emitted via the table-driven

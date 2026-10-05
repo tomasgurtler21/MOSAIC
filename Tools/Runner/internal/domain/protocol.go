@@ -1,6 +1,6 @@
 package domain
 
-// StatusCode is a Communication Protocol v1.8 status code.
+// StatusCode is a Communication Protocol v1.12 status code.
 type StatusCode string
 
 const (
@@ -12,11 +12,12 @@ const (
 	StatusBLOCKED                StatusCode = "BLOCKED"
 )
 
-// ErrorCode is a Communication Protocol v1.8 error code (BLOCKED only).
+// ErrorCode is a Communication Protocol v1.12 error code (BLOCKED only).
 type ErrorCode string
 
 const (
 	ErrorNone               ErrorCode = ""
+	ErrorINVALID_INVOCATION ErrorCode = "E100"
 	ErrorINPUT_NOT_FOUND    ErrorCode = "E101"
 	ErrorDEPENDENCY_MISSING ErrorCode = "E401"
 	ErrorTOOL_UNAVAILABLE   ErrorCode = "E501"
@@ -24,7 +25,7 @@ const (
 	ErrorUSER_CONTACT       ErrorCode = "E503"
 )
 
-// ProtocolRequest is the Communication Protocol v1.8 invocation message
+// ProtocolRequest is the Communication Protocol v1.12 invocation message
 // sent to a subagent.
 type ProtocolRequest struct {
 	AgentInstanceID      string   `json:"agent_instance_id"`
@@ -39,7 +40,7 @@ type ProtocolRequest struct {
 	HumanInTheLoop       bool     `json:"human_in_the_loop"`
 }
 
-// ProtocolResponse is the Communication Protocol v1.8 response from a subagent.
+// ProtocolResponse is the Communication Protocol v1.12 response from a subagent.
 type ProtocolResponse struct {
 	AgentInstanceID string     `json:"agent_instance_id"`
 	RunID           string     `json:"run_id,omitempty"`
@@ -78,7 +79,7 @@ type AgentReference struct {
 
 // DispatchStep is everything the session needs to execute one invocation.
 type DispatchStep struct {
-	RowIndex      int            // which routing table row this invocation is for
+	RowIndex      int // which routing table row this invocation is for
 	Agent         AgentReference
 	Request       ProtocolRequest
 	EffectiveHITL bool   // the computed HITL value, or an override

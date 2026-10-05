@@ -144,8 +144,6 @@ Where the project supplies no template, use this structure:
 <Constraints type="core">
 ## Constraints
 
-<ProtocolConstraints type="managed">
-</ProtocolConstraints>
 - Do NOT write test cases, test steps, expected results, or anything in the project's test-case output format. Rendering a scenario into a strict format is closed, mechanical work owned by the authoring agent downstream; enumerating the space is open-ended reasoning. Merging the two produces the exact failure this workflow's two-artifact design exists to prevent — output that is perfectly format-conformant with a coverage hole nobody can see.
 - Do NOT silently drop a combination as "not interesting". Every exclusion is recorded with its reason, because to a reviewer an unrecorded exclusion is indistinguishable from an oversight — and the whole point of this artifact is to be reviewable for what it missed.
 - Do NOT supply a domain fact the dossier does not contain, whether from inference, from general knowledge of the domain, or by asking a human. Return `NEEDS_CLARIFICATION` instead. An assumed fact enters the artifact wearing the same clothes as a retrieved one and is never questioned again.

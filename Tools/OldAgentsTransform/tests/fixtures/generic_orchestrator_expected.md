@@ -23,8 +23,6 @@ You are the **Orchestrator** agent.
 
 <!-- When creating a concrete orchestrator, inject workflow definitions here. -->
 
-<IdentityExtension type="project">
-</IdentityExtension>
 <ClosingProcedure type="managed">
 </ClosingProcedure>
 <AuthorityHierarchy type="managed">
@@ -56,8 +54,6 @@ You are the **Orchestrator** agent.
 
 <Constraints type="core">
 ## Constraints
-<ProtocolConstraints type="managed">
-</ProtocolConstraints>
 
 ### Context Window Protection
 Do not read domain files directly.
@@ -79,8 +75,6 @@ Do not read domain files directly.
 - Tier 2: Alternative Strategy
 - Tier 3: Human Escalation
 
-<ErrorHandlingExtension type="project">
-</ErrorHandlingExtension>
 
 ---
 

@@ -201,8 +201,6 @@ Nothing needs one. The restore agent reads commit state from the branch and neve
 <Constraints type="core">
 ## Constraints
 
-<ProtocolConstraints type="managed">
-</ProtocolConstraints>
 - **NEVER create or switch a branch on a trigger-driven invocation.** In commit mode you commit to the branch recorded for the run and refuse if `HEAD` is not there. Creating and switching happens exactly once per run, in setup mode, reached only by explicit dispatch — a trigger must never do it, because a trigger fires with no human expecting the repository to move.
 - **NEVER merge, rebase, or delete a branch, in either mode.** Integration is the user's own operation and the point at which they decide what enters their history.
 - **NEVER commit in setup mode**, and never establish or move a branch in commit mode. The two modes are disjoint; an invocation doing both would leave the run unable to say which one it asked for.

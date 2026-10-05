@@ -1,5 +1,5 @@
 ---
-version: "0.2"
+version: "0.3"
 name: "Brownfield PR Fix Workflow"
 description: "Resolve PR review comments on an existing codebase — fetch comments, refine scope and test strategy with user, research, plan and implement fixes with optional TDD, generate per-stage resolution replies, merge, and post."
 hint: "Fresh new untested workflow, created by combining brownfield-tdd with brownfield-pr-audit, with some modifications."
@@ -37,7 +37,7 @@ artifacts:
   - TestResults.md
 ---
 
-<Workflow type="core" name="brownfield-pr-fix" version="1.0">
+<Workflow type="core" name="brownfield-pr-fix" version="0.3">
 ## Brownfield PR Fix Workflow
 
 **Use when:** Resolving PR review comments on an **existing codebase** — fetch active comments, refine scope and test strategy with user, research context, plan and implement fixes, generate resolution replies per stage, merge, and post back to the PR.
@@ -54,7 +54,7 @@ artifacts:
 | EXECUTION.Test.[StageNumber] | tests-review-tdd | FALSE | implementation-tdd | test-writer-tdd | Stage-{StageNumber}/Plan.md, Stage-{StageNumber}/PlanProgress.md | Stage-{StageNumber}/tests-review-tdd.md |
 | EXECUTION.Impl.[StageNumber] | implementation-tdd | FALSE | implementation-review | - | Stage-{StageNumber}/Plan.md, Stage-{StageNumber}/PlanProgress.md | Stage-{StageNumber}/PlanProgress.md |
 | EXECUTION.Impl.[StageNumber] | implementation-review | FALSE | fix-to-pr-response | implementation-tdd | Stage-{StageNumber}/Plan.md, Stage-{StageNumber}/PlanProgress.md | Stage-{StageNumber}/implementation-review.md |
-| EXECUTION.Response.[StageNumber] | fix-to-pr-response | FALSE | test-runner | - | Stage-{StageNumber}/Plan.md, Stage-{StageNumber}/PlanProgress.md, PullRequestComments.md | Stage-{StageNumber}/PullRequestResponses.md |
+| EXECUTION.Response.[StageNumber] | fix-to-pr-response | FALSE | test-runner | - | Stage-{StageNumber}/Plan.md, Stage-{StageNumber}/PlanProgress.md, PullRequestComments.md, PullRequestResponses.md | Stage-{StageNumber}/PullRequestResponses.md |
 | REVIEW | test-runner | FALSE | response-merger | planner-tdd-soft | - | TestResults.md |
 | REVIEW | response-merger | TRUE | pull-request-comment-interface(post) | - | PullRequestComments.md, Stage-*/PullRequestResponses.md | PullRequestResponses.md |
 | COMPLETION | pull-request-comment-interface(post) | TRUE | COMPLETE | - | PullRequestResponses.md | PullRequestResponses.md |
@@ -102,6 +102,7 @@ Two HITL gates at the end serve different purposes: response-merger HITL lets th
 |---------|------|--------|---------|
 | 0.1 | 2026-08-20 | MOSAIC | Initial version |
 | 0.2 | 2026-08-26 | MOSAIC | Replace Unicode emoji with ASCII tokens in HITL column (TRUE/FALSE). |
+| 0.3 | 2026-10-02 | MOSAIC | Provide the canonical PullRequestResponses.md schema artifact to each fix-to-pr-response stage and align frontmatter with the workflow region version. |
 
 ---
 

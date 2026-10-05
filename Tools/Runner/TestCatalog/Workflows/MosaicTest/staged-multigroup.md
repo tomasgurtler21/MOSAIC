@@ -70,15 +70,14 @@ A past engine crash occurred at glob/wildcard dispatch after the design phase fi
 
 ## Expected Run: Auto Mode
 
-Five dispatches total: one pre-consultation, then four workflow steps (2 stages × 2 groups).
+Five dispatches total: one pre-consultation, then four workflow steps (2 stages × 2 groups). The pre-consultation allocates no `Seq` and leaves no `Orchestration.md` row — it surfaces only in the dispatch log.
 
-| Log `Seq` | `Agent` | Kind | `Phase` | `Status` | `Summary` shows |
-|:---:|---|---|---|---|---|
-| 0 | `orchestrator-script#pre_consultation#1` | consultation | — | "" | pre-run consultation response |
-| 1 | `mosaictest-scripted#1` | workflow step | EXECUTION.Test.1 | SUCCESS | Test group / stage 1 / wrote test artifact |
-| 2 | `mosaictest-scripted#2` | workflow step | EXECUTION.Implementation.1 | SUCCESS | Implementation group / stage 1 / wrote impl artifact |
-| 3 | `mosaictest-scripted#3` | workflow step | EXECUTION.Test.2 | SUCCESS | Test group / stage 2 / wrote test artifact |
-| 4 | `mosaictest-scripted#4` | workflow step | EXECUTION.Implementation.2 | SUCCESS | Implementation group / stage 2 / wrote impl artifact |
+| Log `Seq` | `Agent` | `Phase` | `Status` | `Summary` shows |
+|:---:|---|---|---|---|
+| 1 | `mosaictest-scripted#1` | EXECUTION.Test.1 | SUCCESS | Test group / stage 1 / wrote test artifact |
+| 2 | `mosaictest-scripted#2` | EXECUTION.Implementation.1 | SUCCESS | Implementation group / stage 1 / wrote impl artifact |
+| 3 | `mosaictest-scripted#3` | EXECUTION.Test.2 | SUCCESS | Test group / stage 2 / wrote test artifact |
+| 4 | `mosaictest-scripted#4` | EXECUTION.Implementation.2 | SUCCESS | Implementation group / stage 2 / wrote impl artifact |
 
 **Run outcome:** COMPLETE. All stages exhausted, no deviations.
 
@@ -100,7 +99,7 @@ Five dispatches total: one pre-consultation, then four workflow steps (2 stages 
 | Phase column shows `EXECUTION.[StageNumber]` without a group name | The `EXECUTION.{Group}.[StageNumber]` notation was not parsed. The engine may be treating rows as bare. |
 | Phase column shows `EXECUTION.Test.[StageNumber]` (literal brackets) | `{StageNumber}` substitution failed in the phase column. |
 | Only 2 workflow steps instead of 4 | Stage progression is broken — only one stage ran. Check Plan.md for two stages. |
-| Orchestrator consulted mid-run (extra consultation rows) | A deviation occurred. All rows should return SUCCESS in this workflow; a deviation means the stub script was not found or returned an unexpected status. |
+| Orchestrator consulted mid-run (extra `orchestrator-script` entries in the dispatch log) | A deviation occurred. All rows should return SUCCESS in this workflow; a deviation means the stub script was not found or returned an unexpected status. |
 
 ---
 

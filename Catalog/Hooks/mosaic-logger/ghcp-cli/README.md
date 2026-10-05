@@ -6,7 +6,7 @@ structured logs under `OrchestrationLogs/` in your project root.
 
 ## File set
 
-The adapter is a flat set of 9 Python modules, all deployed to `.github/hooks/`:
+The adapter is a flat set of Python modules, all deployed to `.github/hooks/`:
 
 | Module | Role |
 |---|---|
@@ -22,6 +22,48 @@ The adapter is a flat set of 9 Python modules, all deployed to `.github/hooks/`:
 
 A copy of `hook.yaml` (the bundle manifest) is also deployed alongside the modules so
 the adapter can stamp `adapter_version` on `run_start` events at runtime.
+
+The Runner-mode additions are `mosaic_logger_runner_mode.py` (role selection from the
+environment) and `mosaic_logger_handlers_runner.py` (subagent-role handlers); the
+adapter now consists of 11 modules.
+
+## Runner mode
+
+When the MOSAIC Runner starts a GHCP CLI session it sets `MOSAIC_ROLE` (`orchestrator`
+or `subagent`), `MOSAIC_RUN_ID` and `MOSAIC_AGENT_INSTANCE_ID` (subagent role). The
+adapter then logs the session under that run and agent identity; without
+`MOSAIC_ROLE` it behaves natively. The registration file is identical in both modes.
+The Runner owns `run_start`/`run_end`. A subagent-role session is one invocation:
+`agentStop` (or `sessionEnd` when `agentStop` did not fire) writes `invocation_end`,
+the final assistant turn, `02_output.md` and `04_session.raw`, with the response,
+`status_code`, `model` and `token_usage` derived from the session transcript and
+omitted when the transcript cannot supply them. The list of fields Runner mode cannot
+produce is in `Development/Designs/MosaicLogFormat.md` section 4.6 and in the module
+docstring of `mosaic_logger_handlers_runner.py`.
+
+## Trusted folder requirement
+
+GHCP CLI (verified on 1.0.87) loads repository hooks in `-p` mode only when the
+working directory equals or is a descendant of a `trustedFolders` entry in
+`$COPILOT_HOME/config.json` (`~/.copilot/config.json` when `COPILOT_HOME` is unset).
+If the folder is not trusted the hooks are silently not loaded: the CLI exits 0 with no
+warning and no MOSAIC logs are written.
+
+Matching rules (probed on Windows 11):
+
+- Comparison is case-insensitive and tolerant of path separator style.
+- An ancestor entry grants trust to its descendants; a child entry does not cover its
+  parent.
+- `trustedFolders` in `settings.json` is ignored; only `config.json` counts.
+- `config.json` starts with `//` comments (JSONC).
+- `--yolo` and `--add-dir` do not help.
+- Not probed: segment-boundary prefixes, UNC paths, Linux and macOS, policy files.
+
+At every session start for the GHCP CLI harness the Runner reads the configuration
+read-only and warns when the folder is untrusted (or when trust cannot be determined);
+in the TUI it also asks whether to proceed without hook logging. The Runner never
+modifies your Copilot configuration. To fix it, trust the project folder (or an
+ancestor) in Copilot CLI.
 
 ## Deployment target
 

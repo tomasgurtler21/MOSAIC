@@ -961,7 +961,10 @@ func (s *service) buildContent(
 	// means no harness-only agents are in this run and the callback behaves exactly as
 	// it does today.
 	harnessOnly map[string]harnessOnlyContentPlan,
+	// opts adjust individual orchestrator-role files by target path; none leaves behaviour as is.
+	opts ...buildContentOption,
 ) func(domain.PlanItem) ([]byte, error) {
+	itemOpts := newBuildContentOptions(opts)
 	return func(item domain.PlanItem) ([]byte, error) {
 		// Harness-only route: checked first, before the artifact-kind switch. A harness-only
 		// agent has no catalog entry and no SourcePath. Catalog.ReadSource is deliberately
@@ -1015,7 +1018,7 @@ func (s *service) buildContent(
 			infraBlocks = infrastructureBlocks
 		}
 		desc := module.Descriptor()
-		res, err := transform.Apply(transform.Request{
+		tReq := transform.Request{
 			Source: src, Kind: domain.ArtifactAgent, Key: agent.Key, Module: module,
 			Model: models[agent.Key], CustomTools: customTools, SkippedTools: skippedTools,
 			Scope: scope, Deployed: deployed, Workflows: wfBlocks,
@@ -1027,7 +1030,11 @@ func (s *service) buildContent(
 			Timestamp:                     s.now().UTC().Format(time.RFC3339),
 			InjectionsVersion:             desc.InjectionsVersion,
 			OrchestratorInjectionsVersion: desc.OrchestratorInjectionsVersion,
-		})
+		}
+		if agent.Role == domain.RoleOrchestrator {
+			itemOpts.applyTo(item.TargetPath, &tReq)
+		}
+		res, err := transform.Apply(tReq)
 		if err != nil {
 			return nil, err
 		}

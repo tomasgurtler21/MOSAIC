@@ -160,6 +160,7 @@ func (s *service) Update(ctx context.Context, req UpdateRequest) (domain.RunSumm
 	// if found present on disk.
 	var orchScriptState domain.DeployedArtifactState
 	var orchScriptTargetPath string
+	var orchScriptAgent domain.Agent
 	if plan.OrchestratorExcludedFor(domain.ModeUpdateWorkspace) {
 		if script, ok := s.deps.Catalog.OrchestratorScript(); ok {
 			if scriptPath, pathErr := module.TargetPath(domain.TargetPathRequest{
@@ -170,6 +171,7 @@ func (s *service) Update(ctx context.Context, req UpdateRequest) (domain.RunSumm
 				GOOS:     s.deps.GOOS,
 			}); pathErr == nil {
 				orchScriptTargetPath = scriptPath
+				orchScriptAgent = script
 				orchScriptState = probeDeployedArtifact(workspace, orchScriptTargetPath, module.Descriptor().Frontmatter.ModelKey)
 				if orchScriptState.Present {
 					scannedAgentKeys = append(scannedAgentKeys, script.Key)
@@ -277,6 +279,12 @@ func (s *service) Update(ctx context.Context, req UpdateRequest) (domain.RunSumm
 	}
 	toolMappingsVersion := config.HashToolDestinations(toolCfg.ToolDestinations, userCfg.ToolDestinations)
 
+	// Already-declared catalog-backed infrastructure agents are refreshed; none is ever added.
+	orchRefresh := s.orchestratorRefresh([]probedOrchestrator{
+		{Agent: orchestrator, TargetPath: orchTargetPath, State: orchState},
+		{Agent: orchScriptAgent, TargetPath: orchScriptTargetPath, State: orchScriptState},
+	})
+
 	planInput := plan.Input{
 		Catalog: s.deps.Catalog, Module: module, Mode: domain.ModeUpdateWorkspace,
 		WorkspacePath: workspace, Scope: scope, GOOS: s.deps.GOOS,
@@ -289,6 +297,7 @@ func (s *service) Update(ctx context.Context, req UpdateRequest) (domain.RunSumm
 		ToolMappingsVersion: toolMappingsVersion,
 		ProtocolVersion:     protocol.Version,
 		BundleVersion:       bundle.Version,
+		InfrastructureDeclarations: refreshIntent(),
 	}
 	p, err := s.deps.Planner.Build(ctx, planInput)
 	if err != nil {
@@ -324,6 +333,9 @@ func (s *service) Update(ctx context.Context, req UpdateRequest) (domain.RunSumm
 				Kind: domain.GapSkippedFile, Subject: item.Ref.Key,
 				Detail: "file was locally modified and the user chose to skip it",
 			})
+			if gap, ok := orchRefresh.skipGap(item); ok {
+				s.deps.Todo.AddGap(gap)
+			}
 		}
 	}
 
@@ -427,15 +439,9 @@ func (s *service) Update(ctx context.Context, req UpdateRequest) (domain.RunSumm
 	deployedReader := func(item domain.PlanItem) []byte {
 		return readDeployedFile(workspace, item.TargetPath)
 	}
-	// Infrastructure agent selection is intentionally omitted from the update flow.
-	// Update re-deploys whatever was already deployed; it does not re-prompt for
-	// infrastructure agent choices. The InfrastructureAgents region is preserved
-	// byte-for-byte from the deployed file by applyInfrastructureRegion's
-	// deployed-content fallback: when InfrastructureAgents is empty and req.Deployed
-	// is non-nil, applyInfrastructureRegion parses the deployed file and lifts the
-	// region content directly. This is an InjectionInfrastructure-class managed region
-	// and is never a member of buildDeployedRegionMap/deployedContent.
-	contentFn := s.buildContent(module, agentByKey, allModels, req.CustomTools, nil, workflowBlocks, nil, scope, deployedReader, toolMappingsVersion, protocol, bundle, harnessOnlyPlan)
+	// Update never asks about or adds infrastructure declarations; it refreshes stale
+	// catalog-backed ones in place (refresh-only merge), leaving all others byte-identical.
+	contentFn := s.buildContent(module, agentByKey, allModels, req.CustomTools, nil, workflowBlocks, nil, scope, deployedReader, toolMappingsVersion, protocol, bundle, harnessOnlyPlan, orchRefresh.refreshContentOptions(s)...)
 
 	versionStamps := buildVersionStamps(set.Agents, set.Skills, set.Hooks, p.Items, module.Descriptor(), toolMappingsVersion)
 

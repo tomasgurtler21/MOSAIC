@@ -50,7 +50,8 @@ func (s *actorState) effective() []domain.InvocationUsage {
 //     Subagent turn events also carry token_usage for the same work and are
 //     deliberately excluded; summing both double-counts.
 //   - The orchestrator's usage comes from turn events on the orchestrator stream
-//     ONLY. Orchestrator turns are not wrapped in invocation pairs.
+//     ONLY. Orchestrator turns are not wrapped in invocation pairs. User-role
+//     turns carry no model or usage and are excluded.
 //   - invocation_start supplies agent_type and carries no usage.
 //   - Where a folder-derived instance hint disagrees with the agent_instance_id on
 //     the event, the EVENT FIELD WINS.
@@ -163,6 +164,9 @@ func (a *Aggregator) handleOrchestratorEvent(rs *runState, ref domain.StreamRef,
 
 	case domain.EventTurn:
 		if ev.Turn == nil {
+			return
+		}
+		if ev.Turn.Role == domain.TurnUser {
 			return
 		}
 		rs.orchestrator.invocations = append(rs.orchestrator.invocations, domain.InvocationUsage{

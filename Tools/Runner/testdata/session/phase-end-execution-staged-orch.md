@@ -25,7 +25,7 @@ Row index mapping after plan expansion with Stage-1 and Stage-2 (zero-based):
 | EXECUTION.[StageNumber] | agent-b | FALSE | COMPLETE | agent-a | - | - |
 </Workflow>
 
-<InfrastructureAgents type="project">
+<InfrastructureAgents type="managed">
 <InfrastructureAgent type="core" name="review-agent-a" version="1.0.0">
 | Class | Trigger | Param | On Failure | Description |
 |-------|---------|-------|------------|-------------|

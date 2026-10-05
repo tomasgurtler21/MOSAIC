@@ -24,11 +24,11 @@ Each scenario is one verifiable routing condition. Scenarios are atomic — whet
 |----|----------|----------|--------|
 | S-1 | Reviewer returns COMPLETED_NEEDS_ACTION | Route to On Findings target, not On Success | Tested |
 | S-2 | Agent returns PARTIALLY_DONE | Re-dispatch same agent type (successor invocation), not advance to next row | Tested |
-| S-3 | Agent returns BLOCKED (E101 INPUT_NOT_FOUND) | Tier 1 auto-retry (up to 3 attempts), then Tier 2 alternative strategy | Tested |
+| S-3 | Agent returns BLOCKED (E101 REQUIRED_RESOURCE_NOT_FOUND) | Tier 1 auto-retry (up to 3 attempts), then Tier 2 alternative strategy | Tested |
 | S-4 | Agent returns BLOCKED (E501 TOOL_UNAVAILABLE) | Tier 1 auto-retry (up to 3 attempts), then Tier 2 alternative strategy | Tested |
 | S-5 | Agent returns NEEDS_CLARIFICATION | Provide context or escalate to human, not advance | Tested |
 | S-6 | Agent returns CAPABILITY_EXCEEDED | Try close alternative or escalate to human | Tested |
-| S-7 | Agent returns BLOCKED (E503 USER_CONTACT_UNAVAILABLE) on HITL dispatch | Tier 1 auto-retry, do not skip the HITL gate | Tested |
+| S-7 | Agent returns BLOCKED (E503 USER_CONTACT_UNAVAILABLE) on HITL dispatch | Escalate to human, no automatic retry, do not skip the HITL gate | Tested |
 
 ### Creator/Reviewer Gate
 
@@ -113,7 +113,7 @@ Filled in when tests are created. One test may cover multiple scenarios; one sce
 | blocked-e101-retry | BLOCKED E101 Retry | S-3 | brownfield-tdd | implementation-tdd BLOCKED E101 → Tier 1 auto-retry, same agent re-dispatched |
 | blocked-e501-retry | BLOCKED E501 Retry | S-4 | brownfield-tdd | implementation-tdd BLOCKED E501 → Tier 1 auto-retry, same agent re-dispatched |
 | needs-clarification-no-advance | NEEDS_CLARIFICATION No Advance | S-5 | brownfield-tdd | implementation-tdd NEEDS_CLARIFICATION → route back to planner-tdd-soft for clarification, not advance |
-| blocked-e503-hitl-retry | BLOCKED E503 HITL Retry | S-7 | brownfield-tdd | requirements-refinement BLOCKED E503 on HITL dispatch → retry with human_in_the_loop still true |
+| blocked-e503-hitl-retry | BLOCKED E503 HITL Retry | S-7 | brownfield-tdd | requirements-refinement BLOCKED E503 on HITL dispatch → orchestrator stops/escalates immediately, no automatic retry |
 | planner-routeback-quality-gate | Planner Route-Back Quality Gate | R-1, R-2, R-4 | brownfield-tdd | test-runner CNA → planner (with Research.md, Requirements.md) → plan-review quality gate. Plan-review gets updated Plan.md + all stage plans |
 | contracts-routeback-quality-gate | Contracts Route-Back Quality Gate | R-3 | brownfield-tdd | implementation-review CNA routes to contracts-designer → contracts-review quality gate before re-entering EXECUTION |
 | wildcard-input-expansion | Wildcard Input Expansion | W-1 | brownfield-tdd | contracts-designer dispatch after plan-review SUCCESS. Stage-*/Plan.md must expand to Stage-1/Plan.md + Stage-2/Plan.md |
@@ -174,7 +174,7 @@ Detailed context for each scenario — failure modes observed, setup specifics, 
 
 ### S-3 / S-4: BLOCKED — Tiered Error Handling
 
-**Setup (S-3):** Agent returns BLOCKED with `error_code: E101` (INPUT_NOT_FOUND). E.g. `test-writer-tdd` can't find its input artifact.
+**Setup (S-3):** Agent returns BLOCKED with `error_code: E101` (REQUIRED_RESOURCE_NOT_FOUND). E.g. `test-writer-tdd` can't find its input artifact.
 
 **Setup (S-4):** Agent returns BLOCKED with `error_code: E501` (TOOL_UNAVAILABLE). E.g. build tool or test runner unavailable.
 
@@ -204,9 +204,9 @@ Detailed context for each scenario — failure modes observed, setup specifics, 
 
 **Setup:** Agent dispatched with `human_in_the_loop: true` returns BLOCKED with `error_code: E503` (USER_CONTACT_UNAVAILABLE — no user interaction tools available).
 
-**Expected:** Orchestrator retries (Tier 1) — the tool availability may be transient. Must NOT skip the HITL gate or advance without human approval.
+**Expected:** Orchestrator stops and escalates to the human immediately — no automatic retry. Must NOT skip the HITL gate or advance without human approval. A retry, or a re-invocation without the HITL flag, happens only through explicit user action (an explicit waiver of the gate).
 
-**Failure mode anticipated:** Orchestrator treats E503 as "HITL not possible, proceed without it" — effectively bypassing the human oversight gate.
+**Failure mode anticipated:** Orchestrator auto-retries E503 as if it were transient (Tier 1 retry), or treats E503 as "HITL not possible, proceed without it" — effectively bypassing the human oversight gate.
 
 ### G-1: Review Artifact Passed to Creator on Findings Route-Back
 

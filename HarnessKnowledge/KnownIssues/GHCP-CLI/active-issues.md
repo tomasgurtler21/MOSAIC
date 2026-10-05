@@ -701,3 +701,46 @@ No workaround identified in the issue thread; the managed setting appears to hav
 Distinct from GC-016/GC-017 (which are about hook-issued verdicts not being enforced) and from GC-014/GC-015/GC-018 (config/flag pattern-matching gaps) — this is specifically about an enterprise policy toggle not being consulted at all on the non-interactive code path. Relevant primarily to MOSAIC deployments operating under org-managed Copilot CLI settings; low relevance for unmanaged/individual setups.
 
 Re-checked run 2 (2026-09-10): Re-fetched via GitHub MCP — issue body unchanged, still open, zero comments, no maintainer response. Last activity 2026-08-20, only ~3 weeks stale — under the 6-week re-verification threshold, so no "Needs re-verification" flag added this pass; still worth re-checking on a future run given the enterprise-governance severity.
+
+---
+
+### GC-020: Repo-level hooks (`.github/hooks/*.json`) are silently not loaded in `-p` mode unless the working directory is a trusted folder
+
+| Field | Value |
+|-------|-------|
+| **Classification** | Limitation |
+| **Source** | MOSAIC experiments, 2026-10-03 (Windows 11); no upstream issue filed |
+| **Reported** | 2026-10-03 (MOSAIC) |
+| **Last Activity** | 2026-10-03 |
+| **Confidence** | Confirmed (reproduced at MOSAIC) |
+| **Orchestration Impact** | HIGH for hook-based logging and guardrails in headless runs; no effect on runs that do not rely on repo hooks |
+| **Reproduced at MOSAIC** | Yes |
+| **MOSAIC Response** | Mitigated: the Runner checks trust (read-only) at every GHCP CLI session start and warns; in the TUI it asks whether to proceed |
+| **Version(s) Affected** | 1.0.87 (unknown for other versions) |
+| **Latest Platform Version** | v1.0.87 (2026-10-03) |
+| **Labels** | `area:hooks`, `area:non-interactive`, `area:trust` |
+
+**Summary:**
+Repo-level hooks in `.github/hooks/*.json` are not loaded in `-p` mode unless the working directory equals or is a descendant of a `trustedFolders` entry in `$COPILOT_HOME/config.json` (else `~/.copilot/config.json`). The untrusted case exits 0 with no warning, so every hook silently never runs.
+
+Matching rules found by probing (Windows 11):
+- Case-insensitive and separator-tolerant.
+- An ancestor entry grants trust to its descendants; a child entry does not cover its parent.
+- `trustedFolders` in `settings.json` is ignored; only `config.json` counts.
+- `config.json` starts with `//` comments (JSONC), so a plain JSON parser fails on it.
+- `--yolo` and `--add-dir` do not grant trust.
+- Not probed: segment-boundary prefixes (a sibling folder sharing a name prefix), UNC paths, Linux/macOS, policy files.
+
+**Impact on Orchestration:**
+A Runner run in an untrusted folder produces no hook-written MOSAIC logs and gives no sign of the problem; missing logs look like a logger bug.
+
+**Evidence:**
+- Same repo and hook file run in `-p` mode, differing only in whether the working directory was covered by a `trustedFolders` entry: hooks fired only when trusted.
+- Entry-placement variants (ancestor, child, other case, other separators, `settings.json`) probed to derive the rules above.
+
+**Workaround(s):**
+Trust the project folder (or an ancestor) in Copilot CLI before running. The Runner never edits the Copilot configuration; it only warns.
+
+**Notes:**
+Related to GC-003 (workspace `.mcp.json` not wired in an untrusted workspace; one reporter saw it work once the workspace was marked trusted) and to GC-014 (another configuration surface that is never loaded): all are "configuration silently not applied" cases, and folder trust is plausibly the shared precondition for GC-003. Not investigated whether trust also gates other repo-level artifacts. See also CC-082 and OC-099 for the same class of hook-output-cannot-be-assumed behaviour in the other harnesses.
+

@@ -18,14 +18,16 @@ import (
 	"mosaic-run/internal/testcheck"
 	"mosaic-run/internal/testdeploy"
 	"mosaic-run/internal/testrun"
+	"mosaic-run/internal/testrun/invoker"
+	"mosaic-run/internal/testrun/resolve"
 	"mosaic-run/internal/tui"
-	"mosaic-run/internal/tui/screens"
+	"mosaic-run/internal/tui/screens/runconfig"
 )
 
 // resolveAndAnnounceFn is the package-level seam for harness binary resolution in
 // the TUI factory. Tests override this variable to inject failures without
 // executing real resolution.
-var resolveAndAnnounceFn = testrun.ResolveAndAnnounce
+var resolveAndAnnounceFn = resolve.ResolveAndAnnounce
 
 // orchRunFn is the package-level seam for Orchestrator.Run in the TUI factory.
 // Tests override this variable to inject orchestration results (normal-path or
@@ -100,7 +102,7 @@ type interactiveWiring struct {
 	// must observe the Deps value before session.New consumes it:
 	// sessionImpl.deps is unexported, so a constructed session cannot be
 	// interrogated.
-	NewDeps func(runFolder string, isNewRun bool, orchFile string, cfg screens.ConfigSelection) session.Deps
+	NewDeps func(runFolder string, isNewRun bool, orchFile string, cfg runconfig.ConfigSelection) session.Deps
 }
 
 // buildInteractiveWiring assembles the interactive frontend's composition seam.
@@ -116,7 +118,7 @@ func buildInteractiveWiring(in interactiveWiringInput) interactiveWiring {
 	// notably the stop signal and the two loggers -- and derives everything
 	// else from its per-invocation arguments, so a session rebuilt after a
 	// configuration change or a retry keeps observing the same shared state.
-	newDeps := func(runFolder string, isNewRun bool, orchFile string, cfg screens.ConfigSelection) session.Deps {
+	newDeps := func(runFolder string, isNewRun bool, orchFile string, cfg runconfig.ConfigSelection) session.Deps {
 		// cfg.ExecutablePath is set when the user confirms an override on the
 		// exec-override screen. It wins over the pre-scanned path so that
 		// retrying with a different executable actually takes effect.
@@ -124,8 +126,7 @@ func buildInteractiveWiring(in interactiveWiringInput) interactiveWiring {
 		if execPath == "" {
 			execPath = in.ExecutablePath
 		}
-		h := buildAdapter(cfg.Harness, execPath, cfg.GHCPCLIMode, cfg.Timeout, in.Debug)
-
+		effectiveRunFolder := runFolder
 		artifactPath, err := resolveTUIArtifactPath(runFolder)
 		if errors.Is(err, errUnresolvedRunFolder) {
 			// Defensive branch: an unresolved run folder is a contract violation
@@ -136,7 +137,9 @@ func buildInteractiveWiring(in interactiveWiringInput) interactiveWiring {
 				domain.F("path", mintedFolder))
 			fmt.Fprintf(os.Stderr, "notice: run folder unresolved; minting new run at %s\n", mintedFolder)
 			artifactPath = filepath.Join(mintedFolder, "Orchestration.md")
+			effectiveRunFolder = mintedFolder
 		}
+		h := buildAdapter(effectiveRunFolder, cfg.Harness, execPath, cfg.GHCPCLIMode, cfg.Timeout, in.Debug)
 		store := newLoggedArtifactStore(artifactPath, in.Debug)
 
 		// Extract the raw-JSON transport if the selected harness adapter
@@ -164,6 +167,7 @@ func buildInteractiveWiring(in interactiveWiringInput) interactiveWiring {
 			Manual:        routingDeps.Manual,
 			PreConsult:    routingDeps.PreConsult,
 			Approvals:     routingDeps.Approvals,
+			Outputs:       artifact.NewOutputWriteDetector(),
 			StopRequested: in.StopSignal.Requested,
 		}
 	}
@@ -178,8 +182,12 @@ func buildInteractiveWiring(in interactiveWiringInput) interactiveWiring {
 			RecordedWorkflowID: domain.WorkflowID(in.Identity.Workflow),
 			InitialRunFolder:   in.Identity.RunFolder,
 			DevMode:            in.DevMode,
-			SessionFactory: func(runFolder string, isNewRun bool, orchFile string, cfg screens.ConfigSelection) session.Session {
-				return session.New(newDeps(runFolder, isNewRun, orchFile, cfg))
+			SessionFactory: func(runFolder string, isNewRun bool, orchFile string, cfg runconfig.ConfigSelection) session.Session {
+				sessionRunFolder := resolveSessionRunFolder(runFolder, in)
+				sess := withGHCPTrustPreflight(session.New(newDeps(sessionRunFolder, isNewRun, orchFile, cfg)),
+					sessionRunFolder, cfg.Harness, in.ProgramRef, true, in.Debug)
+				return newRunLifecycleSession(sess,
+					runLogConfig{RunFolder: sessionRunFolder, HarnessID: cfg.Harness, Debug: in.Debug, Clock: in.Clock})
 			},
 			MintRunIdentity:        in.Minter,
 			OrchestratorDiscoverer: harness.DiscoverOrchestrator,
@@ -233,10 +241,10 @@ func buildTestRunnerFactory() func(ctx context.Context, cfg testrun.TestConfig, 
 		// interface. This type assertion is safe: reporters that do not implement
 		// the interface simply skip the notification.
 		if rpr, ok := reporter.(testrun.ResolvedPathsReporter); ok {
-			rpr.OnResolvedPaths(resolvedPaths, testrun.HarnessDisplayOrder(cfg.Harnesses))
+			rpr.OnResolvedPaths(resolvedPaths, resolve.HarnessDisplayOrder(cfg.Harnesses))
 		}
 
-		invoker := testrun.NewSubprocessRunInvoker(testrun.RunInvokerOptions{
+		runInvoker := invoker.NewSubprocessRunInvoker(invoker.RunInvokerOptions{
 			WorkingDir:  cfg.Workspace,
 			DebugLogger: logger,
 		})
@@ -244,7 +252,7 @@ func buildTestRunnerFactory() func(ctx context.Context, cfg testrun.TestConfig, 
 		orch := testrun.NewOrchestrator(testrun.OrchestratorDeps{
 			Catalog:    cat,
 			Deployer:   deployer,
-			RunInvoker: invoker,
+			RunInvoker: runInvoker,
 			Checker:    &testCheckerAdapter{},
 			Reporter:   reporter,
 		})

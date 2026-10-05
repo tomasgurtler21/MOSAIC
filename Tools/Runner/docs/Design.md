@@ -2,7 +2,7 @@
 
 > **Status:** Draft
 > **Created:** 2026-08-15
-> **Last Updated:** 2026-08-26
+> **Last Updated:** 2026-09-27
 > **Scope:** The design of `mosaic-run`, the CLI tool that executes orchestration workflows without a human orchestrator in the loop. Covers execution modes (how much routing intelligence the Runner handles autonomously versus delegating to a script-mode orchestrator agent), the architectural layers that implement those modes, the dispatch loop lifecycle, and the contract boundaries between the Runner and the systems it drives (harness adapters, orchestrator agents, the orchestration artifact).
 
 ---
@@ -19,31 +19,34 @@ The Runner (`mosaic-run`) separates these concerns. It takes over all mechanical
 
 The Runner's three execution modes (§2) represent different points on the cost-vs-quality spectrum:
 
-| Approach | Orchestrator Invocations | Context Growth | Task Description Quality |
+| Approach | Orchestrator Invocations | Context Growth | Routing Judgment |
 |----------|------------------------|----------------|-------------------------|
-| **Current (no Runner)** | Every step, persistent session | Unbounded — grows with run length | High — orchestrator crafts each one with full context |
-| **Mode 1 (Orchestrated)** | Every step, fresh session each time | Bounded — always system prompt + Orchestration.md | High — orchestrator still crafts each one, reading compact artifact |
-| **Mode 2 (Auto)** | Only on deviations | Bounded | Low on happy path — Runner generates generic messages |
-| **Mode 3 (Auto-review)** | Only on unresolvable deviations | Bounded | Low on happy path — Runner generates generic messages |
+| **Current (no Runner)** | Every step, persistent session | Unbounded — grows with run length | Every step, in one long session |
+| **Mode 1 (Orchestrated)** | Every step, fresh session each time | Bounded — always system prompt + Orchestration.md | Every step |
+| **Mode 2 (Auto)** | Only on deviations | Bounded | Non-SUCCESS only; the engine follows the table on SUCCESS |
+| **Mode 3 (Auto-review)** | Only on unresolvable deviations | Bounded | Unresolvable deviations only |
 
-Mode 1 is not the "expensive" option — it is already dramatically cheaper than the current approach because each orchestrator invocation starts a fresh session (no context window growth) and all mechanical work is offloaded to the Runner. Modes 2 and 3 reduce cost further by eliminating most orchestrator invocations, but at the price of losing orchestrator-crafted task descriptions on the happy path.
+Mode 1 is not the "expensive" option — it is already dramatically cheaper than the current approach because each orchestrator invocation starts a fresh session (no context window growth) and all mechanical work is offloaded to the Runner. Modes 2 and 3 reduce cost further by eliminating most orchestrator invocations. The price is the orchestrator's judgment on the happy path, and they run only the workflow shapes the engine supports.
+
+**Direction.** Modes 2 and 3 are the intended primary modes. Mode 1 is the fallback: it covers any workflow the script orchestrator can interpret, including table features the engine does not support yet (§1.3), and it remains useful beyond that.
 
 ### 1.2 The Dispatch Intelligence Gap
 
-The orchestrator's value beyond routing is **dispatch intelligence** — the contextual information it packs into each subagent's `task_description` and `constraints`. This intelligence has two distinct layers:
+What the orchestrator adds beyond mechanical work has two layers.
 
-**Per-dispatch context** (what THIS invocation should focus on):
-- "Re-address the interface naming inconsistencies flagged in contracts-review.md, specifically the mismatched parameter types in §3.2"
-- "Focus on the authentication module — the research identified it as the highest-risk area"
+**Routing judgment** (where the run must go when the table alone does not say):
+- A reviewer's findings implicate upstream work, so the fix belongs to `requirements-refinement` rather than the `On Findings` creator
+- A `NEEDS_CLARIFICATION` asks for codebase facts, so a research agent runs before the asking agent is re-dispatched
+- A repeated failure or an exhausted review-loop limit calls for a stop, not another attempt
 
 **Environment context** (facts that apply to EVERY invocation):
 - Skills are located at `.claude/skills/` — read the relevant skill from there by name
 - Use `py` not `python` for the Python interpreter
 - Harness-specific quirks subagents should be aware of
 
-The human orchestrator synthesizes both layers for every dispatch because it holds the full context: harness injections, project knowledge (CLAUDE.md), workflow semantics, prior results. When the Runner auto-routes (Modes 2 and 3), it loses BOTH layers — the task description is generic and carries no environment guidance.
+Task descriptions are not a third layer. Both orchestrators follow a shared minimal rule: state what to accomplish, never how, and never reshape scope from domain content (the Routing Policy in `orchestrator.md` / `orchestrator-script.md`). An orchestrator-stated task therefore differs little from the Runner's generic one. Earlier drafts treated targeted, findings-quoting descriptions as Mode 1's main value, but in practice they over-directed subagents.
 
-Mode 1 fully closes this gap: the orchestrator crafts every dispatch message with both layers. Modes 2/3 lose both layers on auto-routed dispatches. The per-dispatch context gap is the fundamental trade-off of those modes — subagents must derive their focus from instructions and input artifacts alone, without orchestrator guidance on what matters this time. This is the primary reason Mode 1 exists.
+Mode 1 supplies both layers on every step. Modes 2/3 lose routing judgment on auto-routed steps and follow the table instead. That is their fundamental trade-off, and it is acceptable wherever the table already says the right thing.
 
 The environment context gap is a different class of problem: a subagent that cannot find its skills or uses the wrong Python command fails for plumbing reasons unrelated to its task, and those failures are harder to attribute than task-logic failures. Pre-Consultation (§2.8) addresses this narrow layer with a one-shot orchestrator invocation at run start. It does not close the core dispatch intelligence gap — that remains the fundamental trade-off of Modes 2/3 — but it prevents a category of failure that is difficult to diagnose and easy to avoid.
 
@@ -53,6 +56,10 @@ The Runner is not a replacement for the orchestrator agent. The orchestrator age
 
 The Runner is also not a workflow engine in the general sense. It executes MOSAIC workflow tables — a specific format with specific semantics. It does not interpret arbitrary DAGs, BPMN diagrams, or pipeline definitions.
 
+The Runner currently invokes one workflow agent at a time. For an admitted staged workflow, work that a native orchestrator may dispatch concurrently is executed sequentially; this changes scheduling, not which admitted stages run. True concurrent workflow dispatch is deferred and tracked in `ROADMAP.md`.
+
+**Admission is mode-dependent.** The engine routes in Modes 2 and 3, so admission there refuses table shapes the engine cannot interpret — currently including comma-separated multi-target `On Success` (parallel forks). In Mode 1 the engine never routes; it only builds requests for the agent the orchestrator names. Mode 1 therefore admits any table the script orchestrator can interpret, and refuses only what request construction itself needs, such as unresolvable agents or artifact templates. A Mode 1 fork runs its branches one after another: each branch is one routing decision, and the orchestrator judges the join (every `Waits For` branch `SUCCESS`) from the Execution Log. New workflow-table features therefore work in Mode 1 first; Modes 2/3 refuse them until the engine learns them. Mode 1 still refuses a fork branch that is the last row of its phase or execution group, because the last-row helpers answer by table position and such a branch has no join to end on; the refusal names the branch and its row.
+
 ---
 
 ## 2. Execution Modes
@@ -61,11 +68,11 @@ The Runner supports three execution modes that control how much routing intellig
 
 ### 2.1 Mode Overview
 
-| Mode | Name | Engine Routes | Orchestrator Decides | Task Descriptions | Cost vs. Current |
+| Mode | Name | Engine Routes | Orchestrator Decides | Workflow Shapes | Cost vs. Current |
 |------|------|---------------|---------------------|-------------------|-----------------|
-| 1 | **Orchestrated** | Nothing | Everything | Orchestrator-crafted (high quality) | Much cheaper (bounded context) |
-| 2 | **Auto** | SUCCESS | Everything else | Generic on happy path; orchestrator-crafted on deviation | Cheapest for deviation-heavy runs |
-| 3 | **Auto-review** | SUCCESS + creator/reviewer loops | Remaining deviations only | Generic on happy path and review loops | Cheapest overall |
+| 1 | **Orchestrated** | Nothing | Everything | Any the orchestrator can interpret (§1.3) | Much cheaper (bounded context) |
+| 2 | **Auto** | SUCCESS | Everything else | Engine-supported only | Cheapest for deviation-heavy runs |
+| 3 | **Auto-review** | SUCCESS + creator/reviewer loops | Remaining deviations only | Engine-supported only | Cheapest overall |
 
 All three modes are cheaper than the current approach (persistent orchestrator session with unbounded context growth). The modes differ in how much further they reduce cost, and what quality they trade for it.
 
@@ -75,19 +82,19 @@ All three modes are cheaper than the current approach (persistent orchestrator s
 
 **Why this is cheaper than the current approach:** The current orchestrator accumulates context across the entire run — every tool call, every artifact edit, every subagent response stays in the context window. In Mode 1, each orchestrator invocation starts fresh: the context is always just the orchestrator's system prompt + the compact Orchestration.md artifact. No growth. The Runner handles all mechanical work (artifact writes, harness invocations, sequence tracking) that previously consumed orchestrator context.
 
-**Why this is higher quality than Modes 2/3:** The orchestrator crafts the task description for every dispatch. It reads the run's history, understands what the previous subagent produced, and writes a targeted message: "Re-address the interface naming inconsistencies flagged in contracts-review.md, specifically the mismatched parameter types in §3.2." Modes 2/3 cannot do this — the Runner has no domain understanding, so auto-routed dispatches carry generic task descriptions.
+**What it adds over Modes 2/3:** The orchestrator judges every step. It can send work upstream when a finding implicates it, pick the agent that can answer a clarification, or stop. It states each task minimally, with the environment facts its instructions carry, and that remains useful guidance for the subagent. Because the engine never routes in Mode 1, it also runs workflow shapes Modes 2/3 do not support yet (§1.3).
 
 **Engine role:** The engine is used only for dispatch construction (building `ProtocolRequest` objects, resolving artifact paths) — never for routing decisions. The routing decision, task description, and effective HITL all come from the orchestrator's instruction.
 
 **When to use:**
-- Default recommended mode: best cost-quality balance for most workflows
+- Fallback: workflows using table features the engine does not support yet (e.g., parallel forks), which Modes 2/3 refuse at admission
 - Workflows with complex conditional routing that depend on artifact content (e.g., "skip the design phase if the research shows no architectural changes needed")
-- When task description quality matters — subagents perform better when told specifically what to do
+- When per-step routing judgment matters more than cost
 - Developing or debugging the orchestrator agent (the Runner becomes a test harness for the orchestrator's routing logic)
 
 **Dispatch loop:** See the unified loop in §3.1. In Mode 1, step 1 always consults the orchestrator — the engine is never asked for a routing decision. The orchestrator returns a dispatch instruction (agent, task description, and optionally artifact overrides and constraints) or `stop`. The Runner applies orchestrator-provided fields and falls back to table-row defaults for anything the orchestrator omits. See `ScriptOrchestratorContract.md` for the full schema.
 
-**Difference from Modes 2/3:** In Modes 2 and 3, the engine makes routing decisions first and only falls through to the orchestrator on deviation. In Mode 1, there is no engine routing — the orchestrator decides everything, and every dispatch carries an orchestrator-crafted task description.
+**Difference from Modes 2/3:** In Modes 2 and 3, the engine makes routing decisions first and only falls through to the orchestrator on deviation. In Mode 1, there is no engine routing — the orchestrator decides everything and states every dispatch's task.
 
 ### 2.3 Mode 2 — Auto
 
@@ -95,16 +102,16 @@ All three modes are cheaper than the current approach (persistent orchestrator s
 
 **Engine role:** The engine reads the workflow table, determines the On Success target, resolves execution groups and stage ordering, and produces a `DispatchDecision`. For non-SUCCESS responses, the engine produces a `DeviationDecision`, and the session invokes the deviation resolver (orchestrator delegate or stop).
 
-**Task description trade-off:** On the happy path (SUCCESS → next row), the Runner generates a generic task description — the subagent must derive its goal from its own instructions and input artifacts. On deviations, the orchestrator is invoked and crafts a targeted task description. This means the quality of task descriptions degrades precisely on the path that needs them least (the happy path, where the subagent's standard instructions usually suffice) and remains high on the path that benefits most (deviations, where the subagent needs specific guidance about what went wrong).
+**Trade-off:** On the happy path (SUCCESS → next row), the Runner sends a generic task description and follows the table's On Success target without judgment. Orchestrator-stated descriptions are minimal by policy, so the description itself loses little. What is lost is the chance to route differently after a SUCCESS. Deviations still reach the orchestrator.
 
 **When to use:**
 - When happy-path subagents perform well with generic task descriptions (their instructions and artifact inputs are sufficient)
 - When deviations require orchestrator judgement — review findings sometimes warrant more than routing back to the creator (e.g., escalating to the user, adjusting the plan, or stopping the run)
-- When minimizing orchestrator invocations on the happy path matters more than task description quality
+- When minimizing orchestrator invocations on the happy path matters more than per-step routing judgment
 
-**Dispatch loop:** See the unified loop in §3.1. In Mode 2, step 1 asks the engine first. SUCCESS is auto-routed (generic task description). All non-SUCCESS — including COMPLETED_NEEDS_ACTION — produces a Deviation, which triggers orchestrator consultation (crafted task description).
+**Dispatch loop:** See the unified loop in §3.1. In Mode 2, step 1 asks the engine first. SUCCESS is auto-routed (generic task description). All non-SUCCESS — including COMPLETED_NEEDS_ACTION — produces a Deviation, which triggers orchestrator consultation (orchestrator-stated task description).
 
-**Key difference from Mode 3:** COMPLETED_NEEDS_ACTION with an unambiguous On Findings target is NOT auto-routed. It produces a Deviation and goes to the orchestrator. The value is routing flexibility, not task description quality — the creator reads the review artifact regardless and derives its focus from there. What the orchestrator adds is the ability to override the On Findings target: when a reviewer's findings point to an upstream problem (e.g., "the contracts are wrong because the requirements are incomplete"), the orchestrator can route to `requirements-refinement` instead of `contracts-designer`. Mode 3 would blindly auto-route to the On Findings target, which may cause the creator to attempt a local fix when the real problem is upstream.
+**Key difference from Mode 3:** COMPLETED_NEEDS_ACTION with an unambiguous On Findings target is NOT auto-routed. It produces a Deviation and goes to the orchestrator. The value is routing flexibility — the creator reads the review artifact regardless and derives its focus from there. What the orchestrator adds is the ability to override the On Findings target: when a reviewer's findings point to an upstream problem (e.g., "the contracts are wrong because the requirements are incomplete"), the orchestrator can route to `requirements-refinement` instead of `contracts-designer`. Mode 3 would blindly auto-route to the On Findings target, which may cause the creator to attempt a local fix when the real problem is upstream.
 
 ### 2.4 Mode 3 — Auto-review
 
@@ -112,21 +119,23 @@ All three modes are cheaper than the current approach (persistent orchestrator s
 
 **Engine role:** Same as Mode 2, plus: when a review agent returns COMPLETED_NEEDS_ACTION and the workflow table row has an unambiguous On Findings target, the engine auto-routes back to the paired creator without invoking the orchestrator.
 
-**Task description trade-off:** This is the mode with the weakest task descriptions. Both happy-path dispatches AND review-loop re-dispatches carry generic task descriptions. The creator being routed back after a review finding does not receive "fix the naming inconsistency in §3.2" — it receives a generic message and must read the review artifact to understand what to fix. This usually works because the review artifact is in its input_artifacts list and creators are designed to read review feedback, but it is a quality gap compared to Modes 1 and 2.
+**Trade-off:** Review-loop re-dispatches are auto-routed too, with generic descriptions and table targets. The creator reads the review artifact, which is added to its inputs, to learn what to fix; creators are designed to read review feedback, so this usually works. What Mode 3 gives up relative to Mode 2 is the orchestrator's chance to route a finding upstream instead of back to the paired creator. The review loop limit (`review_loop_limit`) still applies: before auto-routing, the engine counts that reviewer's COMPLETED_NEEDS_ACTION iterations at the current phase and stage (a CNA row directly after a CNA row of the same reviewer is a re-dispatch and counts once). When the count reaches the limit, the engine produces a deviation instead of auto-routing. With no limit it never stops.
 
 **When to use:**
 - Maximum automation and minimum cost: the orchestrator is invoked only when something genuinely unexpected happens
 - When review-loop routing is fully captured by the workflow table's On Findings column
-- When subagents reliably derive their task from instructions + artifacts without orchestrator-crafted messages
+- When subagents reliably derive their task from instructions + artifacts without orchestrator routing
 
 **Auto-routed cases:**
 
 | Subagent Status | Condition | Engine Action | Task Description | Artifacts |
 |----------------|-----------|---------------|-----------------|-----------|
 | SUCCESS | Always | Route to On Success target (or next EXECUTION row) | Generic | Table defaults |
-| COMPLETED_NEEDS_ACTION | Row has unambiguous On Findings | Route to On Findings target | Generic | Table defaults + review artifact added to input |
-| COMPLETED_NEEDS_ACTION | Row has no/ambiguous On Findings | Deviation → orchestrator | Orchestrator-crafted | Orchestrator specifies |
-| Any other non-SUCCESS | Always | Deviation → orchestrator | Orchestrator-crafted | Orchestrator specifies |
+| COMPLETED_NEEDS_ACTION | Row has unambiguous On Findings, review loop limit not reached | Route to On Findings target | Generic | Table defaults + review artifact added to input |
+| COMPLETED_NEEDS_ACTION | Row has no/ambiguous On Findings, or review loop limit reached | Deviation → orchestrator | Orchestrator-stated | Orchestrator specifies |
+| Any other non-SUCCESS | Always | Deviation → orchestrator | Orchestrator-stated | Orchestrator specifies |
+
+**Row identification and the nearest-preceding rule:** The engine identifies the row that ran from the `WorkflowRow` value recorded in the Execution Log (the column directly after `Stage`, matching the table's `Row` column), not from seq arithmetic or invocation counts. Infrastructure, out-of-band and ad-hoc steps record `-`. Live routing and resume read the last row from this value and stop and report when the agent or group at that row no longer matches. The table's `Row` column is added by mosaic-deploy; the Runner accepts tables with or without it and refuses one whose `Row` numbers do not match row positions. The On Findings target resolves to the nearest row above the row that ran whose agent is the target: the row that ran is not a candidate, and group and stage boundaries are ignored. A target with no preceding row is treated as no target, which produces a deviation. A run is pinned to its workflow only by `workflow_version`, and the table is re-read on every start including resume, so authors bump the version on every table edit; a mismatch refuses resume unless version drift is allowed.
 
 **Review artifact injection (COMPLETED_NEEDS_ACTION auto-routing):** When the engine auto-routes back from a reviewer to the On Findings target (typically the paired creator), it adds the reviewer's output artifact to the target's `input_artifacts`. The table row for the creator lists the creator's normal inputs — it does not anticipate review loops. The engine knows which artifact the reviewer produced (from the table row's Output column) and adds it to the creator's input set. This ensures the creator can read the review findings without the orchestrator having to specify it manually.
 
@@ -134,14 +143,12 @@ All three modes are cheaper than the current approach (persistent orchestrator s
 
 ### 2.5 The Task Description Spectrum
 
-The task description quality varies across modes and is further improved by pre-consultation (§2.8). To make this concrete:
+Task descriptions differ little across modes, because orchestrator-stated descriptions are minimal by policy. Pre-consultation (§2.8) adds environment facts to auto-routed ones. To make this concrete:
 
-**Mode 1 dispatch (orchestrator-crafted, per-dispatch + environment):**
+**Mode 1 dispatch (orchestrator-stated, minimal + environment):**
 ```
-The contracts-review found three issues: (1) PaymentProcessor.validate()
-accepts a raw string amount but the schema defines it as Decimal, (2) the
-error response type is missing the 'retryable' field. Re-address these in
-ContractsDesign.md.
+Revise ContractsDesign.md to resolve the findings recorded in
+contracts-review.md.
 Skills are at .claude/skills/ — read the relevant skill by name. Use `py`
 not `python`.
 ```
@@ -158,7 +165,7 @@ not `python`.
 Proceed with your task.
 ```
 
-The generic message is deliberately minimal. The subagent already has its instructions (which define its role and scope), its `input_artifacts` list (which tells it what to read), and its `output_artifacts` list (which tells it what to produce) — the Runner has no domain understanding to add. The per-dispatch intelligence gap — the orchestrator's ability to direct focus based on run context ("re-address the naming issues in §3.2") — is the accepted cost of Modes 2/3.
+The generic message is deliberately minimal. The subagent already has its instructions (which define its role and scope), its `input_artifacts` list (which tells it what to read), and its `output_artifacts` list (which tells it what to produce) — the Runner has no domain understanding to add. What Modes 2/3 give up is routing judgment, not description content.
 
 Pre-consultation adds environment plumbing on top of the generic content.
 
@@ -197,12 +204,12 @@ Pre-consultation is enabled by default for Modes 2 and 3. At run start, before t
 
 **Invocation context:** Pre-consultation is a distinct invocation context from routing consultation (§2.9). The orchestrator returns field-keyed strings (§2.8's response shape), not a routing instruction (`dispatch`/`stop`). The contract document defines both response schemas under their respective invocation contexts.
 
-**What it fixes:** Environmental plumbing — project-specific conventions, tool configurations, harness quirks, and other generic facts that apply identically to all subagents. Without pre-consultation, a subagent in Modes 2/3 might fail because it doesn't know a project-specific convention that the orchestrator's deployed instructions carry. Pre-consultation does NOT address the core dispatch intelligence gap (per-dispatch task context) — that remains the fundamental trade-off of Modes 2/3.
+**What it fixes:** Environmental plumbing — project-specific conventions, tool configurations, harness quirks, and other generic facts that apply identically to all subagents. Without pre-consultation, a subagent in Modes 2/3 might fail because it doesn't know a project-specific convention that the orchestrator's deployed instructions carry. Pre-consultation does NOT add routing judgment — that remains the fundamental trade-off of Modes 2/3.
 
 **How it works:**
 
-1. After the run-start sequence completes (workflow loaded, agents resolved, artifact created/resumed), the Runner invokes the orchestrator via the normal `HarnessAdapter`
-2. The orchestrator — which already holds all environment context through its deployed instructions — produces structured output: string values keyed by protocol request field name
+1. After the artifact is created or resumed and any required commit setup completes, but before the workflow dispatch loop, the Runner invokes the orchestrator via the normal `HarnessAdapter`
+2. The orchestrator extracts explicit environment facts from its deployed instructions that apply to every auto-routed subagent, without rationale or duplication; it returns an empty object when none exist
 3. The Runner stores these strings in session state
 4. On every subsequent dispatch, the Runner appends the stored strings to the corresponding fields of the `ProtocolRequest` (e.g., appending to `task_description`, appending to `constraints`)
 5. The Runner never interprets the content — it appends mechanically
@@ -211,10 +218,7 @@ Pre-consultation is enabled by default for Modes 2 and 3. At run start, before t
 
 ```yaml
 task_description: |
-  Skills are located at .claude/skills/ in the project root — read the
-  relevant skill from there by name. Use `py` not `python` for the
-  Python interpreter.
-constraints: |
+  Skills are located at .claude/skills/ in the project root.
   When running Python, always use `py`, never `python`.
 ```
 
@@ -222,16 +226,16 @@ constraints: |
 
 - **Uses the real orchestrator, not a dedicated advisor agent.** The orchestrator already has all the context through deployment. A separate agent would need the same context assembled and passed explicitly — duplicated context with drift risk.
 - **Generic, not per-agent.** The orchestrator doesn't know agent internals. It knows environment facts (paths, command aliases, harness quirks) that apply equally to all subagents. The output is flat strings, not a per-agent map.
-- **On by default, hard failure on error.** If pre-consultation fails, the run refuses to start. Silent degradation — proceeding without environment guidance — is worse than stopping, whether the feature was explicitly requested or merely defaulted on. Pre-consultation can be disabled with `--pre-consult=false`.
+- **On by default, hard failure on error.** If pre-consultation fails, the Runner stops before any workflow dispatch and retains the already-created or resumed artifact for inspection and resume; resuming retries pre-consultation. The coordinator call remains in the Runner diagnostic log and the MOSAIC log's orchestrator sessions but creates no Execution Log row and changes neither `global_sequence` nor `current_state`. Silent degradation — proceeding without environment guidance — is worse than stopping, whether the feature was explicitly requested or merely defaulted on. Pre-consultation can be disabled with `--pre-consult=false`.
 - **Not cached across runs.** Project context, CLAUDE.md, and harness injections can change between runs. One extra LLM invocation at startup is cheap relative to a full run with stale guidance.
 
 **Mode interaction:**
 
 | Mode | Pre-consultation value |
 |------|----------------------|
-| 1 — Orchestrated | Unnecessary — orchestrator already includes environment context in every crafted dispatch |
-| 2 — Auto | Provides environment context for auto-routed dispatches; does not close the per-dispatch intelligence gap |
-| 3 — Auto-review | Provides environment context for all auto-routed dispatches; does not close the per-dispatch intelligence gap |
+| 1 — Orchestrated | Unnecessary — orchestrator already includes environment context in every dispatch it states |
+| 2 — Auto | Provides environment context for auto-routed dispatches; adds no routing judgment |
+| 3 — Auto-review | Provides environment context for all auto-routed dispatches; adds no routing judgment |
 
 ### 2.9 Orchestrator Consultation
 
@@ -242,14 +246,14 @@ There is no separate "deviation resolver" concept. Consulting the orchestrator i
 
 The call is the same either way: invoke the orchestrator agent as a fresh session via the harness adapter, it reads Orchestration.md, and it returns one of two instructions:
 
-- **Dispatch:** `{agent, task_description, constraints?, input_artifacts?, output_artifacts?, hitl_override?}` — execute this routing-table agent next, with this task description. Optional fields override the table row's defaults for this dispatch. When omitted, the Runner uses the table's artifact lists, deployment constraints, and HITL resolution.
+- **Dispatch:** `{agent, task_description, constraints?, input_artifacts?, output_artifacts?, hitl_override?}` — execute this routing-table agent next, with this task description. Optional fields may override artifact and constraint defaults; `hitl_override: true` adds HITL, while `false` applies an explicit user waiver recorded in Workflow Notes. When omitted, the Runner uses table defaults and Plan resolution.
 - **Stop:** `{reason}` — end the run.
 
 This is the complete action vocabulary. The orchestrator never returns a multi-step plan, never assigns sequence numbers (that's the Runner's mechanical work), and never invokes agents itself. It names an agent, describes the task, optionally adjusts the artifact set and constraints for this specific invocation, and the Runner does the rest.
 
-**Free table navigation:** The orchestrator can dispatch any agent in the routing table, regardless of the current position. This is normal operation, not an exception — a reviewer may find upstream problems (wrong contracts, incomplete requirements, bad plan), and the orchestrator routes back to wherever the fix belongs. The Runner looks up the named agent in the table, finds the corresponding row, and builds the `ProtocolRequest` — applying orchestrator-provided fields (task description, artifacts, constraints, HITL) where specified, falling back to the table row's defaults where not. `current_state` updates to reflect the new position, even if that means jumping backward to an earlier phase.
+**Free table navigation:** The orchestrator can dispatch any agent in the routing table, regardless of the current position. This is normal operation, not an exception — a reviewer may find upstream problems (wrong contracts, incomplete requirements, bad plan), and the orchestrator routes back to wherever the fix belongs. The Runner looks up the named agent in the table, finds the corresponding row, and builds the `ProtocolRequest` — applying orchestrator-provided fields (task description, artifacts, constraints, HITL) where specified, falling back to the table row's defaults where not. Once that invocation's outcome is accepted, `current_state` takes the dispatched row's position, even if that means jumping backward to an earlier phase.
 
-**Recording:** Orchestrator consultation invocations are recorded in the Execution Log as infrastructure-flagged rows — they consume `global_sequence` and appear in the log, but do not update `current_state`. This follows the same pattern as infrastructure agent invocations (§5). The audit value is significant: on resume, the orchestrator sees its own prior routing decisions in the log; `orchestration-review` can verify them. Not recording them would create invisible gaps in the sequence — `global_sequence` advances but the log doesn't show why.
+**Recording:** Orchestrator consultations are turns of the run's coordinator, not protocol subagent invocations. They do not consume `global_sequence`, create Execution Log rows, or update `current_state`. Each consultation call is recorded for troubleshooting in the Runner diagnostic log and, through the mosaic-logger hooks, as its own session-scoped orchestrator session (events in `00_orchestrator_events.jsonl`, transcript in a session-scoped `00_orchestrator_session__{scope}.raw`) in the run's MOSAIC log; see `Development/Designs/MosaicLogFormat.md` §4.6 (Runner-hosted mode) for what Runner mode records and the accepted differences from a native run. Conclusions and decisions a later consultation needs are appended by the script orchestrator to Workflow Notes, using the artifact's current `global_sequence` to associate the note with the most recent completed recorded invocation (`0` during run initialization).
 
 The orchestrator never needs to know whether it's being consulted for routine routing (Mode 1) or because something went wrong (Modes 2/3). It reads the artifact, sees the current state, and decides. The distinction is the Runner's concern, not the orchestrator's.
 
@@ -279,7 +283,7 @@ The Runner has ONE dispatch loop. The mode determines who makes the routing deci
 │      task_description, constraints from orchestrator │
 │      input/output artifacts: orchestrator if         │
 │        specified, else table row defaults            │
-│      HITL: orchestrator's hitl_override, else table  │
+│      HITL: table/Plan, plus add or recorded waiver   │
 │    Auto-routed (Modes 2/3):                          │
 │      task_description: generic + pre-consultation    │
 │      input/output: table defaults (+ review artifact │
@@ -290,21 +294,28 @@ The Runner has ONE dispatch loop. The mode determines who makes the routing deci
 │    Harness.Invoke(agent, request) → response        │
 │    Harness error → treat as deviation, back to 1    │
 ├─────────────────────────────────────────────────────┤
-│ 4. RECORD                                           │
+│ 4. VERIFY HITL GATE                                 │
+│    Only when this invocation was dispatched with     │
+│    human_in_the_loop: true. Read human_approved      │
+│    from each output the invocation wrote (§3.5)     │
+│    Rejected attempt: log it without current_state     │
+│    or Artifacts updates, then re-dispatch             │
+├─────────────────────────────────────────────────────┤
+│ 5. RECORD ACCEPTED OUTCOME                          │
 │    Store.Apply(state, completedStep)                │
 │    → Execution log row appended                     │
 │    → current_state updated                          │
 │    → global_sequence bumped                         │
 ├─────────────────────────────────────────────────────┤
-│ 5. INFRASTRUCTURE TRIGGERS                          │
+│ 6. INFRASTRUCTURE TRIGGERS                          │
 │    Evaluate checkpoint/commit/etc. triggers          │
 │    May dispatch infrastructure agents (each recorded)│
 ├─────────────────────────────────────────────────────┤
-│ 6. STAGE REFRESH                                    │
+│ 7. STAGE REFRESH                                    │
 │    If output artifacts contain Stage-*, re-read      │
 │    Plan.md for refreshed stage set                   │
 ├─────────────────────────────────────────────────────┤
-│ 7. LOOP                                             │
+│ 8. LOOP                                             │
 │    Back to step 1 with updated state                │
 └─────────────────────────────────────────────────────┘
 ```
@@ -320,7 +331,7 @@ The orchestrator is invoked as a fresh session. It reads Orchestration.md, decid
 The engine is called with the current state and last response. Three outcomes:
 - **Dispatch** → proceed to step 2 (with generic task description)
 - **Complete** → end run
-- **Deviation** → consult orchestrator (same call as Mode 1), proceed to step 2 with orchestrator-crafted task description
+- **Deviation** → consult orchestrator (same call as Mode 1), proceed to step 2 with orchestrator-stated task description
 - **Stop** → end run (precondition failure)
 
 The mode only affects WHICH deviations reach the orchestrator: Mode 2 sends all non-SUCCESS (including COMPLETED_NEEDS_ACTION); Mode 3 auto-routes COMPLETED_NEEDS_ACTION with unambiguous On Findings before producing a Deviation.
@@ -329,7 +340,7 @@ The mode only affects WHICH deviations reach the orchestrator: Mode 2 sends all 
 
 ### 3.3 Harness Errors
 
-A harness-level error (timeout, crash, malformed output) at step 3 is fed back into step 1 as a deviation. The session constructs a synthetic response with `StatusCode=BLOCKED` and the error message, records it in the artifact, and the next iteration's routing decision accounts for it. The orchestrator (or engine, in Mode 3 if applicable) decides whether to retry, skip, or stop.
+A harness-level error (timeout, crash, malformed output) at step 3 is fed back into step 1 as a deviation. The session constructs a synthetic response with `StatusCode=BLOCKED`, `ErrorCode=E501` (`TOOL_UNAVAILABLE`: the harness is the external tool that failed), and the error message as both status message and error reason. It records the response in the artifact, and the next iteration's routing decision accounts for it. The code matters because the shared Routing Policy picks its recovery tier by `error_code`: `E501` retries the same agent within the Repeated Failures cap and then escalates. The consultation request carries the description in `last_error_reason` (`ScriptOrchestratorContract.md` §3.2). *Not yet implemented: the synthetic response currently carries no error code.*
 
 ### 3.4 Stop Handling
 
@@ -346,18 +357,31 @@ When the routing decision at step 1 is `stop` (from the orchestrator or from the
 
 The stop action on the wire (`ScriptOrchestratorContract.md` §4.2) is the same regardless of surface — the Runner's reaction to it is surface-specific behavior.
 
+### 3.5 HITL Gate Verification (Step 4)
+
+`CommunicationProtocol.md` §9.7 makes verifying the human-in-the-loop gate an obligation of the party that dispatched the invocation. In Runner mode that party is **the Runner**, not the orchestrator agent: the orchestrator returns a routing instruction and cannot re-dispatch, so leaving the check to it would leave it undone. The check's semantics and the response to a gate that was not discharged are the protocol's — this section records only that the Runner owns them here, so the obligation is not read as unassigned.
+
+What the Runner does:
+
+- **Reads `human_approved`** from the frontmatter of each output artifact that an invocation dispatched with `human_in_the_loop: true` created or modified, whatever status it returned except `BLOCKED` with `E503`, which is routed directly because it already reports that the gate could not run — the same set recorded in the Artifacts registry, with wildcards expanded. A listed output that does not exist or that the invocation left unchanged is not checked. The read distinguishes the failure conditions — unreadable, no frontmatter, malformed value, field absent — rather than collapsing them into "not approved", and it never errors the run itself.
+- **Refuses to start** a run whose workflow requires HITL when the interaction surface cannot read approvals at all. A surface that cannot verify the gate cannot honour it, and discovering that mid-run would leave a run that believed it was gated and was not.
+- **Verifies before accepting the workflow outcome.** A discharged gate proceeds to the ordinary record step, which updates `current_state` and the Artifacts registry. An undischarged attempt is appended to the Execution Log and advances sequence/time, but leaves both structures unchanged before the protocol-required re-dispatch. Infrastructure triggers do not run for that rejected attempt.
+- **Routes on the original outcome after a repaired gate.** When the re-dispatch discharges the gate and returns `SUCCESS`, the Runner routes on the original invocation's status and error code and records them as `current_state.last_status` / `error_code`, with `last_agent` naming the re-dispatch (protocol "Routing after the re-dispatch"). Any other re-dispatch status is routed as returned. *Not yet implemented: the Runner currently routes on the re-dispatch's response.*
+
+This is the only place the Runner inspects artifact content beyond the orchestration artifact, and it reads frontmatter only — the same narrowing the protocol applies to an LLM orchestrator, for the same context-discipline reason.
+
 ---
 
 ## 4. Run-Start Sequence
 
-The run-start sequence validates all preconditions before the first dispatch. Every step that can fail does so before any artifact is created, so a refused run leaves no trace.
+The run-start sequence validates configuration and compatibility preconditions before creating the artifact. When commits are enabled, commit setup is the first invocation after creation so its outcome is recorded like every other invocation. A setup failure stops the run but leaves an inspectable artifact rather than erasing the failure from the shared run record.
 
 | Step | What | Failure → |
 |------|------|-----------|
 | 1 | Load orchestrator file, extract selected workflow region | Refusal |
 | 2 | Parse routing table from workflow region | Refusal |
 | 3 | Read existing artifact (if resuming) or verify none exists (if new) | Refusal |
-| 4 | Admit workflow (compat checks, execution group resolution) | Refusal |
+| 4 | Admit workflow for the selected mode (compat checks, execution group resolution; engine-routing shape checks in Modes 2/3 only — §1.3) | Refusal |
 | **4b** | **Recovery check: scan for orphaned `.agents-backup/` directory next to the agents directory; restore originals if found and no active runs are detected** | **Refusal if restore fails** |
 | 5 | Resolve every agent identifier to a definition file | Refusal |
 | **5b** | **Create snapshot (copy-and-invoke) or backup and transform originals (backup-and-transform), per harness strategy** | **Refusal** |
@@ -365,9 +389,10 @@ The run-start sequence validates all preconditions before the first dispatch. Ev
 | 6b | Enumerate declared infrastructure agents | Refusal |
 | 6c | Validate per-class agent selections (gated classes: one active per class) | Refusal |
 | 7 | Settle run configuration (checkpoints, commits, commit variant) | Refusal if precondition fails |
-| 7a | Commit setup dispatch (if commits enabled) | Refusal if setup fails |
-| 7b | Build and validate seed plan (new runs only) | Refusal |
+| 7a | Build and validate seed plan (new runs only) | Refusal |
 | 8 | Create (new) or resume (existing) artifact | Failure |
+| 8a | Commit setup dispatch when commits are enabled and `commit_branch` is absent | Stop with the attempt recorded if setup fails |
+| 8b | Pre-consultation in Modes 2/3 when enabled | Stop before workflow dispatch; retain the artifact for inspection and resume |
 
 ### 4.1 Run Configuration (Step 7)
 
@@ -390,23 +415,37 @@ The Runner collects three configuration decisions that mirror what the human-dri
 
 MOSAIC-owned is recommended because an abandoned stage on a run-owned branch can be discarded cleanly, while on the user's own branch the failed attempt and its undo both stay in history permanently.
 
-### 4.2 Commit Setup Dispatch (Step 7a)
+**Review loop limit** (positive integer or no limit):
+- Asked at run start in both surfaces, suggesting `3`, and recorded as the set-once `review_loop_limit` frontmatter field; no limit omits the field. Resume reads it and never asks again. Both orchestrators' shared Routing Policy and the Mode 3 engine escalate instead of routing a reviewer's `COMPLETED_NEEDS_ACTION` back once that reviewer has hit the limit at the current phase and stage.
 
-When `commits: enabled`, the Runner dispatches the commit-class agent once at run start as an out-of-band invocation. This setup dispatch establishes the target branch — for MOSAIC-owned, the agent creates it; for user's-own, the agent reports the current HEAD branch.
+**Gated infrastructure selections** (`checkpoint`, `commit`, `restore`):
+- When a gated class has more than one declared agent, the user selects exactly one at run start. A class with exactly one declaration is auto-selected and needs no stored entry.
+- The Runner records each required class-to-agent choice in the artifact's set-once `infrastructure_selections` map. On resume it reads and validates that map instead of asking again; an absent, unavailable, or reclassified required selection refuses the resume rather than choosing by declaration order.
+- Non-gated classes such as `review` are not selected; all their declarations remain active.
 
-The setup dispatch returns the branch name in a `[branch:{name}]` marker at the end of its `status_message`. The Runner extracts this and records it as `commit_branch` in the artifact frontmatter. If the marker is missing or the dispatch fails, the run refuses to start — proceeding without a known branch destination would risk committing to the wrong place.
+**Runner-owned settings** use optional `runner_*` frontmatter fields in the shared orchestration artifact: `runner_mode`, `runner_pre_consultation`, and `runner_manual_resolution`. A Runner-created run writes them at creation. On first Runner resume of a native-created artifact that omits them, the user supplies the settings and the Runner records them once; later Runner resumes reuse them. Native orchestration preserves these fields but does not act on them. `commit_branch_variant` is not stored: the artifact schema defines the variant from `commit_branch`, so a second field would be free to disagree with the destination it describes.
 
-The setup dispatch is an ordinary invocation: it consumes `global_sequence`, gets an Execution Log row, and returns a standard protocol response. It is dispatched by explicit instruction, not by a trigger, so the `STAGE_END`-only restriction on the commit class does not apply to it.
+### 4.2 Commit Setup Dispatch (Step 8a)
+
+When `commits: enabled` and the artifact has no `commit_branch`, the Runner dispatches the commit-class agent as an out-of-band invocation after creating or loading the artifact. This setup dispatch establishes the target branch — for MOSAIC-owned, the agent creates it; for user's-own, the agent reports the current HEAD branch. The same condition applies on resume, so an artifact retained after failed setup retries setup before any workflow agent can run.
+
+The setup dispatch returns the branch name in a `[branch:{name}]` marker at the end of its `status_message`. The Runner extracts this and records it as `commit_branch` in the artifact frontmatter. If the marker is missing or the dispatch fails, the run stops before its first workflow invocation and retains the setup attempt in the artifact — proceeding without a known branch destination would risk committing to the wrong place.
+
+The setup dispatch is an ordinary invocation: it receives the next sequence number, returns a standard protocol response, and gets an Execution Log row whether it succeeds or fails. On a new run it is sequence 1. Append the row before writing `commit_branch`, following the artifact's normal log-first ordering. A successful response with a readable branch marker sets `commit_branch` and permits the workflow loop to begin. A non-success response or missing marker leaves `commit_branch` absent, keeps the setup row and advanced sequence in the artifact, and stops the run with the setup reason. `current_state` remains unchanged because setup is an out-of-band non-workflow invocation.
+
+This ordering matches native orchestration and preserves one audit rule across executors: once a protocol invocation has occurred, its outcome exists in `Orchestration.md`. Configuration or compatibility refusal still happens before artifact creation; commit setup is not a precondition check but an agent invocation whose failure belongs in the run record.
+
+Setup is dispatched by explicit instruction, not by a trigger, so the `STAGE_END`-only restriction on the commit class does not apply to it.
 
 ### 4.3 Resume
 
-On resume, the session computes a `ResumePoint` from the existing artifact's execution log. If the last logged step was interrupted mid-flight (execution log entry doesn't match `current_state`), the session rewinds `current_state` so the engine re-dispatches the interrupted row. Run configuration (checkpoints, commits, commit_branch) is read from the existing artifact's frontmatter — it was set at original run start and is never modified.
+On resume, the session first requires a valid artifact `run_id` matching the enclosing `Orchestration-{run_id}/` folder. An absent, empty, malformed, or mismatched value refuses the resume; the Runner never mints identity for an existing artifact. It then computes a `ResumePoint` from the execution log. If the trailing workflow row does not match `current_state.last_agent`, the row is an unaccepted or interrupted attempt: the session preserves the prior accepted `current_state` and re-dispatches that workflow assignment rather than routing on its recorded status. Run configuration — including checkpoints, commits, commit branch, and any gated `infrastructure_selections` — is read from the existing artifact's frontmatter; it was set at original run start and is never modified.
 
 ---
 
 ## 5. Infrastructure Agent Integration
 
-Infrastructure agents (checkpoint, commit, restore) are dispatched automatically by triggers evaluated after each workflow step completion. They are not part of the workflow table — they are declared in the orchestrator file's infrastructure agent region.
+Infrastructure agents are declared outside workflow tables and reached either by automatic trigger evaluation or explicit dispatch. Checkpoint, commit, and review agents may fire automatically according to their declarations; restore agents are manual and never participate in automatic trigger evaluation. All are declared in the orchestrator file's infrastructure agent region.
 
 **No-cascades rule:** Infrastructure agent completions do not trigger further infrastructure evaluations. Only workflow step completions trigger the evaluation pass.
 
@@ -414,9 +453,9 @@ Infrastructure agents (checkpoint, commit, restore) are dispatched automatically
 
 | Trigger | Fires When |
 |---------|-----------|
-| `INVOCATION_INTERVAL` | N workflow steps since last dispatch of this agent |
-| `STAGE_END` | The completed step is the last step of its stage |
-| `PHASE_END` | The completed step is the last step of its phase; for the EXECUTION phase this means the last step of the last stage (phase-wide scope, not per-stage) |
+| `INVOCATION_INTERVAL` | Updated `global_sequence` minus this agent's most recent Execution Log `Seq` is at least N; when it has no prior row, `global_sequence` is at least N. Counts globally allocated invocations, not only workflow steps |
+| `STAGE_END` | The completed step is the last step of its stage and returned `SUCCESS`, accepted by HITL verification where it applies. Any other status, including a reviewer's `COMPLETED_NEEDS_ACTION` loop-back, does not fire |
+| `PHASE_END` | The completed step is the last step of its phase and returned `SUCCESS`, accepted by HITL verification where it applies; for the EXECUTION phase this means the last step of the last stage (phase-wide scope, not per-stage) |
 | `MANUAL` | Never fires automatically; dispatched by explicit instruction only |
 
 **Recording:** Infrastructure steps are recorded in the execution log like any other step, but they do not update `current_state`. The artifact's recorded workflow position always names the last workflow step, ensuring the engine's row-lookup stays correct.
@@ -660,7 +699,7 @@ No open design items remain. All items from the initial draft have been resolved
 
 - **Mode 1 dispatch construction:** The Runner uses the engine for request construction. The orchestrator returns `{agent, task_description}` plus optional overrides (`constraints`, `input_artifacts`, `output_artifacts`, `hitl_override`). The Runner looks up the agent in the routing table; the engine builds the `ProtocolRequest` using orchestrator-provided fields where present, falling back to the table row's defaults where not. Sequence numbers are always assigned by the Runner.
 
-- **Orchestrator invocation recording:** Orchestrator consultation invocations are recorded in the Execution Log as infrastructure-flagged rows — they consume `global_sequence` and appear in the log, but do not update `current_state`. See §2.9.
+- **Orchestrator consultation recording:** Individual calls remain in the Runner diagnostic log and the MOSAIC log's session-scoped orchestrator sessions rather than the orchestration artifact (`Development/Designs/MosaicLogFormat.md` §4.6). They are coordinator turns, so they consume no `global_sequence` value and create no Execution Log row. Workflow Notes preserve conclusions needed by later consultations. See §2.9.
 
 - **Mode 2 engine suppression:** Implementation concern — how Mode 2 suppresses the engine's On Findings auto-routing. Not a design decision; the engine will be rewritten to support all three modes.
 
@@ -678,4 +717,5 @@ No open design items remain. All items from the initial draft have been resolved
 |---------|------|---------|
 | 0.1 | 2026-08-16 | Initial design. Three execution modes (Orchestrated, Auto, Auto-review) with cost model and dispatch intelligence gap as central tensions. Single-decision principle. Two-action orchestrator contract (dispatch + stop) with free table navigation. Dispatch instruction carries optional artifact/constraint overrides (table row defaults, orchestrator overrides on re-invocations). Mode 3 engine injects review artifact on CNA auto-route back. Pre-consultation for environment plumbing (Modes 2/3). Run-start sequence with run configuration (checkpoints, commits, branch variant, commit setup dispatch). Stop-action UX: CLI terminal, TUI offers retry + manual dispatch. Infrastructure agent triggers. All open items resolved. |
 | 0.2 | 2026-08-26 | Runner Agent Snapshot (§6). Runner creates a run-ID-scoped snapshot of deployed agents (`agents-runner-{run_id}/`) at every run start, with harness-specific transformations applied (e.g., `mode: primary` for OpenCode). Run-scoped directories enable safe parallel execution. Snapshot cleaned up on run completion; orphaned snapshots from crashes are harmless. Orchestrator file auto-discovered from harness convention, `--orchestrator-file` flag removed. Snapshot step inserted into Run-Start Sequence as step 5a. |
+| 0.4 | 2026-09-26 | **HITL verification, Runner run-state corrections, and current sequential scheduling documented.** §3.5 and the unified loop put HITL verification before acceptance: a rejected attempt is logged without changing `current_state` or the Artifacts registry and cannot fire infrastructure triggers. §4.2 aligns commit setup with native orchestration: create the artifact first, record every setup outcome as an ordinary out-of-band invocation, and retain a failed attempt for inspection and resume. §4.3 rejects an existing artifact whose `run_id` is absent, malformed, or inconsistent with its run folder rather than preserving obsolete pre-identity behavior. §5 corrects `INVOCATION_INTERVAL` to its implemented global-sequence threshold and distinguishes automatically trigger-fired checkpoint/commit/review agents from manual restore agents. §4.1 and §4.3 persist gated-agent selections across resume. Runner-only execution policy is namespaced as `runner_mode`, `runner_pre_consultation`, and `runner_manual_resolution`; redundant `commit_branch_variant` storage is rejected. Consultation rows are described by their persisted form rather than an internal flag absent from the artifact. Admitted staged workflows currently execute one invocation at a time; concurrent workflow dispatch remains deferred in `ROADMAP.md`, while existing compatibility admission continues to reject workflow shapes the Runner cannot interpret. Setup ordering, legacy identity rejection, selection, and Runner-field persistence require the implementation follow-ups recorded by the review. §3.3 records harness errors as `BLOCKED`/`E501`, so the Routing Policy's error tiers apply (implementation follow-up). HITL verification applies to every returned status except `BLOCKED`/`E503`, which is routed directly because it already reports that the gate could not run, and checks only output artifacts the invocation created or modified; a listed but absent or unchanged output is not a gate miss. Mode rationale rewritten after both orchestrators adopted a shared minimal task-description rule. Mode 1's value is per-step routing judgment plus coverage of any workflow the orchestrator can interpret; it is no longer "targeted task descriptions". Modes 2/3 are the intended primary modes, and Mode 1 is the fallback. Admission is mode-dependent: engine-routing shape checks such as the parallel `On Success` refusal apply only in Modes 2/3, and Mode 1 runs forks sequentially with the orchestrator judging joins. The review loop limit is added to run configuration and to Mode 3 auto-routing. §5 `STAGE_END`/`PHASE_END` fire only when the last step of the stage or phase returns HITL-accepted `SUCCESS`, matching `InfrastructureAgentConcept.md` §4. §2.9 moves `current_state` to the dispatched row's position once the outcome is accepted, not at dispatch. The pre-consultation example carries every environment fact in `task_description`; `constraints` is for scope or deliverable restrictions only. §3.5: after a gate-discharging HITL re-dispatch that returns `SUCCESS`, the Runner routes on and records the original invocation's status (implementation follow-up). |
 | 0.3 | 2026-09-20 | Dual-strategy snapshot (§6 rewrite). Harnesses that resolve agents by name (OpenCode, GHCP CLI) cannot read from a snapshot directory — the copy-and-invoke mechanism only works for path-based harnesses (Claude Code). New backup-and-transform strategy for name-based harnesses: backup originals, transform in-place, restore on completion. Concurrent runs coordinate via per-run OS-level file locks in a shared backup directory — no heartbeats or PID checks. Crash recovery via startup reconciliation (automatic, lock-aware) and user-visible recovery marker file (manual self-service). Run-start sequence gains step 4b (recovery check, before ResolveAll at step 5) and step 5b (snapshot/backup creation, after ResolveAll). |

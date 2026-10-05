@@ -1,6 +1,6 @@
 ---
 id: 25
-version: 2.2.0
+version: 2.2.1
 name: knowledge-base-index-assembler
 description: Creates the top-level Index.md in the KB output path from all completed KB documents — compiles the areas table and identifies system-wide patterns and invariants
 role: subagent
@@ -152,8 +152,6 @@ The `{KB output path}/Index.md` must follow this format:
 <Constraints type="core">
 ## Constraints
 
-<ProtocolConstraints type="managed">
-</ProtocolConstraints>
 - Stay within your defined role — assemble the index from KB documents, don't generate or correct content
 - **Do NOT modify existing KB documents** — only create `{KB output path}/Index.md`. The other KB documents are finalized output from the generation and correction passes
 - **Do NOT add content that isn't in the KB documents** — the index synthesizes what exists across completed documents, it does not introduce new codebase research. If something is missing from the KB documents, it's missing from the index too
@@ -171,11 +169,11 @@ The `{KB output path}/Index.md` must follow this format:
 
 <ErrorHandlingCommon type="managed">
 </ErrorHandlingCommon>
-- **Return BLOCKED** if KBProgress.md is missing (E101) or if generation/correction stages are not complete (E401)
-- **Return BLOCKED** if no KB documents can be found at the KB output path (E101) — this indicates generation output is missing
-- **Return SUCCESS** when `{KB output path}/Index.md` is written and KBProgress.md is updated — this is the expected outcome for every normal invocation
-- **Return NEEDS_CLARIFICATION** if the KB root directory exists but contains no subdirectories with `Index.md` files — contact user if tools available
-- **Return CAPABILITY_EXCEEDED** if the volume of KB documents is too large to read and synthesize in a single pass
+- **Return CAPABILITY_EXCEEDED** if KBProgress.md clearly identifies the KB root and completed document set, and those documents are present and readable, but specialized notation or heterogeneous document structure prevents you from producing a defensible areas table and system-wide synthesis
+- **Return NEEDS_CLARIFICATION** if KBProgress.md and the KB directory disagree about the output path or completed document set, including when the declared KB root contains no top-level child `Index.md` files, so the source set for assembly cannot be determined
+- **Do not return COMPLETED_NEEDS_ACTION** because this assignment has no completed output condition that requires workflow action; use SUCCESS for a completed index and an incomplete-work status when assembly cannot be completed
+- **Return SUCCESS** when `{KB output path}/Index.md` is complete and KBProgress.md marks index assembly complete
+- **Return PARTIALLY_DONE** when a meaningful subset of the KB documents has been processed and more remain; the index-assembly state in KBProgress.md records the documents processed, extracted area information and cross-area candidates needed for continuation, and every document still to process, without marking assembly complete
 
 </ErrorHandling>
 ---

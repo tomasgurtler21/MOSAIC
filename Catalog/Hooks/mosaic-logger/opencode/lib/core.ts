@@ -346,12 +346,15 @@ export async function atomicReplaceText(
 }
 
 /**
- * Synchronous variant of atomicReplace for use on low-frequency paths where
- * briefly blocking the event loop is acceptable (e.g. session-close marker writes).
+ * Synchronous variant of atomicReplace for paths where briefly blocking the
+ * event loop is acceptable (e.g. the transcript refresh, once per completed
+ * assistant message: ~3-4 ms for a 5 MB transcript).
  * Write data to a temp file in the target's directory, then rename over target.
- * Returns true on success, false on any failure (including rename collision on
- * Windows — callers must check whether the target already exists to distinguish
- * concurrent-write races from genuine failures). Never throws.
+ * Returns true on success, false on any failure; callers treat false as a
+ * failed write. Renaming over an existing target worked in the Windows
+ * transcript prototype, but a rename can still fail when writers collide
+ * (e.g. concurrent marker writes in correlation.ts), so callers with
+ * concurrent writers must check whether the target already exists. Never throws.
  * The target directory must already exist; this function does not create directories.
  */
 export function atomicReplaceSync(filePath: string, data: Uint8Array | Buffer): boolean {

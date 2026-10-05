@@ -99,8 +99,10 @@ class TestGenericStandard:
     def test_common_regions_added(
         self, generic_standard_input, tmp_path
     ):
-        """All 7 managed region boundaries must be added (user-owned and tool-managed).
+        """All 5 remaining region boundaries must be added (user-owned and tool-managed).
 
+        IdentityExtension and ErrorHandlingExtension are retired: their legacy markers
+        are recognised as input but produce no region, so neither is reported here.
         ProtocolExtension has been removed from the vocabulary entirely.
         HarnessConstraints remains tool-managed (emitted as <Name type="managed">).
         LanguagePatterns has left the tool-managed set and is now emitted as
@@ -111,12 +113,10 @@ class TestGenericStandard:
         """
         result, _ = _transform_to_tmp(generic_standard_input, tmp_path)
         expected_injections = [
-            "IdentityExtension",
             "LanguagePatterns",
             "CodebaseContext",
             "OutputArtifactTemplate",
             "HarnessConstraints",
-            "ErrorHandlingExtension",
             "ContextLimits",
         ]
         assert result.injections_added == expected_injections
@@ -1453,6 +1453,12 @@ _TARGET_INJECTION_OPEN = '<ArtifactProvenanceExtension type="project">'
 _TARGET_INJECTION_CLOSE = "</ArtifactProvenanceExtension>"
 _OLD_SECTION_OPEN = '<ArtifactProvenance type="core">'
 _OLD_SECTION_CLOSE = "</ArtifactProvenance>"
+# Retired legacy region: recognised in old-shape input, stripped from migrated output.
+_LEGACY_TAG_LINES = frozenset(
+    f"{slash}{name}{attrs}"
+    for name in ("ProtocolConstraints", "IdentityExtension", "ErrorHandlingExtension")
+    for slash, attrs in (("<", ' type="managed">'), ("<", ' type="project">'), ("</", ">"))
+)
 _IDENTITY_SECTION_OPEN = '<Identity type="core">'
 _IDENTITY_SECTION_CLOSE = "</Identity>"
 
@@ -1514,6 +1520,9 @@ def _body_lines_outside_conduct_regions(body: str) -> list[str]:
     comparison scope.
 
     Strips these open→close pairs:
+    Retired-region tag lines (ProtocolConstraints, IdentityExtension,
+    ErrorHandlingExtension) are dropped: the migration removes them.
+
     - ``<ArtifactProvenance type="core">`` … ``</ArtifactProvenance>``
     - ``<ArtifactProvenance type="managed">`` … ``</ArtifactProvenance>``
     - ``<ArtifactProvenanceExtension type="project">`` … ``</ArtifactProvenanceExtension>``
@@ -1538,6 +1547,8 @@ def _body_lines_outside_conduct_regions(body: str) -> list[str]:
     skip = False
     for line in lines:
         stripped = line.strip()
+        if stripped in _LEGACY_TAG_LINES:
+            continue
         if stripped in _open_triggers:
             if not skip:
                 skip = True
@@ -2345,17 +2356,16 @@ class TestFencedMarkersInput:
     ):
         """Marker-like text inside the fence must not create duplicate injection names in result.
 
-        IdentityExtension is referenced inside the fenced block as an example.
-        The transformer must not count that reference as a real marker conversion —
-        only the genuine [INJECTION: identity_extension] in the Identity section
-        should produce one IdentityExtension entry in injections_added.
+        IdentityExtension is referenced inside the fenced block as an example, and the
+        genuine [INJECTION: identity_extension] marker sits in the Identity section.
+        IdentityExtension is retired from the output vocabulary, so neither occurrence
+        may be reported in injections_added.
         """
         result, _ = _transform_to_tmp(generic_fenced_markers_input, tmp_path)
         identity_ext_count = result.injections_added.count("IdentityExtension")
-        assert identity_ext_count == 1, (
-            f"Expected exactly 1 'IdentityExtension' in injections_added "
-            f"(from the genuine marker in Identity section); got {identity_ext_count}. "
-            "Fenced marker-like text must not be counted as a real conversion."
+        assert identity_ext_count == 0, (
+            f"Expected no 'IdentityExtension' in injections_added; got {identity_ext_count}. "
+            "The retired name is recognised on input but never reported as emitted."
         )
 
     def test_output_validates_cleanly(
@@ -2537,17 +2547,17 @@ class TestLegacyCustomConstraintsDropRule:
             tmp_path,
             "Some constraint.\n\n"
             "[INJECTION: custom_constraints]\n"
-            "[INJECTION: error_handling_extension]\n",
+            "[INJECTION: codebase_context]\n",
         )
         assert "CustomConstraints" not in out, (
             "The empty custom_constraints region must still be dropped"
         )
-        assert '<ErrorHandlingExtension type="project">' in out, (
+        assert '<CodebaseContext type="project">' in out, (
             "A neighbouring empty injection of a different name must still be emitted "
             "as an empty region pair -- the drop rule must not generalise beyond "
             "CustomConstraints"
         )
-        assert "</ErrorHandlingExtension>" in out
+        assert "</CodebaseContext>" in out
 
 
 # ---------------------------------------------------------------------------
@@ -2656,8 +2666,8 @@ class TestCommunicationProtocolInput:
     After transformation:
     - <CommunicationProtocol type="managed"> / </CommunicationProtocol> appears at
       top level between </Identity> and <Capabilities type="core">.
-    - IdentityExtension is relocated inside <Identity type="core">, at the end of the Identity
-      body, preceded by one blank line.
+    - The identity_extension marker is recognised as legacy input but IdentityExtension is
+      retired from the output vocabulary: no IdentityExtension region is emitted.
     - ProtocolExtension is emitted as an empty top-level <ProtocolExtension type="project"> pair
       immediately after the deployed block.
     - Old prose is discarded; no untagged leftover text appears.
@@ -2857,38 +2867,21 @@ class TestCommunicationProtocolInput:
             "[INJECTION: protocol_extension] marker is found in the Communication Protocol region."
         )
 
-    def test_identity_extension_emitted_inside_identity_section(
+    def test_identity_extension_region_not_emitted(
         self, communication_protocol_input, tmp_path
     ):
-        """<IdentityExtension type="project"> relocated from the CP region must appear inside
-        <Identity type="core">, not at top level or inside a different section.
+        """The legacy identity_extension marker inside the Communication Protocol region
+        is accepted, but no IdentityExtension region may appear in the output."""
+        result, output_path = _transform_to_tmp(communication_protocol_input, tmp_path)
+        assert result.success is True
+        assert "IdentityExtension" not in _read(output_path)
 
-        The marker's source line lies past Identity's end_line, so in-place emission is
-        impossible.  The transformer must relocate it to the end of the Identity body,
-        immediately before </Identity>, preceded by one blank line.
-        """
-        _, output_path = _transform_to_tmp(communication_protocol_input, tmp_path)
-        content = _read(output_path)
-        identity_open_pos = content.find('<Identity type="core">')
-        identity_close_pos = content.find("</Identity>")
-        ext_pos = content.find('<IdentityExtension type="project">')
-        assert identity_open_pos != -1, '<Identity type="core"> must be present.'
-        assert identity_close_pos != -1, "</Identity> must be present."
-        assert ext_pos != -1, '<IdentityExtension type="project"> must be present in the output.'
-        assert identity_open_pos < ext_pos < identity_close_pos, (
-            '<IdentityExtension type="project"> must appear between <Identity type="core"> and '
-            "</Identity>, i.e. inside the Identity section body."
-        )
-
-    def test_identity_extension_in_injections_added(
+    def test_identity_extension_not_in_injections_added(
         self, communication_protocol_input, tmp_path
     ):
-        """'IdentityExtension' must appear in TransformResult.injections_added."""
+        """'IdentityExtension' must not be reported in injections_added."""
         result, _ = _transform_to_tmp(communication_protocol_input, tmp_path)
-        assert "IdentityExtension" in result.injections_added, (
-            "TransformResult.injections_added must contain 'IdentityExtension' when a "
-            "[INJECTION: identity_extension] marker is found in the Communication Protocol region."
-        )
+        assert "IdentityExtension" not in result.injections_added
 
     def test_all_canonical_sections_added(
         self, communication_protocol_input, tmp_path
@@ -3235,8 +3228,8 @@ class TestHasCanonicalBoundaryTags:
         body = (
             '<Identity type="core">\n'
             "# Agent\n"
-            '<IdentityExtension type="project">\n'
-            "</IdentityExtension>\n"
+            '<CodebaseContext type="project">\n'
+            "</CodebaseContext>\n"
             "</Identity>\n"
         )
         assert has_canonical_boundary_tags(body) is True
@@ -3336,11 +3329,11 @@ class TestHasCanonicalBoundaryTags:
         assert has_canonical_boundary_tags(body) is False
 
     def test_unpaired_injection_tag_returns_false(self):
-        """An open <IdentityExtension type="project"> with no close must return False."""
+        """An open <CodebaseContext type="project"> with no close must return False."""
         body = (
             '<Identity type="core">\n'
             "# Agent\n"
-            '<IdentityExtension type="project">\n'
+            '<CodebaseContext type="project">\n'
             "</Identity>\n"
         )
         assert has_canonical_boundary_tags(body) is False
@@ -7641,22 +7634,19 @@ class TestErrorHandlingAndExecutionPhilosophyHarnessPath:
 
 
 # ===========================================================================
-# Constraints Section Regions: ProtocolConstraints and HarnessConstraints
+# Constraints Section Regions: HarnessConstraints and legacy conduct-bullet removal
 # ===========================================================================
 #
-# Failing tests (TDD RED) that specify the behavior of ProtocolConstraints and
-# HarnessConstraints emission and deletion. Tests will fail until:
-#   - CONDUCT_REGIONS is extended with ProtocolConstraints (row 3) and
-#     HarnessConstraints (row 4), each with its deletion rules and anchor.
-#   - Both transform paths call apply_conduct_regions and merge deployed_added.
+# ProtocolConstraints is retired from the output vocabulary: the migration never
+# emits a ProtocolConstraints region. The five legacy conduct bullets that it used
+# to supersede are still removed from legacy input, and HarnessConstraints is
+# anchored at the start of the Constraints section.
 #
 # Three categories:
-#   1. Table structure tests — fail until Stage 4 adds rows 3 and 4.
+#   1. Table structure tests on CONDUCT_REGIONS.
 #   2. Unit deletion-outcome tests — call apply_conduct_regions with explicit
-#      specs, verifying the three-case contract for each rule type; these
-#      exercise the already-implemented framework with Stage-4-shaped specs.
-#   3. Integration tests via transform_file — fail until CONDUCT_REGIONS is
-#      complete and both transform paths emit the regions.
+#      specs, verifying the three-case contract for each rule type.
+#   3. Integration tests via transform_file on both transform paths.
 # ---------------------------------------------------------------------------
 
 from region_insertion import (  # noqa: E402
@@ -7669,19 +7659,19 @@ from region_insertion import (  # noqa: E402
     apply_conduct_regions,
     find_section_spans,
 )
+import boundary_constants as _boundary_constants  # noqa: E402
 from boundary_constants import BoundaryKind  # noqa: E402
 
 
 # ---------------------------------------------------------------------------
 # Inline spec helpers for unit tests
 #
-# These mirror the deletion rules that Stage 4 implementation should wire into
-# CONDUCT_REGIONS.  Bullet texts are taken from the canonical block text in
-# Agents/Generic/DeployedSections.md.  The drift probe for PC-bullet-5 is
-# derived from ContractsDesign.md §Deletion Rule Catalogue.
+# These mirror the legacy conduct-bullet deletion rules.  Bullet texts are the
+# canonical wording found in old generic agent files.  The specs are attached to a
+# HarnessConstraints region so that the framework tests never emit a retired name.
 # ---------------------------------------------------------------------------
 
-# The four exact bullets that ProtocolConstraints supersedes (corpus-verified).
+# The four exact legacy conduct bullets (corpus-verified).
 _PC_EXACT_PATTERNS = (
     "**Orchestration Artifacts:** NEVER access an orchestration artifact"
     " that is not named in your `input_artifacts`/`output_artifacts`",
@@ -7699,11 +7689,11 @@ _PC_BULLET_5_PROBE = r"(?i)^Note.+\bagents?\b"
 
 
 def _make_pc_inline_spec() -> RegionSpec:
-    """Return an explicit ProtocolConstraints RegionSpec for unit tests.
+    """Return an explicit RegionSpec carrying the five legacy conduct-bullet rules.
 
-    The spec is constructed to match what Stage 4 should implement.  Unit tests
-    that use this spec exercise apply_conduct_regions without depending on
-    CONDUCT_REGIONS being populated.
+    Unit tests that use this spec exercise apply_conduct_regions without depending
+    on the contents of CONDUCT_REGIONS.  The region name is HarnessConstraints:
+    ProtocolConstraints is retired and must never be emitted.
     """
     exact_rules = tuple(
         DeletionRule(
@@ -7723,7 +7713,7 @@ def _make_pc_inline_spec() -> RegionSpec:
         drift_probe=_PC_BULLET_5_PROBE,
     )
     return RegionSpec(
-        name="ProtocolConstraints",
+        name="HarnessConstraints",
         parent_section="Constraints",
         anchor=Anchor.SECTION_START,
         supersedes=exact_rules + (pc5_rule,),
@@ -7733,16 +7723,14 @@ def _make_pc_inline_spec() -> RegionSpec:
 def _make_hc_inline_spec() -> RegionSpec:
     """Return an explicit HarnessConstraints RegionSpec for unit tests.
 
-    CustomConstraints is retired from CANONICAL_DEPLOYED, so HarnessConstraints
-    can no longer anchor BEFORE_REGION of it (that anchor_ref would name a region
-    that no longer exists). Re-anchored to AFTER_REGION of ProtocolConstraints,
-    one of the two forms the design contract accepts.
+    ProtocolConstraints is retired, so HarnessConstraints is anchored at the start
+    of the Constraints section, with the section content end as fallback.
     """
     return RegionSpec(
         name="HarnessConstraints",
         parent_section="Constraints",
-        anchor=Anchor.AFTER_REGION,
-        anchor_ref=(BoundaryKind.DEPLOYED, "ProtocolConstraints"),
+        anchor=Anchor.SECTION_START,
+        anchor_ref=None,
         fallback_anchor=Anchor.SECTION_CONTENT_END,
         supersedes=(),
     )
@@ -7773,11 +7761,8 @@ def _constraints_section(bullet_lines: list[str]) -> tuple[list[str], dict[str, 
 # ---------------------------------------------------------------------------
 
 class TestConstraintsRegionTableStructure:
-    """CONDUCT_REGIONS must contain ProtocolConstraints (anchored at section start)
-    and HarnessConstraints (anchored after ProtocolConstraints, since CustomConstraints
-    is retired and can no longer serve as HarnessConstraints' anchor_ref) after the
-    Constraints region rows are appended.  Every test in this class will fail until
-    those rows are added to region_insertion.CONDUCT_REGIONS."""
+    """CONDUCT_REGIONS carries no row for a retired name, and HarnessConstraints is
+    anchored at the start of the Constraints section."""
 
     def _get_spec(self, name: str) -> RegionSpec:
         match = next((s for s in CONDUCT_REGIONS if s.name == name), None)
@@ -7788,79 +7773,29 @@ class TestConstraintsRegionTableStructure:
             )
         return match  # type: ignore[return-value]  # pytest.fail raises
 
-    # --- ProtocolConstraints row ---
-
-    def test_protocol_constraints_row_present(self) -> None:
-        """CONDUCT_REGIONS must contain a ProtocolConstraints row."""
-        assert any(s.name == "ProtocolConstraints" for s in CONDUCT_REGIONS), (
-            "ProtocolConstraints row is missing from CONDUCT_REGIONS"
+    def test_no_conduct_region_is_named_after_a_retired_name(self) -> None:
+        """No CONDUCT_REGIONS row may emit ProtocolConstraints, IdentityExtension or
+        ErrorHandlingExtension."""
+        names = {s.name for s in CONDUCT_REGIONS}
+        assert names.isdisjoint(_boundary_constants.LEGACY_INPUT_NAMES), (
+            f"Retired names in CONDUCT_REGIONS: {sorted(names & _boundary_constants.LEGACY_INPUT_NAMES)}"
         )
 
-    def test_protocol_constraints_parent_section_is_constraints(self) -> None:
-        """ProtocolConstraints must name 'Constraints' as its parent section."""
-        spec = self._get_spec("ProtocolConstraints")
-        assert spec.parent_section == "Constraints"
-
-    def test_protocol_constraints_anchor_is_section_start(self) -> None:
-        """ProtocolConstraints must anchor at SECTION_START (emitted first in the section)."""
-        spec = self._get_spec("ProtocolConstraints")
-        assert spec.anchor == Anchor.SECTION_START
-
-    def test_protocol_constraints_supersedes_five_rules(self) -> None:
-        """ProtocolConstraints must supersede exactly five deletion rules."""
-        spec = self._get_spec("ProtocolConstraints")
-        assert len(spec.supersedes) == 5, (
-            f"Expected 5 deletion rules in ProtocolConstraints.supersedes, "
-            f"got {len(spec.supersedes)}"
-        )
-
-    def test_protocol_constraints_all_five_rules_required(self) -> None:
-        """All five PC deletion rules must be required=True."""
-        spec = self._get_spec("ProtocolConstraints")
-        for rule in spec.supersedes:
-            assert rule.required is True, (
-                f"Rule {rule.rule_id!r} must be required=True"
-            )
-
-    def test_protocol_constraints_first_four_rules_have_drift_probes(self) -> None:
-        """PC-bullet-1 through PC-bullet-4 must each carry a non-None drift_probe.
-
-        ContractsDesign.md states the invariant: every DeletionRule in CONDUCT_REGIONS
-        has drift_probe is not None — no exceptions. PC-bullet-1 through PC-bullet-4 are
-        explicitly named as rules that must receive probes so that a drifted wording is
-        reported as NC_DRIFTED_BULLET rather than silently left in place.
-
-        Expected probe anchors (from the ContractsDesign.md rule table):
-          PC-bullet-1: r"(?i)^\\*\\*Orchestration Artifacts:\\*\\*"
-          PC-bullet-2: r"(?i)^\\*\\*Project Files:\\*\\*"
-          PC-bullet-3: r"(?i)^NEVER skip\\b.*\\bJSON\\b"
-          PC-bullet-4: r"(?i)^NEVER invent\\b"
-        """
-        spec = self._get_spec("ProtocolConstraints")
-        assert len(spec.supersedes) >= 4
-        expected_probes = {
-            "PC-bullet-1": r"(?i)^\*\*Orchestration Artifacts:\*\*",
-            "PC-bullet-2": r"(?i)^\*\*Project Files:\*\*",
-            "PC-bullet-3": r"(?i)^NEVER skip\b.*\bJSON\b",
-            "PC-bullet-4": r"(?i)^NEVER invent\b",
+    def test_conduct_region_names_are_exactly_the_four_conduct_names_and_harness(self) -> None:
+        """The emitted region set is the four conduct regions plus HarnessConstraints."""
+        assert {s.name for s in CONDUCT_REGIONS} == {
+            "ClosingProcedure",
+            "AuthorityHierarchy",
+            "ErrorHandlingCommon",
+            "ExecutionPhilosophyCommon",
+            "HarnessConstraints",
         }
-        for rule in spec.supersedes[:4]:
-            assert rule.drift_probe is not None, (
-                f"Rule {rule.rule_id!r} must carry a drift_probe per ContractsDesign.md invariant"
-            )
-            if rule.rule_id in expected_probes:
-                assert rule.drift_probe == expected_probes[rule.rule_id], (
-                    f"Rule {rule.rule_id!r} drift_probe does not match design specification; "
-                    f"expected {expected_probes[rule.rule_id]!r}, got {rule.drift_probe!r}"
-                )
 
     def test_all_conduct_regions_rules_have_drift_probes(self) -> None:
         """Every DeletionRule in CONDUCT_REGIONS must carry a non-None drift_probe.
 
-        ContractsDesign.md Testability Notes: 'The drift-probe invariant is a single
-        table-walk test: all(r.drift_probe is not None for spec in CONDUCT_REGIONS for r
-        in spec.supersedes). It catches a future rule added without a probe, without
-        enumerating rules.'
+        A single table-walk catches a future rule added without a probe, without
+        enumerating rules.
         """
         missing = [
             f"{spec.name}/{rule.rule_id}"
@@ -7868,28 +7803,7 @@ class TestConstraintsRegionTableStructure:
             for rule in spec.supersedes
             if rule.drift_probe is None
         ]
-        assert missing == [], (
-            f"Rules with drift_probe=None (violates ContractsDesign.md invariant): {missing}"
-        )
-
-    def test_protocol_constraints_fifth_rule_has_drift_probe(self) -> None:
-        """PC-bullet-5 must carry a drift_probe to catch the known drifted wording."""
-        spec = self._get_spec("ProtocolConstraints")
-        assert len(spec.supersedes) == 5
-        pc5 = spec.supersedes[4]
-        assert pc5.drift_probe is not None, (
-            "PC-bullet-5 must have a drift_probe to detect the known drifted variant"
-        )
-
-    def test_protocol_constraints_rule_ids_unique(self) -> None:
-        """All five rule_ids in ProtocolConstraints.supersedes must be distinct."""
-        spec = self._get_spec("ProtocolConstraints")
-        ids = [r.rule_id for r in spec.supersedes]
-        assert len(ids) == len(set(ids)), (
-            f"Duplicate rule_ids in ProtocolConstraints.supersedes: {ids}"
-        )
-
-    # --- HarnessConstraints row ---
+        assert missing == [], f"Rules with drift_probe=None: {missing}"
 
     def test_harness_constraints_row_present(self) -> None:
         """CONDUCT_REGIONS must contain a HarnessConstraints row."""
@@ -7902,60 +7816,38 @@ class TestConstraintsRegionTableStructure:
         spec = self._get_spec("HarnessConstraints")
         assert spec.parent_section == "Constraints"
 
-    def test_harness_constraints_anchor_ref_never_names_custom_constraints(self) -> None:
-        """HarnessConstraints.anchor_ref must never name CustomConstraints — that region
-        is deleted by this change, so anchoring to it would silently rely on the
-        fallback_anchor on every well-formed input (forbidden by the design contract)."""
+    def test_harness_constraints_anchor_ref_never_names_a_retired_region(self) -> None:
+        """HarnessConstraints.anchor_ref must not name CustomConstraints or any retired name."""
         spec = self._get_spec("HarnessConstraints")
-        assert spec.anchor_ref != (BoundaryKind.DEPLOYED, "CustomConstraints"), (
-            "HarnessConstraints anchor_ref must not name the retired CustomConstraints region"
-        )
+        assert spec.anchor_ref is None or spec.anchor_ref[1] not in (
+            _boundary_constants.LEGACY_INPUT_NAMES | {"CustomConstraints"}
+        ), f"anchor_ref names a retired region: {spec.anchor_ref!r}"
 
-    def test_harness_constraints_anchor_is_after_region_of_protocol_constraints(self) -> None:
-        """HarnessConstraints must anchor AFTER_REGION of ProtocolConstraints — the primary
-        anchor must resolve on a well-formed input without relying on fallback_anchor."""
+    def test_harness_constraints_anchor_is_section_start(self) -> None:
+        """HarnessConstraints anchors at the start of the Constraints section, with no
+        anchor_ref."""
         spec = self._get_spec("HarnessConstraints")
-        assert spec.anchor == Anchor.AFTER_REGION, (
-            f"Expected anchor=AFTER_REGION, got {spec.anchor!r}"
+        assert spec.anchor == Anchor.SECTION_START, (
+            f"Expected anchor=SECTION_START, got {spec.anchor!r}"
         )
-        assert spec.anchor_ref == (BoundaryKind.DEPLOYED, "ProtocolConstraints"), (
-            f"Expected anchor_ref=(DEPLOYED, 'ProtocolConstraints'), got {spec.anchor_ref!r}"
-        )
+        assert spec.anchor_ref is None, f"Expected anchor_ref=None, got {spec.anchor_ref!r}"
 
     def test_harness_constraints_fallback_is_section_content_end(self) -> None:
         """HarnessConstraints fallback anchor must be SECTION_CONTENT_END."""
         spec = self._get_spec("HarnessConstraints")
         assert spec.fallback_anchor == Anchor.SECTION_CONTENT_END
 
-    def test_harness_constraints_supersedes_no_rules(self) -> None:
-        """HarnessConstraints supersedes no prose — supersedes must be empty."""
-        spec = self._get_spec("HarnessConstraints")
-        assert spec.supersedes == ()
-
-    # --- Ordering ---
-
-    def test_protocol_constraints_precedes_harness_constraints_in_table(self) -> None:
-        """ProtocolConstraints must appear before HarnessConstraints in CONDUCT_REGIONS."""
-        names = [s.name for s in CONDUCT_REGIONS]
-        assert "ProtocolConstraints" in names, "ProtocolConstraints row absent"
-        assert "HarnessConstraints" in names, "HarnessConstraints row absent"
-        assert names.index("ProtocolConstraints") < names.index("HarnessConstraints"), (
-            "ProtocolConstraints must precede HarnessConstraints in CONDUCT_REGIONS"
-        )
-
 
 # ---------------------------------------------------------------------------
-# T4.1: unit deletion-outcome contract for ProtocolConstraints bullets
+# Unit deletion-outcome contract for the legacy conduct bullets
 # ---------------------------------------------------------------------------
 
 class TestProtocolConstraintsBulletDeletionUnit:
-    """Verifies the three-case deletion outcome contract for ProtocolConstraints rules,
-    calling apply_conduct_regions directly with explicit inline specs.
+    """Verifies the three-case deletion outcome contract for the legacy conduct-bullet
+    rules, calling apply_conduct_regions directly with explicit inline specs.
 
-    The inline specs are derived from the canonical bullet texts in
-    Agents/Generic/DeployedSections.md.  These tests exercise the already-implemented
-    apply_conduct_regions framework with Stage-4-shaped specs, confirming correct
-    behavior independently of whether CONDUCT_REGIONS has been updated."""
+    These tests exercise the apply_conduct_regions framework independently of the
+    contents of CONDUCT_REGIONS."""
 
     # ------------------------------------------------------------------
     # Exact-bullet rules (PC-bullet-1 through PC-bullet-4)
@@ -7967,7 +7859,7 @@ class TestProtocolConstraintsBulletDeletionUnit:
         bullet_line = f"- {pattern}"
         lines, sections = _constraints_section([bullet_line])
         spec = RegionSpec(
-            name="ProtocolConstraints",
+            name="HarnessConstraints",
             parent_section="Constraints",
             anchor=Anchor.SECTION_START,
             supersedes=(
@@ -7991,7 +7883,7 @@ class TestProtocolConstraintsBulletDeletionUnit:
         bullet_line = f"- {pattern}"
         lines, sections = _constraints_section([bullet_line])
         spec = RegionSpec(
-            name="ProtocolConstraints",
+            name="HarnessConstraints",
             parent_section="Constraints",
             anchor=Anchor.SECTION_START,
             supersedes=(
@@ -8015,7 +7907,7 @@ class TestProtocolConstraintsBulletDeletionUnit:
         pattern = _PC_EXACT_PATTERNS[2]
         lines, sections = _constraints_section(["- Some completely different bullet"])
         spec = RegionSpec(
-            name="ProtocolConstraints",
+            name="HarnessConstraints",
             parent_section="Constraints",
             anchor=Anchor.SECTION_START,
             supersedes=(
@@ -8162,7 +8054,7 @@ class TestProtocolConstraintsBulletDeletionUnit:
 
         This test guards against the broad pattern r'(?i)Note\\b.+(?:do\\s+not\\b|don.t\\b)'
         accidentally removing agent-authored constraints that share surface similarity with
-        PC-bullet-5 but are not superseded by ProtocolConstraints.
+        PC-bullet-5 but are not legacy conduct bullets.
         """
         benign = "Note: escalate promptly; do not wait for confirmation"
         lines, sections = _constraints_section([f"- {benign}"])
@@ -8203,42 +8095,28 @@ class TestHarnessConstraintsDeletionUnit:
             "HarnessConstraints has no required rules, so deletions_unmatched must be empty"
         )
 
-    def test_harness_constraints_emitted_after_protocol_constraints_when_present(self) -> None:
-        """HarnessConstraints must appear immediately after </ProtocolConstraints>
-        in the output — the primary AFTER_REGION anchor, exercised without any
-        CustomConstraints region present at all (that region no longer exists)."""
-        lines, sections = _constraints_section([
-            '<ProtocolConstraints type="managed">',
-            "</ProtocolConstraints>",
-            "- Some bullet",
-        ])
-        spec = _make_hc_inline_spec()
-        result = apply_conduct_regions(lines, sections, specs=(spec,))
-        out_stripped = [l.strip() for l in result.lines]
-        hc_open = '<HarnessConstraints type="managed">'
-        pc_close = "</ProtocolConstraints>"
-        assert hc_open in out_stripped, "HarnessConstraints open tag must be in output"
-        assert pc_close in out_stripped, "ProtocolConstraints close tag must be in output"
-        hc_idx = out_stripped.index(hc_open)
-        pc_close_idx = out_stripped.index(pc_close)
-        assert hc_idx == pc_close_idx + 1, (
-            "HarnessConstraints open tag must immediately follow the ProtocolConstraints "
-            "close tag (the primary AFTER_REGION anchor must resolve directly, not via "
-            "fallback_anchor)"
-        )
-
-    def test_harness_constraints_emitted_at_section_end_when_no_protocol_constraints(self) -> None:
-        """When ProtocolConstraints (the AFTER_REGION anchor_ref) is absent, HarnessConstraints
-        falls back to SECTION_CONTENT_END and is still emitted — exercising the named
-        fallback_anchor field explicitly."""
+    def test_harness_constraints_emitted_at_section_start(self) -> None:
+        """HarnessConstraints must be emitted immediately after the section heading
+        (the SECTION_START anchor), before existing content."""
         lines, sections = _constraints_section(["- Some bullet"])
         spec = _make_hc_inline_spec()
         result = apply_conduct_regions(lines, sections, specs=(spec,))
         out_stripped = [l.strip() for l in result.lines]
-        assert '<HarnessConstraints type="managed">' in out_stripped, (
-            "HarnessConstraints must be emitted via fallback_anchor even when "
-            "ProtocolConstraints is absent from the section"
+        hc_open = '<HarnessConstraints type="managed">'
+        assert hc_open in out_stripped, "HarnessConstraints open tag must be in output"
+        assert out_stripped.index(hc_open) == 1, (
+            "HarnessConstraints open tag must immediately follow the Constraints heading"
         )
+        assert out_stripped.index("- Some bullet") > out_stripped.index(hc_open)
+        assert result.deployed_added == ["HarnessConstraints"]
+
+    def test_harness_constraints_emitted_without_any_other_region_present(self) -> None:
+        """HarnessConstraints does not depend on any sibling region being present."""
+        lines, sections = _constraints_section([])
+        spec = _make_hc_inline_spec()
+        result = apply_conduct_regions(lines, sections, specs=(spec,))
+        assert '<HarnessConstraints type="managed">' in [l.strip() for l in result.lines]
+        assert "ProtocolConstraints" not in "".join(result.lines)
 
     def test_harness_constraints_not_emitted_twice_when_already_present(self) -> None:
         """HarnessConstraints must not be emitted a second time if already in the lines."""
@@ -8263,12 +8141,8 @@ class TestHarnessConstraintsDeletionUnit:
 # ---------------------------------------------------------------------------
 
 class TestConstraintsRegionsGenericPath:
-    """ProtocolConstraints and HarnessConstraints are emitted on the generic transform
-    path, the five superseded bullets are deleted, and the regions appear in the
-    correct order in both deployed_added and the output document.
-
-    Tests fail until CONDUCT_REGIONS contains the Constraints-section rows and
-    the generic transform path calls apply_conduct_regions."""
+    """On the generic transform path HarnessConstraints is emitted, no ProtocolConstraints
+    region is emitted, and the five legacy conduct bullets are still deleted."""
 
     def test_transform_succeeds(
         self, s4_generic_constraints_regions_input, tmp_path
@@ -8278,14 +8152,13 @@ class TestConstraintsRegionsGenericPath:
         assert result.success is True
         assert result.errors == []
 
-    def test_protocol_constraints_in_deployed_added(
+    def test_protocol_constraints_not_in_deployed_added(
         self, s4_generic_constraints_regions_input, tmp_path
     ) -> None:
-        """ProtocolConstraints must appear in deployed_added on the generic path."""
+        """ProtocolConstraints is retired: it must not be reported as emitted."""
         result, _ = _transform_to_tmp(s4_generic_constraints_regions_input, tmp_path)
-        assert "ProtocolConstraints" in result.deployed_added, (
-            f"ProtocolConstraints missing from deployed_added: {result.deployed_added}"
-        )
+        assert "ProtocolConstraints" not in result.deployed_added
+        assert "ProtocolConstraints" not in result.injections_added
 
     def test_harness_constraints_in_deployed_added_or_injections_added(
         self, s4_generic_constraints_regions_input, tmp_path
@@ -8303,27 +8176,10 @@ class TestConstraintsRegionsGenericPath:
             "HarnessConstraints must be recorded in deployed_added or injections_added"
         )
 
-    def test_protocol_constraints_before_harness_constraints_in_deployed_added(
-        self, s4_generic_constraints_regions_input, tmp_path
-    ) -> None:
-        """ProtocolConstraints must precede HarnessConstraints in deployed_added."""
-        result, _ = _transform_to_tmp(s4_generic_constraints_regions_input, tmp_path)
-        assert "ProtocolConstraints" in result.deployed_added, (
-            "ProtocolConstraints must be in deployed_added to check ordering"
-        )
-        # ProtocolConstraints is at a lower document-order index than HarnessConstraints.
-        pc_idx = result.deployed_added.index("ProtocolConstraints")
-        # HarnessConstraints may be absent from deployed_added if emitted from the
-        # legacy marker (injections_added instead).  The document-order check is
-        # covered by the output-content ordering tests below.
-        if "HarnessConstraints" in result.deployed_added:
-            hc_idx = result.deployed_added.index("HarnessConstraints")
-            assert pc_idx < hc_idx
-
     def test_pc_bullet_1_absent_from_output(
         self, s4_generic_constraints_regions_input, tmp_path
     ) -> None:
-        """The first ProtocolConstraints bullet must be deleted from the output."""
+        """The first legacy conduct bullet must be deleted from the output."""
         _, output_path = _transform_to_tmp(s4_generic_constraints_regions_input, tmp_path)
         content = _read(output_path)
         assert "NEVER access an orchestration artifact that is not named" not in content, (
@@ -8333,7 +8189,7 @@ class TestConstraintsRegionsGenericPath:
     def test_pc_bullet_2_absent_from_output(
         self, s4_generic_constraints_regions_input, tmp_path
     ) -> None:
-        """The second ProtocolConstraints bullet must be deleted from the output."""
+        """The second legacy conduct bullet must be deleted from the output."""
         _, output_path = _transform_to_tmp(s4_generic_constraints_regions_input, tmp_path)
         content = _read(output_path)
         assert "You MAY read, modify, or create any project file" not in content, (
@@ -8343,7 +8199,7 @@ class TestConstraintsRegionsGenericPath:
     def test_pc_bullet_3_absent_from_output(
         self, s4_generic_constraints_regions_input, tmp_path
     ) -> None:
-        """The third ProtocolConstraints bullet must be deleted from the output."""
+        """The third legacy conduct bullet must be deleted from the output."""
         _, output_path = _transform_to_tmp(s4_generic_constraints_regions_input, tmp_path)
         content = _read(output_path)
         assert "NEVER skip the JSON response block" not in content, (
@@ -8353,7 +8209,7 @@ class TestConstraintsRegionsGenericPath:
     def test_pc_bullet_4_absent_from_output(
         self, s4_generic_constraints_regions_input, tmp_path
     ) -> None:
-        """The fourth ProtocolConstraints bullet must be deleted from the output."""
+        """The fourth legacy conduct bullet must be deleted from the output."""
         _, output_path = _transform_to_tmp(s4_generic_constraints_regions_input, tmp_path)
         content = _read(output_path)
         assert "NEVER invent status codes" not in content, (
@@ -8363,19 +8219,19 @@ class TestConstraintsRegionsGenericPath:
     def test_pc_bullet_5_canonical_absent_from_output(
         self, s4_generic_constraints_regions_input, tmp_path
     ) -> None:
-        """The fifth ProtocolConstraints bullet (canonical wording) must be deleted from output."""
+        """The fifth legacy conduct bullet (canonical wording) must be deleted from output."""
         _, output_path = _transform_to_tmp(s4_generic_constraints_regions_input, tmp_path)
         content = _read(output_path)
         assert "Note work that belongs to another agent; do not do it yourself" not in content, (
             "PC-bullet-5 canonical wording must be deleted from the transformed output"
         )
 
-    def test_protocol_constraints_open_tag_in_output(
+    def test_protocol_constraints_region_absent_from_output(
         self, s4_generic_constraints_regions_input, tmp_path
     ) -> None:
-        """<ProtocolConstraints type="managed"> open tag must appear in the output."""
+        """No ProtocolConstraints region (any type) may appear in the migrated output."""
         _, output_path = _transform_to_tmp(s4_generic_constraints_regions_input, tmp_path)
-        assert '<ProtocolConstraints type="managed">' in _read(output_path)
+        assert "ProtocolConstraints" not in _body(_read(output_path))
 
     def test_harness_constraints_open_tag_in_output(
         self, s4_generic_constraints_regions_input, tmp_path
@@ -8383,21 +8239,6 @@ class TestConstraintsRegionsGenericPath:
         """<HarnessConstraints type="managed"> open tag must appear in the output."""
         _, output_path = _transform_to_tmp(s4_generic_constraints_regions_input, tmp_path)
         assert '<HarnessConstraints type="managed">' in _read(output_path)
-
-    def test_protocol_constraints_precedes_harness_constraints_in_output(
-        self, s4_generic_constraints_regions_input, tmp_path
-    ) -> None:
-        """<ProtocolConstraints type="managed"> must appear before <HarnessConstraints type="managed">
-        in document order."""
-        _, output_path = _transform_to_tmp(s4_generic_constraints_regions_input, tmp_path)
-        content = _read(output_path)
-        pc_pos = content.find('<ProtocolConstraints type="managed">')
-        hc_pos = content.find('<HarnessConstraints type="managed">')
-        assert pc_pos != -1, "ProtocolConstraints open tag missing from output"
-        assert hc_pos != -1, "HarnessConstraints open tag missing from output"
-        assert pc_pos < hc_pos, (
-            "ProtocolConstraints must precede HarnessConstraints in the output document"
-        )
 
     def test_empty_custom_constraints_marker_dropped_entirely(
         self, s4_generic_constraints_regions_input, tmp_path
@@ -8445,12 +8286,8 @@ class TestConstraintsRegionsGenericPath:
 # ---------------------------------------------------------------------------
 
 class TestConstraintsRegionsHarnessPath:
-    """ProtocolConstraints and HarnessConstraints are emitted on the harness transform
-    path as well, the five superseded bullets are deleted, and region ordering is
-    correct.
-
-    Tests fail until CONDUCT_REGIONS contains the Constraints-section rows and
-    the harness transform path calls apply_conduct_regions."""
+    """On the harness transform path HarnessConstraints is emitted, no ProtocolConstraints
+    region is emitted, and the five legacy conduct bullets are still deleted."""
 
     def test_transform_succeeds(
         self,
@@ -8467,22 +8304,20 @@ class TestConstraintsRegionsHarnessPath:
         assert result.success is True
         assert result.errors == []
 
-    def test_protocol_constraints_in_deployed_added_harness_path(
+    def test_protocol_constraints_not_in_deployed_added_harness_path(
         self,
         s4_harness_constraints_regions_input,
         s4_harness_constraints_regions_generic_ref,
         tmp_path,
     ) -> None:
-        """ProtocolConstraints must appear in deployed_added on the harness path."""
+        """ProtocolConstraints is retired: it must not be reported as emitted."""
         result, _ = _transform_to_tmp(
             s4_harness_constraints_regions_input,
             tmp_path,
             generic_ref_path=s4_harness_constraints_regions_generic_ref,
         )
-        assert "ProtocolConstraints" in result.deployed_added, (
-            f"ProtocolConstraints missing from deployed_added on harness path: "
-            f"{result.deployed_added}"
-        )
+        assert "ProtocolConstraints" not in result.deployed_added
+        assert "ProtocolConstraints" not in result.injections_added
 
     def test_all_five_pc_bullets_absent_from_harness_output(
         self,
@@ -8490,7 +8325,7 @@ class TestConstraintsRegionsHarnessPath:
         s4_harness_constraints_regions_generic_ref,
         tmp_path,
     ) -> None:
-        """All five PC bullets must be deleted from the harness-path output."""
+        """All five legacy conduct bullets must be deleted from the harness-path output."""
         _, output_path = _transform_to_tmp(
             s4_harness_constraints_regions_input,
             tmp_path,
@@ -8509,25 +8344,19 @@ class TestConstraintsRegionsHarnessPath:
                 f"PC bullet fragment must be deleted from harness-path output: {fragment!r}"
             )
 
-    def test_protocol_constraints_precedes_harness_constraints_harness_output(
+    def test_protocol_constraints_region_absent_from_harness_output(
         self,
         s4_harness_constraints_regions_input,
         s4_harness_constraints_regions_generic_ref,
         tmp_path,
     ) -> None:
-        """<ProtocolConstraints type="managed"> must appear before <HarnessConstraints type="managed">
-        in the harness-path output."""
+        """No ProtocolConstraints region may appear in the harness-path output."""
         _, output_path = _transform_to_tmp(
             s4_harness_constraints_regions_input,
             tmp_path,
             generic_ref_path=s4_harness_constraints_regions_generic_ref,
         )
-        content = _read(output_path)
-        pc_pos = content.find('<ProtocolConstraints type="managed">')
-        hc_pos = content.find('<HarnessConstraints type="managed">')
-        assert pc_pos != -1, "ProtocolConstraints tag missing from harness-path output"
-        assert hc_pos != -1, "HarnessConstraints tag missing from harness-path output"
-        assert pc_pos < hc_pos
+        assert "ProtocolConstraints" not in _body(_read(output_path))
 
     def test_harness_constraints_emitted_exactly_once_harness_path(
         self,
@@ -8571,18 +8400,16 @@ class TestConstraintsRegionsHarnessPath:
 
 
 # ---------------------------------------------------------------------------
-# T2.5: HarnessConstraints placement with no CustomConstraints region present
-# (CustomConstraints is retired; this fixture never carried it). Since the
-# fixture carries all five ProtocolConstraints bullets, HarnessConstraints now
-# resolves via its PRIMARY anchor (AFTER_REGION of ProtocolConstraints) — not
-# via fallback_anchor. AC2.6 requires asserting the resulting position, not
+# HarnessConstraints placement with no legacy harness_constraints marker present.
+# The fixture carries all five legacy conduct bullets. HarnessConstraints resolves
+# via its PRIMARY anchor (the start of the Constraints section) — there is no
+# ProtocolConstraints region to follow. The resulting position is asserted, not
 # merely the absence of an error.
 # ---------------------------------------------------------------------------
 
 class TestHarnessConstraintsNoCustomConstraintsGenericPath:
-    """CustomConstraints does not exist as a region any more. With ProtocolConstraints
-    present, HarnessConstraints must land immediately after it via the primary
-    AFTER_REGION anchor, without relying on fallback_anchor."""
+    """CustomConstraints and ProtocolConstraints do not exist as regions any more.
+    HarnessConstraints must land at the start of the Constraints section."""
 
     def test_transform_succeeds(
         self, s4_generic_no_custom_constraints_input, tmp_path
@@ -8591,12 +8418,13 @@ class TestHarnessConstraintsNoCustomConstraintsGenericPath:
         result, _ = _transform_to_tmp(s4_generic_no_custom_constraints_input, tmp_path)
         assert result.success is True
 
-    def test_protocol_constraints_emitted(
+    def test_protocol_constraints_not_emitted(
         self, s4_generic_no_custom_constraints_input, tmp_path
     ) -> None:
-        """ProtocolConstraints must be emitted even when CustomConstraints is absent."""
-        result, _ = _transform_to_tmp(s4_generic_no_custom_constraints_input, tmp_path)
-        assert "ProtocolConstraints" in result.deployed_added
+        """ProtocolConstraints is retired and must not be emitted."""
+        result, output_path = _transform_to_tmp(s4_generic_no_custom_constraints_input, tmp_path)
+        assert "ProtocolConstraints" not in result.deployed_added
+        assert "ProtocolConstraints" not in _body(_read(output_path))
 
     def test_harness_constraints_emitted_without_custom_constraints(
         self, s4_generic_no_custom_constraints_input, tmp_path
@@ -8618,37 +8446,21 @@ class TestHarnessConstraintsNoCustomConstraintsGenericPath:
             "CustomConstraints must not be emitted when no legacy marker was present"
         )
 
-    def test_harness_constraints_immediately_follows_protocol_constraints_close_tag(
+    def test_harness_constraints_immediately_follows_constraints_heading(
         self, s4_generic_no_custom_constraints_input, tmp_path
     ) -> None:
-        """HarnessConstraints must land immediately after </ProtocolConstraints> —
-        asserting adjacency (not merely "no error") is the load-bearing part of AC2.6:
-        a broken primary anchor could still pass a looser ordering check via fallback."""
+        """HarnessConstraints must land immediately after the '## Constraints' heading —
+        the SECTION_START anchor. Asserting adjacency (not merely "no error") is the
+        load-bearing part: a broken primary anchor could still pass a looser check
+        via the fallback anchor at the end of the section."""
         _, output_path = _transform_to_tmp(s4_generic_no_custom_constraints_input, tmp_path)
         lines = _read(output_path).splitlines()
-        pc_close = "</ProtocolConstraints>"
-        hc_open = '<HarnessConstraints type="managed">'
-        assert pc_close in lines, "ProtocolConstraints close tag missing from output"
-        assert hc_open in lines, "HarnessConstraints open tag missing from output"
-        pc_close_idx = lines.index(pc_close)
-        hc_open_idx = lines.index(hc_open)
-        assert hc_open_idx == pc_close_idx + 1, (
-            f"HarnessConstraints (line {hc_open_idx}) must immediately follow "
-            f"ProtocolConstraints' close tag (line {pc_close_idx}); found intervening "
-            f"content: {lines[pc_close_idx + 1:hc_open_idx]!r}"
+        heading_idx = lines.index("## Constraints")
+        assert lines[heading_idx + 1] == '<HarnessConstraints type="managed">', (
+            f"HarnessConstraints must immediately follow the Constraints heading; "
+            f"found {lines[heading_idx + 1]!r}"
         )
-
-    def test_protocol_constraints_before_harness_constraints_when_no_custom(
-        self, s4_generic_no_custom_constraints_input, tmp_path
-    ) -> None:
-        """ProtocolConstraints must still precede HarnessConstraints when CustomConstraints absent."""
-        _, output_path = _transform_to_tmp(s4_generic_no_custom_constraints_input, tmp_path)
-        content = _read(output_path)
-        pc_pos = content.find('<ProtocolConstraints type="managed">')
-        hc_pos = content.find('<HarnessConstraints type="managed">')
-        assert pc_pos != -1, "ProtocolConstraints tag missing"
-        assert hc_pos != -1, "HarnessConstraints tag missing"
-        assert pc_pos < hc_pos
+        assert lines[heading_idx + 2] == "</HarnessConstraints>"
 
 
 # ---------------------------------------------------------------------------
@@ -8702,12 +8514,14 @@ class TestDriftedFifthBulletHandling:
                 "At this stage the bullet must not be silently left behind."
             )
 
-    def test_protocol_constraints_emitted_with_drifted_bullet_input(
+    def test_harness_constraints_emitted_with_drifted_bullet_input(
         self, s4_generic_drifted_bullet_input, tmp_path
     ) -> None:
-        """ProtocolConstraints must be emitted even when PC-bullet-5 carries drifted wording."""
-        result, _ = _transform_to_tmp(s4_generic_drifted_bullet_input, tmp_path)
-        assert "ProtocolConstraints" in result.deployed_added
+        """HarnessConstraints must be emitted and no ProtocolConstraints region appears,
+        even when the fifth legacy bullet carries drifted wording."""
+        result, output_path = _transform_to_tmp(s4_generic_drifted_bullet_input, tmp_path)
+        assert "ProtocolConstraints" not in result.deployed_added
+        assert "ProtocolConstraints" not in _body(_read(output_path))
 
 
 # ---------------------------------------------------------------------------
@@ -8752,15 +8566,15 @@ class TestCriticalToolUsageConstraintPreserved:
             "Critical Tool Usage Constraint detail must survive the transform unchanged"
         )
 
-    def test_protocol_constraints_emitted_alongside_critical_tool_usage_block(
+    def test_no_protocol_constraints_region_alongside_critical_tool_usage_block(
         self, s4_generic_critical_tool_usage_input, tmp_path
     ) -> None:
-        """ProtocolConstraints must still be emitted when Critical Tool Usage Constraint is present."""
-        result, _ = _transform_to_tmp(s4_generic_critical_tool_usage_input, tmp_path)
-        assert "ProtocolConstraints" in result.deployed_added, (
-            "ProtocolConstraints must be emitted even when the Constraints section "
-            "contains a hand-authored heading block"
-        )
+        """No ProtocolConstraints region is emitted when a Critical Tool Usage Constraint
+        block is present, and the block is not touched."""
+        result, output_path = _transform_to_tmp(s4_generic_critical_tool_usage_input, tmp_path)
+        assert "ProtocolConstraints" not in result.deployed_added
+        assert "ProtocolConstraints" not in _body(_read(output_path))
+        assert "### Critical Tool Usage Constraint" in _read(output_path)
 
 
 # ---------------------------------------------------------------------------
@@ -8780,8 +8594,6 @@ class TestHarnessConstraintsTableDrivenHarnessPath:
     updated.  This class uses a fixture pair that contains NO legacy harness_constraints
     marker, forcing HarnessConstraints emission to go through the new table-driven path.
 
-    All tests here fail until CONDUCT_REGIONS contains the HarnessConstraints row and
-    the harness transform path calls apply_conduct_regions.
     """
 
     def test_transform_succeeds_without_legacy_marker(
@@ -8813,7 +8625,7 @@ class TestHarnessConstraintsTableDrivenHarnessPath:
         the legacy marker conversion: injections_added is populated by
         INJECTION_OLD_MARKER_MAP; deployed_added is populated by apply_conduct_regions.
         A result where HarnessConstraints lands only in injections_added means the
-        Stage-4 table row was never applied.
+        table row was never applied.
         """
         result, _ = _transform_to_tmp(
             s4_harness_no_legacy_hc_input,
@@ -8845,27 +8657,24 @@ class TestHarnessConstraintsTableDrivenHarnessPath:
             f"HarnessConstraints open tag must appear exactly once; found {count}"
         )
 
-    def test_protocol_constraints_precedes_harness_constraints_no_legacy_marker(
+    def test_harness_constraints_at_constraints_section_start_no_legacy_marker(
         self,
         s4_harness_no_legacy_hc_input,
         s4_harness_no_legacy_hc_generic_ref,
         tmp_path,
     ) -> None:
-        """<ProtocolConstraints type="managed"> must appear before <HarnessConstraints type="managed">
-        in harness-path output when no legacy marker is present."""
+        """Table-driven HarnessConstraints is anchored at the Constraints section start and
+        no ProtocolConstraints region is emitted."""
         _, output_path = _transform_to_tmp(
             s4_harness_no_legacy_hc_input,
             tmp_path,
             generic_ref_path=s4_harness_no_legacy_hc_generic_ref,
         )
         content = _read(output_path)
-        pc_pos = content.find('<ProtocolConstraints type="managed">')
-        hc_pos = content.find('<HarnessConstraints type="managed">')
-        assert pc_pos != -1, "ProtocolConstraints tag missing from harness-path output"
-        assert hc_pos != -1, "HarnessConstraints tag missing from harness-path output"
-        assert pc_pos < hc_pos, (
-            "ProtocolConstraints must precede HarnessConstraints in the harness-path output"
-        )
+        assert "ProtocolConstraints" not in _body(content)
+        lines = content.splitlines()
+        heading_idx = lines.index("## Constraints")
+        assert lines[heading_idx + 1] == '<HarnessConstraints type="managed">'
 
     def test_custom_constraints_never_emitted_no_legacy_marker(
         self,
@@ -8891,7 +8700,7 @@ class TestHarnessConstraintsTableDrivenHarnessPath:
         s4_harness_no_legacy_hc_generic_ref,
         tmp_path,
     ) -> None:
-        """All five ProtocolConstraints bullets must be deleted from harness-path output
+        """All five legacy conduct bullets must be deleted from harness-path output
         when no legacy harness_constraints marker is present."""
         _, output_path = _transform_to_tmp(
             s4_harness_no_legacy_hc_input,
@@ -9089,8 +8898,8 @@ class TestZeroInjectionDetection:
             "\n",
             "You are the test agent.\n",
             "\n",
-            '<IdentityExtension type="project">\n',
-            "</IdentityExtension>\n",
+            '<CodebaseContext type="project">\n',
+            "</CodebaseContext>\n",
             "</Identity>\n",
         ]
         assert any('type="project"' in line for line in lines), (
@@ -10599,16 +10408,16 @@ class TestEmptyCustomConstraintsStillDropped:
             tmp_path,
             "Some constraint.\n\n"
             "[INJECTION: custom_constraints]\n"
-            "[INJECTION: error_handling_extension]\n",
+            "[INJECTION: codebase_context]\n",
         )
         assert "CustomConstraints" not in out, (
             "The empty custom_constraints region must still be dropped"
         )
-        assert '<ErrorHandlingExtension type="project">' in out, (
+        assert '<CodebaseContext type="project">' in out, (
             "A neighbouring empty injection of a different name must still be emitted; "
             "the drop rule must not generalise beyond CustomConstraints"
         )
-        assert "</ErrorHandlingExtension>" in out
+        assert "</CodebaseContext>" in out
 
 
 # ===========================================================================
@@ -12371,3 +12180,174 @@ class TestArtifactMoveDegradedPath:
             f"'Design Artifact Structure' must appear exactly once on the degraded path; "
             f"found {count} occurrences"
         )
+
+
+# ===========================================================================
+# Retired names: recognised as legacy INPUT, never present in migrated OUTPUT
+# ===========================================================================
+
+_RETIRED_NAMES = ("ProtocolConstraints", "IdentityExtension", "ErrorHandlingExtension")
+
+_LEGACY_CONTENT_SOURCE = """\
+---
+id: 5
+version: 1.0.0
+name: legacy-content-agent
+description: Legacy agent with content directly after retired markers
+---
+
+# LegacyContent Agent
+
+You are the **LegacyContent** agent.
+
+[INJECTION: identity_extension]
+Extra identity note kept as plain text.
+
+---
+
+## Capabilities
+
+Do things.
+
+---
+
+## Constraints
+
+- Stay in scope
+
+---
+
+## Error Handling
+
+- Handle errors
+
+[INJECTION: error_handling_extension]
+Extra handling note kept as plain text.
+
+---
+
+## Execution Philosophy
+
+Execute with focus.
+"""
+
+
+def _outside_fences(text: str) -> str:
+    """Return the text with every fenced code block removed."""
+    kept: list[str] = []
+    in_fence = False
+    for line in text.splitlines(keepends=True):
+        if line.strip().startswith("```"):
+            in_fence = not in_fence
+            continue
+        if not in_fence:
+            kept.append(line)
+    return "".join(kept)
+
+
+class TestRetiredNamesLegacyInput:
+    """Legacy sources that carry ProtocolConstraints bullets or identity_extension /
+    error_handling_extension markers are still accepted and migrated, and the migrated
+    output never contains any retired name."""
+
+    _GENERIC_INPUTS = (
+        "generic_standard_input.md",
+        "s3_generic_eh_ep_input.md",
+        "s4_generic_constraints_regions_input.md",
+        "s4_generic_no_custom_constraints_input.md",
+        "communication_protocol_input.md",
+        "generic_identity_regions_input.md",
+    )
+
+    @pytest.mark.parametrize("name", _GENERIC_INPUTS)
+    def test_legacy_input_is_accepted(self, fixtures_dir, tmp_path, name) -> None:
+        result, _ = _transform_to_tmp(fixtures_dir / name, tmp_path)
+        assert result.success is True, f"errors={result.errors}"
+        assert result.errors == []
+
+    @pytest.mark.parametrize("name", _GENERIC_INPUTS)
+    def test_migrated_output_contains_no_retired_name(self, fixtures_dir, tmp_path, name) -> None:
+        result, output_path = _transform_to_tmp(fixtures_dir / name, tmp_path)
+        content = _outside_fences(_body(_read(output_path)))
+        for retired in _RETIRED_NAMES:
+            assert retired not in content, f"{retired} found in migrated output of {name}"
+            assert retired not in result.injections_added
+            assert retired not in result.deployed_added
+
+    @pytest.mark.parametrize("name", _GENERIC_INPUTS)
+    def test_migrated_output_passes_the_validator(self, fixtures_dir, tmp_path, name) -> None:
+        from boundary_validator import validate_file
+        _, output_path = _transform_to_tmp(fixtures_dir / name, tmp_path)
+        errors = [e for e in validate_file(output_path) if e.severity == "error"]
+        assert errors == [], f"validator errors on migrated output of {name}: {errors}"
+
+    def test_legacy_markers_are_consumed_not_left_behind(self, fixtures_dir, tmp_path) -> None:
+        """The old marker lines are converted away, not passed through verbatim."""
+        _, output_path = _transform_to_tmp(fixtures_dir / "generic_standard_input.md", tmp_path)
+        content = _read(output_path)
+        assert "[INJECTION: identity_extension]" not in content
+        assert "[INJECTION: error_handling_extension]" not in content
+
+    def test_legacy_conduct_bullets_are_still_removed(self, fixtures_dir, tmp_path) -> None:
+        """The ProtocolConstraints bullets in legacy input are deleted, not migrated."""
+        _, output_path = _transform_to_tmp(
+            fixtures_dir / "s4_generic_constraints_regions_input.md", tmp_path
+        )
+        content = _read(output_path)
+        assert "NEVER skip the JSON response block" not in content
+        assert "NEVER invent status codes" not in content
+
+    def test_harness_path_legacy_input_output_has_no_retired_name(
+        self, fixtures_dir, tmp_path
+    ) -> None:
+        result, output_path = _transform_to_tmp(
+            fixtures_dir / "harness_identity_regions_input.md",
+            tmp_path,
+            generic_ref_path=fixtures_dir / "harness_identity_regions_generic_ref.md",
+        )
+        assert result.success is True, f"errors={result.errors}"
+        content = _outside_fences(_body(_read(output_path)))
+        for retired in _RETIRED_NAMES:
+            assert retired not in content
+
+    def test_non_empty_marker_content_stays_inline_without_wrapper(self, tmp_path) -> None:
+        source = tmp_path / "legacy-content.md"
+        source.write_text(_LEGACY_CONTENT_SOURCE, encoding="utf-8")
+        output_path = tmp_path / "out.md"
+
+        result = transform_file(source, output_path, None)
+
+        assert result.success is True, f"errors={result.errors}"
+        content = _read(output_path)
+        for retired in _RETIRED_NAMES:
+            assert retired not in content
+        assert "[INJECTION: identity_extension]" not in content
+        assert "[INJECTION: error_handling_extension]" not in content
+        identity_note = content.find("Extra identity note kept as plain text.")
+        assert identity_note != -1, "identity content after the marker must be preserved"
+        assert (
+            content.find('<Identity type="core">') < identity_note < content.find("</Identity>")
+        ), "identity content must stay inside the Identity section"
+        eh_note = content.find("Extra handling note kept as plain text.")
+        assert eh_note != -1, "error-handling content after the marker must be preserved"
+        assert (
+            content.find('<ErrorHandling type="core">') < eh_note < content.find("</ErrorHandling>")
+        ), "error-handling content must stay inside the ErrorHandling section"
+
+    def test_empty_retired_markers_produce_no_region(self, tmp_path) -> None:
+        source = tmp_path / "legacy-empty.md"
+        source.write_text(
+            _LEGACY_CONTENT_SOURCE.replace(
+                "Extra identity note kept as plain text.\n", ""
+            ).replace("Extra handling note kept as plain text.\n", ""),
+            encoding="utf-8",
+        )
+        output_path = tmp_path / "out.md"
+
+        result = transform_file(source, output_path, None)
+
+        assert result.success is True, f"errors={result.errors}"
+        content = _read(output_path)
+        for retired in _RETIRED_NAMES:
+            assert retired not in content
+        assert result.injections_added == []
