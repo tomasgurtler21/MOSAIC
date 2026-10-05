@@ -118,6 +118,7 @@ func buildSummaryLines(s domain.RunSummary) []summaryLine {
 		add(fmt.Sprintf("Created (%d):", len(created)), "success")
 		for _, a := range created {
 			add(fmt.Sprintf("  ✓ %s:%s", a.Ref.Kind, a.Ref.Key), "success")
+			addFormatChange(add, a)
 		}
 		add("", "body")
 	}
@@ -129,6 +130,7 @@ func buildSummaryLines(s domain.RunSummary) []summaryLine {
 			for _, delta := range a.Stale {
 				add("      "+formatVersionDelta(delta), "muted")
 			}
+			addFormatChange(add, a)
 		}
 		add("", "body")
 	}
@@ -148,6 +150,7 @@ func buildSummaryLines(s domain.RunSummary) []summaryLine {
 			if a.BackupPath != "" {
 				add(fmt.Sprintf("      backup: %s", a.BackupPath), "muted")
 			}
+			addFormatChange(add, a)
 		}
 		add("", "body")
 	}
@@ -294,4 +297,13 @@ func (s *SummaryScreen) Resize(width, height int) {
 	if s.scrollOffset > maxOffset {
 		s.scrollOffset = maxOffset
 	}
+}
+
+// addFormatChange adds a muted line under an action's entry when its write changed the
+// formatting (BOM or line endings) of an existing file.
+func addFormatChange(add func(text, style string), a domain.ActionRecord) {
+	if a.FormatChange == nil {
+		return
+	}
+	add(fmt.Sprintf("      formatting: %s (%s)", a.FormatChange.String(), a.TargetPath), "muted")
 }

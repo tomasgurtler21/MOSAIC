@@ -134,10 +134,7 @@ func planInfrastructureMerge(req Request) (merged []byte, result InfrastructureM
 		}
 	}
 	merged, result = MergeInfrastructureDeclarations(deployedContent, req.InfrastructureAgents, req.InfrastructureMerge)
-	if len(deployedContent) == 0 && len(merged) > 0 && DetectLineEnding(req.Deployed) == "\r\n" {
-		merged = bytes.ReplaceAll(merged, []byte("\n"), []byte("\r\n"))
-	}
-	return merged, result
+	return ConvertLineEndings(merged, sourceLineEnding(req)), result
 }
 
 // applyInfrastructureMerge writes the merged region content. An empty outcome is reported as

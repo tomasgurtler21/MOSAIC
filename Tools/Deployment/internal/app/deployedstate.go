@@ -281,19 +281,10 @@ func probeDeployedStateWithIndex(
 				}
 				if resolved == "" {
 					// Agent has a numeric id but no deployed file matches in the index.
-					// Fallback: probe at the planned path only when the scan flagged this path
-					// as parse-failed. This catches files that exist on disk but could not be
-					// indexed because their frontmatter was unparseable. Files that simply have
-					// a different id (non-matching id-based resolution) still yield Present: false.
-					if parseFailedPaths[pp.TargetPath] {
-						fallback := probeDeployedArtifact(workspace, pp.TargetPath, modelKey)
-						if fallback.Present {
-							fallback.ParseFailed = true
-						}
-						result[pp.TargetPath] = fallback
-					} else {
-						result[pp.TargetPath] = domain.DeployedArtifactState{Present: false}
-					}
+					// Fallback: probe the planned path. A file there that cannot be parsed
+					// cleanly (or that the scan flagged) is parse-failed; files that simply
+					// have a different id still yield Present: false.
+					result[pp.TargetPath] = probePlannedPathForAgent(workspace, pp.TargetPath, modelKey, parseFailedPaths[pp.TargetPath])
 				} else {
 					// Probe at the id-resolved path (may differ from planned path if renamed).
 					result[pp.TargetPath] = probeDeployedArtifact(workspace, resolved, modelKey)

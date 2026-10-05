@@ -248,14 +248,13 @@ func lastContentByte(n *Node) byte {
 
 // ensureTrailingNewline returns content unchanged when it already ends in '\n', or a new
 // slice with '\n' appended otherwise. The original slice is never modified.
-func ensureTrailingNewline(content []byte) []byte {
+func ensureTrailingNewline(content []byte, eol string) []byte {
 	if len(content) > 0 && content[len(content)-1] == '\n' {
 		return content
 	}
-	out := make([]byte, len(content)+1)
-	copy(out, content)
-	out[len(content)] = '\n'
-	return out
+	out := make([]byte, 0, len(content)+len(eol))
+	out = append(out, content...)
+	return append(out, eol...)
 }
 
 // ---------------------------------------------------------------------------
@@ -266,10 +265,10 @@ func ensureTrailingNewline(content []byte) []byte {
 // content items are produced by parsing contentBytes so that any nested tags in the
 // supplied content are represented as live child nodes. parent may be nil for top-level
 // nodes. The body pointer is set so that duplicate-name checks via Node.AppendRegion work.
-func buildRegionNode(kind NodeKind, name string, contentBytes []byte, parent *Node, body *Body) *Node {
+func buildRegionNode(kind NodeKind, name string, contentBytes []byte, parent *Node, body *Body, eol string) *Node {
 	// version is not set at construction time; callers use SetVersion to add or change it.
-	openTag := buildOpenTagLine(kind, name, "")
-	closeTag := buildCloseTagLine(name)
+	openTag := withLineEnding(buildOpenTagLine(kind, name, ""), eol)
+	closeTag := withLineEnding(buildCloseTagLine(name), eol)
 	items := parseBodyItems(contentBytes)
 
 	node := &Node{
@@ -322,14 +321,15 @@ func (b *Body) AppendRegion(kind NodeKind, name string, content []byte) (*Node, 
 	// new opening tag is always on its own line. The textSpan is added to b.items before
 	// the new node; its bytes become part of the body's serialisation without rewriting
 	// any preceding byte.
+	eol := hostLineEnding(b.bytes())
 	if lastBodyByte(b) != '\n' {
-		b.items = append(b.items, &textSpan{raw: []byte("\n")})
+		b.items = append(b.items, &textSpan{raw: []byte(eol)})
 	}
 
 	// Ensure the supplied content ends with a newline so the closing tag is on its own line.
-	contentBytes := ensureTrailingNewline(content)
+	contentBytes := ensureTrailingNewline(content, eol)
 
-	node := buildRegionNode(kind, name, contentBytes, nil, b)
+	node := buildRegionNode(kind, name, contentBytes, nil, b, eol)
 	b.items = append(b.items, node)
 
 	return node, nil
@@ -361,13 +361,17 @@ func (n *Node) AppendRegion(kind NodeKind, name string, content []byte) (*Node, 
 	}
 
 	// Seam: if this node's content does not end in '\n', insert one before the opening tag.
+	eol := hostLineEnding(n.Content())
+	if len(n.Content()) == 0 {
+		eol = hostLineEnding(b.bytes())
+	}
 	if lastContentByte(n) != '\n' {
-		n.items = append(n.items, &textSpan{raw: []byte("\n")})
+		n.items = append(n.items, &textSpan{raw: []byte(eol)})
 	}
 
-	contentBytes := ensureTrailingNewline(content)
+	contentBytes := ensureTrailingNewline(content, eol)
 
-	child := buildRegionNode(kind, name, contentBytes, n, b)
+	child := buildRegionNode(kind, name, contentBytes, n, b, eol)
 	n.items = append(n.items, child)
 
 	return child, nil
@@ -404,16 +408,17 @@ func (b *Body) InsertRegionAfter(sibling *Node, kind NodeKind, name string, cont
 	// Seam: the sibling's close tag ends in '\n' in well-formed documents, so no extra
 	// newline is normally needed. We check defensively in case the close tag is absent
 	// (unclosed tag) or lacks a terminator.
+	eol := hostLineEnding(b.bytes())
 	siblingLast := lastItemByte(sibling)
 	var seam []bodyItem
 	if siblingLast != 0 && siblingLast != '\n' {
-		seam = []bodyItem{&textSpan{raw: []byte("\n")}}
+		seam = []bodyItem{&textSpan{raw: []byte(eol)}}
 	}
 
-	contentBytes := ensureTrailingNewline(content)
+	contentBytes := ensureTrailingNewline(content, eol)
 
 	// The new node's parent is sibling's parent (nil when sibling is top-level).
-	node := buildRegionNode(kind, name, contentBytes, sibling.parent, b)
+	node := buildRegionNode(kind, name, contentBytes, sibling.parent, b, eol)
 
 	// Splice the seam and new node after idx in the container.
 	insertAt := idx + 1

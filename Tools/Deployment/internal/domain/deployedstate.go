@@ -34,6 +34,12 @@ type DeployedArtifactState struct {
 	// Populated by the probe layer (app/deployedstate.go) during extraction.
 	// The zero value (false) means "no injection region found or file absent."
 	HasInjectionRegion bool
+
+	// ParseProblem describes why a present file at the planned target path could not be
+	// used: the parse error text (for docformat format errors: "frontmatter: line N: ...: \"excerpt\""),
+	// "no frontmatter", or "frontmatter has no id". Non-empty only when ParseFailed is true;
+	// "" for every other state.
+	ParseProblem string
 }
 
 // HasVersionInfo reports whether the deployed file carries at least one readable version stamp.

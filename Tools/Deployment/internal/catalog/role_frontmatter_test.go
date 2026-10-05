@@ -55,7 +55,7 @@ func TestParseAgentFile_FrontmatterRoleWins_SubagentInOrchestratorPath(t *testin
 	mustMkdir(t, root, "Catalog", "Orchestrator")
 	writeAgentFixture(t, root,
 		filepath.Join("Catalog", "Orchestrator", "orchestrator.md"),
-		"role: subagent\n")
+		"role: subagent\nid: \"7\"\nname: Fixture\nversion: \"1.0\"\n")
 
 	cat, err := catalog.Load(root, "")
 	if err != nil {
@@ -93,7 +93,7 @@ func TestParseAgentFile_AbsentRole_FallsBackToPathDerivedRole(t *testing.T) {
 	mustMkdir(t, root, "Catalog", "Subagents", "Validation")
 	writeAgentFixture(t, root,
 		filepath.Join("Catalog", "Subagents", "Validation", "no-role-agent.md"),
-		"version: \"1.0\"\nname: No Role Agent\n")
+		"id: \"7\"\nversion: \"1.0\"\nname: No Role Agent\n")
 
 	cat, err := catalog.Load(root, "")
 	if err != nil {
@@ -198,7 +198,7 @@ func TestParseAgentFile_UnrecognisedRole_IssueMessageNamesAllFourValues(t *testi
 	mustMkdir(t, root, "Catalog", "Subagents", "Validation")
 	writeAgentFixture(t, root,
 		filepath.Join("Catalog", "Subagents", "Validation", "four-values-check.md"),
-		"role: completely-unknown\n")
+		"role: completely-unknown\nid: \"7\"\nname: Fixture\nversion: \"1.0\"\n")
 
 	cat, err := catalog.Load(root, "")
 	if err != nil {
@@ -240,7 +240,7 @@ func TestParseAgentFile_UnrecognisedRole_AgentRetainedAndIssueAppended(t *testin
 	mustMkdir(t, root, "Catalog", "Subagents", "Validation")
 	writeAgentFixture(t, root,
 		filepath.Join("Catalog", "Subagents", "Validation", "bad-role-agent.md"),
-		"role: bad-value\n")
+		"role: bad-value\nid: \"7\"\nname: Fixture\nversion: \"1.0\"\n")
 
 	cat, err := catalog.Load(root, "")
 	if err != nil {

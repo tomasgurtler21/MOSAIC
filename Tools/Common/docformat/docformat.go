@@ -16,40 +16,39 @@ import (
 // unmodified; every untouched region is preserved byte-for-byte when the document is
 // modified.
 type Document struct {
-	hasFM   bool   // true when src had opening + closing "---" delimiters
-	fmDelim []byte // "---\n" or "---\r\n"
+	hasFM   bool      // true when src had opening + closing "---" delimiters
+	fences  fencePair // opening and closing fence bytes as found
 	fm      *Frontmatter
 	bodyRaw []byte // bytes after the closing delimiter (or full src when no frontmatter)
 	body    *Body  // lazily initialised on first Body() call; non-nil after that
+	bom     bool   // emit a leading UTF-8 BOM in Bytes()
 }
 
 // Parse splits and parses a MOSAIC file. It never normalises: line endings, blank lines,
 // quoting, key order, and comments are all content to preserve. The returned Document's
 // Bytes method reproduces the source exactly when the document is unmodified.
 func Parse(src []byte) (*Document, error) {
-	rawFM, body, err := SplitFrontmatter(src)
+	if len(src) == 0 {
+		return &Document{fm: &Frontmatter{present: false}}, nil
+	}
+	res, err := splitDetailed(src)
 	if err != nil {
 		return nil, err
 	}
 
-	doc := &Document{bodyRaw: body}
+	doc := &Document{bodyRaw: res.body, bom: res.bom}
 
-	if rawFM == nil {
-		// No frontmatter delimiters — the whole file is the body.
+	if !res.found {
+		// No frontmatter delimiters — the whole file (minus any BOM) is the body.
 		doc.fm = &Frontmatter{present: false}
-		doc.bodyRaw = body // body == src in this case
 		return doc, nil
 	}
 
-	// Record which delimiter style was used so dirty entries can match.
+	// Record the opening fence's actual line ending so dirty entries can match.
 	doc.hasFM = true
-	if bytes.HasPrefix(src, []byte("---\r\n")) {
-		doc.fmDelim = []byte("---\r\n")
-	} else {
-		doc.fmDelim = []byte("---\n")
-	}
+	doc.fences = newFencePair(res.openNL, res.closeLine)
 
-	fm, err := parseFrontmatterBytes(rawFM)
+	fm, err := parseFrontmatterBytes(res.frontmatter)
 	if err != nil {
 		return nil, err
 	}
@@ -61,6 +60,15 @@ func Parse(src []byte) (*Document, error) {
 // Bytes returns the document serialised to bytes. When the document is unmodified the
 // result is byte-identical to the input passed to Parse.
 func (d *Document) Bytes() []byte {
+	out := d.bodyAndFrontmatterBytes()
+	if d.bom {
+		return append(append(make([]byte, 0, len(utf8BOM)+len(out)), utf8BOM...), out...)
+	}
+	return out
+}
+
+// bodyAndFrontmatterBytes serialises the document without its BOM.
+func (d *Document) bodyAndFrontmatterBytes() []byte {
 	// Use the cached body if it exists (it may have been parsed and/or mutated).
 	var bodyBytes []byte
 	if d.body != nil {
@@ -76,19 +84,11 @@ func (d *Document) Bytes() []byte {
 		if len(d.fm.entries) == 0 {
 			return bodyBytes
 		}
-		nl := "\n"
-		var buf bytes.Buffer
-		buf.WriteString("---\n")
-		for _, e := range d.fm.entries {
-			buf.WriteString(serializeEntry(e.key, e.value, nl))
-		}
-		buf.WriteString("---\n")
-		buf.Write(bodyBytes)
-		return buf.Bytes()
+		return synthesiseFrontmatter(d.fm.entries, bodyBytes)
 	}
-	nl := nlFromDelim(d.fmDelim)
+	nl := d.fences.lineEnding()
 	var buf bytes.Buffer
-	buf.Write(d.fmDelim)
+	buf.Write(d.fences.open)
 	for _, e := range d.fm.entries {
 		if e.dirty {
 			buf.WriteString(serializeEntry(e.key, e.value, nl))
@@ -96,7 +96,7 @@ func (d *Document) Bytes() []byte {
 			buf.Write(e.rawBytes)
 		}
 	}
-	buf.Write(d.fmDelim)
+	buf.Write(d.fences.close)
 	buf.Write(bodyBytes)
 	return buf.Bytes()
 }
@@ -130,8 +130,9 @@ func (d *Document) Clone() *Document {
 
 	c := &Document{
 		hasFM:   d.hasFM,
-		fmDelim: cloneBytes(d.fmDelim),
+		fences:  d.fences.clone(),
 		bodyRaw: currentBodyRaw,
+		bom:     d.bom,
 	}
 	if d.fm != nil {
 		c.fm = d.fm.clone()
@@ -1058,6 +1059,7 @@ func parseScalarBytes(data []byte) (mosaic.FieldValue, error) {
 
 	default:
 		value, comment := splitPlainAndComment(data)
+		value = bytes.TrimRight(value, " 	")
 		fv := mosaic.ScalarValue(string(value), mosaic.QuotePlain)
 		if len(comment) > 0 {
 			fv.Comment = string(comment)
@@ -1096,7 +1098,7 @@ func findEndOfDoubleQuotedAt(data []byte, start int) int {
 }
 
 // findEndOfSingleQuotedAt finds the exclusive end position of a single-quoted YAML string
-// that starts at position start in data. In YAML, '' is the only escape (a literal quote).
+// that starts at position start in data. In YAML, ” is the only escape (a literal quote).
 func findEndOfSingleQuotedAt(data []byte, start int) int {
 	i := start + 1
 	for i < len(data) {
@@ -1142,7 +1144,7 @@ func unescapeDoubleQuoted(data []byte) string {
 	return sb.String()
 }
 
-// unescapeSingleQuoted converts YAML single-quote escape sequences ('' → ') to their values.
+// unescapeSingleQuoted converts YAML single-quote escape sequences (” → ') to their values.
 func unescapeSingleQuoted(data []byte) string {
 	return strings.ReplaceAll(string(data), "''", "'")
 }

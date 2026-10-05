@@ -26,7 +26,7 @@ func preserveDeployedWorkflows(node *docformat.Node, name string, class domain.I
 		return RegionOutcome{}, nil, false
 	}
 
-	preserved := stripCustomChildren(region.Content())
+	preserved := ConvertLineEndings(stripCustomChildren(region.Content()), sourceLineEnding(req))
 	node.SetContent(preserved) //nolint:errcheck // Node.SetContent always returns nil; forward-compatible error return.
 
 	var ids []string

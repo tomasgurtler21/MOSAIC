@@ -232,7 +232,7 @@ func processRegions(doc *docformat.Document, req Request) (outcomes []RegionOutc
 		// When capture is empty, reemitNestedUserRegions is a no-op and does not touch the
 		// parent — no stray separators, no trailing whitespace change (AC6.6).
 		if len(capture) > 0 {
-			nestedOutcomes, reemitErr := reemitNestedUserRegions(node, capture, deployedContent)
+			nestedOutcomes, reemitErr := reemitNestedUserRegions(node, capture, deployedContent, sourceLineEnding(req))
 			if reemitErr != nil {
 				return nil, nil, nil, nil, reemitErr
 			}
@@ -418,7 +418,7 @@ func processRegions(doc *docformat.Document, req Request) (outcomes []RegionOutc
 					}
 				}
 				// Anchored or no reorder: place the custom region at its resolved position.
-				if _, placeErr := placeCustomRegion(body, rec, entry.Content); placeErr != nil {
+				if _, placeErr := placeCustomRegion(body, rec, ConvertLineEndings(entry.Content, sourceLineEnding(req))); placeErr != nil {
 					return nil, nil, nil, nil, placeErr
 				}
 				outcomes = append(outcomes, RegionOutcome{
@@ -450,7 +450,7 @@ func processRegions(doc *docformat.Document, req Request) (outcomes []RegionOutc
 		// Park all unanchored custom regions at end of body and emit a single parking gap
 		// listing every parked name in sorted order. Exactly one gap is emitted per transform.
 		if len(toPark) > 0 {
-			parkedNames, parkedOutcomes, parkErr := parkCustomRegions(body, toPark)
+			parkedNames, parkedOutcomes, parkErr := parkCustomRegions(body, toPark, sourceLineEnding(req))
 			if parkErr != nil {
 				return nil, nil, nil, nil, parkErr
 			}
@@ -491,11 +491,8 @@ func applyHarnessRegion(node *docformat.Node, name string, class domain.Injectio
 		// read from CRLF-checked-out files on Windows matches what LF-checked-out files
 		// produce. Adapt the LF content to the source document's prevailing line ending so the
 		// injected lines are consistent with the surrounding document.
-		lineEnding := DetectLineEnding(req.Source)
-		contentBytes := []byte(content)
-		if lineEnding == "\r\n" {
-			contentBytes = bytes.ReplaceAll(contentBytes, []byte("\n"), []byte("\r\n"))
-		}
+		lineEnding := sourceLineEnding(req)
+		contentBytes := ConvertLineEndings([]byte(content), lineEnding)
 		if len(contentBytes) == 0 || contentBytes[len(contentBytes)-1] != '\n' {
 			contentBytes = append(contentBytes, []byte(lineEnding)...)
 		}
@@ -588,7 +585,7 @@ func applyProjectRegion(node *docformat.Node, name string, class domain.Injectio
 	// Update: lift from the deployed file when the region was present there.
 	// The source default is never consulted once the region exists in the deployed file.
 	if entry, present := deployedContent[name]; present {
-		node.SetContent(entry.Content) //nolint:errcheck // Node.SetContent always returns nil; forward-compatible error return.
+		node.SetContent(ConvertLineEndings(entry.Content, sourceLineEnding(req))) //nolint:errcheck // Node.SetContent always returns nil; forward-compatible error return.
 		action := RegionPreserved
 		if entry.Migrated {
 			// Content arrived via rename resolution: the deployed file stored it under the
@@ -654,6 +651,7 @@ func applyWorkflowRegion(node *docformat.Node, name string, class domain.Injecti
 	}
 
 	assembled, ids := assembleWorkflowBlocks(req.Workflows)
+	assembled = ConvertLineEndings(assembled, sourceLineEnding(req))
 	node.SetContent(assembled) //nolint:errcheck // Node.SetContent always returns nil; forward-compatible error return.
 	return RegionOutcome{
 		Name:   name,
@@ -686,7 +684,7 @@ func applyInfrastructureRegion(node *docformat.Node, name string, class domain.I
 		if req.Deployed != nil {
 			if deployedDoc, err := docformat.Parse(req.Deployed); err == nil {
 				if deployedNode, ok := deployedDoc.Body().Deployed("InfrastructureAgents"); ok {
-					preservedContent := deployedNode.Content()
+					preservedContent := ConvertLineEndings(deployedNode.Content(), sourceLineEnding(req))
 					node.SetContent(preservedContent) //nolint:errcheck // Node.SetContent always returns nil; forward-compatible error return.
 					return RegionOutcome{
 						Name:   name,
@@ -710,6 +708,7 @@ func applyInfrastructureRegion(node *docformat.Node, name string, class domain.I
 	}
 
 	assembled, keys := AssembleInfrastructureBlocks(req.InfrastructureAgents)
+	assembled = ConvertLineEndings(assembled, sourceLineEnding(req))
 	node.SetContent(assembled) //nolint:errcheck // Node.SetContent always returns nil; forward-compatible error return.
 	return RegionOutcome{
 		Name:   name,
@@ -729,21 +728,9 @@ func applyProtocolRegion(node *docformat.Node, name string, req Request) (Region
 		return RegionOutcome{}, fmt.Errorf("region %q: %w", name, ErrProtocolContentMissing)
 	}
 
-	// Determine the effective line ending for the protocol region. The primary signal is the
-	// block's own line ending (which is CRLF when loaded from a CRLF-checked-out file).
-	// When the block is LF but the source document is CRLF, promote to CRLF so the region
-	// is consistent with the surrounding document. This handles test fixtures where protocol
-	// blocks are Go string literals (always LF) embedded in a real CRLF source file.
-	//
-	// The block is normalised to LF first to avoid double-converting an already-CRLF block.
-	lineEnding := DetectLineEnding(block)
-	if lineEnding == "\n" && DetectLineEnding(req.Source) == "\r\n" {
-		lineEnding = "\r\n"
-	}
-	adaptedBlock := bytes.ReplaceAll(block, []byte("\r\n"), []byte("\n"))
-	if lineEnding == "\r\n" {
-		adaptedBlock = bytes.ReplaceAll(adaptedBlock, []byte("\n"), []byte("\r\n"))
-	}
+	// The block may carry either line ending (CRLF when loaded from a CRLF-checked-out file);
+	// the region follows the source document's style so the output has a single style.
+	adaptedBlock := ConvertLineEndings(block, sourceLineEnding(req))
 	node.SetContent(adaptedBlock) //nolint:errcheck // Node.SetContent always returns nil; forward-compatible error return.
 	// Write the protocol version as a tag attribute on the region's opening tag.
 	// The version source is the protocol document's frontmatter; only the destination changes.
@@ -786,6 +773,7 @@ func applyBundleRegion(node *docformat.Node, name string, req Request) (RegionOu
 		return RegionOutcome{}, fmt.Errorf("region %q: %w", name, ErrBundleBlockMissingForRole)
 	}
 
+	block = ConvertLineEndings(block, sourceLineEnding(req))
 	node.SetContent(block) //nolint:errcheck // Node.SetContent always returns nil; forward-compatible error return.
 	return RegionOutcome{
 		Name:   name,
@@ -881,7 +869,7 @@ func captureNestedUserRegions(sourceNode *docformat.Node, depDoc *docformat.Docu
 //
 // Returns one RegionOutcome per re-emitted region with the region's true marker kind
 // (NodeInjection or NodeCustom), never the parent's NodeDeployed.
-func reemitNestedUserRegions(parent *docformat.Node, captured []nestedRegionRecord, deployedContent map[string]regionEntry) ([]RegionOutcome, error) {
+func reemitNestedUserRegions(parent *docformat.Node, captured []nestedRegionRecord, deployedContent map[string]regionEntry, eol string) ([]RegionOutcome, error) {
 	if len(captured) == 0 {
 		return nil, nil
 	}
@@ -892,7 +880,7 @@ func reemitNestedUserRegions(parent *docformat.Node, captured []nestedRegionReco
 		var content []byte
 		if deployedContent != nil {
 			if entry, ok := deployedContent[rec.Name]; ok {
-				content = entry.Content
+				content = ConvertLineEndings(entry.Content, eol)
 			}
 		}
 

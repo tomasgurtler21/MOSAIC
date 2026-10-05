@@ -31,6 +31,7 @@ type catalogImpl struct {
 	tiers        []domain.TierInfo
 	issues       []Issue
 	sourcePaths  map[string]bool // every absolute path emitted by the catalog
+	failures     sourceFailures  // source files that could not be interpreted during load
 }
 
 // Root returns the absolute MOSAIC repository root passed to Load.
@@ -186,6 +187,10 @@ func loadCatalog(mosaicRoot, catalogRoot string) (Catalog, error) {
 	// The catalogue root wins on key collision; shadowing is silent (no Issue produced).
 	cat.issues = append(cat.issues, cat.loadSkillsMerged(defaultCatalogRoot, catalogRoot)...)
 	cat.issues = append(cat.issues, cat.loadHooksMerged(defaultCatalogRoot, catalogRoot)...)
+
+	if err := cat.failures.asError(); err != nil {
+		return nil, err
+	}
 
 	cat.tiers = buildTiers(cat.agentIdx)
 

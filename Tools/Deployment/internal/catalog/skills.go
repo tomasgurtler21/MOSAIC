@@ -4,7 +4,6 @@ import (
 	"os"
 	"path/filepath"
 
-	"mosaic-common/docformat"
 	"mosaic-deploy/internal/catalog/catalogpaths"
 	"mosaic-deploy/internal/domain"
 )
@@ -34,6 +33,7 @@ func (c *catalogImpl) loadSkills(root string) []Issue {
 			skillDir := filepath.Join(skillsDir, key)
 			skill, err := parseSkillDir(skillDir, key)
 			if err != nil {
+				c.failures.addFailure(filepath.Join(skillDir, "SKILL.md"), SourceKindSkill, err)
 				continue
 			}
 			c.skills = append(c.skills, skill)
@@ -90,6 +90,7 @@ func (c *catalogImpl) loadSkillsMerged(defaultCatalogRoot, catalogRoot string) [
 			skillDir := filepath.Join(skillsDir, key)
 			skill, err := parseSkillDir(skillDir, key)
 			if err != nil {
+				c.failures.addFailure(filepath.Join(skillDir, "SKILL.md"), SourceKindSkill, err)
 				continue
 			}
 			if _, exists := c.skillIdx[key]; exists {
@@ -120,11 +121,7 @@ func (c *catalogImpl) loadSkillsMerged(defaultCatalogRoot, catalogRoot string) [
 func parseSkillDir(dir, key string) (domain.Skill, error) {
 	entryFile := "SKILL.md"
 	skillMd := filepath.Join(dir, entryFile)
-	data, err := os.ReadFile(skillMd)
-	if err != nil {
-		return domain.Skill{}, err
-	}
-	doc, err := docformat.Parse(data)
+	doc, err := readAndParse(skillMd)
 	if err != nil {
 		return domain.Skill{}, err
 	}
@@ -162,7 +159,8 @@ func parseSkillDir(dir, key string) (domain.Skill, error) {
 		return nil
 	})
 	if err != nil {
-		return domain.Skill{}, err
+		// A directory walk failure is an I/O problem, not a SKILL.md parse failure.
+		return domain.Skill{}, &sourceIssue{problem: SourceProblemUnreadable, err: err}
 	}
 
 	return skill, nil

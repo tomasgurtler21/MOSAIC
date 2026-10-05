@@ -119,7 +119,7 @@ func sourceAnchorNames(sourceBody *docformat.Body) map[string]bool {
 //
 // Records are sorted by Name before appending so the output document is deterministic
 // regardless of the order in which records arrive.
-func parkCustomRegions(body *docformat.Body, records []customRegionRecord) ([]string, []RegionOutcome, error) {
+func parkCustomRegions(body *docformat.Body, records []customRegionRecord, eol string) ([]string, []RegionOutcome, error) {
 	// Sort by name for deterministic output.
 	sort.Slice(records, func(i, j int) bool {
 		return records[i].Name < records[j].Name
@@ -128,7 +128,7 @@ func parkCustomRegions(body *docformat.Body, records []customRegionRecord) ([]st
 	names := make([]string, 0, len(records))
 	outcomes := make([]RegionOutcome, 0, len(records))
 	for _, rec := range records {
-		if _, err := body.AppendRegion(docformat.NodeCustom, rec.Name, rec.Content); err != nil {
+		if _, err := body.AppendRegion(docformat.NodeCustom, rec.Name, ConvertLineEndings(rec.Content, eol)); err != nil {
 			return nil, nil, fmt.Errorf("park custom region %q: %w", rec.Name, err)
 		}
 		names = append(names, rec.Name)

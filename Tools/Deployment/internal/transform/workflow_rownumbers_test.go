@@ -281,7 +281,11 @@ func TestApply_RebuildRowInjectionIsIdempotent(t *testing.T) {
 func TestApply_RebuildPreservesCRLFLineEndings(t *testing.T) {
 	block := toCRLF(twoTableBlock)
 
-	out := injectBlock(t, "grouped-flow", block)
+	// The source is CRLF: the output follows the source's line ending.
+	result := applyOrchestrator(t, toCRLF(orchestratorWithWorkflows), func(r *transform.Request) {
+		r.Workflows = []transform.WorkflowBlock{{ID: "grouped-flow", Block: []byte(block)}}
+	})
+	out := regionContent(t, result.Output, workflowRegionName)
 
 	if bytes.Contains(bytes.ReplaceAll(out, []byte("\r\n"), nil), []byte("\n")) {
 		t.Errorf("output contains a bare LF:\n%q", out)

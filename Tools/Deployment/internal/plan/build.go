@@ -296,6 +296,9 @@ func classifyAgentItem(
 			ManifestMissing: true,
 		}
 		item.Reason = "deployed file could not be read/parsed"
+		if deployed.ParseProblem != "" {
+			item.Reason += ": " + deployed.ParseProblem
+		}
 		return item
 	}
 

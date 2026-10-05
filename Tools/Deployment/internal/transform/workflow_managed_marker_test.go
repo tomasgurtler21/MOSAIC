@@ -324,9 +324,10 @@ func TestWorkflowManagedMarker_AttributeOrder_PreservedWhenTypeNotFirst(t *testi
 // ---------------------------------------------------------------------------
 
 func TestWorkflowManagedMarker_CRLFOpeningTag_TerminatorPreserved(t *testing.T) {
-	// A CRLF-terminated opening tag must remain CRLF after the type rewrite.
-	result := applyWithWorkflows(t, []transform.WorkflowBlock{
-		{ID: "crlf-workflow", Block: []byte(crlfWorkflowBlock)},
+	// A CRLF-terminated opening tag must remain CRLF after the type rewrite. The source is
+	// CRLF: the output follows the source's line ending.
+	result := applyOrchestrator(t, string(crlfBytes(orchestratorForManagedMarker)), func(r *transform.Request) {
+		r.Workflows = []transform.WorkflowBlock{{ID: "crlf-workflow", Block: []byte(crlfWorkflowBlock)}}
 	})
 	content := availableWorkflowsContent(t, result)
 

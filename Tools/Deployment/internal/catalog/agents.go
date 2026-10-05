@@ -1,7 +1,9 @@
 package catalog
 
 import (
+	"errors"
 	"fmt"
+	"io/fs"
 	"os"
 	"path/filepath"
 	"sort"
@@ -23,31 +25,51 @@ import (
 func (c *catalogImpl) loadAgents(root string) []Issue {
 	var issues []Issue
 
-	// Orchestrator: single file. Try new path first, fall back to legacy path.
+	// Orchestrator: single file. Try new path first, fall back to legacy path only when the
+	// new-path file does not exist; a broken new-path file is reported, not replaced.
 	orchPaths := []string{
 		catalogpaths.OrchestratorFile(root),
 		filepath.Join(root, "Agents", "Generic", "Orchestrator", "orchestrator.md"),
 	}
 	for _, orchPath := range orchPaths {
-		if orch, orchIssues, err := parseAgentFile(orchPath, domain.RoleOrchestrator, ""); err == nil {
-			c.orchestr = orch
-			c.agentIdx[orch.Key] = orch
-			c.sourcePaths[orchPath] = true
-			issues = append(issues, orchIssues...)
-			break // Stop at the first path that resolves successfully.
+		if _, statErr := os.Stat(orchPath); statErr != nil {
+			if !errors.Is(statErr, fs.ErrNotExist) {
+				c.failures.addFailure(orchPath, SourceKindAgent, &sourceIssue{problem: SourceProblemUnreadable, err: statErr})
+				break
+			}
+			continue // Missing file: try the next path.
 		}
+		orch, orchIssues, err := parseAgentFile(orchPath, domain.RoleOrchestrator, "")
+		if err != nil {
+			c.failures.addFailure(orchPath, SourceKindAgent, err)
+			break
+		}
+		c.orchestr = orch
+		c.agentIdx[orch.Key] = orch
+		c.sourcePaths[orchPath] = true
+		issues = append(issues, orchIssues...)
+		break
 	}
-	// Missing orchestrator is not a hard error — loadCatalog still returns successfully.
+	// Missing orchestrator is not an error; an existing but unreadable one is.
 
 	// Orchestrator script: single file adjacent to orchestrator.md. A missing file is not
-	// an error; a catalog without it loads and deploys normally.
+	// an error; an existing file that cannot be interpreted is.
 	scriptPath := catalogpaths.OrchestratorScriptFile(root)
-	if script, scriptIssues, err := parseAgentFile(scriptPath, domain.RoleOrchestrator, ""); err == nil {
-		c.orchScript = script
-		c.orchScriptOK = true
-		c.agentIdx[script.Key] = script
-		c.sourcePaths[scriptPath] = true
-		issues = append(issues, scriptIssues...)
+	if _, statErr := os.Stat(scriptPath); statErr != nil {
+		if !errors.Is(statErr, fs.ErrNotExist) {
+			c.failures.addFailure(scriptPath, SourceKindAgent, &sourceIssue{problem: SourceProblemUnreadable, err: statErr})
+		}
+	} else {
+		script, scriptIssues, err := parseAgentFile(scriptPath, domain.RoleOrchestrator, "")
+		if err != nil {
+			c.failures.addFailure(scriptPath, SourceKindAgent, err)
+		} else {
+			c.orchScript = script
+			c.orchScriptOK = true
+			c.agentIdx[script.Key] = script
+			c.sourcePaths[scriptPath] = true
+			issues = append(issues, scriptIssues...)
+		}
 	}
 
 	// Worker agents: scan new path first, then legacy path; first occurrence of a key wins.
@@ -85,6 +107,7 @@ func (c *catalogImpl) loadAgents(root string) []Issue {
 				agentPath := filepath.Join(catDir, name)
 				agent, agentIssues, err := parseAgentFile(agentPath, domain.RoleSubagent, category)
 				if err != nil {
+					c.failures.addFailure(agentPath, SourceKindAgent, err)
 					continue
 				}
 				issues = append(issues, agentIssues...)
@@ -123,6 +146,7 @@ func (c *catalogImpl) loadAgents(root string) []Issue {
 			utilPath := filepath.Join(utilDir, name)
 			agent, utilIssues, err := parseAgentFile(utilPath, domain.RoleUtility, "")
 			if err != nil {
+				c.failures.addFailure(utilPath, SourceKindAgent, err)
 				continue
 			}
 			issues = append(issues, utilIssues...)
@@ -158,6 +182,7 @@ func (c *catalogImpl) loadAgents(root string) []Issue {
 			agentPath := filepath.Join(standaloneDir, name)
 			agent, agentIssues, err := parseAgentFile(agentPath, domain.RoleStandalone, "")
 			if err != nil {
+				c.failures.addFailure(agentPath, SourceKindAgent, err)
 				continue
 			}
 			issues = append(issues, agentIssues...)
@@ -192,6 +217,7 @@ func (c *catalogImpl) loadAgents(root string) []Issue {
 				agentPath := filepath.Join(catDir, name)
 				agent, agentIssues, err := parseAgentFile(agentPath, domain.RoleStandalone, category)
 				if err != nil {
+					c.failures.addFailure(agentPath, SourceKindAgent, err)
 					continue
 				}
 				issues = append(issues, agentIssues...)
@@ -218,11 +244,7 @@ func (c *catalogImpl) loadAgents(root string) []Issue {
 // role is used and a catalog.Issue with code "invalid-role" (severity error) is returned —
 // a malformed role must not silently drop an agent from the catalog.
 func parseAgentFile(path string, role domain.AgentRole, category string) (domain.Agent, []Issue, error) {
-	data, err := os.ReadFile(path)
-	if err != nil {
-		return domain.Agent{}, nil, err
-	}
-	doc, err := docformat.Parse(data)
+	doc, err := readAndParse(path)
 	if err != nil {
 		return domain.Agent{}, nil, err
 	}
@@ -332,6 +354,10 @@ func parseAgentFile(path string, role domain.AgentRole, category string) (domain
 	// on_failure: scalar policy ("halt" or "continue")
 	if v, ok := fm.Get("on_failure"); ok && v.Kind == domain.KindScalar {
 		agent.OnFailure = v.Scalar
+	}
+
+	if err := checkAgentSource(agent, fm.Present()); err != nil {
+		return domain.Agent{}, nil, err
 	}
 
 	return agent, issues, nil

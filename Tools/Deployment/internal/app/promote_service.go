@@ -435,7 +435,7 @@ func (s *service) Promote(ctx context.Context, req PromoteRequest) (PromoteResul
 	// when either signal is absent, so the caller learns which signal failed.
 	verdict := eligibleHarnessOnly(src)
 	if !verdict.Eligible {
-		return PromoteResult{}, fmt.Errorf("%w: %s", ErrPromoteNotTransformed, verdict.Reason)
+		return PromoteResult{}, fmt.Errorf("%w: %s: %s", ErrPromoteNotTransformed, req.FilePath, verdict.Reason)
 	}
 
 	// Derive the agent key from the source filename — the same derivation the catalog uses
@@ -446,7 +446,7 @@ func (s *service) Promote(ctx context.Context, req PromoteRequest) (PromoteResul
 	// before asking any questions. This is a pure parse — no I/O, no questions.
 	facts, factsErr := inspectPromoteSource(src, module.Descriptor())
 	if factsErr != nil {
-		return PromoteResult{}, factsErr
+		return PromoteResult{}, fmt.Errorf("%s: %w", req.FilePath, factsErr)
 	}
 
 	// Resolve category: use the pre-answered value (pre-answer convention — a non-empty
@@ -611,7 +611,7 @@ func (s *service) Promote(ctx context.Context, req PromoteRequest) (PromoteResul
 		RequiredSkills:  recovered.RequiredSkills,
 	})
 	if err != nil {
-		return PromoteResult{}, err
+		return PromoteResult{}, fmt.Errorf("%s: %w", req.FilePath, err)
 	}
 
 	// Write the generated file to the destination, unless this is a dry run. A dry run

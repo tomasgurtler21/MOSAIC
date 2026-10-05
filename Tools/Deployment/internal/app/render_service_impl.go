@@ -115,7 +115,7 @@ func renderAgent(_ context.Context, s *service, req RenderAgentRequest) (RenderA
 	// -----------------------------------------------------------------------
 	doc, parseErr := docformat.Parse(srcBytes)
 	if parseErr != nil {
-		return RenderAgentResult{}, fmt.Errorf("%w: %v", ErrRenderSourceNotGeneric, parseErr)
+		return RenderAgentResult{}, fmt.Errorf("%w: %s: %v", ErrRenderSourceNotGeneric, sourcePath, parseErr)
 	}
 	fm := doc.Frontmatter()
 

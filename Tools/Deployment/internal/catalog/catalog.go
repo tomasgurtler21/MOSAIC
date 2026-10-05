@@ -204,7 +204,10 @@ func ResolveRoot(dir string) (string, error) {
 // from which agents, workflows, skills, and hooks are loaded; when empty, it defaults to
 // DefaultCatalogRoot(mosaicRoot). Bundle and protocol files are always resolved from mosaicRoot.
 // Structural problems are accumulated into Catalog.Issues rather than returned as errors.
-// Load returns a non-nil error only when a root is unreadable or structurally invalid.
+// Load returns a non-nil error when a root is unreadable or structurally invalid, and when any
+// source file cannot be interpreted: an agent, skill, or workflow that fails to parse, an agent
+// without frontmatter, or a subagent missing id, name, or version. The error matches
+// ErrCatalogSourceInvalid and names every offending file with its problem.
 func Load(mosaicRoot, catalogRoot string) (Catalog, error) {
 	if catalogRoot == "" {
 		catalogRoot = DefaultCatalogRoot(mosaicRoot)

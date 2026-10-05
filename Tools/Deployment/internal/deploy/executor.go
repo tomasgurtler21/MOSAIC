@@ -211,7 +211,7 @@ func (e *executor) Execute(ctx context.Context, req ExecRequest) (ExecResult, er
 	// probeErr is non-nil when the workspace probe failed and a fallback was triggered;
 	// it is carried as the first partial error and the per-item Err in fallback mode.
 	// contentErrors lists items whose Content callback failed during probe iteration.
-	deployRoot, fallback, probeErr, contentErrors, _, err := resolveDeploymentRoot(req, journal)
+	deployRoot, fallback, probeErr, contentErrors, probeItem, probeFormat, err := resolveDeploymentRoot(req, journal)
 	if err != nil {
 		return ExecResult{}, err
 	}
@@ -295,6 +295,7 @@ func (e *executor) Execute(ctx context.Context, req ExecRequest) (ExecResult, er
 		} else {
 			// Normal mode: write to the workspace deployment root.
 			ar, entry = e.executeItem(item, req, deployRoot, prior, journal)
+			ar.FormatChange = withProbeFormat(ar, item, probeItem, probeFormat)
 			if ar.Err != "" && partialErr == nil {
 				partialErr = fmt.Errorf("%s", ar.Err)
 			}
@@ -504,11 +505,13 @@ func (e *executor) executeItem(
 				return ar, nil
 			}
 		}
+		formatChange := formatChangeOnOverwrite(destPath, content)
 		if writeErr := mkdirAndWrite(destPath, content); writeErr != nil {
 			ar.Taken = domain.TakenFailed
 			ar.Err = writeErr.Error()
 			return ar, nil
 		}
+		ar.FormatChange = formatChange
 		if item.Action == domain.ActionCreate {
 			ar.Taken = domain.TakenCreated
 		} else {
@@ -636,11 +639,13 @@ func (e *executor) executeConflict(
 				return ar, nil
 			}
 		}
+		formatChange := formatChangeOnOverwrite(destPath, content)
 		if writeErr := mkdirAndWrite(destPath, content); writeErr != nil {
 			ar.Taken = domain.TakenFailed
 			ar.Err = writeErr.Error()
 			return ar, nil
 		}
+		ar.FormatChange = formatChange
 		ar.Taken = domain.TakenUpdated
 		stamp := resolveVersionStamp(item, req.VersionStamps)
 		entry := newManifestEntry(item, content, stamp)
@@ -683,11 +688,13 @@ func (e *executor) executeConflict(
 			return ar, nil
 		}
 		destPath := filepath.Join(deployRoot, item.TargetPath)
+		formatChange := formatChangeOnOverwrite(destPath, content)
 		if writeErr := mkdirAndWrite(destPath, content); writeErr != nil {
 			ar.Taken = domain.TakenFailed
 			ar.Err = writeErr.Error()
 			return ar, nil
 		}
+		ar.FormatChange = formatChange
 		ar.Taken = domain.TakenBackedUp
 		stamp := resolveVersionStamp(item, req.VersionStamps)
 		entry := newManifestEntry(item, content, stamp)
