@@ -43,6 +43,12 @@ from region_insertion import (
 
 import file_classification as _fc
 from fence import fence_mask
+from frontmatter_input import (
+    FrontmatterDecodeError,
+    is_frontmatter_fence,
+    read_frontmatter_text,
+    render_line_for_error,
+)
 
 from document_kind import classify_document as _classify_document
 from non_conformance import NonConformance, detect_output_non_conformances
@@ -333,7 +339,18 @@ def transform_file(
             warnings=[msg],
         )
 
-    content = input_path.read_text(encoding="utf-8")
+    try:
+        content = read_frontmatter_text(input_path)
+    except FrontmatterDecodeError as exc:
+        return TransformResult(
+            success=False,
+            errors=[TransformError(line_number=exc.line_number, message=exc.reason)],
+            sections_added=[],
+            injections_added=[],
+            deployed_added=[],
+            version_before="",
+            version_after="",
+        )
     lines = content.splitlines(keepends=True)
 
     # Parse frontmatter leniently (without version requirement) so we can
@@ -519,7 +536,21 @@ def transform_file(
 
     if is_harness:
         # Load and parse generic reference
-        generic_content = generic_ref_path.read_text(encoding="utf-8")
+        try:
+            generic_content = read_frontmatter_text(generic_ref_path)
+        except FrontmatterDecodeError as exc:
+            return TransformResult(
+                success=False,
+                errors=[TransformError(
+                    line_number=exc.line_number,
+                    message=f"Failed to read generic reference {generic_ref_path}: {exc.reason}"
+                )],
+                sections_added=[],
+                injections_added=[],
+                deployed_added=[],
+                version_before=version_before,
+                version_after=""
+            )
         generic_lines = generic_content.splitlines(keepends=True)
         generic_fm_result = _parse_frontmatter(generic_lines)
         if not generic_fm_result["success"]:
@@ -650,17 +681,18 @@ def _parse_frontmatter(lines: list[str], require_version: bool = True) -> dict:
         error: str (if not success)
         line_number: int (if not success)
     """
-    if not lines or lines[0].strip() != "---":
+    if not lines or not is_frontmatter_fence(lines[0]):
+        first_line = render_line_for_error(lines[0] if lines else "")
         return {
             "success": False,
-            "error": "Missing opening --- for frontmatter",
+            "error": f"Missing opening --- for frontmatter; line 1 is {first_line}",
             "line_number": 1
         }
 
     # Find closing ---
     closing_line = None
     for i in range(1, len(lines)):
-        if lines[i].strip() == "---":
+        if is_frontmatter_fence(lines[i]):
             closing_line = i
             break
 
@@ -1897,7 +1929,7 @@ def resolve_cli_generic_ref(
         return explicit_ref
 
     try:
-        content = input_path.read_text(encoding="utf-8")
+        content = read_frontmatter_text(input_path)
         lines = content.splitlines(keepends=True)
         fm_result = _parse_frontmatter(lines, require_version=False)
         if not fm_result["success"]:
@@ -1986,7 +2018,7 @@ def _cli_would_skip(
     # the silent ALREADY_TRANSFORMED skip path there too.
     if generic_ref is None:
         try:
-            content = input_path.read_text(encoding="utf-8")
+            content = read_frontmatter_text(input_path)
             lines = content.splitlines(keepends=True)
             fm = _parse_frontmatter(lines, require_version=False)
             if fm["success"] and "transform_version" in fm["frontmatter"]:
@@ -2024,7 +2056,7 @@ def _main() -> int:
     # this check, letting the operator force a full re-transform.
     if args.generic_ref is None and generic_ref is not None:
         try:
-            _content = args.input.read_text(encoding="utf-8")
+            _content = read_frontmatter_text(args.input)
             _lines = _content.splitlines(keepends=True)
             _fm = _parse_frontmatter(_lines, require_version=False)
             if _fm["success"]:

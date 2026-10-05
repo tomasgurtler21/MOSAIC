@@ -33,6 +33,12 @@ from boundary_constants import (
     tag_base_name,
 )
 from document_kind import DocumentKind, classify_document as _classify_document_for_validator
+from frontmatter_input import (
+    FrontmatterDecodeError,
+    is_frontmatter_fence,
+    read_frontmatter_text,
+    render_line_for_error,
+)
 
 # Regex to extract a top-level YAML key from a frontmatter line.
 # Matches lines like: "key: value" or "key:" at the start of a line
@@ -110,17 +116,18 @@ def _parse_frontmatter(
           If E000 is returned, further validation should be skipped.
     """
     # File must start with '---'
-    if not lines or lines[0].strip() != "---":
+    if not lines or not is_frontmatter_fence(lines[0]):
+        first_line = render_line_for_error(lines[0] if lines else "")
         return None, [ValidationError(
             file_path=file_path,
             line_number=1,
             error_code="E000",
-            message="Malformed YAML frontmatter: expected '---' on line 1",
+            message=f"Malformed YAML frontmatter: expected '---' on line 1, found {first_line}",
         )]
 
     # Find the closing '---'
     for i in range(1, len(lines)):
-        if lines[i].strip() == "---":
+        if is_frontmatter_fence(lines[i]):
             # Found closing separator at index i.
             # Collect all top-level keys and values for kind classification.
             fm_keys_list: list[tuple[int, str]] = []  # (0-based line index, key)
@@ -152,7 +159,7 @@ def _parse_frontmatter(
     # No closing '---' found — malformed frontmatter
     return None, [ValidationError(
         file_path=file_path,
-        line_number=len(lines),
+        line_number=1,
         error_code="E000",
         message="Malformed YAML frontmatter: missing closing '---'",
     )]
@@ -200,7 +207,14 @@ def validate_file(file_path: pathlib.Path) -> list[ValidationError]:
     errors: list[ValidationError] = []
 
     try:
-        content = file_path.read_text(encoding="utf-8")
+        content = read_frontmatter_text(file_path)
+    except FrontmatterDecodeError as exc:
+        return [ValidationError(
+            file_path=file_path,
+            line_number=exc.line_number,
+            error_code="E000",
+            message=exc.reason,
+        )]
     except OSError as exc:
         return [ValidationError(
             file_path=file_path,
