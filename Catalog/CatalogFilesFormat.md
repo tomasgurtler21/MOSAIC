@@ -12,8 +12,56 @@ schema for readers working from the tool side, alongside
 **All three are copies and must be updated together**; where any of them
 disagrees with the design document, the design document is right.
 
-Unique to this document, and not specified anywhere else: skill frontmatter
-fields, hook bundle structure, and their version bump rules.
+Unique to this document, and not specified anywhere else: file encoding and
+frontmatter fence rules, skill frontmatter fields, hook bundle structure, and
+their version bump rules.
+
+---
+
+## File Encoding and Frontmatter Fences
+
+These rules apply to all MOSAIC source files: agents, skills, and workflows.
+The tools enforce them when they read a file.
+
+### Encoding
+
+- Files must be UTF-8. A file with invalid UTF-8, or a UTF-16 file, is rejected
+  with an error that names the file.
+- A leading UTF-8 byte order mark (BOM) is tolerated without a warning.
+  Deployed output is written without it.
+
+### Line endings
+
+- LF and CRLF line endings are both accepted. LF is recommended; the
+  repository's `.gitattributes` enforces LF for `*.md`.
+- Deployed output uses the source file's line-ending style throughout.
+- CR-only line endings are rejected.
+
+### Frontmatter fences
+
+- Frontmatter starts with a `---` line on the first line of the file (after an
+  optional BOM) and ends with a `---` line.
+- Trailing spaces or tabs after either fence are tolerated. When the tool
+  rewrites the file, the fence is written as plain `---`.
+- Leading blank lines, leading whitespace, or invisible characters before or
+  around the opening fence are rejected with an error that shows the line.
+- Invisible characters on an unindented fence-like line inside the frontmatter
+  are rejected the same way.
+- An indented `---` inside a block value is ordinary content.
+- A file whose first non-blank line is not fence-like has no frontmatter.
+
+### Agent frontmatter requirement
+
+Every agent file needs frontmatter. Subagents additionally need `id`, `name`,
+and `version`. A violation stops the deploy before any file is written.
+
+### Rewrite reporting
+
+When a deploy run overwrites a deployed agent or skill file whose BOM or
+line-ending style differs from the bytes written, the change is reported in the
+run log and the summaries. The following writes are not reported: hook files,
+fallback-location writes, and files written by the `transform`, `promote`, and
+`render` commands to an explicit destination.
 
 ---
 

@@ -1,5 +1,5 @@
 ---
-version: "3.9"
+version: "3.10"
 name: "Brownfield TDD Workflow"
 description: "New features or significant changes to an existing codebase requiring test-first development with full research and design."
 hint: "The main workhorse — best on shell-buildable codebases. Works best at a certain feature size, discovered through use rather than designed in. The two size-mismatch directions fail differently: too small wastes cost on overspecified Requirements/Plan and triggers unnecessary correction round-trips; too big genuinely starves execution agents of context, making them more error-prone and pushing you toward needing stronger models."
@@ -35,7 +35,7 @@ artifacts:
   - TestResults.md
 ---
 
-<Workflow type="core" name="brownfield-tdd" version="3.9">
+<Workflow type="core" name="brownfield-tdd" version="3.10">
 ## Brownfield TDD Workflow
 
 **Use when:** New features or significant changes to an **existing codebase** requiring test-first development with full research and design.
@@ -68,8 +68,6 @@ artifacts:
 
 **Notes:**
 - **Brownfield** = existing codebase with patterns to discover and follow
-- contracts-designer + contracts-review are optional - skip both if no new contracts are needed
-- implementation-review may identify other issues than code itself → callback to codebase-research, planner-tdd-soft, contracts-designer
 
 </Workflow>
 
@@ -91,10 +89,11 @@ Quality tracks feature sizing more than it tracks raw context budget. This was n
 
 | Version | Date | Author | Summary |
 |---------|------|--------|---------|
-| 3.7 | 2026-08-06 | MOSAIC | Make test-runner findings route back to planner |
 | 3.6 | 2026-08-05 | MOSAIC | Initial version |
+| 3.7 | 2026-08-06 | MOSAIC | Make test-runner findings route back to planner |
 | 3.8 | 2026-08-26 | MOSAIC | Replace Unicode emoji with ASCII tokens in HITL column (TRUE/FALSE). |
 | 3.9 | 2026-09-28 | MOSAIC | Add Research.md to requirements-review inputs; its codebase alignment and feasibility checks run on research findings. |
+| 3.10 | 2026-10-05 | MOSAIC | Remove note making design phase optional, it decreased realibility for very little savings |
 
 ---
 

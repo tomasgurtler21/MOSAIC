@@ -14,7 +14,7 @@ Planning agents define WHAT work to do, WHEN to do it, and HOW it should be stru
 | 7 | [planner-audit](./planner-audit.md) | 5.2.2 | Creates audit plans splitting changed files into typed stages (Implementation, Tests, Architecture, Contracts) for iterative auditing |
 | 8 | [contracts-designer](./contracts-designer.md) | 4.3.1 | Defines interfaces, contracts, data structures, and component specifications |
 | 5 | [system-designer](./system-designer.md) | 3.2.2 | Designs system architecture, component interactions, and high-level structure |
-| 4 | [requirements-refinement](./requirements-refinement.md) | 3.4.0 | Refines requirements into typed specifications at a user-declared depth through user dialogue |
+| 4 | [requirements-refinement](./requirements-refinement.md) | 3.4.1 | Refines requirements into typed specifications at a user-declared depth through user dialogue |
 | 24 | [knowledge-base-flag-sorter](./knowledge-base-flag-sorter.md) | 1.1.0 | Collects correction flags from KBFlags.md, organizes bottom-up by tier, creates correction stages in KBProgress.md |
 | 26 | [verification-questions-preparer](./verification-questions-preparer.md) | 2.2.1 | Creates, populates, and validates Q/A verification artifacts and prepares batched attempted-answer prompts |
 | 33 | [pr-requirements-analyzer](./pr-requirements-analyzer.md) | 1.0.0 | Analyzes PR context — fetches changed file list and stats, summarizes existing comment threads, confirms audit scope with user, enriches Requirements.md with PR metadata |

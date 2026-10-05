@@ -1,5 +1,5 @@
 ---
-version: "3.4"
+version: "3.5"
 name: "Brownfield Design Workflow"
 description: "Architecture review, design proposals, or planning large features for an existing codebase without implementation."
 hint: "The RESEARCH/PLANNING/DESIGN head of brownfield-tdd, ending before EXECUTION — the mirror image of implementation-only's EXECUTION/REVIEW tail. Unlike implementation-only, this one has a genuine standalone reason to exist beyond resuming a split run: 'produce a design without implementing it' is a real, distinct request, not just a workaround for something native run-continuation now covers."
@@ -25,7 +25,7 @@ artifacts:
   - contracts-review.md
 ---
 
-<Workflow type="core" name="brownfield-design" version="3.4">
+<Workflow type="core" name="brownfield-design" version="3.5">
 ## Brownfield Design Workflow
 
 **Use when:** Architecture review, design proposals, or planning large features for an **existing codebase** without implementation.
@@ -42,8 +42,6 @@ artifacts:
 
 **Notes:**
 - **Brownfield** = existing codebase with patterns to follow
-- contracts-designer + contracts-review are optional - skip both if no new/modified contracts are needed
-- Enable HITL on contracts-designer/contracts-review if user review is required
 
 </Workflow>
 
@@ -64,6 +62,7 @@ The difference is in why each half is still worth keeping. `implementation-only`
 | 3.2 | 2026-08-17 | MOSAIC | Changelog tracking begins here; earlier revisions predate this record. |
 | 3.3 | 2026-08-26 | MOSAIC | Replace Unicode emoji with ASCII tokens in HITL column (TRUE/FALSE). |
 | 3.4 | 2026-09-28 | MOSAIC | Add Research.md to requirements-review inputs; its codebase alignment and feasibility checks run on research findings. |
+| 3.5 | 2026-10-05 | MOSAIC | Remove note making design phase optional, it decreased realibility for very little savings |
 
 ---
 

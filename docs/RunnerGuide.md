@@ -16,6 +16,8 @@ This guide is for **project authors** who want to run multi-agent workflows with
 | **Supported harnesses** | `claude-code`, `opencode`, `ghcp-cli` |
 | **State file** | `Orchestration-{run_id}/Orchestration.md` — atomic writes, crash-safe, resumable |
 
+> **Known issue — GHCP CLI:** Runner runs on `ghcp-cli` are currently unreliable. With recent GHCP CLI versions (observed on 1.0.91), GHCP CLI sometimes ignores the requested `--agent` and runs its default agent instead, which shows up as protocol or parsing errors in the run. The failures are intermittent and the cause is not yet confirmed. In limited testing GHCP CLI 1.0.87 did not show the problem, so pinning it may help, but this is not verified. For reliable runs, use `claude-code` or `opencode`.
+
 **Why not just use the orchestrator agent?** A persistent orchestrator session accumulates context with every dispatch — every tool call, artifact edit, and subagent response stays in the context window. Cost grows roughly quadratically with run length. The Runner offloads all mechanical work (artifact writes, sequence tracking, harness invocations) and keeps orchestrator calls bounded: each starts a fresh session reading only the compact `Orchestration.md`.
 
 ---

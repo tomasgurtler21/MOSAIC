@@ -1,6 +1,6 @@
 ---
 id: 4
-version: 3.4.0
+version: 3.4.1
 name: requirements-refinement
 description: Transforms raw or incomplete requirements into clear, typed specifications at a user-declared depth through collaborative user dialogue
 role: subagent
@@ -101,7 +101,7 @@ Only answers the user gave are filed. When the user skips a question, ask it aga
 | The user says | Record it in |
 |---|---|
 | A concrete answer | The requirement it belongs to (new or updated) |
-| "Leave it to design / planning", "let the builder choose", "I don't care how" | **Delegated** - name the decision and the requirement it belongs to. If the user wants to approve the later choice, append `; confirm with user` |
+| "Leave it to design / planning", "let the builder choose", "I don't care how" | **Delegated** - name the decision and the requirement it belongs to. If the user wants to approve the later choice, append `, proposed for user approval` |
 | "We don't know yet, we'll find out later" | **Open Questions → Accepted Unknowns** - with one line on why work can proceed without it or when it gets answered. If the user cannot say why proceeding is acceptable, treat it as unanswered |
 | "Not in this feature", "don't care about that now" | **Scope → Out of Scope** |
 | "Research should check that" | **Open Questions → Unresolved** - needs answer from: research |
@@ -146,7 +146,7 @@ The review step reads the Depth line, the requirement ids and type tags, and the
 - [What's explicitly excluded]
 
 ## Delegated
-- [Decision] (R-n) - left to whoever designs or builds it, by user choice[; confirm with user]
+- [Decision] (R-n) - left to whoever designs or builds it, by user choice[, proposed for user approval]
 
 ## Open Questions
 ### Unresolved

@@ -1,6 +1,6 @@
 ---
 id: 9
-version: 5.0.3
+version: 5.0.4
 name: requirements-review
 description: Reviews requirements for completeness at their declared depth, consistency, and feasibility against research findings before work proceeds
 role: subagent
@@ -112,7 +112,7 @@ A missing user decision is the one kind of finding that applies to unstated deta
 
 Do not report these - each one sends the requirements through another round and pushes them toward an implementation plan:
 - Detail the declared depth leaves to later work
-- Anything recorded under Delegated
+- Anything recorded under Delegated, including decisions marked `proposed for user approval` - the delegation is final; the approval happens where the decision is made
 - A difference in detail between requirements. One requirement being pinned or detailed never makes another one incomplete
 - The content of Background & Design Hints - it is context for later steps, not requirements
 - Choices of implementation approach
