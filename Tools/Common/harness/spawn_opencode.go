@@ -1,6 +1,6 @@
 // OpenCode argument building lives in its own file, sitting beside spawn.go's
 // Claude Code BuildArgs rather than being folded into it: the two CLIs'
-// contracts diverge enough (positional prompt vs -p flag, no session-reuse
+// contracts diverge enough (stdin prompt vs -p flag, no session-reuse
 // flags, no append-system-prompt equivalent) that a shared function would
 // need to branch on more than InvocationKind.
 package harness
@@ -21,15 +21,30 @@ var ErrOpenCodeUnsupportedOutputFormat = errors.New("harness: opencode supports 
 var ErrOpenCodeEmptyAgentIdentifier = errors.New("harness: opencode requires a non-empty agent identifier")
 
 // BuildOpenCodeArgs constructs the CLI arguments for one request against the
-// `opencode run` contract. Pure: no file, process, clock or environment
-// access on any path.
+// `opencode run` contract and returns the prompt content to be written to the
+// child's stdin. Pure: no file, process, clock or environment access on any
+// path.
 //
-// The positional message carries SystemPrompt (prepended, separated by a
-// newline, when non-empty) rather than any file-based mechanism: OpenCode's
-// only alternative for injecting system-prompt content is a config file's
-// `prompt` field with a `{file:...}` reference, which requires writing a
-// config file — I/O a pure builder cannot perform, and a file this spawn
-// path deliberately does not write.
+// The prompt is delivered on stdin, never in argv: a `.cmd`/`.bat` shim runs
+// through `cmd /c`, and cmd.exe truncates the command line at the first
+// newline, which the multi-line env block always contains (the same rule as the
+// Claude Code BuildArgs). stdin is SystemPrompt + "\n" + Prompt when
+// SystemPrompt is non-empty, otherwise Prompt; it is nil when that content is
+// empty, in which case OpenCode reports "You must provide a message or a
+// command".
+//
+// No positional message is ever emitted, not even an empty one: OpenCode
+// 1.18.18 stores `positional + "\n" + stdin` as the user message when both are
+// present, and uses stdin verbatim when no positional is given. Verified live
+// against OpenCode 1.18.18 by comparing the stored message with the stdin
+// payload byte for byte: native exe and `cmd /c` shim, payloads with and
+// without a trailing newline, and a 38 568-byte payload (beyond the cmd.exe
+// and CreateProcess command-line limits). --agent and --auto behave as with a
+// positional message.
+//
+// OpenCode's only alternative for injecting system-prompt content is a config
+// file's `prompt` field with a `{file:...}` reference, which requires writing
+// a config file - I/O a pure builder cannot perform.
 //
 // req.Agent.DefinitionPath, req.MaxTurns and req.AllowedTools are
 // deliberately unused: the documented `opencode run` flag list offers no
@@ -41,15 +56,15 @@ var ErrOpenCodeEmptyAgentIdentifier = errors.New("harness: opencode requires a n
 // is created on every invocation. OpenCode may nonetheless leave orphaned
 // session state on disk even though no reuse flag is ever passed; that is a
 // known and accepted limitation, not something this builder can prevent.
-func BuildOpenCodeArgs(req SpawnRequest) ([]string, error) {
+func BuildOpenCodeArgs(req SpawnRequest) (args []string, stdin []byte, err error) {
 	if req.Agent.Identifier == "" {
-		return nil, ErrOpenCodeEmptyAgentIdentifier
+		return nil, nil, ErrOpenCodeEmptyAgentIdentifier
 	}
 	if req.OutputFormat != "" && req.OutputFormat != "json" {
-		return nil, ErrOpenCodeUnsupportedOutputFormat
+		return nil, nil, ErrOpenCodeUnsupportedOutputFormat
 	}
 
-	args := []string{
+	args = []string{
 		"run",
 		"--agent", req.Agent.Identifier,
 		"--format", "json",
@@ -70,18 +85,18 @@ func BuildOpenCodeArgs(req SpawnRequest) ([]string, error) {
 		args = append(args, "--model", req.Model)
 	}
 
-	// ExtraArgs must precede the positional message: the message is
-	// positional, so appending anything after it would be read as further
-	// message words rather than as arguments.
+	// ExtraArgs come last; there is no positional message after them.
 	args = append(args, req.ExtraArgs...)
 
-	message := req.Prompt
+	content := req.Prompt
 	if req.SystemPrompt != "" {
-		message = req.SystemPrompt + "\n" + req.Prompt
+		content = req.SystemPrompt + "\n" + req.Prompt
 	}
-	args = append(args, message)
+	if content != "" {
+		stdin = []byte(content)
+	}
 
-	return args, nil
+	return args, stdin, nil
 }
 
 // NewOpenCode constructs a Spawner bound to the given executable path,
@@ -116,7 +131,7 @@ func (s *openCodeSpawner) Spawn(ctx context.Context, req SpawnRequest) (Response
 		return Response{}, err
 	}
 
-	args, err := BuildOpenCodeArgs(req)
+	args, stdin, err := BuildOpenCodeArgs(req)
 	if err != nil {
 		return Response{}, err
 	}
@@ -132,6 +147,7 @@ func (s *openCodeSpawner) Spawn(ctx context.Context, req SpawnRequest) (Response
 	resp, err := Run(ctx, cmd, args, RunOptions{
 		WorkingDir: req.WorkingDir,
 		Env:        req.Env,
+		Stdin:      stdin,
 		Timeout:    timeout,
 		Sink:       s.cfg.sink,
 	})

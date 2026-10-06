@@ -2,6 +2,7 @@ package session
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"path/filepath"
 	"strconv"
@@ -169,6 +170,10 @@ func (s *sessionImpl) consultSelectResolver(ctx context.Context, req domain.Cons
 				domain.F("error", consultErr.Error()),
 			)
 			instr, consultErr = s.deps.Manual.ConsultRouting(ctx, req)
+		} else if consultErr != nil && config.ManualResolution {
+			// Unreachable after the start-time port check; reported rather
+			// than silently skipped.
+			consultErr = errors.Join(consultErr, newManualMissing())
 		}
 	}
 	if consultErr != nil {

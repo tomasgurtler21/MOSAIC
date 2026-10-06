@@ -151,10 +151,12 @@ func buildInteractiveWiring(in interactiveWiringInput) interactiveWiring {
 		}
 
 		// The same builder the non-interactive path uses, so both frontends
-		// share one place where consultant selection is expressed. It returns
+		// share one place where consultant wiring is expressed. Availability
+		// depends on the transports only, never on cfg.Settings: a resumed run's
+		// effective settings come from its artifact. It returns
 		// the routing fields only; the stop dependency belongs to this seam
 		// alone, because the non-interactive frontend has no stop affordance.
-		routingDeps := buildDeps(cfg.Settings, rawInvoker, in.ProgramRef, artifact.NewApprovalReader(), in.DispatchLog)
+		routingDeps := buildDeps(rawInvoker, in.ProgramRef, artifact.NewApprovalReader(), in.DispatchLog)
 
 		return session.Deps{
 			Harness:       h,
@@ -290,28 +292,22 @@ func (a *testCheckerAdapter) LoadExpected(path string) (*testcheck.ExpectedOutco
 }
 
 // buildDeps constructs the session's routing consultant, manual resolver,
-// pre-consultation capability and approval reader from the run's settings.
-// It is the single dependency builder for both frontends: the non-interactive
-// path calls it with settings derived from the pre-scanned CLI flags, the
-// interactive path with the settings carried by the completed configuration
-// selection. Neither frontend constructs a consultant of its own.
+// pre-consultation capability and approval reader. It is the single dependency
+// builder for both frontends. No input to it is a run setting: the ports it
+// returns are fixed by which transports exist, and the session's effective
+// settings (after resume reconciliation or adoption) decide which are used.
 //
 // The orchestrator reference and the routing table are deliberately absent:
 // neither is known at this point on either frontend. Both reach the
 // consultants later, through domain.RunContextBinder, on the session's
 // run-start path.
 //
-//   - settings.Mode selects which consultant is wired as Deps.Routing.
-//   - settings.ManualResolution controls whether a ManualResolver is wired
-//     as Deps.Manual.
-//   - settings.PreConsultation controls whether the OrchestratorConsultant is
-//     also wired as Deps.PreConsult (it implements both ports).
-//   - invoker is the consultation transport used by OrchestratorConsultant.
-//   - interact is the Interaction port used by ManualResolver.
+//   - Deps.Routing is always the OrchestratorConsultant.
+//   - Deps.PreConsult is that same consultant if and only if invoker is non-nil.
+//   - Deps.Manual is a ManualResolver if and only if interact is non-nil.
 //   - approvals is the HITL approval reader. Both frontends pass the real
 //     reader; a nil value is normalised by session.New as it is today.
 func buildDeps(
-	settings domain.RunSettings,
 	invoker domain.RawInvoker,
 	interact domain.Interaction,
 	approvals domain.ApprovalReader,
@@ -327,13 +323,13 @@ func buildDeps(
 		Approvals: approvals,
 	}
 
-	if settings.ManualResolution {
+	if interact != nil {
 		deps.Manual = &deviation.ManualResolver{
 			Interact: interact,
 		}
 	}
 
-	if settings.PreConsultation {
+	if invoker != nil {
 		deps.PreConsult = consultant
 	}
 

@@ -5,7 +5,6 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
-	"runtime/debug"
 	"strings"
 	"time"
 
@@ -435,17 +434,7 @@ func (m *rootModel) startSession() tea.Cmd {
 	sess := m.sess
 	ctx := m.ctx
 
-	return func() (msg tea.Msg) {
-		defer func() {
-			if p := recover(); p != nil {
-				stack := debug.Stack()
-				if len(stack) > 4096 {
-					stack = stack[:4096]
-				}
-				msg = runErrorMsg{err: fmt.Errorf("panic in session: %v\n%s", p, stack)}
-			}
-		}()
-
+	body := func() tea.Msg {
 		var seedInputs []string
 		if sel.isNewRun && sel.seedInput != "" {
 			seedInputs = []string{sel.seedInput}
@@ -471,4 +460,5 @@ func (m *rootModel) startSession() tea.Cmd {
 		}
 		return runDoneMsg{outcome: outcome}
 	}
+	return guardCmd(m.debug, "session", func(err error) tea.Msg { return runErrorMsg{err: err} }, body)
 }

@@ -1,7 +1,6 @@
 package main
 
 import (
-	"context"
 	"strings"
 	"testing"
 	"time"
@@ -64,7 +63,7 @@ func TestBuildDeps_PreConsultation_AdviceAppliedToDispatch_ViaBuildDeps(t *testi
 	}
 
 	// Build session deps through the shared builder (same path both frontends use).
-	deps := buildDeps(settings, fakeInvoker, &mainTestNoopInteraction{}, nil, nil)
+	deps := buildDepsFromTransports(fakeInvoker, &mainTestNoopInteraction{}, nil, nil)
 
 	// Supply the infrastructure deps that buildDeps deliberately leaves empty
 	// (Harness, Store, Clock, Interact are frontend-supplied, not part of the
@@ -96,7 +95,7 @@ func TestBuildDeps_PreConsultation_AdviceAppliedToDispatch_ViaBuildDeps(t *testi
 		RunSettings:          settings,
 	}
 
-	ses.Start(context.Background(), cfg) //nolint:errcheck
+	startSessionGuarded(t, ses, cfg)
 
 	invs := f.Invocations()
 	if len(invs) < 1 {
@@ -143,7 +142,7 @@ func TestBuildDeps_OrchestratedMode_RoutingConsultantIsInvoked(t *testing.T) {
 		Mode: domain.ExecutionModeOrchestrated,
 	}
 
-	deps := buildDeps(settings, fakeInvoker, nil, nil, nil)
+	deps := buildDepsFromTransports(fakeInvoker, nil, nil, nil)
 
 	f := harness.NewMockAdapter()
 	deps.Harness = f
@@ -172,7 +171,7 @@ func TestBuildDeps_OrchestratedMode_RoutingConsultantIsInvoked(t *testing.T) {
 		RunSettings:          settings,
 	}
 
-	ses.Start(context.Background(), cfg) //nolint:errcheck
+	startSessionGuarded(t, ses, cfg)
 
 	// A non-zero InvokeRaw call count proves that routing decisions flowed
 	// through the OrchestratorConsultant that buildDeps wired. If the session

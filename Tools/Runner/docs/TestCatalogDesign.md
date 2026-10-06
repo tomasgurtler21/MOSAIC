@@ -55,6 +55,19 @@ So the plan is:
 
 There are no per-harness workflows or fixtures. The only per-harness work is in the Runner's own code: each harness adapter needs the code for asking the orchestrator what to run next (RUN-4 in `Requirements.md`). None of them has it today.
 
+### 2.1 How a Test Is Run: Ground Rules
+
+These rules define what "a test in this suite" means. A test that breaks one of them is not finished, however well its fixtures are written.
+
+1. **Every test runs through the test runner, and only through it.** A test is a workflow file, its fixtures and its `*.expected.json`. The test runner (`mosaic-run --dev test` on the command line, the dev-test screen in the TUI) deploys, seeds, runs and checks it. A test never needs a hand-written `mosaic-run run` command, an extra flag, or a manual step. The only exceptions are the procedures in `RunningTests.md` § Manual-Only Test Procedures, which need process lifecycle control the runner doesn't have.
+2. **The TUI and the CLI are equivalent.** Anything the test runner can do from the command line it can do from the TUI, and the reverse. A capability that exists on only one side is a tooling gap, not a usage instruction.
+3. **What gets tested is chosen by the runner's selection, never by the test.** The user selects suite or workflows, modes and harnesses. The test declares what it supports (frontmatter, §6a) and nothing else. It never depends on how a particular machine happens to be set up.
+4. **A harness can have more than one install, and the runner covers them.** The same harness CLI behaves differently depending on how it was installed. On Windows, an npm install is a `.cmd` shim launched through `cmd.exe`, while a native install is launched directly. That difference has already hidden a real defect (the prompt was cut off on npm OpenCode installs while every test passed on a native install). Finding and covering the installs present on the machine is the test runner's job, and results are reported per install. A test that only matters for one install flavour still runs on all of them and must pass on all of them.
+5. **Pass or fail is decided by `*.expected.json` alone.** A test must not rely on a human reading the TUI to notice a failure. `status_message` echoes are diagnostic readouts that explain a failure; they are not the failure signal. When a defect can only be observed in content, the fixture must turn that into a status change (e.g. `request-fidelity` puts a `cmd.exe` expansion token in a script path so that damage produces `FIXTURE_ERROR`), or the checker must gain an assertion for it.
+6. **Check what arrived, not only what was sent.** The dispatch log is the Runner's record of what it *sent* (`task_contains` reads it). Delivery defects are only visible on the receiving side: in the agent's reply, or in a status the agent could only produce if the request arrived intact.
+
+Where the test runner doesn't yet meet these rules, the gap is tracked as a requirement on the tool. Tests are never worked around with manual instructions. Current gaps: `Requirements_RunnerOsFidelity.md` (repo root).
+
 ---
 
 ## 3. The Rules Every Stub Follows
@@ -259,7 +272,7 @@ smoke_set:
 
 ## 7. The Test Workflows
 
-Three original workflows test the harness connection itself and are the first thing to run against a new or changed harness: `smoke-single`, `payload-stress`, `staged-preplaced-plan`.
+Three original workflows test the harness connection itself and are the first thing to run against a new or changed harness: `smoke-single`, `payload-stress`, `staged-preplaced-plan`. `request-fidelity` joins them: it covers the request direction (Runner → agent), which `payload-stress` does not.
 
 The remaining workflows test Runner modes, routing mechanisms, and edge cases. The table below shows every workflow — implemented and planned.
 
@@ -267,6 +280,7 @@ The remaining workflows test Runner modes, routing mechanisms, and edge cases. T
 |----------|------|--------------|-------|
 | `smoke-single` | Auto, Auto-review | Harness works at all; single invocation, envelope parse, identifier echo | **Implemented** |
 | `payload-stress` | Auto, Auto-review, Orchestrated | Fenced blocks, JSON in messages, Unicode survive the round trip | **Implemented** |
+| `request-fidelity` | Auto | The request reaches the agent byte for byte: an input path containing a literal `%OS%` and `cmd.exe`-special advice text survive delivery, including through Windows npm `.cmd` shims. Failure is machine-detected (`FIXTURE_ERROR`), not left to a human reading the TUI | **Implemented** |
 | `staged-preplaced-plan` | Auto, Auto-review, Orchestrated | Staged execution with a pre-placed Plan.md | **Implemented** |
 | `orchestrated-linear` | Orchestrated | Orchestrator is asked before every step including the first; the stop instruction works; the task description it writes actually reaches the subagent | **Implemented** |
 | `orchestrated-backjump` | Orchestrated | Instruction overrides for artifacts, constraints and human review on successive dispatches of the same row | **Implemented** |
@@ -418,7 +432,7 @@ The `test` subcommand cannot:
 - **Simulate harness errors** — timeout/crash injection requires adapter-level hooks. See §13.3.
 - **Evaluate subjective quality** — whether a task description is "good enough" is a human judgement.
 
-These gaps are covered by manual procedures documented in `RunningTests.md`. Tooling gaps that prevent specific test workflows from running are tracked separately in `ToolingGaps.md`.
+These gaps are covered by manual procedures documented in `RunningTests.md`. Tooling gaps that prevent specific test workflows from running are tracked as requirements on the test runner (see §2.1).
 
 ### 8.3 Relationship to Workflow Frontmatter
 

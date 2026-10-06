@@ -75,6 +75,7 @@ func newLinearSession(t *testing.T) (ses session.Session, f *harness.MockAdapter
 		Store:     store,
 		Clock:     fixedClock{t: epoch},
 		Interact:  &noopInteraction{},
+		Manual:    &scriptedRoutingConsultant{},
 	})
 	return
 }

@@ -199,7 +199,7 @@ func (m *rootModel) launchTestRun() tea.Cmd {
 	interact := m.interact
 	ctx := m.ctx
 
-	return func() tea.Msg {
+	body := func() tea.Msg {
 		if factory == nil {
 			return testAllDoneMsg{Summary: &testrun.TestSummary{
 				DeployError: fmt.Errorf("test runner not configured"),
@@ -219,6 +219,9 @@ func (m *rootModel) launchTestRun() tea.Cmd {
 		}
 		return testAllDoneMsg{Summary: summary}
 	}
+	return guardCmd(m.debug, "test run", func(err error) tea.Msg {
+		return testAllDoneMsg{Summary: &testrun.TestSummary{DeployError: err}}
+	}, body)
 }
 
 // tuiTestProgressReporter implements testrun.ProgressReporter by forwarding

@@ -158,6 +158,12 @@ func (s *sessionImpl) setupInfraAndStages(ctx context.Context, rs *runStartCtx) 
 		}
 	}
 
+	// The effective settings are settled: refuse a run that needs a capability
+	// the composition root did not wire, before any artifact write.
+	if portErr := s.deps.CheckForSettings(rs.config.RunSettings); portErr != nil {
+		return s.refusalCaused(portErr.Error(), portErr), true, nil
+	}
+
 	// Record adopted runner settings once, before any dispatch.
 	if adoptRunnerSettings {
 		adopted, err := s.deps.Store.AdoptRunnerSettings(ctx, rs.config.Mode, rs.config.PreConsultation, rs.config.ManualResolution, s.deps.Clock.Now())
@@ -336,6 +342,12 @@ func (s *sessionImpl) applyOverridesAndPreConsult(ctx context.Context, rs *runSt
 	}
 	if rs.config.Mode != domain.ExecutionModeAuto && rs.config.Mode != domain.ExecutionModeAutoReview {
 		return domain.RunOutcome{}, false, nil
+	}
+	if s.deps.PreConsult == nil {
+		// Unreachable after the start-time port check; kept so no path can
+		// dereference a nil port.
+		missing := newPreConsultMissing(rs.config.Mode)
+		return s.startFailed("pre-consultation failed: "+missing.Error(), missing), true, nil
 	}
 	advice, pcErr := s.deps.PreConsult.PreConsult(ctx, domain.ConsultationRequest{
 		Context:               domain.ConsultContextPreConsultation,

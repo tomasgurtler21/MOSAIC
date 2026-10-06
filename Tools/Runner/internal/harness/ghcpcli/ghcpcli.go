@@ -300,7 +300,7 @@ func (a *GHCPCLIAdapter) InvokeRaw(ctx context.Context, agent domain.AgentRefere
 		return nil, err
 	}
 
-	args, err := commonharness.BuildGHCPCLIArgs(spawnReq)
+	args, stdin, err := commonharness.BuildGHCPCLIArgs(spawnReq)
 	if err != nil {
 		a.logger.Log(domain.EventHarnessInvokeError, err.Error(),
 			domain.F("agent", agent.Identifier),
@@ -311,6 +311,7 @@ func (a *GHCPCLIAdapter) InvokeRaw(ctx context.Context, agent domain.AgentRefere
 	resp, err := commonharness.Run(ctx, cmd, args, commonharness.RunOptions{
 		WorkingDir: spawnReq.WorkingDir,
 		Env:        spawnReq.Env,
+		Stdin:      stdin,
 		Timeout:    a.timeout,
 		Sink:       a.sink,
 	})

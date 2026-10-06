@@ -11,7 +11,7 @@ package ghcpcli_test
 // Coverage:
 //
 //   Request mapping:
-//   - The -p prompt carries the marshalled request for both invocation kinds.
+//   - The stdin prompt carries the marshalled request for both invocation kinds.
 //   - --agent <Identifier> is emitted for both invocation kinds.
 //   - SystemPrompt is left unset: no <env> block appears in the prompt
 //     for either invocation kind, unlike OpenCodeAdapter which always injects
@@ -66,10 +66,11 @@ import (
 // ---------------------------------------------------------------------------
 
 // TestGHCPCLIAdapter_OrdinaryInvocation_PromptCarriesMarshalledRequest verifies
-// that the -p prompt value contains the marshalled request JSON for ordinary
+// that the stdin prompt contains the marshalled request JSON for ordinary
 // invocations.
 func TestGHCPCLIAdapter_OrdinaryInvocation_PromptCarriesMarshalledRequest(t *testing.T) {
-	argsFile := setHelperEnv(t, "ghcpcli-success")
+	setHelperEnv(t, "ghcpcli-success")
+	stdinFile := newTestStdinCapture(t)
 
 	adapter := ghcpcli.NewGHCPCLIAdapter(helperExe(t), 5*time.Second)
 	_, err := adapter.Invoke(context.Background(), ordinaryAgentRef(), minimalClaudeRequest("test-agent#1"))
@@ -77,20 +78,17 @@ func TestGHCPCLIAdapter_OrdinaryInvocation_PromptCarriesMarshalledRequest(t *tes
 		t.Fatalf("unexpected error: %v", err)
 	}
 
-	args := readArgs(t, argsFile)
-	pIdx := indexOfArg(args, "-p")
-	if pIdx < 0 || pIdx+1 >= len(args) {
-		t.Fatalf("want -p <prompt> in args, got %v", args)
-	}
-	if !strings.Contains(args[pIdx+1], "test-agent#1") {
-		t.Errorf("want -p value to contain the marshalled request (agent_instance_id), got %q", args[pIdx+1])
+	stdin := string(readHelperStdin(t, stdinFile))
+	if !strings.Contains(stdin, "test-agent#1") {
+		t.Errorf("want stdin to contain the marshalled request (agent_instance_id), got %q", stdin)
 	}
 }
 
 // TestGHCPCLIAdapter_OrchestratorInvocation_PromptCarriesMarshalledRequest
 // verifies the same for orchestrator invocations.
 func TestGHCPCLIAdapter_OrchestratorInvocation_PromptCarriesMarshalledRequest(t *testing.T) {
-	argsFile := setHelperEnv(t, "ghcpcli-success")
+	setHelperEnv(t, "ghcpcli-success")
+	stdinFile := newTestStdinCapture(t)
 
 	adapter := ghcpcli.NewGHCPCLIAdapter(helperExe(t), 5*time.Second)
 	_, err := adapter.Invoke(context.Background(), orchestratorAgentRef(), minimalClaudeRequest("orchestrator-agent#1"))
@@ -98,13 +96,9 @@ func TestGHCPCLIAdapter_OrchestratorInvocation_PromptCarriesMarshalledRequest(t 
 		t.Fatalf("unexpected error: %v", err)
 	}
 
-	args := readArgs(t, argsFile)
-	pIdx := indexOfArg(args, "-p")
-	if pIdx < 0 || pIdx+1 >= len(args) {
-		t.Fatalf("want -p <prompt> in args, got %v", args)
-	}
-	if !strings.Contains(args[pIdx+1], "orchestrator-agent#1") {
-		t.Errorf("want -p value to contain the marshalled request (agent_instance_id), got %q", args[pIdx+1])
+	stdin := string(readHelperStdin(t, stdinFile))
+	if !strings.Contains(stdin, "orchestrator-agent#1") {
+		t.Errorf("want stdin to contain the marshalled request (agent_instance_id), got %q", stdin)
 	}
 }
 
@@ -152,7 +146,8 @@ func TestGHCPCLIAdapter_OrchestratorInvocation_IncludesAgentFlag(t *testing.T) {
 // files it discovers itself, and any orchestration context is rendered into the
 // agent's .agent.md profile at deploy time by Tools/Deployment.
 func TestGHCPCLIAdapter_OrdinaryInvocation_NoEnvBlockInPrompt(t *testing.T) {
-	argsFile := setHelperEnv(t, "ghcpcli-success")
+	setHelperEnv(t, "ghcpcli-success")
+	stdinFile := newTestStdinCapture(t)
 
 	adapter := ghcpcli.NewGHCPCLIAdapter(helperExe(t), 5*time.Second)
 	_, err := adapter.Invoke(context.Background(), ordinaryAgentRef(), minimalClaudeRequest("test-agent#1"))
@@ -160,13 +155,9 @@ func TestGHCPCLIAdapter_OrdinaryInvocation_NoEnvBlockInPrompt(t *testing.T) {
 		t.Fatalf("unexpected error: %v", err)
 	}
 
-	args := readArgs(t, argsFile)
-	pIdx := indexOfArg(args, "-p")
-	if pIdx < 0 || pIdx+1 >= len(args) {
-		t.Fatalf("want -p <prompt> in args, got %v", args)
-	}
-	if strings.Contains(args[pIdx+1], "<env>") {
-		t.Errorf("want NO <env> block in ordinary invocation prompt (SystemPrompt must be left unset), got %q", args[pIdx+1])
+	stdin := string(readHelperStdin(t, stdinFile))
+	if strings.Contains(stdin, "<env>") {
+		t.Errorf("want NO <env> block in ordinary invocation prompt (SystemPrompt must be left unset), got %q", stdin)
 	}
 }
 
@@ -174,7 +165,8 @@ func TestGHCPCLIAdapter_OrdinaryInvocation_NoEnvBlockInPrompt(t *testing.T) {
 // SystemPrompt is also left unset for orchestrator invocations. Both invocation
 // kinds must leave the <env> injection absent.
 func TestGHCPCLIAdapter_OrchestratorInvocation_NoEnvBlockInPrompt(t *testing.T) {
-	argsFile := setHelperEnv(t, "ghcpcli-success")
+	setHelperEnv(t, "ghcpcli-success")
+	stdinFile := newTestStdinCapture(t)
 
 	adapter := ghcpcli.NewGHCPCLIAdapter(helperExe(t), 5*time.Second)
 	_, err := adapter.Invoke(context.Background(), orchestratorAgentRef(), minimalClaudeRequest("orchestrator-agent#1"))
@@ -182,13 +174,9 @@ func TestGHCPCLIAdapter_OrchestratorInvocation_NoEnvBlockInPrompt(t *testing.T) 
 		t.Fatalf("unexpected error: %v", err)
 	}
 
-	args := readArgs(t, argsFile)
-	pIdx := indexOfArg(args, "-p")
-	if pIdx < 0 || pIdx+1 >= len(args) {
-		t.Fatalf("want -p <prompt> in args, got %v", args)
-	}
-	if strings.Contains(args[pIdx+1], "<env>") {
-		t.Errorf("want NO <env> block in orchestrator invocation prompt (SystemPrompt must be left unset), got %q", args[pIdx+1])
+	stdin := string(readHelperStdin(t, stdinFile))
+	if strings.Contains(stdin, "<env>") {
+		t.Errorf("want NO <env> block in orchestrator invocation prompt (SystemPrompt must be left unset), got %q", stdin)
 	}
 }
 

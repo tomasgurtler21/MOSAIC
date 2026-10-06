@@ -95,16 +95,13 @@ func testWiringInput(t *testing.T, signal *session.StopSignal, identity tuiRunId
 	}
 }
 
-// fullyWiredConfig exercises every conditional branch of the dependency
-// builder, so a Deps completeness check has no field left legitimately nil.
+// fullyWiredConfig selects a harness whose adapter implements domain.RawInvoker
+// (so every capability port is available), so a Deps completeness check has no
+// field left legitimately nil. It carries no settings: availability of the
+// capability ports does not depend on them.
 func fullyWiredConfig() runconfig.ConfigSelection {
 	return runconfig.ConfigSelection{
-		Settings: domain.RunSettings{
-			Mode:             domain.ExecutionModeOrchestrated,
-			ManualResolution: true,
-			PreConsultation:  true,
-		},
-		Harness: "fake",
+		Harness: "claude-code",
 	}
 }
 
@@ -239,20 +236,19 @@ func TestInteractiveWiring_ResetThroughOptions_IsObservedByProducedDeps(t *testi
 func TestBuildDeps_LeavesStopRequestedNil(t *testing.T) {
 	cases := []struct {
 		name     string
-		settings domain.RunSettings
+		invoker  domain.RawInvoker
+		interact domain.Interaction
 	}{
-		{"zero settings", domain.RunSettings{}},
-		{"auto", domain.RunSettings{Mode: domain.ExecutionModeAuto}},
-		{"orchestrated", domain.RunSettings{Mode: domain.ExecutionModeOrchestrated}},
-		{"manual resolution enabled", domain.RunSettings{Mode: domain.ExecutionModeAuto, ManualResolution: true}},
-		{"pre-consultation enabled", domain.RunSettings{Mode: domain.ExecutionModeAuto, PreConsultation: true}},
-		{"every branch enabled", domain.RunSettings{Mode: domain.ExecutionModeOrchestrated, ManualResolution: true, PreConsultation: true}},
+		{"no transports", nil, nil},
+		{"raw invoker only", &fakeRawInvoker{}, nil},
+		{"interaction only", nil, &mainTestNoopInteraction{}},
+		{"every capability wired", &fakeRawInvoker{}, &mainTestNoopInteraction{}},
 	}
 
 	for _, tc := range cases {
 		tc := tc
 		t.Run(tc.name, func(t *testing.T) {
-			deps := buildDeps(tc.settings, nil, nil, nil, &sentinelDispatchLogger{})
+			deps := buildDepsFromTransports(tc.invoker, tc.interact, nil, &sentinelDispatchLogger{})
 			if deps.StopRequested != nil {
 				t.Error("buildDeps set StopRequested: the shared builder must leave the stop dependency unwired so the non-interactive frontend keeps session.New's constant-false default")
 			}

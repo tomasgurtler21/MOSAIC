@@ -80,6 +80,13 @@ func (m *mainTestMemStore) Apply(_ context.Context, state domain.ArtifactState, 
 			LastAgent:  step.AgentInstance,
 		}
 	}
+	state.ExecutionLog = append(state.ExecutionLog, domain.ExecutionLogEntry{
+		Seq:    step.Seq,
+		Agent:  step.AgentInstance,
+		Phase:  step.Phase,
+		Stage:  step.Stage,
+		Status: step.Status,
+	})
 	m.state = state
 	return state, nil
 }

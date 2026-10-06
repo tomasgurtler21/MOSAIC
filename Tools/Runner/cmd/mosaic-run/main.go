@@ -28,7 +28,7 @@ import (
 	"github.com/mattn/go-isatty"
 )
 
-const ToolVersion = "1.4.0"
+const ToolVersion = "1.4.1"
 
 // wantsTUI reports whether mosaic-run should launch the interactive TUI.
 // The TUI is launched when:
@@ -131,15 +131,6 @@ func runCLIMode(args, cobraArgs []string) int {
 	}
 	execPathStr := scanFlag(args, "--executable-path")
 
-	// Pre-scan the flags that select which consultants are wired before the session
-	// is constructed. These mirror the cobra flag defaults: --mode has no default
-	// (the session will refuse an absent mode), --manual-resolution defaults to false,
-	// and --pre-consult defaults to true. The pre-scan happens here so that buildDeps
-	// can wire the correct consultant types into session.Deps before session.New is called.
-	modeStr := scanFlag(args, "--mode")
-	manualResolution := scanBoolFlag(args, "--manual-resolution")
-	preConsult := preConsultFromArgs(args)
-
 	// Parse the timeout duration; fall back to 30 minutes on invalid input
 	// (cli.Run will surface the parse error to the user with ExitUsage).
 	invocationTimeout := 30 * time.Minute
@@ -198,15 +189,13 @@ func runCLIMode(args, cobraArgs []string) int {
 		rawInvoker = ri
 	}
 
-	// Build the consultation routing deps from the pre-scanned flags. The orchestrator
-	// reference and routing table are not known at process startup; the session hands
-	// them to every consultant that implements domain.RunContextBinder at run start.
-	cliSettings := domain.RunSettings{
-		Mode:             domain.ExecutionMode(modeStr),
-		ManualResolution: manualResolution,
-		PreConsultation:  preConsult,
-	}
-	routingDeps := buildDeps(cliSettings, rawInvoker, interact, artifact.NewApprovalReader(), dispLogger)
+	// Build the consultation routing deps. Availability depends only on the
+	// transports; the session's effective settings (flags, or the recorded
+	// settings on resume) decide which capabilities are used. The orchestrator
+	// reference and routing table are not known at process startup; the session
+	// hands them to every consultant that implements domain.RunContextBinder at
+	// run start.
+	routingDeps := buildDeps(rawInvoker, interact, artifact.NewApprovalReader(), dispLogger)
 
 	// Wire the session with the resolved run-scoped store and all port dependencies.
 	// The store path matches runIdentity.RunFolder, so session I/O and the COMPLETED
@@ -229,6 +218,7 @@ func runCLIMode(args, cobraArgs []string) int {
 	// resolution step and uses the same run folder that was used to wire the session.
 	// Use cobraArgs (not args) so the entry-point-only --dev flag does not reach cobra.
 	sess = withGHCPTrustPreflight(sess, runIdentity.RunFolder, harnessStr, interact, false, logger)
+	sess = newPanicLoggingSession(sess, logger)
 	sess = newRunLifecycleSession(sess, runLogConfig{RunFolder: runIdentity.RunFolder, HarnessID: harnessStr, Debug: logger, Clock: &realClock{}})
 	runCtx, releaseRunCtx := newCLIRunContext(context.Background(), osInterrupt)
 	defer releaseRunCtx()
