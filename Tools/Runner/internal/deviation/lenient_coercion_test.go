@@ -22,6 +22,7 @@ func TestConsultRouting_CoercesInputArtifactsFromBareString(t *testing.T) {
 	reply := []byte(`{
 		"action": "dispatch",
 		"agent": "agent-a",
+"row": 1,
 		"task_description": "do the thing",
 		"input_artifacts": "single-file.md"
 	}`)
@@ -58,6 +59,7 @@ func TestConsultRouting_CoercesOutputArtifactsFromBareString(t *testing.T) {
 	reply := []byte(`{
 		"action": "dispatch",
 		"agent": "agent-a",
+"row": 1,
 		"task_description": "do the thing",
 		"output_artifacts": "result.md"
 	}`)
@@ -93,6 +95,7 @@ func TestConsultRouting_CoercesHITLOverrideFromStringTrue(t *testing.T) {
 	reply := []byte(`{
 		"action": "dispatch",
 		"agent": "agent-a",
+"row": 1,
 		"task_description": "do the thing",
 		"hitl_override": "true"
 	}`)
@@ -126,6 +129,7 @@ func TestConsultRouting_CoercesHITLOverrideFromStringFalse(t *testing.T) {
 	reply := []byte(`{
 		"action": "dispatch",
 		"agent": "agent-a",
+"row": 1,
 		"task_description": "do the thing",
 		"hitl_override": "false"
 	}`)
@@ -159,6 +163,7 @@ func TestConsultRouting_CoercedFieldsAreAllNonNilPointers(t *testing.T) {
 	reply := []byte(`{
 		"action": "dispatch",
 		"agent": "agent-a",
+"row": 1,
 		"task_description": "do the thing",
 		"input_artifacts": "in.md",
 		"output_artifacts": "out.md",
@@ -205,6 +210,7 @@ func TestConsultRouting_UncoercibleValues_FailWithMalformedJSON(t *testing.T) {
 			reply: []byte(`{
 				"action": "dispatch",
 				"agent": "agent-a",
+"row": 1,
 				"task_description": "do the thing",
 				"input_artifacts": 42
 			}`),
@@ -214,6 +220,7 @@ func TestConsultRouting_UncoercibleValues_FailWithMalformedJSON(t *testing.T) {
 			reply: []byte(`{
 				"action": "dispatch",
 				"agent": "agent-a",
+"row": 1,
 				"task_description": "do the thing",
 				"input_artifacts": {"key": "value"}
 			}`),
@@ -223,6 +230,7 @@ func TestConsultRouting_UncoercibleValues_FailWithMalformedJSON(t *testing.T) {
 			reply: []byte(`{
 				"action": "dispatch",
 				"agent": "agent-a",
+"row": 1,
 				"task_description": "do the thing",
 				"output_artifacts": 99
 			}`),
@@ -232,6 +240,7 @@ func TestConsultRouting_UncoercibleValues_FailWithMalformedJSON(t *testing.T) {
 			reply: []byte(`{
 				"action": "dispatch",
 				"agent": "agent-a",
+"row": 1,
 				"task_description": "do the thing",
 				"output_artifacts": {"key": "value"}
 			}`),
@@ -241,6 +250,7 @@ func TestConsultRouting_UncoercibleValues_FailWithMalformedJSON(t *testing.T) {
 			reply: []byte(`{
 				"action": "dispatch",
 				"agent": "agent-a",
+"row": 1,
 				"task_description": "do the thing",
 				"hitl_override": "yes"
 			}`),
@@ -250,6 +260,7 @@ func TestConsultRouting_UncoercibleValues_FailWithMalformedJSON(t *testing.T) {
 			reply: []byte(`{
 				"action": "dispatch",
 				"agent": "agent-a",
+"row": 1,
 				"task_description": "do the thing",
 				"hitl_override": 1
 			}`),

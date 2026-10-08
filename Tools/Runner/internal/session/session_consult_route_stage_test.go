@@ -1,10 +1,11 @@
 package session_test
 
-// Tests for ConsultRoute stage context preservation: the current_state.stage
-// value must survive consultant-routed dispatches (not be wiped to ""), every
-// CompletedStep produced by consultRoute must carry Stage=entryStage, recursive
-// consultRoute calls must independently read the stage at their own entry, and
-// HITL-rejection infrastructure steps must also carry the stage value.
+// Tests for the stage a consultant-routed step is recorded at: every
+// CompletedStep produced by consultRoute carries the stage of the dispatch
+// instruction (current_state.stage follows it and is never wiped to ""),
+// recursive consultRoute calls record their own instruction's stage, and
+// HITL-rejection infrastructure steps carry the same stage as the step they
+// reject.
 
 import (
 	"context"
@@ -67,14 +68,14 @@ func writeConsultStagedPlan(t *testing.T, dir string) {
 
 // newConsultStagedSession builds a session backed by consult-staged-orch.md
 // in orchestrated mode. The fixture uses EXECUTION.[StageNumber] rows for
-// agent-a and agent-b and requires Plan.md for template expansion; this helper
-// writes Plan.md (Stage-1 and Stage-2) and sets RunFolder = dir so the session
-// finds it. After expansion the routing table has four rows (indices 0-3):
+// agent-a and agent-b and requires Plan.md for the stage set; this helper
+// writes Plan.md (stages 1 and 2) and sets RunFolder = dir so the session finds
+// it. The routing table has two rows (indices 0-1), each run once per stage:
 //
-//	0 = EXECUTION.Stage-1 / agent-a
-//	1 = EXECUTION.Stage-1 / agent-b
-//	2 = EXECUTION.Stage-2 / agent-a
-//	3 = EXECUTION.Stage-2 / agent-b
+//	0 = EXECUTION.[StageNumber] / agent-a
+//	1 = EXECUTION.[StageNumber] / agent-b
+//
+// A consultant dispatch names the row index and the plan stage number.
 //
 // The session uses a no-op interaction. Callers that need notice capture should
 // build the session inline as TestSession_ConsultRoute_PreservesCurrentStateStage
@@ -121,13 +122,13 @@ func baseConsultStagedConfig(orchPath, runFolder string) domain.RunConfig {
 }
 
 // consultStagedStage2State returns an ArtifactState that simulates a
-// consult-staged-orch.md run having completed Stage-1 (agent-a#1, agent-b#2)
-// and Stage-2/agent-a (agent-a#3), with Stage-2/agent-b still pending.
-// CurrentState.Stage="Stage-2" is the load-bearing value: tests assert that
-// it is preserved (not wiped to "") after a consultant-routed dispatch.
+// consult-staged-orch.md run having completed stage 1 (agent-a#1, agent-b#2)
+// and agent-a of stage 2 (agent-a#3), with agent-b of stage 2 still pending.
+// CurrentState.Stage="2" is the recorded stage of the last step; tests assert
+// that a consultant-routed dispatch records its own instruction's stage.
 //
-// The Phase value "EXECUTION.Stage-2" is the expanded form of the
-// EXECUTION.[StageNumber] template row after plan expansion.
+// The Phase value is the bare phase name "EXECUTION"; the stage of an
+// ungrouped staged row is recorded as the plain stage number.
 func consultStagedStage2State() domain.ArtifactState {
 	return domain.ArtifactState{
 		Workflow:        "consult-staged",
@@ -136,15 +137,15 @@ func consultStagedStage2State() domain.ArtifactState {
 		GlobalSequence:  3,
 		RunSettings:     domain.RunSettings{Mode: domain.ExecutionModeOrchestrated},
 		CurrentState: domain.CurrentState{
-			Phase:      "EXECUTION.Stage-2",
-			Stage:      "Stage-2",
+			Phase:      "EXECUTION",
+			Stage:      "2",
 			LastStatus: domain.StatusSUCCESS,
 			LastAgent:  "agent-a#3",
 		},
 		ExecutionLog: []domain.ExecutionLogEntry{
-			{Seq: 1, Agent: "agent-a#1", Phase: "EXECUTION.Stage-1", Stage: "Stage-1", Status: domain.StatusSUCCESS},
-			{Seq: 2, Agent: "agent-b#2", Phase: "EXECUTION.Stage-1", Stage: "Stage-1", Status: domain.StatusSUCCESS},
-			{Seq: 3, Agent: "agent-a#3", Phase: "EXECUTION.Stage-2", Stage: "Stage-2", Status: domain.StatusSUCCESS},
+			{Seq: 1, Agent: "agent-a#1", Phase: "EXECUTION", Stage: "1", WorkflowRow: 1, Status: domain.StatusSUCCESS},
+			{Seq: 2, Agent: "agent-b#2", Phase: "EXECUTION", Stage: "1", WorkflowRow: 2, Status: domain.StatusSUCCESS},
+			{Seq: 3, Agent: "agent-a#3", Phase: "EXECUTION", Stage: "2", WorkflowRow: 1, Status: domain.StatusSUCCESS},
 		},
 	}
 }
@@ -155,21 +156,20 @@ func consultStagedStage2State() domain.ArtifactState {
 // when the consultation was triggered.
 //
 // The test uses consult-staged-orch.md (explicit Stage-1 and Stage-2 rows)
-// and pre-seeds the store to represent a run that completed Stage-1 and
-// Stage-2/agent-a, leaving Stage-2/agent-b as the next step. Stage="Stage-2"
+// and pre-seeds the store to represent a run that completed stage 1 and
+// agent-a of stage 2, leaving agent-b of stage 2 as the next step. Stage="2"
 // is load-bearing: if consultRoute omits Stage from the CompletedStep,
 // Store.Apply overwrites current_state.stage with "", causing the next
 // engine.Next() call to fail with "stage 0 has no entry in stage set".
 //
 // Secondary assertions verify that the CompletedStep produced by consultRoute
-// carries Stage="Stage-2" and that at least one notification message emitted
-// during the dispatch contains the stage value rather than the hardcoded "".
+// carries Stage="2" (the instruction's stage) and that at least one
+// notification message emitted during the dispatch contains the stage value.
 func TestSession_ConsultRoute_PreservesCurrentStateStage(t *testing.T) {
 	consultant := &scriptedRoutingConsultant{}
-	// Row 3 is EXECUTION.Stage-2/agent-b after plan expansion (zero-based):
-	// the template rows for agent-a and agent-b expand to indices 0-1 (Stage-1)
-	// and 2-3 (Stage-2) given a Plan.md with Stage-1 and Stage-2.
-	consultant.queueDispatch("agent-b", "complete Stage-2", 3)
+	// Row 1 is EXECUTION.[StageNumber]/agent-b (zero-based); the instruction
+	// names stage 2 from the Plan.md stage set.
+	consultant.queueStagedDispatch("agent-b", "complete Stage-2", 1, 2)
 	consultant.queueStop("Stage-2 complete")
 
 	notices := &noticeCapturingInteraction{}
@@ -190,8 +190,8 @@ func TestSession_ConsultRoute_PreservesCurrentStateStage(t *testing.T) {
 		Interact: notices,
 	})
 
-	// Pre-seed the store to simulate Stage-1 done and Stage-2/agent-a done,
-	// so Stage="Stage-2" is the value consultRoute must not wipe to "".
+	// Pre-seed the store to simulate stage 1 done and agent-a of stage 2 done,
+	// so Stage="2" is the value consultRoute must not wipe to "".
 	store.state = consultStagedStage2State()
 	store.exists = true
 
@@ -206,16 +206,15 @@ func TestSession_ConsultRoute_PreservesCurrentStateStage(t *testing.T) {
 		t.Fatalf("want nil error, got %v", err)
 	}
 
-	// Primary assertion: current_state.stage must remain "Stage-2" after the
-	// consultant-routed dispatch. Without the fix, consultRoute omits Stage
-	// from CompletedStep, and Store.Apply overwrites current_state.stage with
-	// "" because the step is not infrastructure.
-	if store.state.CurrentState.Stage != "Stage-2" {
-		t.Errorf("want current_state.stage=%q after consultant-routed dispatch in Stage-2, got %q; "+
-			"consultRoute must capture state.CurrentState.Stage at entry (entryStage) and "+
-			"populate every CompletedStep with Stage: entryStage so Store.Apply does not "+
+	// Primary assertion: current_state.stage must be "2" after the
+	// consultant-routed dispatch. If consultRoute omits Stage from the
+	// CompletedStep, Store.Apply overwrites current_state.stage with "" because
+	// the step is not infrastructure.
+	if store.state.CurrentState.Stage != "2" {
+		t.Errorf("want current_state.stage=%q after consultant-routed dispatch in stage 2, got %q; "+
+			"every CompletedStep must carry the instruction's stage so Store.Apply does not "+
 			"wipe the stage context",
-			"Stage-2", store.state.CurrentState.Stage)
+			"2", store.state.CurrentState.Stage)
 	}
 
 	// Secondary assertion: the non-infrastructure CompletedStep applied by
@@ -232,54 +231,47 @@ func TestSession_ConsultRoute_PreservesCurrentStateStage(t *testing.T) {
 		t.Fatal("want at least one non-infrastructure workflow step in store.Applied, got none; "+
 			"the consultant-routed dispatch must produce a CompletedStep recorded via Store.Apply")
 	}
-	if workflowStep.Stage != "Stage-2" {
+	if workflowStep.Stage != "2" {
 		t.Errorf("want CompletedStep.Stage=%q for consultant-routed workflow step, got %q; "+
-			"all CompletedStep literals in consultRoute must include Stage: entryStage",
-			"Stage-2", workflowStep.Stage)
+			"all CompletedStep literals in consultRoute must carry the instruction's stage",
+			"2", workflowStep.Stage)
 	}
 
 	// Tertiary assertion: at least one notification emitted by consultRoute
-	// must contain "Stage-2". The dispatch-start and step-done format strings
-	// currently hardcode stage="" and must be updated to use entryStage.
+	// must carry the stage the step runs at.
+	const wantNotice = `stage="2"`
 	found := false
 	for _, n := range notices.allNotices() {
-		if strings.Contains(n.Message, "Stage-2") {
+		if strings.Contains(n.Message, wantNotice) {
 			found = true
 			break
 		}
 	}
 	if !found {
 		t.Errorf("want at least one notification message containing %q from consultRoute, "+
-			"got none in %d total notifications; "+
-			"consultRoute notification format strings must use entryStage, not hardcoded \"\"",
-			"Stage-2", len(notices.allNotices()))
+			"got none in %d total notifications",
+			wantNotice, len(notices.allNotices()))
 	}
 }
 
-// TestSession_ConsultRoute_RecursiveCall_UsesOwnEntryStage verifies that when
-// consultRoute calls itself recursively (here triggered by a harness error that
-// becomes a deviation re-route), the recursive call independently reads
-// state.CurrentState.Stage at its own entry point and propagates that value to
-// the CompletedStep it produces.
+// TestSession_ConsultRoute_RecursiveCall_RecordsOwnInstructionStage verifies
+// that when consultRoute calls itself recursively (here triggered by a harness
+// error that becomes a deviation re-route), the recursive call records the
+// stage of its own dispatch instruction on the CompletedStep it produces.
 //
-// The test pre-seeds Stage="Stage-2" and causes the first consultant-dispatched
-// agent (agent-a, row 2) to fail at the harness level. consultRoute calls
-// itself with a deviation; the recursive call dispatches agent-b (row 3), which
-// succeeds. The CompletedStep applied by the recursive call must carry
-// Stage="Stage-2" because state.CurrentState.Stage was "Stage-2" at the
-// recursive entry (the failed attempt's row records no position change and the
-// consultation itself writes nothing).
-//
-// This guards against an implementation where the recursive call might receive
-// a stale or zero stage value instead of reading from the current state at its
-// own entry.
-func TestSession_ConsultRoute_RecursiveCall_UsesOwnEntryStage(t *testing.T) {
+// The test pre-seeds stage "2" and causes the first consultant-dispatched
+// agent (agent-a, stage 2) to fail at the harness level. consultRoute calls
+// itself with a deviation; the recursive call dispatches agent-b at stage 1,
+// which succeeds. The CompletedStep applied by the recursive call must carry
+// Stage="1": the instruction's stage, neither the pre-seeded "2" nor the stage
+// of the failed attempt.
+func TestSession_ConsultRoute_RecursiveCall_RecordsOwnInstructionStage(t *testing.T) {
 	consultant := &scriptedRoutingConsultant{}
-	// First dispatch: agent-a (row 2, Stage-2). Harness returns an error.
-	consultant.queueDispatch("agent-a", "attempt Stage-2 step", 2)
+	// First dispatch: agent-a (row 0, stage 2). Harness returns an error.
+	consultant.queueStagedDispatch("agent-a", "attempt Stage-2 step", 0, 2)
 	// The harness error triggers recursive consultRoute with a deviation.
-	// Recursive dispatch: agent-b (row 3, Stage-2). Harness returns SUCCESS.
-	consultant.queueDispatch("agent-b", "recover from deviation in Stage-2", 3)
+	// Recursive dispatch: agent-b (row 1, stage 1). Harness returns SUCCESS.
+	consultant.queueStagedDispatch("agent-b", "recover from deviation in stage 1", 1, 1)
 	// After the recursive consultRoute returns, the outer loop resumes and
 	// calls the consultant once more; stop to end the run cleanly.
 	consultant.queueStop("Stage-2 deviation resolved")
@@ -305,9 +297,7 @@ func TestSession_ConsultRoute_RecursiveCall_UsesOwnEntryStage(t *testing.T) {
 	}
 
 	// The recursive consultRoute applied a CompletedStep for agent-b#5.
-	// Its Stage field must be "Stage-2" because state.CurrentState.Stage was
-	// "Stage-2" when the recursive call entered consultRoute.
-	// Without the fix, the recursive call also omits Stage, setting it to "".
+	// Its Stage field must be "1", the stage of its own dispatch instruction.
 	var workflowStep *domain.CompletedStep
 	for i := range store.Applied {
 		s := &store.Applied[i]
@@ -319,38 +309,37 @@ func TestSession_ConsultRoute_RecursiveCall_UsesOwnEntryStage(t *testing.T) {
 		t.Fatal("want agent-b#5 CompletedStep in store.Applied (applied by recursive consultRoute), " +
 			"got none; the recursive consultRoute must apply its accepted step via Store.Apply")
 	}
-	if workflowStep.Stage != "Stage-2" {
+	if workflowStep.Stage != "1" {
 		t.Errorf("want CompletedStep.Stage=%q for the recursive consultRoute's accepted step, got %q; "+
-			"the recursive call must read state.CurrentState.Stage at its own entry and "+
-			"populate Stage: entryStage on its CompletedStep",
-			"Stage-2", workflowStep.Stage)
+			"the recursive call must record the stage of its own dispatch instruction",
+			"1", workflowStep.Stage)
 	}
 
 	// Also verify the artifact's current_state.stage after the full sequence.
-	if store.state.CurrentState.Stage != "Stage-2" {
+	if store.state.CurrentState.Stage != "1" {
 		t.Errorf("want current_state.stage=%q after recursive consultRoute completes, got %q",
-			"Stage-2", store.state.CurrentState.Stage)
+			"1", store.state.CurrentState.Stage)
 	}
 }
 
 // TestSession_ConsultRoute_HITLRejection_InfrastructureStepsCarryStage verifies
 // that the HITL-rejection CompletedStep records produced inside consultRoute --
 // rlRejStep (HITLRedispatch path) and elRejStep (HITLEscalate path) -- carry
-// Stage="Stage-2" rather than the empty string the pre-fix code emits.
+// the stage of the dispatch instruction ("2"), the same as the step they reject.
 //
-// The test pre-seeds a Stage-2 run and arranges for the consultant's first
+// The test pre-seeds a stage-2 run and arranges for the consultant's first
 // dispatch to trigger both a HITL redispatch and a HITL escalation:
 //
-//  1. Consultant dispatches agent-b (row 3) with HITLOverride=true and one
+//  1. Consultant dispatches agent-b (row 1, stage 2) with HITLOverride=true and one
 //     output artifact. fixedApprovalReader always returns ApprovalFalse.
 //  2. First harness response: SUCCESS -> ApprovalFalse -> HITLRedispatch
 //     rlRejStep (IsInfrastructure=true, HITLRejected=true) is applied;
-//     its Stage field must be "Stage-2".
+//     its Stage field must be "2".
 //  3. HITL redispatch response: SUCCESS -> ApprovalFalse, RedispatchUsed=true
 //     -> HITLEscalate. elRejStep (IsInfrastructure=true, HITLRejected=true)
-//     is applied; its Stage field must also be "Stage-2". consultRoute is
+//     is applied; its Stage field must also be "2". consultRoute is
 //     then called recursively with the escalation deviation.
-//  4. Recursive consultRoute: consultant dispatches agent-b again without HITL;
+//  4. Recursive consultRoute: consultant dispatches agent-b (stage 2) without HITL;
 //     third harness response -> SUCCESS, HITLAccept -> completedStep applied.
 //  5. Outer loop resumes; consultant issues stop to end the run cleanly.
 func TestSession_ConsultRoute_HITLRejection_InfrastructureStepsCarryStage(t *testing.T) {
@@ -364,10 +353,11 @@ func TestSession_ConsultRoute_HITLRejection_InfrastructureStepsCarryStage(t *tes
 	// Call 1: dispatch agent-b with HITL=true and one output artifact.
 	// Both the initial dispatch and the HITL redispatch return SUCCESS with
 	// ApprovalFalse, causing redispatch then escalation.
-	consultant.queueDispatchWithHITLAndOutputs("agent-b", "complete Stage-2 step with HITL", 3, &hitlTrue, &outputs)
+	consultant.queueDispatchWithHITLAndOutputs("agent-b", "complete Stage-2 step with HITL", 1, &hitlTrue, &outputs)
+	consultant.stageLastDispatch(2)
 	// Call 2: dispatched by the recursive consultRoute after HITL escalation.
 	// No HITL override -> row.HITL=false -> HITLAccept on first attempt.
-	consultant.queueDispatch("agent-b", "recover after HITL escalation", 3)
+	consultant.queueStagedDispatch("agent-b", "recover after HITL escalation", 1, 2)
 	// Call 3: outer dispatch loop resumes after the recursive call returns.
 	consultant.queueStop("Stage-2 HITL recovery complete")
 
@@ -388,8 +378,8 @@ func TestSession_ConsultRoute_HITLRejection_InfrastructureStepsCarryStage(t *tes
 		Interact:  &noopInteraction{},
 	})
 
-	// Pre-seed the store: Stage-1 done, Stage-2/agent-a done, Stage-2/agent-b
-	// pending. Stage="Stage-2" is the value rlRejStep and elRejStep must carry.
+	// Pre-seed the store: stage 1 done, agent-a of stage 2 done, agent-b of
+	// stage 2 pending. Stage="2" is the value rlRejStep and elRejStep must carry.
 	store.state = consultStagedStage2State()
 	store.exists = true
 
@@ -416,9 +406,8 @@ func TestSession_ConsultRoute_HITLRejection_InfrastructureStepsCarryStage(t *tes
 	ses.Start(context.Background(), baseConsultStagedConfig(orchPath, dir)) //nolint:errcheck
 
 	// Primary assertion: every HITLRejected step applied by consultRoute must
-	// carry Stage="Stage-2". Before the fix, rlRejStep and elRejStep omit the
-	// Stage field, leaving it as "". An implementation that only sets Stage on
-	// the final completedStep will fail this assertion.
+	// carry Stage="2". An implementation that only sets Stage on the final
+	// completedStep will fail this assertion.
 	var hitlRejectedSteps []domain.CompletedStep
 	for _, s := range store.Applied {
 		if s.HITLRejected {
@@ -431,12 +420,12 @@ func TestSession_ConsultRoute_HITLRejection_InfrastructureStepsCarryStage(t *tes
 			"redispatching or escalating, so the execution log has a record of every attempt")
 	}
 	for _, s := range hitlRejectedSteps {
-		if s.Stage != "Stage-2" {
+		if s.Stage != "2" {
 			t.Errorf("HITLRejected step %q: want Stage=%q, got %q; "+
 				"all CompletedStep literals in consultRoute -- including rlRejStep (HITLRedispatch) "+
-				"and elRejStep (HITLEscalate) -- must include Stage: entryStage so the "+
-				"execution log reflects the stage context in force when the step was attempted",
-				s.AgentInstance, "Stage-2", s.Stage)
+				"and elRejStep (HITLEscalate) -- must carry the instruction's stage so the "+
+				"execution log reflects the stage the step was attempted at",
+				s.AgentInstance, "2", s.Stage)
 		}
 		if !s.IsInfrastructure {
 			t.Errorf("HITLRejected step %q: want IsInfrastructure=true, got false; "+

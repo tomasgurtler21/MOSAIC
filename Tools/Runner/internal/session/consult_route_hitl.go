@@ -166,6 +166,9 @@ func (s *sessionImpl) consultHITLRedispatch(
 	*state = newState
 	*seq = (*state).GlobalSequence
 	if !antiLoop.recordDispatch(dispInstr.RowIndex, agentRef.Identifier) {
+		if stopOut, stop := s.guardEscalationExhausted(antiLoop, agentRef.Identifier, dispInstr.RowIndex); stop {
+			return domain.ProtocolResponse{}, 0, false, true, stopOut, nil
+		}
 		s.deps.Debug.Log(domain.EventSessionHITLEscalate, "anti-loop guard triggered in hitlLoop redispatch; escalating",
 			domain.F("agent", agentRef.Identifier),
 		)
@@ -328,6 +331,7 @@ func (s *sessionImpl) applyConsultStep(
 		domain.F("status", string(completedStep.Status)),
 	)
 	*seq = currentAttemptSeq
+	s.consultOutputs = consultOutputs{set: true, paths: written}
 	*lastResponse = &finalResponse
 	if routedResp != nil {
 		// Routing follows the original attempt, not the repairing re-dispatch.

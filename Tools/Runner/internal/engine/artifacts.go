@@ -68,23 +68,16 @@ func ResolveArtifacts(
 }
 
 // injectReviewArtifacts appends entries from lastOutputArtifacts to tableArts,
-// skipping any path already present in tableArts. The result is the table
-// row's entries in their original order, followed by the unique new entries in
-// the order they appear in lastOutputArtifacts.
-func injectReviewArtifacts(tableArts, lastOutputArtifacts []string) []string {
+// skipping any path already present once run-prefixed and unprefixed forms are
+// treated as equal. The result is the table row's entries in their original
+// order, followed by the unique new entries in the order they appear in
+// lastOutputArtifacts.
+func injectReviewArtifacts(runID string, tableArts, lastOutputArtifacts []string) []string {
 	if len(lastOutputArtifacts) == 0 {
 		return tableArts
 	}
-	existing := make(map[string]bool, len(tableArts))
-	for _, a := range tableArts {
-		existing[a] = true
-	}
-	result := make([]string, len(tableArts))
-	copy(result, tableArts)
-	for _, a := range lastOutputArtifacts {
-		if !existing[a] {
-			result = append(result, a)
-		}
-	}
-	return result
+	merged := make([]string, 0, len(tableArts)+len(lastOutputArtifacts))
+	merged = append(merged, tableArts...)
+	merged = append(merged, lastOutputArtifacts...)
+	return domain.DedupArtifactPaths(runID, merged)
 }

@@ -259,6 +259,9 @@ type sessionImpl struct {
 	// harnesses and non-CLI harnesses. Its Cleanup method is registered in a
 	// defer immediately after setup succeeds.
 	backupState *lockprotocol.BackupState
+	// consultOutputs holds the outputs of the latest consultation-routed step
+	// until the dispatch loop hands them to the next engine decision.
+	consultOutputs consultOutputs
 }
 
 // isRawTextHarnessError reports whether err is a raw-text protocol failure:

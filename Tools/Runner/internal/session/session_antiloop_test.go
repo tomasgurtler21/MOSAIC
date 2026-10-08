@@ -238,8 +238,8 @@ func TestSession_AntiLoopGuard_CounterResets_OnDifferentAgentDispatch(t *testing
 	consultant.queueDispatch("agent-a", "attempt", 0)
 	consultant.queueDispatch("agent-a", "attempt", 0)
 	consultant.queueDispatch("agent-a", "attempt", 0)
-	// Switching to agent-b must reset the agent-a counter.
-	consultant.queueDispatch("agent-b", "interlude", 0)
+	// Switching to agent-b (the agent of row 1) must reset the agent-a counter.
+	consultant.queueDispatch("agent-b", "interlude", 1)
 	// Two more agent-a dispatches after the reset; neither should be blocked.
 	consultant.queueDispatch("agent-a", "post-reset attempt 1", 0)
 	consultant.queueDispatch("agent-a", "post-reset attempt 2", 0)

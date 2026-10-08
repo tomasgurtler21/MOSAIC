@@ -1,9 +1,15 @@
+---
+last_updated: "2026-10-08"
+---
+
 # Harness Package
 
 > Part of: mosaic-run
 > Responsibility: Implements the `domain.HarnessAdapter` port for all three supported harnesses (Claude Code, GHCP CLI, OpenCode) plus a `MockAdapter` for test use, and provides protocol serialization helpers.
 
 ## Overview
+
+The package root holds the `MockAdapter` and the protocol helpers (`MarshalRequest` / `UnmarshalResponse`, Communication Protocol v1.12). The three production adapters live in sub-packages (`claudecode`, `ghcpcli`, `opencode`) and share the `cliexec` subprocess helper, the `roleenv` role-environment options, and `mosaic-common/harness` for argument construction and output parsing. `cmd/mosaic-run` builds the chosen adapter in `buildAdapter`.
 
 The `harness` package is a thin adapter layer. Each concrete adapter converts `domain.AgentReference` and `domain.ProtocolRequest` into the neutral `mosaic-common/harness.SpawnRequest` type, delegates subprocess spawning to the shared `mosaic-common/harness` package (which owns CLI argument construction, subprocess lifecycle, and output-envelope parsing), and converts results back to `domain.ProtocolResponse`.
 
@@ -75,12 +81,14 @@ OpenCode does not require a per-tool allowlist. `BuildOpenCodeArgs` always emits
 | Constructor | Description |
 |-------------|-------------|
 | `NewClaudeCodeAdapter(path, timeout)` | Logging disabled. Default behavior. |
-| `NewClaudeCodeAdapterWithLogger(path, timeout, logger)` | Adds debug logging. |
+| `NewClaudeCodeAdapterWithLogger(path, timeout, logger, opts...)` | Adds debug logging. |
 | `NewGHCPCLIAdapter(path, timeout)` | Logging disabled. Defaults to `GHCPCLIModeBlanket`. |
 | `NewGHCPCLIAdapterWithLogger(path, timeout, logger)` | Adds debug logging. Defaults to `GHCPCLIModeBlanket`. |
-| `NewGHCPCLIAdapterWithMode(path, timeout, logger, mode)` | Explicit permission-mode selection. Used by `cmd/mosaic-run` for all new runs. |
+| `NewGHCPCLIAdapterWithMode(path, timeout, logger, mode, opts...)` | Explicit permission-mode selection. Used by `cmd/mosaic-run` for all new runs. |
 | `NewOpenCodeAdapter(path, timeout)` | Logging disabled. |
-| `NewOpenCodeAdapterWithLogger(path, timeout, logger)` | Adds debug logging. |
+| `NewOpenCodeAdapterWithLogger(path, timeout, logger, opts...)` | Adds debug logging. |
+
+The trailing `opts` are `roleenv` options (the role environment handed to the spawned process); `NewGHCPCLIAdapterWithLogger` takes none.
 
 ## Error Taxonomy
 

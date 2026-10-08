@@ -1,6 +1,7 @@
 ---
 run_id: "20260801T202027Z-ad3d"
 created_by: "knowledge-base-generator#4"
+last_updated: "2026-10-08"
 ---
 
 # compat
@@ -11,24 +12,24 @@ created_by: "knowledge-base-generator#4"
 
 The runner does not support every shape a workflow markdown file could theoretically express — only a specific subset ("FR-18a") that its state machine (`engine`) and its stage-driven dispatch loop (`session`) know how to handle. `compat` is the single checkpoint between workflow parsing (`workflow`) and everything downstream: it either refuses a routing table outright with a precise, named reason, or it produces an `AdmittedWorkflow` that carries both the original table and the derived execution-group structure the rest of the runner relies on.
 
-The single entry point is `Admit(table) (AdmittedWorkflow, error)`. There is no partial admission — a table is either fully admitted or refused.
+The single entry point is `Admit(table, mode) (AdmittedWorkflow, error)`; the run's `ExecutionMode` selects the parallel-dispatch rule (see below). There is no partial admission — a table is either fully admitted or refused.
 
 ## Components / Subdomains
 
 | Component | Purpose |
 |-----------|---------|
-| **Admission checks** | Seven independently-checked FR-18a conditions, each producing its own refusal reason so a KB consumer/debugger can tell exactly which unsupported shape was encountered. |
+| **Admission checks** | Seven independently-checked FR-18a conditions, each producing its own refusal reason so a KB consumer/debugger can tell exactly which unsupported shape was encountered. Condition 5 depends on the execution mode; in orchestrated mode a fork-branch boundary check takes its place. |
 | **Execution group resolution** | Partitions the EXECUTION-phase rows into contiguous named groups by reading the group segment from each row's `PhaseParsed.Group` field. Agent identifiers are never inspected. Cross-validates the declared group set against the workflow's approach table (refusals A1–A5). |
 
 ## Key Flows
 
 ### Admission (`Admit`)
 
-Given a `RoutingTable`, checks run in this order (not strictly the FR-18a numbering, but the actual code order — condition numbers below match the FR-18a condition list, not execution order):
+Given a `RoutingTable` and the run's `ExecutionMode`, checks run in this order (not strictly the FR-18a numbering, but the actual code order — condition numbers below match the FR-18a condition list, not execution order):
 
 1. **Condition 6 — agent-with-mode notation:** any row whose `Agent` contains `(` or `)` is refused immediately, before any structural analysis, so the error names the exact row/agent.
 2. **Condition 3 — non-EXECUTION staged phase:** a staged phase (`PhaseParsed.IsStaged == true`) whose name isn't literally `"EXECUTION"` is refused (staging is only supported for the EXECUTION phase).
-3. **Condition 5 — parallel dispatch:** a comma inside `OnSuccess.Value` is treated as parallel routing and refused (the runner's `DispatchDecision.Steps` currently only ever holds one element — see project Index.md invariants).
+3. **Condition 5 — parallel dispatch (mode-dependent):** in `auto`, `auto-review` and the unset sentinel, a comma inside `OnSuccess.Value` is treated as parallel routing and refused (the engine routes On Success itself and `DispatchDecision.Steps` only ever holds one element — see project Index.md invariants). In `orchestrated` mode the consultant dispatches one agent at a time, so a fork/join table is admitted, subject to the **fork-branch boundary check**: a branch (a row named in the multi-target On Success of an earlier row of the same phase) may not be the last row of its phase, which also covers the last row of an execution group, because the last-row helpers answer by table position and a branch has no join to end on.
 4. **Locate the staged block:** scan all rows once to find the first and last staged-row index. If there are no staged rows at all, admission short-circuits to a non-staged `AdmittedWorkflow` (`HasStagedPhase: false`) — treated as an edge case since the supported workflow set always has an EXECUTION phase.
 5. **Condition 2 — multiple staged phase blocks:** within the `[firstExecIdx, lastExecIdx]` range, if a non-staged row appears before a staged row (i.e. staged rows are non-contiguous), refuse.
 6. **Condition 1 — stage source not the plan artifact:** if there are any pre-EXECUTION rows, at least one of them must produce the output artifact `Stage-*/Plan.md`; otherwise the runner has no way to know stages come from `planstages` reading the Plan artifact, and admission is refused.
@@ -64,7 +65,7 @@ Group boundaries are expressed as zero-based, half-open `[StartRow, EndRow)` row
 |----------|-----|
 | **workflow** | Consumes the `RoutingTable` produced by parsing a workflow region — this is `Admit`'s only input. |
 | **domain** | Uses `RoutingTable`, `RoutingRow`, `PhaseParsed`, `AdmittedWorkflow`, `ExecutionGroup`, `GroupName`, `ApproachTable`, and `RefusalError` — compat has no types of its own. |
-| **session** (run-start sequence) | `session` calls `Admit` once per run, after parsing the workflow and before resolving agents/reading stages; the resulting `AdmittedWorkflow` is threaded into `engine.Next` on every subsequent tick. `session` reads `GroupsDeclared` from the result to gate whether the Approach column is required when reading stages. |
+| **session** (run-start sequence) | `session` calls `Admit` (passing the run's execution mode) once per run, after parsing the workflow and before resolving agents/reading stages; the resulting `AdmittedWorkflow` is threaded into `engine.Next` on every subsequent tick. `session` reads `GroupsDeclared` from the result to gate whether the Approach column is required when reading stages. |
 | **engine** | Reads `AdmittedWorkflow.Groups`, `GroupsDeclared`, `ApproachTable`, `HasStagedPhase`, and the pre-/post-execution row ranges to decide dispatch order — compat does not call engine, it only produces the data engine consumes. |
 
 ## Key Concepts
@@ -85,7 +86,7 @@ Group boundaries are expressed as zero-based, half-open `[StartRow, EndRow)` row
 ## Invariants & Conventions
 
 - Every refusal returns `*domain.RefusalError{Component: "compat", ...}` — never a plain error, panic, or silent fallback (see project-level "Refusal over silent fallback" pattern).
-- Each of the seven FR-18a conditions is checked independently and produces a distinct, human-readable reason string naming the offending row index and/or agent — refusals are diagnosable without re-reading the routing table.
+- Each of the seven FR-18a conditions (condition 5 replaced by the fork-branch boundary check in orchestrated mode) is checked independently and produces a distinct, human-readable reason string naming the offending row index and/or agent — refusals are diagnosable without re-reading the routing table.
 - Duplicate agent identifiers across different EXECUTION rows are explicitly permitted (FR-26a) — grouping is row-based, not agent-identity-based.
 - `Groups` and the pre-/post-execution row ranges use zero-based, half-open `[start, end)` conventions consistently with `RoutingRow.Index`.
 - A routing table with zero staged rows is not itself an error at the `Admit` level — it returns a non-staged `AdmittedWorkflow` — though the codebase's supported workflow set always includes a staged EXECUTION phase in practice.

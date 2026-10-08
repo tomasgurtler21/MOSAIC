@@ -200,7 +200,7 @@ func TestSession_Start_BoundaryTriggers_PhaseEndOnlyAtLastStage(t *testing.T) {
 // consultant sends the run back to the implementer and then to the reviewer.
 func TestSession_Start_BoundaryTriggers_ReviewerFindingsThenSuccessFiresOnlyOnSuccess(t *testing.T) {
 	consultant := &scriptedRoutingConsultant{}
-	consultant.queueDispatch("implementation-tdd", "fix findings", 0)
+	consultant.queueStagedDispatch("implementation-tdd", "fix findings", 0, 1)
 	// After the fix the auto route resumes on its own and re-runs the reviewer;
 	// the next consultation happens only after the boundary triggers and stops.
 	consultant.queueStop("done")
@@ -282,7 +282,7 @@ func TestSession_Consult_BoundaryTriggers_NonSuccessLastStepFiresNothing(t *test
 	for _, status := range condNonSuccessStatuses {
 		t.Run(string(status), func(t *testing.T) {
 			consultant := &scriptedRoutingConsultant{}
-			consultant.queueDispatch("implementation-review", "review", 1)
+			consultant.queueStagedDispatch("implementation-review", "review", 1, 1)
 			consultant.queueStop("done")
 			ses, f, cfg := newConsultTriggerSession(t, condOneStagePlan, &fixedApprovalReader{approval: domain.ApprovalTrue}, consultant)
 			queueCond(f, "implementation-review", status)
@@ -296,7 +296,7 @@ func TestSession_Consult_BoundaryTriggers_NonSuccessLastStepFiresNothing(t *test
 
 func TestSession_Consult_BoundaryTriggers_HITLRejectedSuccessFiresNothing(t *testing.T) {
 	consultant := &scriptedRoutingConsultant{}
-	consultant.queueDispatch("implementation-review", "review", 1)
+	consultant.queueStagedDispatch("implementation-review", "review", 1, 1)
 	consultant.queueStop("done")
 	ses, f, cfg := newConsultTriggerSession(t, condOneStagePlan, &fixedApprovalReader{approval: domain.ApprovalFalse}, consultant)
 	queueCond(f, "implementation-review", domain.StatusSUCCESS)
@@ -309,7 +309,7 @@ func TestSession_Consult_BoundaryTriggers_HITLRejectedSuccessFiresNothing(t *tes
 
 func TestSession_Consult_BoundaryTriggers_FireOnceAfterAcceptedSuccess(t *testing.T) {
 	consultant := &scriptedRoutingConsultant{}
-	consultant.queueDispatch("implementation-review", "review", 1)
+	consultant.queueStagedDispatch("implementation-review", "review", 1, 1)
 	consultant.queueStop("done")
 	ses, f, cfg := newConsultTriggerSession(t, condOneStagePlan, &fixedApprovalReader{approval: domain.ApprovalTrue}, consultant)
 	queueCond(f, "implementation-review", domain.StatusSUCCESS)
@@ -325,7 +325,7 @@ func TestSession_Consult_BoundaryTriggers_FireOnceAfterAcceptedSuccess(t *testin
 
 func TestSession_Consult_BoundaryTriggers_PhaseEndNotFiredBeforeLastStage(t *testing.T) {
 	consultant := &scriptedRoutingConsultant{}
-	consultant.queueDispatch("implementation-review", "review", 1)
+	consultant.queueStagedDispatch("implementation-review", "review", 1, 1)
 	consultant.queueStop("done")
 	ses, f, cfg := newConsultTriggerSession(t, condTwoStagePlan, &fixedApprovalReader{approval: domain.ApprovalTrue}, consultant)
 	queueCond(f, "implementation-review", domain.StatusSUCCESS)
@@ -338,9 +338,9 @@ func TestSession_Consult_BoundaryTriggers_PhaseEndNotFiredBeforeLastStage(t *tes
 
 func TestSession_Consult_BoundaryTriggers_ReviewerFindingsThenSuccessFiresOnlyOnSuccess(t *testing.T) {
 	consultant := &scriptedRoutingConsultant{}
-	consultant.queueDispatch("implementation-review", "review", 1)
-	consultant.queueDispatch("implementation-tdd", "fix findings", 0)
-	consultant.queueDispatch("implementation-review", "re-review", 1)
+	consultant.queueStagedDispatch("implementation-review", "review", 1, 1)
+	consultant.queueStagedDispatch("implementation-tdd", "fix findings", 0, 1)
+	consultant.queueStagedDispatch("implementation-review", "re-review", 1, 1)
 	consultant.queueStop("done")
 	ses, f, cfg := newConsultTriggerSession(t, condOneStagePlan, &fixedApprovalReader{approval: domain.ApprovalTrue}, consultant)
 	queueCond(f, "implementation-review", domain.StatusCOMPLETED_NEEDS_ACTION)

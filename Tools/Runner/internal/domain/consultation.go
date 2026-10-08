@@ -43,7 +43,30 @@ type ConsultationRequest struct {
 	// consultation was triggered by ExecutionModeOrchestrated rather than by a
 	// deviation.
 	Deviation *DeviationInfo
+
+	// Stages is the session's current stage set at consultation time (stages
+	// added mid-run included). Nil when no plan has been read. Like Deviation,
+	// it is NEVER serialised onto the wire.
+	Stages *StageSet
+
+	// ArtifactRegistry is the run's Artifacts registry at consultation time,
+	// paths in the recorded (unprefixed) form. Used by the ManualResolver for
+	// artifact candidates only. NEVER serialised onto the wire. Nil when empty.
+	ArtifactRegistry []ArtifactRegistryEntry
+
+	// RowDefaults resolves a row's default payload for the ManualResolver's
+	// pre-checked artifact lists and HITL default. Bound by the session to its
+	// current stage sets. NEVER serialised onto the wire. Nil: no defaults
+	// (empty lists, HITL off).
+	RowDefaults RowDefaultsFunc
 }
+
+// RowDefaultsFunc resolves the DispatchDefaults of row at stage (0 for a
+// non-staged row) exactly as an engine-routed dispatch would. A non-nil error
+// names the row and either the pattern that could not be resolved or the stage
+// argument that is invalid for the row. It never returns zero defaults in place
+// of such an error.
+type RowDefaultsFunc func(row RoutingRow, stage StageNumber) (DispatchDefaults, error)
 
 // RoutingInstruction is a routing consultant's answer. Exactly one field is
 // non-nil; a value with neither or both set is a programming error and the
@@ -84,6 +107,9 @@ type DispatchInstruction struct {
 
 	// HITLOverride overrides the effective HITL when non-nil.
 	HITLOverride *bool
+
+	// Stage is the validated plan stage for a staged row, 0 for a non-staged row.
+	Stage StageNumber
 }
 
 // StopInstruction ends the run. The artifact is left exactly as it stands and
@@ -138,6 +164,16 @@ const (
 	// ConsultFailMalformedJSON, which means an object was located but its content
 	// does not unmarshal into the expected schema.
 	ConsultFailNoInstruction ConsultationFailure = "no-instruction"
+
+	// ConsultFailInteractionUnavailable: the manual resolver's Interaction could
+	// not answer a step (a status other than Answered or Cancelled, an empty
+	// answer on a required step, or an Interaction error). Ends routing at the
+	// first such answer; the session stops resumably.
+	ConsultFailInteractionUnavailable ConsultationFailure = "interaction-unavailable"
+
+	// ConsultFailManualBoundExceeded: manual routing exceeded
+	// deviation.ManualInvalidResultLimit or deviation.ManualPromptLimit.
+	ConsultFailManualBoundExceeded ConsultationFailure = "manual-bound-exceeded"
 )
 
 // ConsultationError names the failing condition. Its message always states the
@@ -158,3 +194,11 @@ func (e *ConsultationError) Error() string {
 }
 
 func (e *ConsultationError) Unwrap() error { return e.Err }
+
+// DispatchDefaults is the default dispatch payload of one routing row at one
+// stage, as an engine-routed dispatch resolves it.
+type DispatchDefaults struct {
+	InputArtifacts  []string // resolved, bare paths (Stage-* expanded)
+	OutputArtifacts []string // resolved, bare paths (Stage-* kept literal)
+	HITL            bool     // row HITL OR plan-stage HITL
+}

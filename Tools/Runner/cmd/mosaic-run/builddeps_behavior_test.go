@@ -132,8 +132,8 @@ func TestBuildDeps_OrchestratedMode_RoutingConsultantIsInvoked(t *testing.T) {
 	// orchestrated mode: dispatch agent-a, dispatch agent-b, then stop.
 	fakeInvoker := &fakeRawInvoker{
 		responses: [][]byte{
-			[]byte(`{"action":"dispatch","agent":"agent-a","task_description":"orchestrated task for agent-a"}`),
-			[]byte(`{"action":"dispatch","agent":"agent-b","task_description":"orchestrated task for agent-b"}`),
+			[]byte(`{"action":"dispatch","agent":"agent-a","row":1,"task_description":"orchestrated task for agent-a"}`),
+			[]byte(`{"action":"dispatch","agent":"agent-b","row":2,"task_description":"orchestrated task for agent-b"}`),
 			[]byte(`{"action":"stop","reason":"workflow complete"}`),
 		},
 	}

@@ -57,11 +57,15 @@ func TestIntegration_OptionalRow_IsDispatchedAndContributesToDeviation(t *testin
 	// optional-agent returns PARTIALLY_DONE (a non-SUCCESS response that triggers
 	// a deviation, proving the optional row was dispatched AND contributes to a
 	// deviation if it fails).
-	f.Queue("optional-agent", harness.ScriptedEntry{Response: &domain.ProtocolResponse{
-		AgentInstanceID: "optional-agent#2",
-		StatusCode:      domain.StatusPARTIALLY_DONE,
-		StatusMessage:   "only partially done",
-	}})
+	// It stays PARTIALLY_DONE through the original dispatch and all 3 engine
+	// re-dispatches, so the deviation follows.
+	for i := 0; i < 4; i++ {
+		f.Queue("optional-agent", harness.ScriptedEntry{Response: &domain.ProtocolResponse{
+			AgentInstanceID: "optional-agent#2",
+			StatusCode:      domain.StatusPARTIALLY_DONE,
+			StatusMessage:   "only partially done",
+		}})
+	}
 
 	cfg := domain.RunConfig{
 		RunID: integrationRunID,
@@ -222,11 +226,14 @@ func TestIntegration_Deviation_NoConsultant_ReturnsUnresolved(t *testing.T) {
 	// No routing consultant: deviation terminates with RunDeviationUnresolved.
 	sess := newSession(f, artifactPath)
 
-	f.Queue("agent-a", harness.ScriptedEntry{Response: &domain.ProtocolResponse{
-		AgentInstanceID: "agent-a#1",
-		StatusCode:      domain.StatusPARTIALLY_DONE,
-		StatusMessage:   "only partially done",
-	}})
+	// PARTIALLY_DONE on the original dispatch and all 3 engine re-dispatches.
+	for i := 0; i < 4; i++ {
+		f.Queue("agent-a", harness.ScriptedEntry{Response: &domain.ProtocolResponse{
+			AgentInstanceID: "agent-a#1",
+			StatusCode:      domain.StatusPARTIALLY_DONE,
+			StatusMessage:   "only partially done",
+		}})
+	}
 
 	cfg := domain.RunConfig{
 		RunID: integrationRunID,

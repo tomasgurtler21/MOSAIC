@@ -26,6 +26,9 @@ dispatch
 ### Agent
 mosaictest-scripted
 
+### Row
+1
+
 ### TaskDescription
 ~~~
 MOSAICTEST-FINDINGS-REDISPATCH / orchestrator re-dispatching the creator after the reviewer's CNA deviation

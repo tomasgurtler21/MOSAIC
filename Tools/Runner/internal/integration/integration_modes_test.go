@@ -197,12 +197,11 @@ func TestIntegration_AutoMode_Deviation_ConsultCalledOnce(t *testing.T) {
 			writeAgentFile(t, dir, "agent-b")
 
 			f := harness.NewMockAdapter()
-			// agent-a returns a non-SUCCESS, triggering a deviation.
-			f.Queue("agent-a", harness.ScriptedEntry{Response: &domain.ProtocolResponse{
-				AgentInstanceID: "agent-a#1",
-				StatusCode:      domain.StatusPARTIALLY_DONE,
-				StatusMessage:   "only partially done",
-			}})
+			// agent-a returns PARTIALLY_DONE on the original dispatch and all 3 engine re-dispatches; the deviation follows.
+			for i := 0; i < 4; i++ {
+				f.Queue("agent-a", harness.ScriptedEntry{Response: &domain.ProtocolResponse{
+					AgentInstanceID: "agent-a#1", StatusCode: domain.StatusPARTIALLY_DONE, StatusMessage: "only partially done"}})
+			}
 
 			consultant := &intScriptedRoutingConsultant{}
 			consultant.queueStop("operator requested stop after deviation")

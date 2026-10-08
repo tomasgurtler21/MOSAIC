@@ -23,14 +23,17 @@ type wireRequest struct {
 // wireRoutingResponse is the JSON payload the orchestrator returns for a routing
 // consultation. Unknown extra fields are silently ignored (AC3.4).
 type wireRoutingResponse struct {
-	Action          string    `json:"action"`           // "dispatch" | "stop"
-	Agent           string    `json:"agent"`            // dispatch only; required
-	TaskDescription string    `json:"task_description"` // dispatch only; required
-	Constraints     *string   `json:"constraints"`      // optional; nil = fall back to table row
-	InputArtifacts  *[]string `json:"input_artifacts"`  // optional; nil = fall back; non-nil empty = "no inputs"
-	OutputArtifacts *[]string `json:"output_artifacts"` // optional; same semantics
-	HITLOverride    *bool     `json:"hitl_override"`    // optional; nil = fall back
-	Reason          string    `json:"reason"`           // stop only
+	Action          string             `json:"action"`           // "dispatch" | "stop"
+	Agent           string             `json:"agent"`            // dispatch only; required
+	TaskDescription string             `json:"task_description"` // dispatch only; required
+	Constraints     *string            `json:"constraints"`      // optional; nil = fall back to table row
+	InputArtifacts  *[]string          `json:"input_artifacts"`  // optional; nil = fall back; non-nil empty = "no inputs"
+	OutputArtifacts *[]string          `json:"output_artifacts"` // optional; same semantics
+	HITLOverride    *bool              `json:"hitl_override"`    // optional; nil = fall back
+	Row             domain.WorkflowRow // dispatch only; required; 1-based, NoWorkflowRow = absent (see wire_row_stage.go)
+	Stage           domain.StageNumber // dispatch only; required exactly for a staged row; 0 = absent
+	StageGroup      domain.GroupName   // group of a "Group.N" stage value; empty for a bare number
+	Reason          string             `json:"reason"` // stop only
 }
 
 // wirePreConsultResponse is the JSON payload the orchestrator returns for a
@@ -53,6 +56,8 @@ type wireRoutingRaw struct {
 	InputArtifacts  json.RawMessage `json:"input_artifacts"`
 	OutputArtifacts json.RawMessage `json:"output_artifacts"`
 	HITLOverride    json.RawMessage `json:"hitl_override"`
+	Row             json.RawMessage `json:"row"`
+	Stage           json.RawMessage `json:"stage"`
 	Reason          string          `json:"reason"`
 }
 
@@ -96,6 +101,12 @@ func unmarshalRoutingResponseLenient(data []byte) (wireRoutingResponse, error) {
 	}
 	resp.HITLOverride, err = coerceBoolField("hitl_override", raw.HITLOverride)
 	if err != nil {
+		return wireRoutingResponse{}, err
+	}
+	if resp.Row, err = coerceRowField(raw.Row); err != nil {
+		return wireRoutingResponse{}, err
+	}
+	if resp.Stage, resp.StageGroup, err = coerceStageField(raw.Stage); err != nil {
 		return wireRoutingResponse{}, err
 	}
 

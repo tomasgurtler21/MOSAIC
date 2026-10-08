@@ -234,7 +234,8 @@ func runLinearScenario(t *testing.T, kind dispatchPathKind, sc linearScenario) {
 	if sc.pre != "" {
 		writeRunFile(t, rig.runFolder, "design.md", sc.pre)
 	}
-	for _, a := range sc.attempts {
+	attempts, extra := withMechanicalFollowUp(kind, sc.attempts)
+	for _, a := range attempts {
 		entry := harness.ScriptedEntry{Response: resp(a.status, "attempt")}
 		if a.content != "" {
 			entry.Writes = []harness.ScriptedWrite{{Path: plan, Content: a.content}}
@@ -256,12 +257,12 @@ func runLinearScenario(t *testing.T, kind dispatchPathKind, sc linearScenario) {
 
 	rig.ses.Start(context.Background(), rig.config(kind, "written-outputs")) //nolint:errcheck
 
-	if got := rig.invocationsOf("agent-a"); got != sc.wantCalls {
-		t.Errorf("agent-a invocations: want %d, got %d", sc.wantCalls, got)
+	if got := rig.invocationsOf("agent-a"); got != sc.wantCalls+extra {
+		t.Errorf("agent-a invocations: want %d, got %d", sc.wantCalls+extra, got)
 	}
 	acc := rig.acceptedSteps("agent-a")
-	if len(acc) != 1 {
-		t.Fatalf("accepted agent-a steps: want 1, got %d", len(acc))
+	if len(acc) != 1+extra {
+		t.Fatalf("accepted agent-a steps: want %d, got %d", 1+extra, len(acc))
 	}
 	var want []string
 	if sc.wantWritten {

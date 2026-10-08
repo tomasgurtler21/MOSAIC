@@ -21,7 +21,7 @@ import (
 	"mosaic-log-analyzer/internal/tui"
 )
 
-const ToolVersion = "1.0.1"
+const ToolVersion = "1.0.2"
 
 // valueFlagNames are the flags that consume a following token in space-separated
 // form (--flag value). Boolean flags like --tui are NOT in this set.

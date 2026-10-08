@@ -3,11 +3,11 @@ package tui
 import (
 	"strings"
 
-	"github.com/charmbracelet/bubbles/textinput"
 	tea "github.com/charmbracelet/bubbletea"
 
 	tuicommon "mosaic-common/tui"
 	"mosaic-common/interaction"
+	"mosaic-common/tui/pastesafe"
 )
 
 // ---------------------------------------------------------------------------
@@ -129,61 +129,42 @@ func (s *inlineSelectOne) view() string {
 // inlineText
 // ---------------------------------------------------------------------------
 
-// inlineText renders a text input overlay for AskText questions.
+// inlineText renders a text input overlay for AskText questions. Entry is
+// paste-safe: a pasted line break never submits and becomes a space.
 type inlineText struct {
 	q      interaction.TextQuestion
-	model  textinput.Model
-	done   bool
-	back   bool
-	errMsg string
+	field  *pastesafe.Field
 	styles tuicommon.Theme
 	width  int
 	height int
 }
 
 func newInlineText(q interaction.TextQuestion, styles tuicommon.Theme, width, height int) *inlineText {
-	m := textinput.New()
-	m.Placeholder = q.Prompt
+	field := pastesafe.NewField(pastesafe.WithPlaceholder(q.Prompt), pastesafe.WithValidate(q.Validate))
 	if q.Default != "" {
-		m.SetValue(q.Default)
+		field.SetValue(q.Default)
 	}
-	m.Focus()
-	return &inlineText{q: q, model: m, styles: styles, width: width, height: height}
+	return &inlineText{q: q, field: field, styles: styles, width: width, height: height}
 }
 
 func (t *inlineText) init() tea.Cmd {
-	return textinput.Blink
+	return t.field.Init()
 }
 
 func (t *inlineText) update(msg tea.Msg) tea.Cmd {
-	if keyMsg, ok := msg.(tea.KeyMsg); ok {
-		switch keyMsg.Type {
-		case tea.KeyEnter:
-			val := t.model.Value()
-			if t.q.Validate != nil {
-				if err := t.q.Validate(val); err != nil {
-					t.errMsg = err.Error()
-					return nil
-				}
-			}
-			t.errMsg = ""
-			t.done = true
-			return nil
-		case tea.KeyEsc:
-			t.back = true
-			return nil
-		}
-	}
-	var cmd tea.Cmd
-	t.model, cmd = t.model.Update(msg)
-	return cmd
+	return t.field.Update(msg)
+}
+
+// finished reports whether the user confirmed the text or cancelled with Esc.
+func (t *inlineText) finished() bool {
+	return t.field.Done() || t.field.Back()
 }
 
 func (t *inlineText) answer() interaction.TextAnswer {
-	if t.back {
+	if t.field.Back() {
 		return interaction.TextAnswer{Status: interaction.Cancelled}
 	}
-	return interaction.TextAnswer{Status: interaction.Answered, Text: t.model.Value()}
+	return interaction.TextAnswer{Status: interaction.Answered, Text: t.field.Value()}
 }
 
 func (t *inlineText) view() string {
@@ -194,10 +175,10 @@ func (t *inlineText) view() string {
 		sb.WriteString(t.styles.Style(tuicommon.RoleMuted).Width(t.width).Render(t.q.Detail))
 		sb.WriteByte('\n')
 	}
-	sb.WriteString(t.model.View())
-	if t.errMsg != "" {
+	sb.WriteString(t.field.View())
+	if t.field.ErrMsg() != "" {
 		sb.WriteByte('\n')
-		sb.WriteString(t.styles.Style(tuicommon.RoleError).Width(t.width).Render(t.errMsg))
+		sb.WriteString(t.styles.Style(tuicommon.RoleError).Width(t.width).Render(t.field.ErrMsg()))
 	}
 	sb.WriteByte('\n')
 	sb.WriteString(t.styles.Style(tuicommon.RoleHelp).Width(t.width).Render("enter confirm  esc cancel"))

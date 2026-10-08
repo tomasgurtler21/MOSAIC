@@ -339,7 +339,7 @@ func TestNext_OnFindings_FreeFormHint_CNA_ReturnsDeviation(t *testing.T) {
 // of whether On Findings has a hint. On Findings auto-routing is only for CNA.
 func TestNext_OnFindings_NonCNA_NonSuccess_ReturnsDeviation(t *testing.T) {
 	// brownfield-tdd row 8: tests-review-tdd has OnFindings="test-writer-tdd".
-	// If it returns PARTIALLY_DONE (not CNA), the engine must return Deviation,
+	// If it returns NEEDS_CLARIFICATION (not CNA), the engine must return Deviation,
 	// even though On Findings names an agent.
 	aw := mustParseAndAdmit(t, brownfieldTDDContent, "brownfield-tdd", "3.4")
 	stages := singleStageSet("TDD")
@@ -349,13 +349,13 @@ func TestNext_OnFindings_NonCNA_NonSuccess_ReturnsDeviation(t *testing.T) {
 		"test-writer-tdd", "tests-review-tdd", "implementation-tdd", "implementation-review",
 		"test-runner",
 	)
-	state := stateAfter("EXECUTION.[StageNumber]", "Stage-1", "tests-review-tdd#9", domain.StatusPARTIALLY_DONE, 9)
+	state := stateAfter("EXECUTION.[StageNumber]", "Stage-1", "tests-review-tdd#9", domain.StatusNEEDS_CLARIFICATION, 9)
 
 	dec := engine.Next(engine.NextInput{
 		Workflow:        aw,
 		Stages:          stages,
 		State:           state,
-		LastResponse:    nonSuccessResponse("tests-review-tdd#9", domain.StatusPARTIALLY_DONE),
+		LastResponse:    nonSuccessResponse("tests-review-tdd#9", domain.StatusNEEDS_CLARIFICATION),
 		Agents:          agents,
 		Seq:             9,
 		Now:             fixedNow,

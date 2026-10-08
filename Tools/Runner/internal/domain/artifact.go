@@ -63,7 +63,7 @@ type FrontmatterEntry struct {
 // CurrentState is the mutable nested block in the frontmatter.
 type CurrentState struct {
 	Phase      string     // standard workflow phase
-	Stage      string     // "Stage-N" during EXECUTION with stages, "" otherwise
+	Stage      string     // recorded stage value (domain.FormatStageValue, e.g. "Test.1") during EXECUTION with stages, "" otherwise
 	LastStatus StatusCode // zero value before any invocation
 	LastAgent  string     // "{AgentName}#{Seq}", "" before any invocation
 	ErrorCode  ErrorCode  // populated only when LastStatus is BLOCKED
@@ -74,15 +74,18 @@ type ExecutionLogEntry struct {
 	Seq   int
 	Agent string // "{AgentName}#{Seq}"
 	Phase string
-	Stage string // "Stage-N" during EXECUTION, "" otherwise
+	Stage string // recorded stage value (domain.FormatStageValue, e.g. "Test.1") during EXECUTION, "" otherwise
 	// WorkflowRow is the 1-based routing-table row the step ran; NoWorkflowRow
 	// when absent, "-" or non-canonical in the table.
 	WorkflowRow WorkflowRow
 	Status      StatusCode
 	Timestamp   time.Time
 	Summary     string // from ProtocolResponse.StatusMessage, truncated
-	Inputs      string // comma-separated input_artifacts, or "" if none; "-" in the table
-	Checkpoint  string // "" unless a checkpoint was taken
+	// ErrorCode is the step's error code; ErrorNone unless Status is BLOCKED.
+	// Persisted as a trailing "[error:CODE]" marker on the Summary cell.
+	ErrorCode  ErrorCode
+	Inputs     string // comma-separated input_artifacts, or "" if none; "-" in the table
+	Checkpoint string // "" unless a checkpoint was taken
 }
 
 // ArtifactRegistryEntry is one row of the Artifacts table (keyed registry).

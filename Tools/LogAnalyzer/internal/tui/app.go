@@ -561,7 +561,7 @@ func (m Model) updateQuestion(msg tea.Msg) (tea.Model, tea.Cmd) {
 	}
 	if m.textOverlay != nil {
 		cmd := m.textOverlay.update(msg)
-		if m.textOverlay.done || m.textOverlay.back {
+		if m.textOverlay.finished() {
 			ans := m.textOverlay.answer()
 			m.replyToPending(answerMsg{textAns: ans})
 			m.textOverlay = nil

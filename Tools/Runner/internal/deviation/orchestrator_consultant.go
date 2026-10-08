@@ -19,8 +19,8 @@ type OrchestratorConsultant struct {
 	// Orchestrator is the resolved orchestrator agent. Its InvocationKind must
 	// be domain.InvocationOrchestrator.
 	Orchestrator domain.AgentReference
-	// Table resolves a dispatch instruction's agent identifier to a row index
-	// and supplies the available-agent list for the unknown-agent error.
+	// Table validates a dispatch reply's agent, row and stage and supplies the
+	// available-agent list for the unknown-agent error.
 	Table domain.RoutingTable
 	// DispatchLogger records each consultation invocation in the same dispatch
 	// log that invokeAndLog uses for subagent dispatches. When nil, no logging
@@ -43,6 +43,11 @@ type OrchestratorConsultant struct {
 //   - ConsultFailUnknownAction: action is not "dispatch" or "stop"
 //   - ConsultFailMissingField: required field (agent, task_description) absent or empty
 //   - ConsultFailUnknownAgent: dispatch agent not in the routing table
+//
+// A dispatch reply must name the row (1-based) and, for a staged row, the
+// stage; it is validated against the table and req.Stages. An invalid reply is
+// retried like a malformed one and, once the attempts are spent, fails with
+// ConsultFailMalformedJSON.
 func (c *OrchestratorConsultant) ConsultRouting(ctx context.Context, req domain.ConsultationRequest) (domain.RoutingInstruction, error) {
 	wr := wireRequest{
 		OrchestrationArtifact: req.OrchestrationArtifact,
@@ -118,47 +123,19 @@ func (c *OrchestratorConsultant) ConsultRouting(ctx context.Context, req domain.
 
 		switch resp.Action {
 		case "dispatch":
-			if resp.Agent == "" {
-				return domain.RoutingInstruction{}, &domain.ConsultationError{
-					Failure: domain.ConsultFailMissingField,
-					Detail:  "missing required field: agent",
+			dispatch, dispErr := c.dispatchFromReply(req, resp)
+			if dispErr != nil {
+				var ce *domain.ConsultationError
+				if errors.As(dispErr, &ce) && ce.Failure == domain.ConsultFailMalformedJSON {
+					if c.DispatchLogger != nil {
+						c.DispatchLogger.LogError(consultationInstanceID, dispErr.Error())
+					}
+					lastErr = dispErr
+					continue
 				}
+				return domain.RoutingInstruction{}, dispErr
 			}
-			if resp.TaskDescription == "" {
-				return domain.RoutingInstruction{}, &domain.ConsultationError{
-					Failure: domain.ConsultFailMissingField,
-					Detail:  "missing required field: task_description",
-				}
-			}
-			rowIndex := -1
-			for _, row := range c.Table.Rows {
-				if row.Agent == resp.Agent {
-					rowIndex = row.Index
-					break
-				}
-			}
-			if rowIndex == -1 {
-				agents := make([]string, 0, len(c.Table.Rows))
-				for _, row := range c.Table.Rows {
-					agents = append(agents, row.Agent)
-				}
-				return domain.RoutingInstruction{}, &domain.ConsultationError{
-					Failure: domain.ConsultFailUnknownAgent,
-					Detail:  fmt.Sprintf("agent %q not found in routing table; available: %v", resp.Agent, agents),
-					Agents:  agents,
-				}
-			}
-			return domain.RoutingInstruction{
-				Dispatch: &domain.DispatchInstruction{
-					Agent:           resp.Agent,
-					RowIndex:        rowIndex,
-					TaskDescription: resp.TaskDescription,
-					Constraints:     resp.Constraints,
-					InputArtifacts:  resp.InputArtifacts,
-					OutputArtifacts: resp.OutputArtifacts,
-					HITLOverride:    resp.HITLOverride,
-				},
-			}, nil
+			return domain.RoutingInstruction{Dispatch: dispatch}, nil
 
 		case "stop":
 			return domain.RoutingInstruction{
@@ -173,6 +150,73 @@ func (c *OrchestratorConsultant) ConsultRouting(ctx context.Context, req domain.
 		}
 	}
 	return domain.RoutingInstruction{}, lastErr
+}
+
+// dispatchFromReply turns a parsed dispatch reply into a DispatchInstruction.
+// A reply whose row or stage fails domain.ValidateDispatchTarget against the
+// routing table and the request's current stage set is reported as
+// ConsultFailMalformedJSON, so the caller retries it like any malformed reply.
+// An unknown agent keeps its own failure class and is not retried.
+func (c *OrchestratorConsultant) dispatchFromReply(req domain.ConsultationRequest, resp wireRoutingResponse) (*domain.DispatchInstruction, error) {
+	if resp.Agent == "" {
+		return nil, &domain.ConsultationError{
+			Failure: domain.ConsultFailMissingField,
+			Detail:  "missing required field: agent",
+		}
+	}
+	if resp.TaskDescription == "" {
+		return nil, &domain.ConsultationError{
+			Failure: domain.ConsultFailMissingField,
+			Detail:  "missing required field: task_description",
+		}
+	}
+	agents := make([]string, 0, len(c.Table.Rows))
+	known := false
+	for _, row := range c.Table.Rows {
+		agents = append(agents, row.Agent)
+		if row.Agent == resp.Agent {
+			known = true
+		}
+	}
+	if !known {
+		return nil, &domain.ConsultationError{
+			Failure: domain.ConsultFailUnknownAgent,
+			Detail:  fmt.Sprintf("agent %q not found in routing table; available: %v", resp.Agent, agents),
+			Agents:  agents,
+		}
+	}
+	resolved, err := domain.ValidateDispatchTarget(c.Table, req.Stages, domain.DispatchTarget{
+		Agent:      resp.Agent,
+		Row:        resp.Row,
+		Stage:      resp.Stage,
+		StageGroup: resp.StageGroup,
+	})
+	if err != nil {
+		return nil, &domain.ConsultationError{
+			Failure: domain.ConsultFailMalformedJSON,
+			Detail:  describeTargetError(err),
+			Err:     err,
+		}
+	}
+	return &domain.DispatchInstruction{
+		Agent:           resp.Agent,
+		RowIndex:        resolved.Row.Index,
+		Stage:           resolved.StageNumber,
+		TaskDescription: resp.TaskDescription,
+		Constraints:     resp.Constraints,
+		InputArtifacts:  resp.InputArtifacts,
+		OutputArtifacts: resp.OutputArtifacts,
+		HITLOverride:    resp.HITLOverride,
+	}, nil
+}
+
+// describeTargetError renders an invalid row/stage for the consultation error.
+func describeTargetError(err error) string {
+	var te *domain.DispatchTargetError
+	if errors.As(err, &te) && te.Detail != "" {
+		return fmt.Sprintf("invalid dispatch row/stage (%s): %s", te.Reason, te.Detail)
+	}
+	return fmt.Sprintf("invalid dispatch row/stage: %v", err)
 }
 
 // PreConsult implements domain.PreConsultant. It invokes the orchestrator with

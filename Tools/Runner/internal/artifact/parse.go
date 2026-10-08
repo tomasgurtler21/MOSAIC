@@ -66,7 +66,7 @@ func Parse(data []byte) (domain.ArtifactState, error) {
 	}
 	logEntries, err := parseExecutionLog(execContent)
 	if err != nil {
-		return refuse("failed to parse execution log: " + err.Error())
+		return domain.ArtifactState{}, refuseSection("failed to parse execution log: ", err)
 	}
 	state.ExecutionLog = logEntries
 
@@ -84,16 +84,17 @@ func Parse(data []byte) (domain.ArtifactState, error) {
 	}
 	regEntries, err := parseArtifactRegistry(artsContent)
 	if err != nil {
-		return refuse("failed to parse artifact registry: " + err.Error())
+		return domain.ArtifactState{}, refuseSection("failed to parse artifact registry: ", err)
 	}
 	state.ArtifactRegistry = regEntries
 
 	// WorkflowNotes section is optional; absence means empty notes.
 	if notesContent, ok := extractSectionContent(body, "WorkflowNotes"); ok {
 		notes, err := parseWorkflowNotes(notesContent)
-		if err == nil {
-			state.WorkflowNotes = notes
+		if err != nil {
+			return domain.ArtifactState{}, refuseSection("failed to parse workflow notes: ", err)
 		}
+		state.WorkflowNotes = notes
 	}
 
 	return state, nil

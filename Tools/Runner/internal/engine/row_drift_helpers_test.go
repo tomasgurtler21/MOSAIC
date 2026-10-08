@@ -4,6 +4,7 @@ package engine_test
 // whose entries carry the recorded workflow row.
 
 import (
+	"errors"
 	"strconv"
 	"testing"
 
@@ -136,3 +137,35 @@ const (
 	bvRowImplBuild      = 12
 	bvRowImplReview     = 13
 )
+
+// inPhase sets the phase of every logged entry. workflowStep records the bare
+// EXECUTION phase; rows of other phases record their own.
+func (l *runLog) inPhase(phase string) *runLog {
+	for i := range l.entries {
+		l.entries[i].Phase = phase
+	}
+	return l
+}
+
+// lastInPhase sets the phase of the most recent entry only.
+func (l *runLog) lastInPhase(phase string) *runLog {
+	l.entries[len(l.entries)-1].Phase = phase
+	return l
+}
+
+// requirePositionCause asserts a Stop whose typed cause is a
+// *domain.PositionUnresolvedError with the given Cause, and returns it.
+func requirePositionCause(
+	t *testing.T, dec domain.EngineDecision, want domain.PositionUnresolvedCause,
+) *domain.PositionUnresolvedError {
+	t.Helper()
+	stop := requireStop(t, dec)
+	var perr *domain.PositionUnresolvedError
+	if !errors.As(stop.Err, &perr) {
+		t.Fatalf("stop must carry a *PositionUnresolvedError, got Err=%v (reason %q)", stop.Err, stop.Reason)
+	}
+	if perr.Cause != want {
+		t.Errorf("position cause: want %d, got %d (%v)", want, perr.Cause, perr)
+	}
+	return perr
+}

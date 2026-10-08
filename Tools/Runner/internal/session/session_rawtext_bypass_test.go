@@ -8,8 +8,8 @@ package session_test
 //   - Raw-text sentinel error (ErrProtocolNotExtractable): bypass succeeds on
 //     direct redispatch, run continues normally without consulting orchestrator.
 //   - Raw-text sentinel error (ErrMalformedJSON): bypass fails on redispatch,
-//     session falls back to consultRoute as today; consultant called once fewer
-//     time than without bypass.
+//     the failed bypass is its own BLOCKED/E501 attempt and the engine
+//     re-dispatches while the E501 budget remains.
 //
 //   Consultant-routed dispatch bypass (consultRoute path, session.go ~line 1776):
 //   - Raw-text sentinel error (ErrEmptyResponse): bypass inside consultRoute
@@ -164,65 +164,50 @@ func TestSession_RawTextBypass_MainLoop_BypassSucceeds_RunCompletes(t *testing.T
 	requireHarnessErrorStep(t, store, "main-loop site")
 }
 
-// ===== (b) Main dispatch loop: bypass fails, falls back to consultRoute =====
+// ===== (b) Main dispatch loop: bypass fails, the engine's E501 decision follows =====
 
-// TestSession_RawTextBypass_MainLoop_BypassFails_FallsBackToConsultRoute
+// TestSession_RawTextBypass_MainLoop_BypassFails_EngineRetriesWhileBudgetRemains
 // verifies that when the bypass redispatch at the auto-routed dispatch site
-// also fails (with any error), the session falls back to the normal
-// consultation path (consultRoute). The bypass adds one extra harness
-// invocation (the failed bypass attempt itself) before consultRoute is called,
-// giving agent-a three total invocations in the GREEN path.
+// also fails, the failed bypass counts as its own BLOCKED/E501 attempt and the
+// engine's decision follows: with budget left, the same agent is dispatched
+// again without consulting the orchestrator.
 //
 // Sentinel exercised: ErrMalformedJSON.
 //
-// RED failure: without bypass the failed bypass attempt is absent, so agent-a
-// is invoked twice (original error + consultant-directed retry) rather than
-// three times. The assertion `agent-a invocations == 3` fails in RED (count=2).
-func TestSession_RawTextBypass_MainLoop_BypassFails_FallsBackToConsultRoute(t *testing.T) {
+// Three agent-a invocations: the original raw-text error, the failed bypass
+// (two of the three E501 attempts), and the engine's re-dispatch that succeeds.
+func TestSession_RawTextBypass_MainLoop_BypassFails_EngineRetriesWhileBudgetRemains(t *testing.T) {
+	// Empty consultant: any consultation fails the run early.
 	consultant := &scriptedRoutingConsultant{}
-	// In RED, consultRoute is called for the original ErrMalformedJSON error (entry 1).
-	// Call 1: dispatch agent-a at row 0. The harness consumes entry 2 (timeout),
-	//         which triggers a recursive consultRoute.
-	// Call 2 (recursive, RED only): stop -- run terminates; entry 3 never reached.
-	//
-	// In GREEN, bypass consumes entry 2 (timeout) instead of a consultant dispatch.
-	// consultRoute is then called once for the bypass-failure deviation.
-	// Call 1: dispatch agent-a at row 0 -- harness consumes entry 3 (SUCCESS).
-	// Call 2: stop (run terminates cleanly).
-	consultant.queueDispatch("agent-a", "retry after bypass failure", 0)
-	consultant.queueStop("run stopped")
 
-	ses, f, _, orchPath := newAutoSessionWithConsultant(t, consultant)
+	ses, f, store, orchPath := newAutoSessionWithConsultant(t, consultant)
 
-	// Three agent-a entries:
-	//   Entry 1: ErrMalformedJSON (original dispatch).
-	//   Entry 2: generic timeout -- consumed by bypass in GREEN, by consultant
-	//            dispatch in RED.
-	//   Entry 3: SUCCESS -- consumed by consultant dispatch in GREEN; never
-	//            reached in RED (run stops at call 2 before this entry is used).
 	f.Queue("agent-a",
 		harness.ScriptedEntry{Err: wrapSentinel(commonharness.ErrMalformedJSON)},
 		harness.ScriptedEntry{Err: fmt.Errorf("harness: subprocess timed out")},
 		harness.ScriptedEntry{Response: &domain.ProtocolResponse{
 			AgentInstanceID: "agent-a#3",
 			StatusCode:      domain.StatusSUCCESS,
-			StatusMessage:   "done after fallback",
+			StatusMessage:   "done on the engine re-dispatch",
 		}},
 	)
+	f.Queue("agent-b", harness.ScriptedEntry{Response: &domain.ProtocolResponse{
+		AgentInstanceID: "agent-b#4",
+		StatusCode:      domain.StatusSUCCESS,
+		StatusMessage:   "done",
+	}})
 
-	ses.Start(context.Background(), baseLinearConfig(orchPath)) //nolint:errcheck
+	got, err := ses.Start(context.Background(), baseLinearConfig(orchPath))
 
-	// Three agent-a invocations expected: original error, failed bypass
-	// attempt, and the consultant-directed retry that succeeds.
-	// Without bypass: only two invocations (original error consumed by bypass
-	// is absent; entry 2 is consumed by the consultant dispatch instead, but
-	// entry 3 is never reached because consultant call 2 is stop).
+	requireRunStatus(t, got, err, domain.RunCompleted)
+	if consultant.CallCount != 0 {
+		t.Errorf("want no consultation while E501 budget remains, got %d", consultant.CallCount)
+	}
 	if n := countInvocationsFor(f.Invocations(), "agent-a"); n != 3 {
-		t.Errorf("want 3 agent-a harness invocations "+
-			"(original ErrMalformedJSON + failed bypass timeout + consultant retry SUCCESS), "+
-			"got %d; without bypass only 2 invocations occur (original + consultant dispatch "+
-			"consumes entry 2, but run terminates at call 2 stop before entry 3 is used)",
-			n)
+		t.Errorf("want 3 agent-a harness invocations (original error + failed bypass + engine re-dispatch), got %d", n)
+	}
+	if n := countE501RowsFor(store, "agent-a"); n != 2 {
+		t.Errorf("want 2 BLOCKED/E501 agent-a rows (original error and failed bypass), got %d", n)
 	}
 }
 

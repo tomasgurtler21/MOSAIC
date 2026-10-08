@@ -760,7 +760,7 @@ Related to GC-003 (workspace `.mcp.json` not wired in an untrusted workspace; on
 | **Reproduced at MOSAIC** | Yes |
 | **MOSAIC Response** | Mitigated: the prompt is piped on stdin and `-p` is never emitted |
 | **Version(s) Affected** | 1.0.91 and 1.0.92 (stdin routes verified: direct exe on 1.0.91, `copilot.cmd` shim on 1.0.92); the cmd.exe mangling itself is version-independent |
-| **Latest Platform Version** | v1.0.91 (2026-10-01) |
+| **Latest Platform Version** | v1.0.92 (2026-10-05) |
 | **Labels** | `area:non-interactive`, `area:windows`, `area:prompt-delivery` |
 
 **Summary:**
@@ -782,4 +782,4 @@ Byte-for-byte comparison of stdin payloads (special characters, paths, trailing 
 Pipe the prompt on stdin and omit `-p`. Not live-probed: the partial-allowlist mode; prompt delivery is independent of those flags, but `--allow-tool` and extra-argument values still travel in argv through cmd.exe.
 
 **Notes:**
-Same class as the Claude Code and OpenCode argv-delivery problems fixed by stdin delivery. Raw probe outputs: `C:\AI\MOSAIC\testworkspace\GhcpAgentDeselectProbes\20261006-stdin-probes\` (`secondpass-direct\live\` = 1.0.91 direct exe, `thirdpass-shim\out\` = 1.0.92 through the shim). Because of the silent self-update, `copilot --version` does not reliably give the running version; read it from the event stream.
+Same class as the Claude Code and OpenCode argv-delivery problems fixed by stdin delivery. Raw probe outputs: `C:\AI\MOSAIC\HarnessProbes\GhcpAgentDeselect\20261006-stdin-probes\` (`secondpass-direct\live\` = 1.0.91 direct exe, `thirdpass-shim\out\` = 1.0.92 through the shim). Because of the silent self-update, `copilot --version` does not reliably give the running version; read it from the event stream. In the Runner, GC-021 can look like GC-022 (resolved: agent dropped at session start), since both surface as `reply contains no JSON object` / `BLOCKED E501`. Tell them apart by the JSONL: `subagent.deselected` means GC-022; exit 1, empty output, or a `user.message` differing from the request means GC-021.

@@ -21,22 +21,28 @@ current_state:
 ---
 
 <ExecutionLog type="core">
-| Seq | Agent                | Phase     | Stage | WorkflowRow | Status  | Timestamp            | Summary      | Inputs | Checkpoint |
-| --- | -------------------- | --------- | ----- | ----------- | ------- | -------------------- | ------------ | ------ | ---------- |
-| 1   | planner-tdd-soft#1   | PLANNING  | -     | 1           | SUCCESS | 2026-01-29T09:05:00Z | Plan created | -      | -          |
-| 2   | implementation-tdd#2 | EXECUTION | 1     | 2           | SUCCESS | 2026-01-29T10:00:00Z | Bug fixed    | -      | -          |
+
+| Seq | Agent | Phase | Stage | WorkflowRow | Status | Timestamp | Summary | Inputs | Checkpoint |
+| --- | --- | --- | --- | --- | --- | --- | --- | --- | --- |
+| 1 | planner-tdd-soft#1 | PLANNING | - | 1 | SUCCESS | 2026-01-29T09:05:00Z | Plan created | - | - |
+| 2 | implementation-tdd#2 | EXECUTION | 1 | 2 | SUCCESS | 2026-01-29T10:00:00Z | Bug fixed | - | - |
+
 </ExecutionLog>
 
 <Artifacts type="core">
-| Artifact                | Created In  | Created By           |
-| ----------------------- | ----------- | -------------------- |
-| Plan.md                 | PLANNING    | planner-tdd-soft#1   |
-| Stage-1/Plan.md         | PLANNING    | planner-tdd-soft#1   |
+
+| Artifact | Created In | Created By |
+| --- | --- | --- |
+| Plan.md | PLANNING | planner-tdd-soft#1 |
+| Stage-1/Plan.md | PLANNING | planner-tdd-soft#1 |
 | Stage-1/PlanProgress.md | EXECUTION.1 | implementation-tdd#2 |
+
 </Artifacts>
 
 <WorkflowNotes type="core">
-| Seq | Note                              |
-| --- | --------------------------------- |
-| 1   | Timeout value is 30s per RFC-1234 |
+
+| Seq | Note |
+| --- | --- |
+| 1 | Timeout value is 30s per RFC-1234 |
+
 </WorkflowNotes>

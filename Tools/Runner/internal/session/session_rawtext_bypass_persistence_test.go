@@ -6,8 +6,8 @@ package session_test
 // Coverage:
 //
 //   Non-sentinel errors skip bypass:
-//   - A generic error not wrapping any sentinel goes straight to consultRoute
-//     with no extra harness invocation (regression / AC4.4 guard).
+//   - A generic error not wrapping any sentinel is one E501 attempt that the
+//     engine re-dispatches, with no bypass invocation.
 //
 //   Anti-loop guard checked during bypass:
 //   - When the anti-loop counter is at the limit before the bypass, bypass is
@@ -26,7 +26,7 @@ package session_test
 // Sentinel classification cross-reference:
 //   ErrProtocolNotExtractable: TestSession_RawTextBypass_MainLoop_BypassSucceeds_RunCompletes
 //                              TestSession_RawTextBypass_HITLRedispatch_BypassSucceeds_ThreeInvocations
-//   ErrMalformedJSON:          TestSession_RawTextBypass_MainLoop_BypassFails_FallsBackToConsultRoute
+//   ErrMalformedJSON:          TestSession_RawTextBypass_MainLoop_BypassFails_EngineRetriesWhileBudgetRemains
 //                              TestSession_RawTextBypass_AntiLoopTrips_BypassSkipped
 //   ErrEmptyResponse:          TestSession_RawTextBypass_ConsultRoute_BypassSucceeds_FewerInvocations
 
@@ -42,26 +42,18 @@ import (
 	"mosaic-run/internal/session"
 )
 
-// ===== (e) Non-sentinel errors skip bypass (regression) =====
+// ===== (e) Non-sentinel errors skip bypass =====
 
 // TestSession_RawTextBypass_NonSentinelError_SkipsBypass verifies that a
-// generic harness error that does not wrap any commonharness sentinel bypasses
-// the bypass mechanism and routes directly to consultRoute, matching the
-// current (pre-Stage-4) behavior. This is a regression guard for AC4.4.
-//
-// This test passes in both the RED and GREEN phases because non-sentinel errors
-// must never trigger bypass, before or after Stage 4 is implemented.
+// generic harness error that does not wrap any commonharness sentinel does not
+// trigger the raw-text bypass: the failure is one BLOCKED/E501 attempt, and the
+// engine re-dispatches the same agent without consulting the orchestrator.
 func TestSession_RawTextBypass_NonSentinelError_SkipsBypass(t *testing.T) {
+	// Empty consultant: any consultation fails the run early.
 	consultant := &scriptedRoutingConsultant{}
-	// Non-sentinel error at main dispatch loop: consultant dispatches agent-a
-	// again for a successful retry.
-	consultant.queueDispatch("agent-a", "retry after timeout", 0)
-	consultant.queueStop("done after retry")
 
-	ses, f, _, orchPath := newAutoSessionWithConsultant(t, consultant)
+	ses, f, store, orchPath := newAutoSessionWithConsultant(t, consultant)
 
-	// agent-a entry 1: generic non-sentinel error.
-	// agent-a entry 2: SUCCESS for the consultant-directed retry.
 	f.Queue("agent-a",
 		harness.ScriptedEntry{Err: fmt.Errorf("harness: subprocess timed out after 60s")},
 		harness.ScriptedEntry{Response: &domain.ProtocolResponse{
@@ -70,24 +62,24 @@ func TestSession_RawTextBypass_NonSentinelError_SkipsBypass(t *testing.T) {
 			StatusMessage:   "done on retry",
 		}},
 	)
+	f.Queue("agent-b", harness.ScriptedEntry{Response: &domain.ProtocolResponse{
+		AgentInstanceID: "agent-b#3",
+		StatusCode:      domain.StatusSUCCESS,
+		StatusMessage:   "done",
+	}})
 
-	ses.Start(context.Background(), baseLinearConfig(orchPath)) //nolint:errcheck
+	got, err := ses.Start(context.Background(), baseLinearConfig(orchPath))
 
-	// Without bypass the error goes to consultRoute (consultant call 1:
-	// dispatch, call 2: stop after retry). With bypass also skipped for
-	// non-sentinel, same sequence. Exactly 2 consultant calls expected.
-	if consultant.CallCount != 2 {
-		t.Errorf("want 2 consultant calls for non-sentinel harness error "+
-			"(dispatch + stop), got %d; non-sentinel errors must not trigger "+
-			"bypass -- they must go straight to consultRoute as before Stage 4",
-			consultant.CallCount)
+	requireRunStatus(t, got, err, domain.RunCompleted)
+	if consultant.CallCount != 0 {
+		t.Errorf("want no consultation for a harness error with budget left, got %d", consultant.CallCount)
 	}
-	// Two agent-a invocations: the original non-sentinel error and the
-	// consultant-directed retry. No extra bypass invocation.
 	if n := countInvocationsFor(f.Invocations(), "agent-a"); n != 2 {
-		t.Errorf("want 2 agent-a invocations (error + consultant retry), got %d; "+
-			"bypass must not add an extra invocation for non-sentinel errors",
-			n)
+		t.Errorf("want 2 agent-a invocations (error + engine re-dispatch), got %d", n)
+	}
+	// Exactly one E501 attempt: the error. A bypass would have been a second one.
+	if n := countE501RowsFor(store, "agent-a"); n != 1 {
+		t.Errorf("want 1 BLOCKED/E501 agent-a row for a non-sentinel error, got %d", n)
 	}
 }
 

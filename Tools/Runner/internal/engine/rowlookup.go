@@ -1,121 +1,8 @@
 package engine
 
 import (
-	"fmt"
-
 	"mosaic-run/internal/domain"
 )
-
-// findCurrentRowIndex returns the routing table row index that was last dispatched,
-// derived from the artifact state.
-//
-// A single-row agent, or a non-EXECUTION row, resolves by agent and phase.
-// An agent that fills several EXECUTION rows resolves from the row recorded in
-// the Execution Log for the step that just ran.
-//
-// It returns (-1, nil) when the row simply cannot be identified from the state
-// (no matching agent+phase row) — an ambiguity, not a contract violation.
-//
-// It returns (-1, err) when a multi-row agent has no log entry, the entry
-// records no row, or the recorded row fails validation against the table. The
-// error is propagated verbatim, never collapsed into -1 and never replaced by
-// a guessed row.
-func findCurrentRowIndex(
-	workflow domain.AdmittedWorkflow,
-	stages *domain.StageSet,
-	state domain.ArtifactState,
-) (int, error) {
-	agentName := extractAgentName(state.CurrentState.LastAgent)
-	phase := state.CurrentState.Phase
-
-	// An agent that is not a routing table participant at all is not an
-	// ambiguity to fall back on -- it is an unresolvable position, and the
-	// stop must name this as the cause (AC3.7). After the Apply fix,
-	// CurrentState.LastAgent always names a workflow participant in a
-	// correctly-recorded artifact, so reaching this branch means the
-	// recorded agent genuinely is not one.
-	if !isWorkflowParticipant(workflow, agentName) {
-		return -1, &domain.PositionUnresolvedError{
-			AgentInstance: state.CurrentState.LastAgent,
-			Phase:         phase,
-			Stage:         state.CurrentState.Stage,
-			Cause:         domain.CauseAgentNotInWorkflow,
-		}
-	}
-
-	// Non-EXECUTION row: find by agent name + phase (unique per phase in supported workflows).
-	if !isExecutionPhase(phase) {
-		for _, row := range workflow.Table.Rows {
-			if row.Agent == agentName && row.Phase == phase {
-				return row.Index, nil
-			}
-		}
-		return -1, nil
-	}
-
-	// EXECUTION row: collect all matching rows.
-	var matches []int
-	for _, row := range workflow.Table.Rows {
-		if row.Agent == agentName && row.PhaseParsed.IsStaged {
-			matches = append(matches, row.Index)
-		}
-	}
-	if len(matches) == 0 {
-		return -1, nil
-	}
-	if len(matches) == 1 {
-		// Unique agent in EXECUTION — no disambiguation needed.
-		return matches[0], nil
-	}
-
-	// Multiple EXECUTION rows for this agent (e.g. build-review appears in both
-	// the test group and the implementation group). The row is the one recorded
-	// in the Execution Log for the step that just ran, validated against the table.
-	return recordedRowForAgent(workflow, state.ExecutionLog, state.CurrentState.LastAgent)
-}
-
-// findRowForLogEntry returns the row index corresponding to an execution log entry.
-//
-// A single-row EXECUTION agent, or a non-EXECUTION entry, resolves by agent and
-// phase. Non-EXECUTION resolution assumes an agent appears at most once per
-// non-EXECUTION phase (true for every supported workflow).
-//
-// An agent that fills several EXECUTION rows resolves from the row recorded on
-// the entry, validated with the same helper live routing uses. A missing or
-// invalid recorded row returns an error naming the agent and row; no row is
-// ever guessed.
-func findRowForLogEntry(
-	workflow domain.AdmittedWorkflow,
-	entry domain.ExecutionLogEntry,
-) (int, error) {
-	agentName := extractAgentName(entry.Agent)
-	if !isExecutionPhase(entry.Phase) {
-		for _, row := range workflow.Table.Rows {
-			if row.Agent == agentName && row.Phase == entry.Phase {
-				return row.Index, nil
-			}
-		}
-		return -1, fmt.Errorf("row not found for log entry agent=%q phase=%q", entry.Agent, entry.Phase)
-	}
-
-	matchCount := 0
-	firstMatch := -1
-	for _, row := range workflow.Table.Rows {
-		if row.Agent == agentName && row.PhaseParsed.IsStaged {
-			if matchCount == 0 {
-				firstMatch = row.Index
-			}
-			matchCount++
-		}
-	}
-	switch matchCount {
-	case 0:
-		return -1, fmt.Errorf("row not found for log entry agent=%q phase=%q", entry.Agent, entry.Phase)
-	case 1:
-		return firstMatch, nil
-	}
-	return validateRecordedRow(workflow, entry)
-}
 
 // findNearestPrecedingRowForAgent returns the index of the nearest routing table
 // row above fromRow whose Agent matches the given identifier. Group and stage
@@ -176,10 +63,16 @@ func findGroupIndexInWorkflow(workflow domain.AdmittedWorkflow, rowIdx int) int 
 // has produced as many COMPLETED_NEEDS_ACTION iterations at the current phase
 // and stage as the review loop limit allows. A limit of 0 means no limit.
 //
+// The count is keyed by reviewer, phase and stage (not by workflow row) and only
+// covers the rows since the reviewer's last SUCCESS at that phase and stage.
+//
 // A CNA row directly following a CNA row of the same agent is a re-dispatch of
 // the same iteration (for example after a rejected result) and is not counted
-// again.
-func reviewLoopLimitReached(state domain.ArtifactState) bool {
+// again. Likewise a reviewer SUCCESS directly following the same reviewer's CNA
+// is a gate-discharging re-dispatch of that round, not a pass, and does not
+// reset the count; only a reviewer SUCCESS that does not directly follow its
+// own CNA does.
+func reviewLoopLimitReached(state domain.ArtifactState, pos position) bool {
 	limit := state.ReviewLoopLimit
 	if limit <= 0 {
 		return false
@@ -187,20 +80,21 @@ func reviewLoopLimitReached(state domain.ArtifactState) bool {
 	reviewer := extractAgentName(state.CurrentState.LastAgent)
 	count := 0
 	for i, e := range state.ExecutionLog {
-		if e.Status != domain.StatusCOMPLETED_NEEDS_ACTION ||
-			e.Phase != state.CurrentState.Phase ||
-			e.Stage != state.CurrentState.Stage ||
+		if (e.Status != domain.StatusCOMPLETED_NEEDS_ACTION && e.Status != domain.StatusSUCCESS) ||
+			e.Phase != pos.entry.Phase ||
+			e.Stage != pos.stage ||
 			extractAgentName(e.Agent) != reviewer {
 			continue
 		}
-		if i > 0 {
-			prev := state.ExecutionLog[i-1]
-			if prev.Status == domain.StatusCOMPLETED_NEEDS_ACTION &&
-				extractAgentName(prev.Agent) == reviewer {
-				continue
-			}
+		followsOwnCNA := i > 0 &&
+			state.ExecutionLog[i-1].Status == domain.StatusCOMPLETED_NEEDS_ACTION &&
+			extractAgentName(state.ExecutionLog[i-1].Agent) == reviewer
+		switch {
+		case e.Status == domain.StatusSUCCESS && !followsOwnCNA:
+			count = 0
+		case e.Status == domain.StatusCOMPLETED_NEEDS_ACTION && !followsOwnCNA:
+			count++
 		}
-		count++
 	}
 	return count >= limit
 }

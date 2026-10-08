@@ -169,6 +169,10 @@ const (
 	// CauseRecordedRowInvalid: the recorded row is outside the table, holds a
 	// different agent, or lies in another group than the entry's stage.
 	CauseRecordedRowInvalid
+
+	// CauseStagedRowWithoutStage: the step's row is a staged (EXECUTION) row but
+	// its Execution Log entry records no stage (Stage "-").
+	CauseStagedRowWithoutStage
 )
 
 // PositionUnresolvedError is returned when the workflow position cannot be
@@ -180,6 +184,8 @@ type PositionUnresolvedError struct {
 	Stage         string // the recorded stage, as stored
 	Cause         PositionUnresolvedCause
 	RecordedRow   WorkflowRow // the row number recorded in the log; NoWorkflowRow when none
+	// Group is the row's group; set only for CauseStagedRowWithoutStage.
+	Group GroupName
 }
 
 // Error states the cause, not merely the symptom. For CauseAgentNotInWorkflow
@@ -211,7 +217,20 @@ func (e *PositionUnresolvedError) Error() string {
 			"position unresolved: recorded workflow row %d for agent %q does not match the routing table (phase %q, stage %q)",
 			int(e.RecordedRow), e.AgentInstance, e.Phase, e.Stage,
 		)
+	case CauseStagedRowWithoutStage:
+		return fmt.Sprintf(
+			"position unresolved: workflow row %d (agent %q) is a staged execution row, but its execution log row records no stage; set the Stage cell of that log row to the group form, e.g. %s.N (phase %q)",
+			int(e.RecordedRow), e.AgentInstance, groupOrPlaceholder(e.Group), e.Phase,
+		)
 	default:
 		return fmt.Sprintf("position unresolved for agent %q at phase %q, stage %q", e.AgentInstance, e.Phase, e.Stage)
 	}
+}
+
+// groupOrPlaceholder names group, or a placeholder when the group is unknown.
+func groupOrPlaceholder(group GroupName) string {
+	if group == "" {
+		return "<Group>"
+	}
+	return string(group)
 }

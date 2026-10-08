@@ -18,10 +18,8 @@ import (
 // Stage and Checkpoint fields that are "" in the ArtifactState are rendered as
 // "-" in the execution log table. No other component ever sees or produces "-".
 //
-// Column widths in the output tables are at least as wide as the header and each
-// cell value. Round-tripping a parsed file through Render produces identical bytes
-// when the column widths in the original separator row were already >= all cell
-// values.
+// Tables are written compact (no column padding) with every cell sanitised, so
+// line length follows row content and a cell can never break its table.
 func Render(state domain.ArtifactState) ([]byte, error) {
 	var buf bytes.Buffer
 
@@ -116,9 +114,7 @@ func Render(state domain.ArtifactState) ([]byte, error) {
 	if err != nil {
 		return nil, fmt.Errorf("artifact: render ExecutionLog close tag: %w", err)
 	}
-	buf.Write(execLogOpen)
-	buf.Write(renderExecutionLog(state.ExecutionLog))
-	buf.Write(execLogClose)
+	writeSection(&buf, execLogOpen, renderExecutionLog(state.ExecutionLog), execLogClose)
 
 	buf.WriteString("\n")
 
@@ -131,9 +127,7 @@ func Render(state domain.ArtifactState) ([]byte, error) {
 	if err != nil {
 		return nil, fmt.Errorf("artifact: render Artifacts close tag: %w", err)
 	}
-	buf.Write(artifactsOpen)
-	buf.Write(renderArtifactRegistry(state.ArtifactRegistry))
-	buf.Write(artifactsClose)
+	writeSection(&buf, artifactsOpen, renderArtifactRegistry(state.ArtifactRegistry), artifactsClose)
 
 	buf.WriteString("\n")
 
@@ -146,11 +140,19 @@ func Render(state domain.ArtifactState) ([]byte, error) {
 	if err != nil {
 		return nil, fmt.Errorf("artifact: render WorkflowNotes close tag: %w", err)
 	}
-	buf.Write(workflowNotesOpen)
-	buf.Write(renderWorkflowNotes(state.WorkflowNotes))
-	buf.Write(workflowNotesClose)
+	writeSection(&buf, workflowNotesOpen, renderWorkflowNotes(state.WorkflowNotes), workflowNotesClose)
 
 	return buf.Bytes(), nil
+}
+
+// writeSection writes a region open tag, a blank line, the table, a blank line
+// and the close tag, so the table renders as a table in CommonMark viewers.
+func writeSection(buf *bytes.Buffer, open, table, closeTag []byte) {
+	buf.Write(open)
+	buf.WriteString("\n")
+	buf.Write(table)
+	buf.WriteString("\n")
+	buf.Write(closeTag)
 }
 
 // TruncateSummary applies the head-50 + tail-50 truncation rule from the artifact
@@ -203,7 +205,7 @@ func renderExecutionLog(entries []domain.ExecutionLogEntry) []byte {
 		if checkpoint == "" {
 			checkpoint = "-"
 		}
-		row := []string{
+		row := sanitizeCells(
 			strconv.Itoa(e.Seq),
 			e.Agent,
 			e.Phase,
@@ -211,14 +213,14 @@ func renderExecutionLog(entries []domain.ExecutionLogEntry) []byte {
 			workflowRow,
 			string(e.Status),
 			e.Timestamp.UTC().Format(time.RFC3339),
-			e.Summary,
+			renderSummaryCell(e),
 			inputs,
 			checkpoint,
-		}
+		)
 		t = t.AppendRow(row)
 	}
 
-	return t.Render()
+	return t.RenderCompact()
 }
 
 // renderArtifactRegistry renders the artifact registry entries as a markdown table.
@@ -227,11 +229,11 @@ func renderArtifactRegistry(entries []domain.ArtifactRegistryEntry) []byte {
 	t := mdtable.Table{Header: headers}
 
 	for _, e := range entries {
-		row := []string{e.Artifact, e.CreatedIn, e.CreatedBy}
+		row := sanitizeCells(e.Artifact, e.CreatedIn, e.CreatedBy)
 		t = t.AppendRow(row)
 	}
 
-	return t.Render()
+	return t.RenderCompact()
 }
 
 // renderWorkflowNotes renders the workflow notes as a markdown table.
@@ -240,11 +242,11 @@ func renderWorkflowNotes(notes []domain.WorkflowNote) []byte {
 	t := mdtable.Table{Header: headers}
 
 	for _, n := range notes {
-		row := []string{strconv.Itoa(n.Seq), n.Note}
+		row := sanitizeCells(strconv.Itoa(n.Seq), n.Note)
 		t = t.AppendRow(row)
 	}
 
-	return t.Render()
+	return t.RenderCompact()
 }
 
 // enabledDisabled renders a boolean as the "enabled"/"disabled" frontmatter value.

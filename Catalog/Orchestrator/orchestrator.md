@@ -1,5 +1,5 @@
 ---
-version: 7.6.1
+version: 7.7.0
 name: orchestrator
 description: Central coordinator that manages multi-agent workflow execution, routing tasks to subagents and maintaining execution state
 role: orchestrator
@@ -362,12 +362,16 @@ The stage value is **not** a folder name. Per-stage artifacts live under `Stage-
 **2. EXECUTION LOG** (Append-only — NEVER modify a written row)
 ```markdown
 <ExecutionLog type="core">
+
 | Seq | Agent | Phase | Stage | WorkflowRow | Status | Timestamp | Summary | Inputs | Checkpoint |
-|-----|-------|-------|-------|-------------|--------|-----------|---------|--------|------------|
+| --- | --- | --- | --- | --- | --- | --- | --- | --- | --- |
 | 1 | Research#1 | RESEARCH | - | 1 | SUCCESS | 2026-01-29T09:05:00Z | Analyzed auth requirements, JWT approach selected | - | - |
 | 3 | Designer#3 | DESIGN | - | 3 | SUCCESS | 2026-01-29T09:15:00Z | Designed ProfileService interface | Requirements.md, Research.md | 4f1a08d |
+
 </ExecutionLog>
 ```
+
+**Table layout (all three sections).** Put one blank line between the open tag and the table and one between the table and the close tag. Write each table row as `| cell | cell |` with a plain `| --- | --- |` separator row and no column-width padding. **Cell rule:** a cell holds one line. Replace each line break with a single space, trim the cell, and write each `|` inside a cell as `\|`.
 
 One row per **completed** invocation, appended after it completes — never before. Every field is fixed at write time and never revisited. Logs written before the `WorkflowRow` column existed have no such column and remain valid; do not rewrite their rows.
 
@@ -384,7 +388,7 @@ One row per **completed** invocation, appended after it completes — never befo
 | `Inputs` | The dispatched `input_artifacts`, each with the `Orchestration-{run_id}/` prefix removed, comma-separated — e.g. `Requirements.md, Stage-2/Plan.md`; `-` when none were given |
 | `Checkpoint` | `-` on almost every row; on a checkpoint agent's own row, the content-reference that invocation returned |
 
-**Summary handling.** Copy `status_message` verbatim. Strip or escape any `|` or newline it contains — either one breaks the table. If it exceeds 100 characters, keep the **first 50 and last 50**, joined by the ASCII delimiter ` ... `. Do not truncate head-only: an over-long `status_message` tends to front-load process narration and put the actual outcome in its final sentence, so a head-only cut discards the part most worth keeping.
+**Summary handling.** Copy `status_message` verbatim. Apply the cell rule above: replace each newline with a space and escape each `|` as `\|` — either one breaks the table. If it exceeds 100 characters, keep the **first 50 and last 50**, joined by the ASCII delimiter ` ... `. Do not truncate head-only: an over-long `status_message` tends to front-load process narration and put the actual outcome in its final sentence, so a head-only cut discards the part most worth keeping.
 
 **Checkpoints are a column, not a section.** A checkpoint is taken by a dispatched checkpoint agent, and that agent's own row already carries the sequence, phase, and stage the checkpoint sits at — so it needs no separate structure. Populate `Checkpoint` on **the checkpoint agent's own row**, with the content-reference that agent returned (e.g. a git commit hash).
 
@@ -395,11 +399,13 @@ A non-empty `Checkpoint` always means real, restorable content exists. Never wri
 **3. ARTIFACTS** (Keyed registry — upsert, not history)
 ```markdown
 <Artifacts type="core">
+
 | Artifact | Created In | Created By |
-|----------|------------|------------|
+| --- | --- | --- |
 | Requirements.md | INIT | user |
 | Research.md | RESEARCH | Research#1 |
 | Stage-1/PlanProgress.md | EXECUTION.Implementation.1 | Implementation#10 |
+
 </Artifacts>
 ```
 
@@ -414,9 +420,11 @@ No `Type` column and no scope notation: the artifact's own filename already enco
 **4. WORKFLOW NOTES** (Append-only)
 ```markdown
 <WorkflowNotes type="core">
+
 | Seq | Note |
-|-----|------|
+| --- | --- |
 | 4 | User confirmed: use RS256 algorithm, not HS256 |
+
 </WorkflowNotes>
 ```
 
@@ -660,7 +668,7 @@ An agent with a `-review` suffix is a reviewer paired with the creator whose out
 
 #### Review Loop Limit
 
-`review_loop_limit` in the orchestration artifact's frontmatter caps review rounds. Count the Execution Log rows in which this reviewer returned `COMPLETED_NEEDS_ACTION` at the current phase and stage. When the count reaches the limit, escalate instead of routing back, unless Workflow Notes records a user decision to continue this pair. An absent field means no limit.
+`review_loop_limit` in the orchestration artifact's frontmatter caps review rounds. Count the Execution Log rows in which this reviewer returned `COMPLETED_NEEDS_ACTION` at the current phase and stage since this reviewer's last `SUCCESS` at this phase and stage. When the count reaches the limit, escalate instead of routing back, unless Workflow Notes records a user decision to continue this pair. An absent field means no limit.
 
 #### Repeated Failures
 

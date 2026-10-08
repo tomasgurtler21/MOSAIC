@@ -385,7 +385,7 @@ func (m *rootModel) launchSession() tea.Cmd {
 	// is stated as the initial status line before dispatch, mirroring the
 	// CLI's stdout announcement.
 	style := stylesFromTheme(m.theme)
-	m.progressScreen = runflow.NewProgressScreen(m.width, m.height, style)
+	m.progressScreen = m.newProgressScreenWithHistory(style)
 	m.progressScreen.SetStatus(runselect.Announce(m.announceIdentity()), false)
 	m.screen = screenProgress
 	return tea.Batch(m.progressScreen.Init(), m.startSession())

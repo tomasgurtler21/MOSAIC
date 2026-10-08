@@ -11,7 +11,7 @@ import (
 // changing the confirmed folder.
 type CatalogFolderScreen struct {
 	confirmed string // last confirmed folder (or initial)
-	draft     string // in-progress text input; empty means no active edit
+	entry     *draftEntry
 	width     int
 	styles    Styles
 	done      bool
@@ -21,6 +21,7 @@ type CatalogFolderScreen struct {
 // NewCatalogFolderScreen creates a CatalogFolderScreen initialized to initial.
 func NewCatalogFolderScreen(initial string, width int, styles Styles) *CatalogFolderScreen {
 	return &CatalogFolderScreen{
+		entry:     newDraftEntry(),
 		confirmed: initial,
 		width:     width,
 		styles:    styles,
@@ -34,27 +35,22 @@ func (s *CatalogFolderScreen) Update(msg tea.Msg) tea.Cmd {
 	if !ok {
 		return nil
 	}
-	switch key.Type {
-	case tea.KeyEnter:
-		if s.draft != "" {
-			s.confirmed = s.draft
-			s.draft = ""
+	res := s.entry.update(key)
+	switch {
+	case res.submitted:
+		if res.draft != "" {
+			s.confirmed = res.draft
 		}
 		s.done = true
-	case tea.KeyEsc:
-		s.draft = ""
+	case res.back:
 		s.back = true
-	case tea.KeyRunes:
-		for _, r := range key.Runes {
-			s.draft += string(r)
-		}
 	}
 	return nil
 }
 
 // View renders the catalog folder screen with theme-resolved styles.
 func (s *CatalogFolderScreen) View() string {
-	display := s.draft
+	display := s.entry.draft()
 	if display == "" {
 		display = s.confirmed
 	}
@@ -79,7 +75,7 @@ func (s *CatalogFolderScreen) Back() bool { return s.back }
 func (s *CatalogFolderScreen) Reset() {
 	s.done = false
 	s.back = false
-	s.draft = ""
+	s.entry.reset()
 }
 
 // Resize updates the available width without affecting Done, Back, or the

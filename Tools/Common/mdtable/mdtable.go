@@ -48,6 +48,12 @@ func Parse(data []byte) (Table, error) {
 //
 // Returns an error if no table is found at or after offset.
 func ParseAt(data []byte, offset int) (Table, int, int, error) {
+	return parseAt(data, offset, false)
+}
+
+// parseAt implements ParseAt. When strict is true, a data row with more cells
+// than the header yields a *StructureError instead of being cut.
+func parseAt(data []byte, offset int, strict bool) (Table, int, int, error) {
 	if offset < 0 || offset > len(data) {
 		return Table{}, 0, 0, errors.New("mdtable: offset out of range")
 	}
@@ -89,6 +95,11 @@ func ParseAt(data []byte, offset int) (Table, int, int, error) {
 				row = append(row, "")
 			}
 			if len(row) > len(header) {
+				if strict {
+					return Table{}, 0, 0, &StructureError{
+						Row: len(rows), Line: j + 1, Cells: len(row), Columns: len(header),
+					}
+				}
 				row = row[:len(header)]
 			}
 			rows = append(rows, row)
@@ -283,7 +294,7 @@ func parseRow(line []byte) []string {
 	if len(trimmed) > 0 && trimmed[len(trimmed)-1] == '|' {
 		trimmed = trimmed[:len(trimmed)-1]
 	}
-	parts := strings.Split(trimmed, "|")
+	parts := splitUnescaped(trimmed)
 	result := make([]string, len(parts))
 	for i, p := range parts {
 		result[i] = strings.TrimSpace(p)
