@@ -1,3 +1,39 @@
+# 0.6.2 (2026-10-10)
+
+## Tools
+
+### Runner v1.5.0
+#### Changes
+- Requires `orchestrator-script` v2.3.0 (dispatch replies now name the workflow row)
+- Malformed orchestrator replies are retried instead of stopping the run
+- Auto modes retry `PARTIALLY_DONE` and `E501` without consulting the orchestrator
+- With manual resolution enabled, you pick the next step yourself when an orchestrator consultation fails, instead of the run ending
+- Stopped runs can be continued, retried or manually dispatched without leaving the Runner
+#### Bugfixes
+- Fix crash when continuing a run
+- Fix prompt delivery to OpenCode and GHCP CLI on Windows
+- Fix resumed runs continuing from the wrong step
+- Fix orchestration artifact tables not rendering in Markdown viewers
+- Input fields handle multi-line paste
+
+### Deploy v1.1.4
+#### Bugfixes
+- Input fields handle multi-line paste
+
+### AgentTest v1.0.3
+#### Bugfixes
+- Input fields handle multi-line paste
+
+### LogAnalyzer v1.0.2
+#### Bugfixes
+- Input fields handle multi-line paste
+
+## Catalog
+- **Orchestrator** (v7.7.0) / **orchestrator-script** (v2.3.0): orchestration artifact tables render properly, review loop limit resets after the reviewer's `SUCCESS`; `orchestrator-script` names the workflow row in its dispatches (required by Runner v1.5.0)
+
+## Documentation
+- Runner Guide: automatic retries, manual routing, resuming from the TUI
+
 # 0.6.1 (2026-10-05)
 
 ## Tools
