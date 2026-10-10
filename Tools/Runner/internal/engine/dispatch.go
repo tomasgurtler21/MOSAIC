@@ -72,7 +72,7 @@ func initialDispatch(
 func handleNonExecutionSuccess(
 	workflow domain.AdmittedWorkflow,
 	stages *domain.StageSet,
-	currentRowIdx int,
+	pos position,
 	currentRow domain.RoutingRow,
 	state domain.ArtifactState,
 	agents map[string]domain.AgentReference,
@@ -82,6 +82,7 @@ func handleNonExecutionSuccess(
 	stageSource domain.StageSource,
 ) domain.EngineDecision {
 
+	currentRowIdx := pos.rowIdx
 	hint := currentRow.OnSuccess
 	if !isUnambiguousHint(hint) {
 		return domain.EngineDecision{Deviation: &domain.DeviationDecision{
@@ -89,7 +90,7 @@ func handleNonExecutionSuccess(
 				Kind:          domain.DeviationAmbiguousRoute,
 				CurrentRow:    currentRowIdx,
 				CurrentPhase:  currentRow.Phase,
-				CurrentStage:  state.CurrentState.Stage,
+				CurrentStage:  pos.stage,
 				ArtifactState: state,
 			},
 		}}
@@ -178,7 +179,7 @@ func handleNonExecutionSuccess(
 				Kind:          domain.DeviationAmbiguousRoute,
 				CurrentRow:    currentRowIdx,
 				CurrentPhase:  currentRow.Phase,
-				CurrentStage:  state.CurrentState.Stage,
+				CurrentStage:  pos.stage,
 				ArtifactState: state,
 			},
 		}}
@@ -196,15 +197,14 @@ func handleNonExecutionSuccess(
 func handleExecutionSuccess(
 	workflow domain.AdmittedWorkflow,
 	stages *domain.StageSet,
-	currentRowIdx int,
+	pos position,
 	state domain.ArtifactState,
 	agents map[string]domain.AgentReference,
 	seq int,
 	now time.Time,
 ) domain.EngineDecision {
 
-	currentStageNum := parseStageNumber(state.CurrentState.Stage)
-	adv, advErr := computeNextFromExecution(workflow, stages, currentRowIdx, currentStageNum)
+	adv, advErr := computeNextFromExecution(workflow, stages, pos.rowIdx, pos.stageNum)
 	if advErr != nil {
 		return domain.EngineDecision{Stop: &domain.StopDecision{Reason: advErr.Error()}}
 	}
@@ -225,10 +225,10 @@ func handleExecutionSuccess(
 
 // executionAdvance is the outcome of advancing past a completed EXECUTION row.
 type executionAdvance struct {
-	RowIndex    int                // next row to dispatch; undefined when Complete is true
+	RowIndex    int // next row to dispatch; undefined when Complete is true
 	StageNumber domain.StageNumber
-	StageString string             // "Stage-N"
-	Complete    bool               // no further rows to dispatch
+	StageString string // stage path form "Stage-N", used for artifact path resolution only; not the recorded stage value
+	Complete    bool   // no further rows to dispatch
 }
 
 // computeNextFromExecution returns the next row after a successful EXECUTION
@@ -319,25 +319,11 @@ func buildDispatchStep(
 	row := workflow.Table.Rows[rowIdx]
 	isExecution := row.PhaseParsed.IsStaged
 
-	// Compute effective HITL.
-	rowHITL := row.HITL
-	stageHITL := false
-	if isExecution && stages != nil && stageNum > 0 {
-		if entry, ok := stages.Entry(stageNum); ok {
-			stageHITL = entry.HITL
-		}
-	}
-	effectiveHITL := rowHITL || stageHITL
-
-	// Resolve artifact paths.
-	inputArts, err := ResolveArtifacts(row.InputArtifacts, stageNum, stageStr, stages, refreshedStages, true)
+	defaults, err := resolveDefaults(row, stageNum, stageStr, stages, refreshedStages)
 	if err != nil {
 		return domain.DispatchStep{}, err
 	}
-	outputArts, err := ResolveArtifacts(row.OutputArtifacts, stageNum, stageStr, stages, refreshedStages, false)
-	if err != nil {
-		return domain.DispatchStep{}, err
-	}
+	inputArts, outputArts, effectiveHITL := defaults.InputArtifacts, defaults.OutputArtifacts, defaults.HITL
 
 	agent := agents[row.Agent]
 	instanceID := fmt.Sprintf("%s#%d", row.Agent, seq+1)

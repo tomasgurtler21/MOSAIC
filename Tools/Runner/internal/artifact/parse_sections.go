@@ -2,6 +2,7 @@ package artifact
 
 import (
 	"bytes"
+	"errors"
 	"strconv"
 	"strings"
 	"time"
@@ -23,20 +24,15 @@ func extractSectionContent(body []byte, sectionName string) ([]byte, bool) {
 		return nil, false
 	}
 
-	openIdx := bytes.Index(body, openTag)
-	if openIdx < 0 {
+	openEnd, ok := findTagLineEnd(body, bytes.TrimSpace(openTag), 0)
+	if !ok {
 		return nil, false
 	}
-
-	contentStart := openIdx + len(openTag)
-	remaining := body[contentStart:]
-
-	closeIdx := bytes.Index(remaining, closeTag)
-	if closeIdx < 0 {
+	closeStart, ok := findTagLineStart(body, bytes.TrimSpace(closeTag), openEnd)
+	if !ok {
 		return nil, false
 	}
-
-	return remaining[:closeIdx], true
+	return dropBlankLines(body[openEnd:closeStart]), true
 }
 
 // parseExecutionLog parses the execution log table from section content.
@@ -44,7 +40,7 @@ func parseExecutionLog(content []byte) ([]domain.ExecutionLogEntry, error) {
 	if len(bytes.TrimSpace(content)) == 0 {
 		return nil, nil
 	}
-	t, err := mdtable.Parse(content)
+	t, err := mdtable.ParseStrict(content)
 	if err != nil {
 		return nil, err
 	}
@@ -68,19 +64,19 @@ func parseExecutionLog(content []byte) ([]domain.ExecutionLogEntry, error) {
 		entry := domain.ExecutionLogEntry{}
 
 		if seqCol >= 0 {
-			n, err := strconv.Atoi(strings.TrimSpace(row[seqCol]))
+			n, err := strconv.Atoi(cellText(row[seqCol]))
 			if err == nil {
 				entry.Seq = n
 			}
 		}
 		if agentCol >= 0 {
-			entry.Agent = strings.TrimSpace(row[agentCol])
+			entry.Agent = cellText(row[agentCol])
 		}
 		if phaseCol >= 0 {
-			entry.Phase = strings.TrimSpace(row[phaseCol])
+			entry.Phase = cellText(row[phaseCol])
 		}
 		if stageCol >= 0 {
-			v := strings.TrimSpace(row[stageCol])
+			v := cellText(row[stageCol])
 			if v == "-" {
 				v = ""
 			}
@@ -90,26 +86,29 @@ func parseExecutionLog(content []byte) ([]domain.ExecutionLogEntry, error) {
 			entry.WorkflowRow = parseWorkflowRowCell(row[workflowRowCol])
 		}
 		if statusCol >= 0 {
-			entry.Status = domain.StatusCode(strings.TrimSpace(row[statusCol]))
+			entry.Status = domain.StatusCode(cellText(row[statusCol]))
 		}
 		if tsCol >= 0 {
-			ts, err := time.Parse(time.RFC3339, strings.TrimSpace(row[tsCol]))
+			ts, err := time.Parse(time.RFC3339, cellText(row[tsCol]))
 			if err == nil {
 				entry.Timestamp = ts
 			}
 		}
 		if summaryCol >= 0 {
-			entry.Summary = strings.TrimSpace(row[summaryCol])
+			entry.Summary = cellText(row[summaryCol])
+			if entry.Status == domain.StatusBLOCKED {
+				entry.Summary, entry.ErrorCode = domain.SplitErrorMarker(entry.Summary)
+			}
 		}
 		if inputsCol >= 0 {
-			v := strings.TrimSpace(row[inputsCol])
+			v := cellText(row[inputsCol])
 			if v == "-" {
 				v = ""
 			}
 			entry.Inputs = v
 		}
 		if checkpointCol >= 0 {
-			v := strings.TrimSpace(row[checkpointCol])
+			v := cellText(row[checkpointCol])
 			if v == "-" {
 				v = ""
 			}
@@ -126,7 +125,7 @@ func parseArtifactRegistry(content []byte) ([]domain.ArtifactRegistryEntry, erro
 	if len(bytes.TrimSpace(content)) == 0 {
 		return nil, nil
 	}
-	t, err := mdtable.Parse(content)
+	t, err := mdtable.ParseStrict(content)
 	if err != nil {
 		return nil, err
 	}
@@ -142,13 +141,13 @@ func parseArtifactRegistry(content []byte) ([]domain.ArtifactRegistryEntry, erro
 	for _, row := range t.Rows {
 		entry := domain.ArtifactRegistryEntry{}
 		if artCol >= 0 {
-			entry.Artifact = strings.TrimSpace(row[artCol])
+			entry.Artifact = cellText(row[artCol])
 		}
 		if createdInCol >= 0 {
-			entry.CreatedIn = strings.TrimSpace(row[createdInCol])
+			entry.CreatedIn = cellText(row[createdInCol])
 		}
 		if createdByCol >= 0 {
-			entry.CreatedBy = strings.TrimSpace(row[createdByCol])
+			entry.CreatedBy = cellText(row[createdByCol])
 		}
 		entries = append(entries, entry)
 	}
@@ -160,9 +159,12 @@ func parseWorkflowNotes(content []byte) ([]domain.WorkflowNote, error) {
 	if len(bytes.TrimSpace(content)) == 0 {
 		return nil, nil
 	}
-	t, err := mdtable.Parse(content)
+	t, err := mdtable.ParseStrict(content)
 	if err != nil {
 		return nil, err
+	}
+	if t.Column("Seq") < 0 || t.Column("Note") < 0 {
+		return nil, errors.New("workflow notes table must have the columns Seq and Note")
 	}
 	if len(t.Rows) == 0 {
 		return nil, nil
@@ -175,13 +177,13 @@ func parseWorkflowNotes(content []byte) ([]domain.WorkflowNote, error) {
 	for _, row := range t.Rows {
 		note := domain.WorkflowNote{}
 		if seqCol >= 0 {
-			n, err := strconv.Atoi(strings.TrimSpace(row[seqCol]))
+			n, err := strconv.Atoi(cellText(row[seqCol]))
 			if err == nil {
 				note.Seq = n
 			}
 		}
 		if noteCol >= 0 {
-			note.Note = strings.TrimSpace(row[noteCol])
+			note.Note = cellText(row[noteCol])
 		}
 		notes = append(notes, note)
 	}

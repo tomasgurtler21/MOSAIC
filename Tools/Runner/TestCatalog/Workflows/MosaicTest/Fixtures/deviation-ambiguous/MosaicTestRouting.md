@@ -20,6 +20,9 @@ dispatch
 ### Agent
 mosaictest-scripted
 
+### Row
+1
+
 ### TaskDescription
 ~~~
 MOSAICTEST-AMBIGUOUS-REROUTE / deviation resolved by orchestrator / ambiguous On Findings forced consultation

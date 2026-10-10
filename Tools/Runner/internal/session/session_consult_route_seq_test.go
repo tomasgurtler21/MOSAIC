@@ -18,6 +18,7 @@ import (
 	"testing"
 
 	"mosaic-run/internal/domain"
+	"mosaic-run/internal/engine"
 	"mosaic-run/internal/harness"
 	"mosaic-run/internal/session"
 )
@@ -86,8 +87,9 @@ func (r *alternatingApprovalReader) ReadApproval(_ context.Context, _ string) do
 // is derived from the target row using the deviation context, producing Stage = "2".
 func TestSession_ConsultRoute_CrossStageDeviation_UsesTargetRowStage(t *testing.T) {
 	consultant := &scriptedRoutingConsultant{}
-	// Row 2 is EXECUTION.Stage-2/agent-a after plan expansion (zero-based).
-	consultant.queueDispatch("agent-a", "recover Stage-2 after harness failure", 2)
+	// Row 0 is EXECUTION.[StageNumber]/agent-a (zero-based); stage 2 is named
+	// by the instruction.
+	consultant.queueStagedDispatch("agent-a", "recover Stage-2 after harness failure", 0, 2)
 	consultant.queueStop("Stage-2 step completed after recovery")
 
 	dir := scopedTempDir(t)
@@ -112,9 +114,12 @@ func TestSession_ConsultRoute_CrossStageDeviation_UsesTargetRowStage(t *testing.
 	store.state = stage1DoneAutoState()
 	store.exists = true
 
-	// The engine auto-dispatches Stage-2/agent-a (row 2). The harness fails,
-	// triggering consultRoute with deviation.CurrentStage = "2".
-	f.Queue("agent-a", harness.ScriptedEntry{Err: errors.New("simulated harness failure on Stage-2/agent-a")})
+	// The engine auto-dispatches Stage-2/agent-a (row 2). The harness fails on
+	// every attempt until the E501 budget is used up, triggering consultRoute
+	// with deviation.CurrentStage = "2".
+	for i := 0; i < engine.E501AttemptLimit; i++ {
+		f.Queue("agent-a", harness.ScriptedEntry{Err: errors.New("simulated harness failure on Stage-2/agent-a")})
+	}
 	// The consultant re-routes to row 2 (agent-a). The harness succeeds this time.
 	f.Queue("agent-a", harness.ScriptedEntry{Response: &domain.ProtocolResponse{
 		AgentInstanceID: "agent-a#4",
@@ -178,13 +183,14 @@ func TestSession_ConsultRoute_CrossStageDeviation_UsesTargetRowStage(t *testing.
 // Sequence:
 //
 //	(a) Stage-1/agent-a auto-dispatched and succeeds (Seq=1).
-//	(b) Stage-1/agent-b auto-dispatch: the harness returns an error, recorded
-//	    as a row (Seq=2), and the consultant is asked. The consultation
-//	    consumes no slot. It re-dispatches agent-b with HITLOverride=true: first
-//	    attempt SUCCESS + ApprovalFalse is a HITL-rejected row (Seq=3), the
-//	    redispatch is accepted (Seq=4).
+//	(b) Stage-1/agent-b auto-dispatch: the harness returns an error each time,
+//	    recorded as rows (Seq=2..4) until the engine's E501 budget is used up,
+//	    and the consultant is asked. The consultation consumes no slot. It
+//	    re-dispatches agent-b with HITLOverride=true: first attempt SUCCESS +
+//	    ApprovalFalse is a HITL-rejected row (Seq=5), the redispatch is
+//	    accepted (Seq=6).
 //	(c) Stage-2/agent-a and Stage-2/agent-b are auto-dispatched afterwards and
-//	    take Seq 5 and 6, with no collision with the accepted step from (b).
+//	    take Seq 7 and 8, with no collision with the accepted step from (b).
 func TestSession_MixedRoutingPaths_SeqStrictlyMonotonic(t *testing.T) {
 	hitlOverride := true
 	outputs := []string{"stage-1-b-output.md"}
@@ -197,6 +203,7 @@ func TestSession_MixedRoutingPaths_SeqStrictlyMonotonic(t *testing.T) {
 	// second returns True (HITLAccept). This exercises both the rlRejStep path
 	// and the final workflowStep path within a single consultRoute call.
 	consultant.queueDispatchWithHITLAndOutputs("agent-b", "re-route Stage-1/agent-b", 1, &hitlOverride, &outputs)
+	consultant.stageLastDispatch(1)
 	// After consultRoute returns, the outer auto loop dispatches Stage-2 rows.
 	// No further consultant instructions needed -- the run completes on its own
 	// via auto-routing.
@@ -224,23 +231,26 @@ func TestSession_MixedRoutingPaths_SeqStrictlyMonotonic(t *testing.T) {
 		StatusCode:      domain.StatusSUCCESS,
 		StatusMessage:   "Stage-1/agent-a done",
 	}})
-	// (b) Stage-1/agent-b: harness error is recorded (Seq=2) and triggers consultRoute.
-	f.Queue("agent-b", harness.ScriptedEntry{Err: errors.New("simulated Stage-1/agent-b harness error")})
+	// (b) Stage-1/agent-b: every harness error is recorded (Seq=2..4); once the
+	// E501 budget is used up the last one triggers consultRoute.
+	for i := 0; i < engine.E501AttemptLimit; i++ {
+		f.Queue("agent-b", harness.ScriptedEntry{Err: errors.New("simulated Stage-1/agent-b harness error")})
+	}
 	// Inside consultRoute: first agent-b dispatch (HITLOverride=true).
-	// ApprovalFalse -> HITLRedispatch (rlRejStep applied at Seq=3).
+	// ApprovalFalse -> HITLRedispatch (rlRejStep applied at Seq=5).
 	f.Queue("agent-b", harness.ScriptedEntry{Response: &domain.ProtocolResponse{
 		AgentInstanceID: "agent-b#2",
 		StatusCode:      domain.StatusSUCCESS,
 		StatusMessage:   "Stage-1/agent-b first attempt",
 	}})
-	// HITL redispatch: ApprovalTrue -> HITLAccept (workflowStep applied at Seq=4).
+	// HITL redispatch: ApprovalTrue -> HITLAccept (workflowStep applied at Seq=6).
 	f.Queue("agent-b", harness.ScriptedEntry{Response: &domain.ProtocolResponse{
 		AgentInstanceID: "agent-b#3",
 		StatusCode:      domain.StatusSUCCESS,
 		StatusMessage:   "Stage-1/agent-b accepted after redispatch",
 	}})
 	// (c) Stage-2/agent-a: auto-dispatched after consultRoute returns.
-	// Its Seq must be global_sequence+1 = 5, not a repeat of the accepted step's 4.
+	// Its Seq must be global_sequence+1 = 7, not a repeat of the accepted step's 6.
 	f.Queue("agent-a", harness.ScriptedEntry{Response: &domain.ProtocolResponse{
 		AgentInstanceID: "agent-a#5",
 		StatusCode:      domain.StatusSUCCESS,
@@ -265,10 +275,10 @@ func TestSession_MixedRoutingPaths_SeqStrictlyMonotonic(t *testing.T) {
 	ses.Start(context.Background(), cfg) //nolint:errcheck
 
 	// Primary assertion: the consultation leaves no row, and every recorded
-	// invocation takes the next slot after global_sequence (Seq 1..6).
+	// invocation takes the next slot after global_sequence (Seq 1..8).
 	requireNoConsultationRows(t, store)
-	if len(store.Applied) != 6 {
-		t.Fatalf("want 6 applied steps (agent-a, agent-b error, rejected attempt, accepted "+
+	if len(store.Applied) != 8 {
+		t.Fatalf("want 8 applied steps (agent-a, three agent-b errors, rejected attempt, accepted "+
 			"attempt, Stage-2/agent-a, Stage-2/agent-b), got %d: %+v", len(store.Applied), store.Applied)
 	}
 	for i, step := range store.Applied {

@@ -15,8 +15,9 @@ import (
 
 // NewInteraction returns a non-interactive CLI implementation of interaction.Interaction.
 //
-// All question methods (SelectOne, SelectMany, AskText, Confirm) return immediately
-// without blocking on terminal input. The CLI runner resolves configuration from
+// SelectOne, SelectMany and AskText return the Unsupported status immediately;
+// Confirm returns Answered with Confirm=false. None blocks on terminal input.
+// The CLI runner resolves configuration from
 // flags and populates RunConfig directly, so these methods are not used to drive
 // run setup.
 //
@@ -31,25 +32,22 @@ type cliInteraction struct {
 	out io.Writer
 }
 
-// SelectOne returns Answered immediately. The CLI resolves workflow selection from
-// the --workflow flag rather than through the interaction port.
+// SelectOne returns the Unsupported status immediately: a non-interactive run
+// cannot ask a choice question. The CLI resolves workflow selection from the
+// --workflow flag rather than through the interaction port.
 func (c *cliInteraction) SelectOne(_ context.Context, _ interaction.ChoiceQuestion) (interaction.ChoiceAnswer, error) {
-	return interaction.ChoiceAnswer{Status: interaction.Answered}, nil
+	return interaction.ChoiceAnswer{Status: interaction.Unsupported}, nil
 }
 
-// SelectMany returns Answered immediately with no selected options.
-//
-// The session does not call SelectMany in CLI mode; this method exists solely for
-// interface compliance. If a future session code path calls it, the caller receives
-// an empty OptionIDs slice, which should be treated as a no-op or an error by the
-// caller rather than a meaningful selection.
+// SelectMany returns the Unsupported status immediately, never an empty Answered,
+// so a caller cannot mistake the refusal for a real (empty) selection.
 func (c *cliInteraction) SelectMany(_ context.Context, _ interaction.ChoiceQuestion) (interaction.MultiChoiceAnswer, error) {
-	return interaction.MultiChoiceAnswer{Status: interaction.Answered}, nil
+	return interaction.MultiChoiceAnswer{Status: interaction.Unsupported}, nil
 }
 
-// AskText returns Answered immediately with an empty text value.
+// AskText returns the Unsupported status immediately, never an empty Answered.
 func (c *cliInteraction) AskText(_ context.Context, _ interaction.TextQuestion) (interaction.TextAnswer, error) {
-	return interaction.TextAnswer{Status: interaction.Answered}, nil
+	return interaction.TextAnswer{Status: interaction.Unsupported}, nil
 }
 
 // Confirm returns Answered immediately with Confirm=false.

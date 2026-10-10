@@ -5,12 +5,14 @@ package session_test
 import (
 	"context"
 	"errors"
+	"fmt"
 	"os"
 	"path/filepath"
 	"sync"
 	"testing"
 
 	"mosaic-run/internal/domain"
+	"mosaic-run/internal/engine"
 	"mosaic-run/internal/harness"
 	"mosaic-run/internal/session"
 )
@@ -279,12 +281,16 @@ func TestSession_Start_WithLogger_DeviationResolution_LogsDeviation(t *testing.T
 	logger := &sessionRecordingLogger{}
 	ses, f, _, orchPath := newTestDeviationWorkflowSession(t, logger)
 
-	// agent-a returns PARTIALLY_DONE with no On Findings column -> engine returns Deviation.
-	f.Queue("agent-a", harness.ScriptedEntry{Response: &domain.ProtocolResponse{
-		AgentInstanceID: "agent-a#1",
-		StatusCode:      domain.StatusPARTIALLY_DONE,
-		StatusMessage:   "only partly done",
-	}})
+	// agent-a returns PARTIALLY_DONE on the original dispatch and on every
+	// mechanical re-dispatch; once the re-dispatch bound is used up the engine
+	// returns a Deviation.
+	for i := 0; i < 1+engine.PartiallyDoneRedispatchLimit; i++ {
+		f.Queue("agent-a", harness.ScriptedEntry{Response: &domain.ProtocolResponse{
+			AgentInstanceID: fmt.Sprintf("agent-a#%d", i+1),
+			StatusCode:      domain.StatusPARTIALLY_DONE,
+			StatusMessage:   "only partly done",
+		}})
+	}
 
 	ses.Start(context.Background(), domain.RunConfig{
 		OrchestratorFilePath: orchPath,

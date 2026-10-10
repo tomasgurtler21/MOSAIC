@@ -80,6 +80,19 @@ func (m *mainTestMemStore) Apply(_ context.Context, state domain.ArtifactState, 
 			LastAgent:  step.AgentInstance,
 		}
 	}
+	entry := domain.ExecutionLogEntry{
+		Seq:         step.Seq,
+		Agent:       step.AgentInstance,
+		Phase:       step.Phase,
+		Stage:       step.Stage,
+		WorkflowRow: step.WorkflowRow,
+		Status:      step.Status,
+	}
+	// Like the file store, only a BLOCKED row carries its error code in the log.
+	if step.Status == domain.StatusBLOCKED {
+		entry.ErrorCode = step.ErrorCode
+	}
+	state.ExecutionLog = append(state.ExecutionLog, entry)
 	m.state = state
 	return state, nil
 }

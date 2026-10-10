@@ -58,7 +58,7 @@ func malformedSchemaReply() sequencedReply {
 // a RoutingInstruction without error.
 func TestConsultRouting_RetrySucceedsOnSecondAttempt_ValidDispatch(t *testing.T) {
 	table := mustParseTable(t)
-	validDispatch := []byte(`{"action":"dispatch","agent":"agent-a","task_description":"do the thing"}`)
+	validDispatch := []byte(`{"action":"dispatch","agent":"agent-a","row":1,"task_description":"do the thing"}`)
 	invoker := &sequencedRawInvoker{replies: []sequencedReply{
 		malformedSchemaReply(),
 		{reply: validDispatch},
@@ -201,7 +201,7 @@ func TestConsultRouting_NonMalformedFailureIsNotRetried(t *testing.T) {
 // AgentInstanceIDs and 2 LogError calls (one per malformed attempt).
 func TestConsultRouting_RetryLogsDistinctConsultationIDs(t *testing.T) {
 	table := mustParseTable(t)
-	validDispatch := []byte(`{"action":"dispatch","agent":"agent-a","task_description":"do the thing"}`)
+	validDispatch := []byte(`{"action":"dispatch","agent":"agent-a","row":1,"task_description":"do the thing"}`)
 	invoker := &sequencedRawInvoker{replies: []sequencedReply{
 		malformedSchemaReply(),
 		malformedSchemaReply(),

@@ -33,7 +33,7 @@ type CompletedStep struct {
 	Seq           int
 	AgentInstance string // "{AgentName}#{Seq}"
 	Phase         string
-	Stage         string // "Stage-N" during EXECUTION, "" otherwise
+	Stage         string // recorded stage value (domain.FormatStageValue, e.g. "Test.1") during EXECUTION, "" otherwise
 	// WorkflowRow is the dispatched routing-table row, 1-based.
 	// NoWorkflowRow for infrastructure and out-of-band steps.
 	WorkflowRow WorkflowRow
@@ -383,6 +383,11 @@ const (
 	EventSessionConsultDispatch = "session.consult.dispatch"
 	EventSessionConsultStop     = "session.consult.stop"
 	EventSessionConsultFailed   = "session.consult.failed"
+
+	// EventSessionConsultDiscarded: a routing decision completed after a stop
+	// request was discarded. Fields: agent, row (1-based), stage (recorded form).
+	EventSessionConsultDiscarded = "session.consult.discarded"
+
 	EventSessionPreConsult      = "session.preconsult"
 	EventSessionCommitSetup     = "session.commit.setup"
 	EventSessionHITLVerify      = "session.hitl.verify"

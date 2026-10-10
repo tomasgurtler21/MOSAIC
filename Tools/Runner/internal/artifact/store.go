@@ -140,6 +140,10 @@ func (f *fileStore) Apply(ctx context.Context, state domain.ArtifactState, step 
 	}
 
 	// Build the new execution log entry.
+	var errorCode domain.ErrorCode
+	if step.RoutedStatus() == domain.StatusBLOCKED {
+		errorCode = step.RoutedErrorCode()
+	}
 	newEntry := domain.ExecutionLogEntry{
 		Seq:         step.Seq,
 		Agent:       step.AgentInstance,
@@ -147,9 +151,10 @@ func (f *fileStore) Apply(ctx context.Context, state domain.ArtifactState, step 
 		Stage:       step.Stage,
 		WorkflowRow: step.WorkflowRow,
 		Status:      step.Status,
+		ErrorCode:   errorCode,
 		Timestamp:   step.Timestamp,
 		Summary:     TruncateSummary(step.Summary),
-		Inputs:      step.Inputs,
+		Inputs:      recordedInputs(state.RunID, step.Inputs),
 		Checkpoint:  step.Checkpoint,
 	}
 
@@ -189,7 +194,7 @@ func (f *fileStore) Apply(ctx context.Context, state domain.ArtifactState, step 
 	}
 	for _, art := range step.WrittenArtifacts {
 		entry := domain.ArtifactRegistryEntry{
-			Artifact:  art,
+			Artifact:  domain.RecordedArtifactPath(state.RunID, art),
 			CreatedIn: createdIn,
 			CreatedBy: step.AgentInstance,
 		}
@@ -216,6 +221,19 @@ func registryKey(runID, artifact string) string {
 		return artifact
 	}
 	return strings.TrimPrefix(artifact, "Orchestration-"+runID+"/")
+}
+
+// recordedInputs rewrites each comma-separated path of an Inputs cell into its
+// recorded form (without the run-folder prefix).
+func recordedInputs(runID, inputs string) string {
+	if inputs == "" {
+		return inputs
+	}
+	parts := strings.Split(inputs, ", ")
+	for i, p := range parts {
+		parts[i] = domain.RecordedArtifactPath(runID, p)
+	}
+	return strings.Join(parts, ", ")
 }
 
 // upsertRegistry replaces the entry for entry.Artifact in place at its first

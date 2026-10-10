@@ -19,6 +19,7 @@ package opencode_test
 // adapter's own backstop constant, DefaultSpawnTimeout.
 
 import (
+	"bytes"
 	"os"
 	"path/filepath"
 	"reflect"
@@ -100,7 +101,7 @@ func TestSpawnPlan_ArgsMatchSharedOpenCodeArgumentBuilder(t *testing.T) {
 		t.Fatalf("SpawnPlan: %v", err)
 	}
 
-	want, err := commonharness.BuildOpenCodeArgs(commonharness.SpawnRequest{
+	want, wantStdin, err := commonharness.BuildOpenCodeArgs(commonharness.SpawnRequest{
 		Agent: commonharness.AgentRef{
 			Identifier: subject.Identity,
 			Kind:       commonharness.InvocationKind(subject.InvocationKind),
@@ -116,6 +117,9 @@ func TestSpawnPlan_ArgsMatchSharedOpenCodeArgumentBuilder(t *testing.T) {
 
 	if !reflect.DeepEqual(plan.Args, want) {
 		t.Errorf("SpawnPlan: Args = %v, want the shared argument builder's output %v", plan.Args, want)
+	}
+	if !bytes.Equal(plan.Stdin, wantStdin) {
+		t.Errorf("SpawnPlan: Stdin = %q, want the shared builder's stdin %q", plan.Stdin, wantStdin)
 	}
 }
 
@@ -137,7 +141,7 @@ func TestSpawnPlan_SystemPromptUsesSandboxSubjectDirNotProcessCwd(t *testing.T) 
 		t.Fatalf("SpawnPlan: %v", err)
 	}
 
-	wrongCwdArgs, err := commonharness.BuildOpenCodeArgs(commonharness.SpawnRequest{
+	_, wrongCwdStdin, err := commonharness.BuildOpenCodeArgs(commonharness.SpawnRequest{
 		Agent: commonharness.AgentRef{
 			Identifier: subject.Identity,
 			Kind:       commonharness.InvocationKind(subject.InvocationKind),
@@ -155,23 +159,48 @@ func TestSpawnPlan_SystemPromptUsesSandboxSubjectDirNotProcessCwd(t *testing.T) 
 	// to the test process's own working directory, so a plan built against
 	// the sandbox dir must diverge from one built against an empty
 	// workingDir — unless the adapter is wrongly passing "" through.
-	if reflect.DeepEqual(plan.Args, wrongCwdArgs) {
-		t.Errorf("SpawnPlan: Args = %v matched EnvBlock(\"\")'s output; want EnvBlock(%q) — the sandbox subject dir, not the process's own working directory", plan.Args, sb.SubjectDir)
+	if bytes.Equal(plan.Stdin, wrongCwdStdin) {
+		t.Errorf("SpawnPlan: Stdin matched EnvBlock(\"\")'s output; want EnvBlock(%q) — the sandbox subject dir, not the process's own working directory", sb.SubjectDir)
+	}
+	wantPrefix := commonharness.EnvBlock(sb.SubjectDir) + "\n"
+	if !strings.HasPrefix(string(plan.Stdin), wantPrefix) {
+		t.Errorf("SpawnPlan: Stdin = %q, want it to begin with the env block for the sandbox subject dir followed by a newline", plan.Stdin)
 	}
 }
 
-func TestSpawnPlan_ArgsContainOpeningMessage(t *testing.T) {
+func TestSpawnPlan_StdinCarriesEnvBlockAndOpeningMessage(t *testing.T) {
 	a := opencode.New(opencode.Options{})
 	subject := spawnTestSubject()
+	sb, prov := baseProvisioning(t, t.TempDir())
 
-	plan, err := a.SpawnPlan(testContext(), subject, mustProvisioning(t))
+	plan, err := a.SpawnPlan(testContext(), subject, prov)
 	if err != nil {
 		t.Fatalf("SpawnPlan: %v", err)
 	}
 
-	joined := strings.Join(plan.Args, " ")
-	if !strings.Contains(joined, subject.OpeningMessage) {
-		t.Errorf("SpawnPlan: Args = %v, want the subject's opening message %q to appear somewhere", plan.Args, subject.OpeningMessage)
+	want := commonharness.EnvBlock(sb.SubjectDir) + "\n" + subject.OpeningMessage
+	if string(plan.Stdin) != want {
+		t.Errorf("SpawnPlan: Stdin = %q, want the env block, a newline and the opening message %q", plan.Stdin, want)
+	}
+}
+
+func TestSpawnPlan_ArgsCarryNoPromptContentAndNoPositionalMessage(t *testing.T) {
+	a := opencode.New(opencode.Options{})
+	subject := spawnTestSubject()
+	_, prov := baseProvisioning(t, t.TempDir())
+
+	plan, err := a.SpawnPlan(testContext(), subject, prov)
+	if err != nil {
+		t.Fatalf("SpawnPlan: %v", err)
+	}
+
+	for _, arg := range plan.Args {
+		if strings.ContainsAny(arg, "\r\n") || strings.Contains(arg, subject.OpeningMessage) || strings.Contains(arg, "<env>") {
+			t.Errorf("SpawnPlan: Args = %q, want no element carrying prompt content or a newline", plan.Args)
+		}
+	}
+	if n := len(plan.Args); n == 0 || plan.Args[n-1] != subject.Model {
+		t.Errorf("SpawnPlan: Args = %q, want the final argument to be the --model value with no positional message after it", plan.Args)
 	}
 }
 

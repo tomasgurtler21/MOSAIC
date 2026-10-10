@@ -10,6 +10,7 @@ Each workflow has exactly one seed root. Seed that directory and nothing else.
 |----------|------|-----------|
 | `smoke-single` | auto, auto-review | `C:\AI\MOSAIC\MOSAIC\Tools\Runner\TestCatalog\Workflows\MosaicTest\Fixtures\smoke-single` |
 | `payload-stress` | any | `C:\AI\MOSAIC\MOSAIC\Tools\Runner\TestCatalog\Workflows\MosaicTest\Fixtures\payload-stress` |
+| `request-fidelity` | **auto** | `C:\AI\MOSAIC\MOSAIC\Tools\Runner\TestCatalog\Workflows\MosaicTest\Fixtures\request-fidelity` |
 | `staged-preplaced-plan` | any | `C:\AI\MOSAIC\MOSAIC\Tools\Runner\TestCatalog\Workflows\MosaicTest\Fixtures\staged-preplaced-plan` |
 | `orchestrated-linear` | **orchestrated only** | `C:\AI\MOSAIC\MOSAIC\Tools\Runner\TestCatalog\Workflows\MosaicTest\Fixtures\orchestrated-linear` |
 | `orchestrated-backjump` | **orchestrated only** | `C:\AI\MOSAIC\MOSAIC\Tools\Runner\TestCatalog\Workflows\MosaicTest\Fixtures\orchestrated-backjump` |

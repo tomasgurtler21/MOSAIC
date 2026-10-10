@@ -12,7 +12,7 @@ import (
 // the same Update/View/Done/Back/Reset/Resize contract as ReportPathScreen.
 type SummaryInputScreen struct {
 	confirmed string // last confirmed filter (or initial); empty = all versions
-	draft     string // in-progress text input
+	entry     *draftEntry
 	width     int
 	styles    Styles
 	done      bool
@@ -23,6 +23,7 @@ type SummaryInputScreen struct {
 // initialFilter. An empty initialFilter means "all versions".
 func NewSummaryInputScreen(initialFilter string, width int, styles Styles) *SummaryInputScreen {
 	return &SummaryInputScreen{
+		entry:     newDraftEntry(),
 		confirmed: initialFilter,
 		width:     width,
 		styles:    styles,
@@ -37,31 +38,22 @@ func (s *SummaryInputScreen) Update(msg tea.Msg) tea.Cmd {
 	if !ok {
 		return nil
 	}
-	switch key.Type {
-	case tea.KeyEnter:
-		if s.draft != "" {
-			s.confirmed = s.draft
-			s.draft = ""
+	res := s.entry.update(key)
+	switch {
+	case res.submitted:
+		if res.draft != "" {
+			s.confirmed = res.draft
 		}
 		s.done = true
-	case tea.KeyEsc:
-		s.draft = ""
+	case res.back:
 		s.back = true
-	case tea.KeyBackspace:
-		if len(s.draft) > 0 {
-			s.draft = s.draft[:len(s.draft)-1]
-		}
-	case tea.KeyRunes:
-		for _, r := range key.Runes {
-			s.draft += string(r)
-		}
 	}
 	return nil
 }
 
 // View renders the summary input screen with theme-resolved styles.
 func (s *SummaryInputScreen) View() string {
-	display := s.draft
+	display := s.entry.draft()
 	if display == "" {
 		if s.confirmed != "" {
 			display = s.confirmed
@@ -91,7 +83,7 @@ func (s *SummaryInputScreen) Back() bool { return s.back }
 func (s *SummaryInputScreen) Reset() {
 	s.done = false
 	s.back = false
-	s.draft = ""
+	s.entry.reset()
 }
 
 // Resize updates the available width without affecting Done, Back, or the

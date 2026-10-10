@@ -20,6 +20,10 @@ func (s *sessionImpl) runDispatchLoop(ctx context.Context, rs *runStartCtx) (dom
 	s.manualDispatchPending = rs.config.ManualDispatch
 
 	for {
+		if s.consultOutputs.set {
+			rs.lastOutputArtifacts = s.consultOutputs.paths
+			s.consultOutputs = consultOutputs{}
+		}
 		decision := engine.Next(engine.NextInput{
 			Workflow:            rs.admitted,
 			Stages:              rs.stages,
@@ -120,7 +124,14 @@ func (s *sessionImpl) handleEngineDispatch(ctx context.Context, rs *runStartCtx,
 		return domain.RunOutcome{Status: domain.RunFailed, Message: "engine returned empty dispatch"}, true, false, nil
 	}
 	step := s.prepareAutoDispatchRequest(ctx, rs, decision.Dispatch.Steps[0])
-	rs.antiLoop.recordDispatch(step.RowIndex, step.Agent.Identifier)
+	// An engine dispatch is counted but never blocked. Mechanical re-dispatches
+	// are not counted at all: their own bounds (PARTIALLY_DONE limit, E501
+	// budget) own them, and they must not eat into the guard's allowance for
+	// the dispatches a consultant requests afterwards.
+	if step.Retry == domain.RetryNone {
+		rs.antiLoop.recordDispatch(step.RowIndex, step.Agent.Identifier)
+	}
+	rs.antiLoop.escalations = 0
 
 	if s.deps.StopRequested() {
 		s.deps.Debug.Log(domain.EventSessionStopObserved, "graceful stop observed; not dispatching",
@@ -241,17 +252,27 @@ func (s *sessionImpl) handleAutoHarnessErrorAndBypass(ctx context.Context, rs *r
 		s.deps.Debug.Log(domain.EventSessionDeviationUnresolved, msg)
 		return domain.ProtocolResponse{}, step, true, false, domain.RunOutcome{Status: domain.RunDeviationUnresolved, Message: msg}, nil
 	}
-	// Raw-text bypass: one direct retry before consulting the orchestrator.
-	if isRawTextHarnessError(invokeErr) && rs.antiLoop.recordDispatch(step.RowIndex, step.Agent.Identifier) {
+	// Raw-text bypass: one direct retry (one attempt of the E501 budget in the
+	// mechanical-retry modes) before the next step is decided.
+	if isRawTextHarnessError(invokeErr) && bypassPermitted(rs.state, step.RowIndex, step.Stage, step.Agent.Identifier, &rs.antiLoop) {
 		bypassSeq := rs.state.GlobalSequence + 1
 		bypassReq := step.Request
 		bypassReq.AgentInstanceID = fmt.Sprintf("%s#%d", step.Agent.Identifier, bypassSeq)
-		if bypassResp, bypassErr := s.invokeAndLog(ctx, step.Agent, bypassReq); bypassErr == nil {
+		bypassResp, bypassErr := s.invokeAndLog(ctx, step.Agent, bypassReq)
+		if bypassErr == nil {
 			step.Request = bypassReq
 			return bypassResp, step, false, false, domain.RunOutcome{}, nil
 		}
+		if recErr := s.recordFailedBypass(ctx, &rs.state, bypassReq, step.Phase, step.Stage, step.RowIndex, bypassErr); recErr != nil {
+			return domain.ProtocolResponse{}, step, true, false, domain.RunOutcome{Status: domain.RunFailed, Message: recErr.Error()}, recErr
+		}
+		rs.seq = rs.state.GlobalSequence
 	}
 	rs.lastResponse = &harnessResp
+	if isMechanicalRetryMode(rs.state.Mode) && e501BudgetLeft(rs.state, step.RowIndex, step.Stage) {
+		// Budget remains: the engine decision re-dispatches the same row and stage.
+		return domain.ProtocolResponse{}, step, false, true, domain.RunOutcome{}, nil
+	}
 	done, out, outErr := s.consultRoute(ctx, &deviationInfo, &rs.state, &rs.seq,
 		&rs.lastResponse, &rs.prevWorkflowStep, &rs.refreshedStages, &rs.stages,
 		rs.table, rs.agents, rs.config, rs.declaredInfraAgents, rs.admitted, &rs.antiLoop)

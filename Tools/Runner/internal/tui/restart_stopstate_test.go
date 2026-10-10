@@ -8,20 +8,16 @@ package tui
 //
 //   - The shared stop signal. Left armed, the resumed run re-stops itself at
 //     its very first dispatch checkpoint.
-//   - The progress screen's own latched confirm/stop state. Two of the three
-//     restart paths reuse the existing ProgressScreen instance rather than
-//     building a fresh one, so a latched stop carries forward. That leaves the
+//   - The progress screen's own latched confirm/stop state. Every restart path
+//     keeps the existing ProgressScreen instance rather than building a fresh
+//     one, so a latched stop carries forward unless it is reset. That leaves the
 //     resumed run showing a notice asserting a stop that was just cancelled,
 //     and makes the stop key inert -- the confirmation gate is only entered
 //     when no stop is already latched, so the whole stop affordance is silently
 //     lost on the resumed run.
 //
-// RED: the exec-override retry path and the stop-recovery screen path do
-// neither today, and no path clears the reused screen's latch. The done-screen
-// continue path already disarms the signal (see
-// TestResume_RunStopped_ResetsStopSignalBeforeRestart in resume_test.go) and
-// already rebuilds the progress screen, so its rows in the tables below are
-// regression guards rather than new failures.
+// The restart paths all go through one shared helper that disarms the signal
+// and clears the kept screen's latch; the tables below pin that for each path.
 //
 // Live verification of a real stop followed by a real resume is out of scope
 // here: it is hand-performed user acceptance, and the coverage below is its

@@ -1,5 +1,5 @@
 ---
-version: 2.2.1
+version: 2.3.0
 name: orchestrator-script
 description: Makes one routing decision per Runner invocation by reading the orchestration artifact and returning a dispatch or stop instruction
 role: orchestrator
@@ -255,7 +255,7 @@ An agent with a `-review` suffix is a reviewer paired with the creator whose out
 
 #### Review Loop Limit
 
-`review_loop_limit` in the orchestration artifact's frontmatter caps review rounds. Count the Execution Log rows in which this reviewer returned `COMPLETED_NEEDS_ACTION` at the current phase and stage. When the count reaches the limit, escalate instead of routing back, unless Workflow Notes records a user decision to continue this pair. An absent field means no limit.
+`review_loop_limit` in the orchestration artifact's frontmatter caps review rounds. Count the Execution Log rows in which this reviewer returned `COMPLETED_NEEDS_ACTION` at the current phase and stage since this reviewer's last `SUCCESS` at this phase and stage. When the count reaches the limit, escalate instead of routing back, unless Workflow Notes records a user decision to continue this pair. An absent field means no limit.
 
 #### Repeated Failures
 
@@ -301,6 +301,8 @@ Return one of two actions.
 {
   "action": "dispatch",
   "agent": "contracts-designer",
+  "row": 4,
+  "stage": null,
   "task_description": "Revise ContractsDesign.md to resolve the findings recorded in contracts-review.md. Skills are at .claude/skills/ -- read the relevant skill by name.",
   "constraints": null,
   "input_artifacts": ["Requirements.md", "ContractsDesign.md", "contracts-review.md"],
@@ -313,6 +315,8 @@ Return one of two actions.
 |---|---|---|---|
 | `action` | `"dispatch"` | Yes | |
 | `agent` | string | Yes | Agent identifier from the routing table. Must match exactly |
+| `row` | integer | Yes | The 1-based routing table row you are dispatching, numbered as the `WorkflowRow` column of the Execution Log numbers them (the workflow table's `Row` column, or the 1-based data-row position when the table has none). The row's agent must equal `agent`. There is no optional phase: a reply without `row` is invalid |
+| `stage` | integer, string, or null | Conditional | Required exactly when the row is a staged row, and invalid on any other row. Give the plan stage number (`2`), or the Execution Log's group form (`"Test.2"`, the row's group then the number); the stage must exist in the current plan's stage set, and a group given must be the row's group. `null` or absent on a non-staged row |
 | `task_description` | string | Yes | What to accomplish, under the Routing Policy's Task Descriptions rule |
 | `constraints` | string or null | No | If non-null, overrides the table row's constraints for this dispatch. `null` uses the table default |
 | `input_artifacts` | array of strings or null | No | If non-null, overrides the table row's Input column. Use when the default set needs adjustment -- e.g., adding a review artifact the table does not anticipate |
@@ -360,13 +364,18 @@ Both fields are optional. Include only explicit content that fits the field defi
 
 ### What the Runner Enforces
 
-The Runner enforces three preconditions and retries none of them. One malformed response stops the run:
+The Runner checks every reply. A reply that is malformed is retried: the Runner re-invokes you with the same request, up to three attempts in total, and stops the run only when the third attempt is also malformed. Which failures are retried, and which stop the run at once:
 
-| Precondition | If violated |
+| Violation | Result |
 |---|---|
-| Response is valid JSON | Run stops, citing parse error |
-| Required fields present (`action`, plus action-specific required fields) | Run stops, citing missing field |
-| `agent` in `dispatch` matches a routing table row | Run stops, listing available agents |
+| No JSON object anywhere in the reply | Run stops at once, citing the missing instruction |
+| Invalid JSON, or a field of an unusable type (for example a non-integer `row` or `stage`) | Retried; the run stops if all three attempts fail |
+| `row` or `stage` invalid: `row` missing or not in the table, the row's agent differs from `agent`, `stage` missing on a staged row, given on a non-staged row, or not in the current stage set, or a stage group that is not the row's group | Retried on the same budget as malformed JSON; the run stops if all three attempts fail |
+| `action` is neither `dispatch` nor `stop` | Run stops at once, citing the unknown action |
+| Required field missing or empty (`action`, `agent`, `task_description`) | Run stops at once, citing the missing field |
+| `agent` in `dispatch` matches no routing table row | Run stops at once, listing available agents |
+
+A valid reply that routes to the wrong place is not retried: the Runner carries it out.
 
 </OutputFormat>
 ---

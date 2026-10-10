@@ -1,141 +1,149 @@
 ---
 run_id: "20260801T202027Z-ad3d"
 created_by: "knowledge-base-generator#2"
+last_updated: "2026-10-08"
 ---
 
 # session
 
-> Responsibility: The imperative shell that drives a complete orchestration run — from resolving all run-start inputs, through the dispatch loop that repeatedly asks the pure `engine` what happens next and carries out that decision, to a terminal outcome (completed, stopped, refused, or failed).
+> Responsibility: The imperative shell that drives a complete orchestration run — from resolving all run-start inputs, through the dispatch loop that repeatedly asks the pure `engine` what happens next and carries out that decision (dispatching, gating on human approval, consulting the routing consultant), to a terminal outcome (completed, stopped, refused, start-failed, or failed).
 
 ## Overview
 
-`session` is the only package that performs I/O in service of running a workflow: it invokes the harness, reads/writes the artifact, resolves deviations, and reports progress. It exists to keep `engine` pure — `engine.Next` only *decides*, `session` *does*. Both frontends (`cli` and `tui`) call the same `Session.Start` entry point and never touch `engine`, `orchfile`, `workflow`, `compat`, `agentresolve`, or `planstages` directly; `session` owns the sequencing of all of those packages.
+`session` is the only package that performs I/O in service of running a workflow: it invokes the harness, reads/writes the artifact, consults the routing consultant, and reports progress. It exists to keep `engine` pure — `engine.Next` only *decides*, `session` *does*. Both frontends (`cli` and `tui`) call the same `Session.Start` entry point and never touch `engine`, `orchfile`, `workflow`, `compat`, `agentresolve`, or `planstages` directly; `session` owns the sequencing of all of those packages.
 
-A run has two phases: a fixed-order **run-start sequence** that validates every input and produces (or resumes) the artifact, and a **dispatch loop** that repeatedly calls `engine.Next` and acts on whichever decision comes back until the run reaches a terminal state.
+A run has two phases: a fixed-order **run-start sequence** that validates every input and produces (or resumes) the artifact, and a **dispatch loop** that repeatedly calls `engine.Next` and acts on whichever decision comes back until the run reaches a terminal state. The run's execution mode (`orchestrated`, `auto`, `auto-review`) is required, immutable, persisted in the artifact, and passed to every `engine.Next` call.
 
 ## Components / Subdomains
 
 | Component | Purpose |
 |-----------|---------|
-| **Run-start sequence** | Loads and validates every input needed before the first dispatch: workflow region, routing table, existing artifact (if any), admission, crash recovery check, agent resolution, snapshot/backup creation, stage set, declared infrastructure agents, per-class agent selection, and checkpoint availability. Produces a fresh or resumed artifact state. |
-| **Dispatch loop** | The core `for` loop: calls `engine.Next`, then branches on which decision field is populated (Dispatch / Complete / Deviation / Stop) and performs the corresponding action. |
-| **Deviation & rejoin handling** | Invokes the injected `DeviationResolver` when the engine cannot decide or when harness invocation fails, then applies the returned `RejoinInstruction` (stop / rejoin at a row / custom dispatch) to resume the loop. |
-| **Infrastructure-agent trigger evaluation** | After each *workflow* step completes (never after infrastructure steps — "no-cascades"), checks every declared infrastructure agent's triggers and synchronously dispatches any that fire, applying per-class gating, activation, and failure policy. |
-| **Selection & override validation** (`selection.go`) | Enforces at-most-one-active-agent-per-gated-class semantics (checkpoint, commit, restore) and applies `infrastructure_overrides` from the artifact to declared agents' trigger lists. |
-| **Stage-* re-derivation** | Detects when a completed step's output artifacts reference the `Stage-*` wildcard pattern and re-reads `Plan.md` via `planstages` so the next `engine.Next` call sees a refreshed stage set. |
+| **Run-start sequence** (`start_prepare.go`, `start_harness.go`) | Loads and validates every input needed before the first dispatch and produces a fresh or resumed artifact state. |
+| **Dispatch loop** (`dispatch_loop.go`) | The core `for` loop: calls `engine.Next`, then branches on which decision field is populated (Dispatch / Complete / Consult / Deviation / Stop) and performs the corresponding action. |
+| **HITL gate** (`dispatch_hitl.go`, `consult_route_hitl.go`, `written_outputs.go`) | Verifies `human_approved` on the outputs an attempt actually wrote and drives the single re-dispatch or the escalation. |
+| **Routing consultation** (`consult_route.go`, `consult_target.go`, `consult_defaults.go`, `consult_manual.go`) | One cycle that asks the consultant (or the manual resolver) where to go next, validates the answer, and dispatches the chosen row. |
+| **Mechanical-retry integration** (`retry_dispatch.go`) | Connects harness errors and the raw-text bypass to the engine's E501 budget. |
+| **Anti-loop guard** (`antiloop.go`, `antiloop_escalation.go`) | Bounds consultant-requested repeat dispatches. |
+| **Graceful stop** (`stopsignal.go`, `stopcheckpoints.go`, `consult_stop.go`) | The stop flag, the six places it is observed, and the visible discard of a routing decision completed after a stop request. |
+| **Infrastructure-agent trigger evaluation** (`triggers.go`) | After each *workflow* step, checks every declared infrastructure agent's triggers and synchronously dispatches those that fire. |
+| **Selection & override validation** (`selection.go`, `deps_policy.go`) | At-most-one-active-agent-per-gated-class, `infrastructure_overrides`, and the dependency policy that refuses a run needing an unwired port. |
+| **Stage-* re-derivation** | Re-reads `Plan.md` via `planstages` when a completed step's outputs reference the `Stage-*` wildcard. |
 
 ## Key Flows
 
 ### Run-start sequence
 
-Executed once, in this fixed order, entirely inside `Start`:
+Executed once, in this fixed order, inside `Start`:
 
-1. Load the orchestrator file and select the requested workflow region (`orchfile`).
-2. Parse the region's raw content into a routing table (`workflow`).
-3. Read the existing artifact, if any. A non-canonical-format artifact is always a refusal, regardless of new-vs-resume. A missing artifact is expected for new runs and an error for resume.
-4. Apply the new-vs-resume contract: new runs refuse if an artifact already exists (race guard); resumes refuse if none exists (stale scan guard). Resumes also refuse on workflow-version mismatch unless version drift is explicitly allowed.
-5. Admit the workflow (`compat`) — validates the FR-18a subset and resolves execution groups.
-5a. **Recovery check** (CLI harnesses only): call `snapshot.RecoveryCheck` against the harness agents directory. Scans for an orphaned `.agents-backup/` directory left by a previous crashed run and restores originals if no active runs are detected. Runs before agent resolution so agent files are in their original state when `ResolveAll` reads them. Refuses the run if a corrupt manifest is found.
-6. Resolve every agent identifier referenced in the routing table to a definition file (`agentresolve`).
-6a. **Snapshot / backup-and-transform** (CLI harnesses only): select strategy based on `CLIHarness.LoadingMechanism`. For `LoadingMechanismPath` (Claude Code): copy agents to a run-scoped `agents-runner-{run_id}/` directory and apply harness transforms to the copies; defer cleanup to run exit. For `LoadingMechanismName` (OpenCode, GHCP CLI): call `snapshot.SetupBackupAndTransform` — copies originals to `.agents-backup/`, transforms originals in-place, writes recovery marker; defer `BackupState.Cleanup` to run exit. Refuses the run on error.
-7. If the admitted workflow has a staged phase, read the stage set from `Plan.md` (`planstages`), passing `admitted.GroupsDeclared` to indicate whether the `Approach` column is required. When `GroupsDeclared` is true, every stage must carry a non-empty `Approach` value; when false, the column is not read even if present.
-8. Enumerate declared infrastructure agents from the orchestrator file, then validate per-class agent selection (refusing non-interactive runs that have multiple agents in a gated class but no `--infra-class` selection).
-9. Settle checkpoints: refuse only when checkpoints were requested for the run **and** no checkpoint-class infrastructure agent is declared.
-10. Create a fresh artifact (new run) or determine the resume point via `engine.ResumePoint` (resume). A resume whose last step was interrupted mid-invocation (FR-33) has its `CurrentState` rewound so the interrupted row is re-dispatched rather than skipped.
-11. Validate and apply any `infrastructure_overrides` recorded in the artifact state against the declared agents (unknown agent names refuse; disallowed trigger names per agent class refuse).
+0. Refuse when an always-required port (Harness, Store, Clock, Interact) is nil (`Deps.CheckRequired`).
+1. Load the orchestrator file and select the requested workflow region (`orchfile`); a resume whose workflow the file no longer declares is a refusal naming both the workflow and the run.
+2. Parse the region into a routing table (`workflow`); resolve the orchestrator agent; bind the run context (orchestrator, table) to the routing consultant, manual resolver and pre-consultant; refuse when the workflow has human-review rows and the approval reader cannot read approvals.
+3. Read the existing artifact. A non-canonical artifact is always a refusal (the underlying parse error stays the refusal's cause). New runs refuse if an artifact exists; resumes refuse if none exists, if the artifact's `run_id` does not match its folder, or on workflow-version mismatch unless drift is allowed.
+4. Admit the workflow (`compat.Admit(table, mode)`); recovery check (CLI harnesses only): `snapshot.RecoveryCheck` restores originals from an orphaned `.agents-backup/` if no run is active, and refuses on a corrupt manifest.
+5. Resolve every agent identifier to a definition file (`agentresolve`).
+5b. Snapshot / backup-and-transform (CLI harnesses only): for `LoadingMechanismPath` (Claude Code) copy agents to a run-scoped `agents-runner-{run_id}/` directory and transform the copies; for `LoadingMechanismName` (OpenCode, GHCP CLI) back originals up to `.agents-backup/`, transform in place and write a recovery marker. Cleanup is deferred to run exit.
+6. On resume, read the stage set from `Plan.md` (`planstages`, with `admitted.GroupsDeclared` deciding whether the `Approach` column is required); enumerate declared infrastructure agents and apply the infrastructure filter; on resume settle the run settings against the artifact (`domain.ReconcileResumeSettings`: supplied values are compared with recorded ones); validate per-class agent selection; refuse checkpoints requested with no checkpoint-class agent; refuse an unset mode; refuse commits enabled with no commit-class agent; refuse when the effective settings need a port that is not wired (`Deps.CheckForSettings`: PreConsult for pre-consultation in auto modes, Manual for manual resolution); record adopted runner settings once for a native-created artifact.
+7. Create the artifact (new run; apply seed inputs, then read the stage set) or take the existing one (resume). Commit setup runs here when commits are enabled and no `commit_branch` is recorded: an ordinary out-of-band invocation that always gets an Execution Log row without moving `current_state`; only SUCCESS with a `[branch:{name}]` marker records the branch. On resume `engine.ResumePoint` finds the resume point, and an interrupted last step has `current_state` rewound to the last completed workflow step so it is re-dispatched.
+8. Validate and apply `infrastructure_overrides` against the declared agents; in `auto` and `auto-review` modes with pre-consultation enabled, run the one-shot pre-consultation (it never touches the artifact; its advice is appended to later auto-routed task descriptions and constraints).
 
-Any failure at steps 1–9 or step 11 returns a **refusal** outcome (`RunRefused`) with no error — refusals are expected, pre-invocation validation failures, not infrastructure faults. Infrastructure-level failures (e.g. artifact store I/O errors) return `RunFailed` with a non-nil error instead.
+Steps 0 through 6 and the overrides step refuse with `RunRefused` and no error — refusals are expected, pre-invocation rejections. A failed commit setup or pre-consultation, after the artifact exists, ends with `RunStartFailed`: the artifact and any setup row are kept, nothing is dispatched, and a resume retries the step. Infrastructure faults (artifact store I/O) return `RunFailed` with a non-nil error.
 
 ### Dispatch loop
 
-Each iteration calls `engine.Next` with the admitted workflow, stage set, current artifact state, the previous response, resolved agents, the running sequence number, the current time, and any one-shot refreshed stage set. Exactly one of four decision fields comes back:
+Each iteration calls `engine.Next` with the admitted workflow, stages, state, previous response, resolved agents, sequence number, time, one-shot refreshed stage set, stage source, the run mode and the output artifacts of the previous step (`rs.lastOutputArtifacts`; a consultation-routed step hands its outputs over through `consultOutputs`). Exactly one decision field comes back:
 
-- **Dispatch** — Build the request for `Steps[0]` (only one step is ever populated today; the slice shape reserves room for future parallel dispatch): stamp `RunID` from artifact state (not from `RunConfig`, so resumed runs keep the RunID minted at creation), resolve artifact paths to run-scoped form, apply and clear any pending HITL override from a prior deviation rejoin, notify progress, then invoke the harness.
-  - On invocation success: append a `CompletedStep` to the artifact via `Store.Apply`, notify per-step completion, then — only for non-infrastructure steps — evaluate infrastructure-agent triggers (see below) and check for `Stage-*` re-derivation.
-  - On invocation failure (that isn't context cancellation): treated as a deviation of kind `DeviationHarnessError`, never a run crash — the deviation resolver decides whether to rejoin, dispatch a custom agent, or stop.
-  - On context cancellation: returns `RunStopped` immediately (graceful stop).
-- **Complete** — Returns `RunCompleted`.
-- **Deviation** — Invokes the deviation resolver with `decision.Deviation.Info`, then applies the returned rejoin instruction.
-- **Stop** — Returns `RunStopped` with the engine's stop reason.
-- No field populated — `RunFailed` (should not occur; a defensive fallback).
+- **Dispatch** (`handleEngineDispatch`) — Fill in the request (generic task description plus any pre-consultation advice, `RunID` from artifact state, run-scoped artifact paths), count the dispatch for the anti-loop guard (mechanical retries are not counted), observe the stop flag, record the output baseline, invoke the harness, and run the HITL gate. The accepted result is applied through `Store.Apply` (written outputs registered, status and error code recorded on the log row), progress is reported, infrastructure triggers are evaluated (workflow steps only) and `Stage-*` outputs re-derive the stage set.
+- **Complete** — `RunCompleted`.
+- **Consult** — orchestrated mode: `consultRoute` with no deviation info.
+- **Deviation** — `consultRoute` with the engine's `DeviationInfo`. With no routing consultant wired (and no pending manual dispatch) the outcome is `RunDeviationUnresolved`.
+- **Stop** — `RunStopped` with the engine's stop reason (a position-resolution error is carried typed in the decision).
 
-### Deviation resolution and rejoin
+### Harness errors and mechanical retries
 
-Whenever the deviation resolver is invoked (either because the engine returned a Deviation decision, or because a harness invocation errored), `applyRejoinInstruction` does the following:
+A harness-level error on an auto-routed dispatch (other than context cancellation) is never a run crash. It is recorded as a BLOCKED row with error code E501 under the failed instance; with no routing consultant wired the outcome is then `RunDeviationUnresolved`, otherwise:
 
-1. Re-reads the artifact from disk (FR-23) — the orchestrator delegate strategy may have updated it out-of-band while resolving.
-2. Branches on the returned `RejoinInstruction`:
-   - **Stop** — terminates the run with `RunDeviationUnresolved`.
-   - **Rejoin** — carries an optional HITL override forward to the next dispatch (applied once, then cleared) and repositions `CurrentState` to the target row via `applyRejoinAtRow`, clearing `lastResponse` so the engine doesn't misinterpret stale data.
-   - **Custom** — performs a one-off harness invocation for an agent outside the routing table (refusing if no agent identifier is supplied — a schema gap), then rejoins at the specified row the same way.
-   - Empty instruction — `RunDeviationUnresolved`.
+1. If the error is a raw-text protocol failure (output received but no protocol JSON extractable) and the bypass is permitted, one direct re-dispatch under a fresh instance runs. In `auto` and `auto-review` the bypass is one attempt of the E501 budget (`engine.E501BudgetRemaining`, 3 attempts per row and stage since the last SUCCESS), so the budget owns the bound; in `orchestrated` the anti-loop guard owns it. A failed bypass is recorded as its own BLOCKED/E501 row.
+2. If the budget still has attempts left in `auto` or `auto-review`, the loop continues and `engine.Next` re-dispatches the same row and stage.
+3. Otherwise the session consults (`consultRoute`) with the harness response as the deviation.
 
-`applyRejoinAtRow` repositions the artifact's `CurrentState` so `engine.Next` dispatches from an arbitrary target row: row 0 clears `CurrentState` entirely (restart); row N>0 searches the execution log backward for the last entry produced by row N-1's agent and reconstructs `CurrentState` from it, or clears it if no such entry exists. This is what lets a deviation resolver direct arbitrary row jumps, not just "retry the last row."
+PARTIALLY_DONE re-dispatches (bounded at 3 by the engine) need no session logic beyond the dispatch itself.
+
+### HITL gate
+
+For a dispatch whose effective HITL is on, after every attempt (whatever its status) the session reads `human_approved` on the declared outputs that attempt created or modified — found by the `OutputWriteDetector` against a baseline taken before the first attempt and reused for the re-dispatch; without a wired detector every declared concrete path counts (`Stage-*` expanded through the stage set), so the gate fails closed. `domain.DecideHITLCompliance` decides: accept; re-dispatch the same agent once (same task, constraints and artifacts); or escalate. The rejected attempt is logged as an infrastructure-flagged row (HITL-rejected) that does not move `current_state`. Escalation after the spent re-dispatch is a routing consultation as a deviation. BLOCKED/E503 (the agent could not reach the user) is accepted without a re-dispatch. When a gate-discharging re-dispatch returns SUCCESS, its row records the re-dispatch's agent instance, but `current_state`, routing and STAGE_END/PHASE_END evaluation follow the original attempt's status and error code (the `Routed` outcome). Only written outputs are registered in the Artifacts table. The same gate runs for consultation-routed dispatches.
+
+### Routing consultation (`consultRoute`)
+
+One cycle for every routing choice the engine hands over (orchestrated Consult, deviations, HITL escalations, harness errors, review-class triggers, guard escalations):
+
+1. If a stop was requested, stop before starting; the consultation writes nothing, so a resume derives the same decision again.
+2. Build the `ConsultationRequest`: the artifact path, the last status message and error reason, plus session-only context that never reaches the wire — the deviation, the current stage set, the Artifacts registry in recorded (unprefixed) form, and a row-defaults function bound to the stage sets in force.
+3. Pick the resolver: the one-shot manual resolver when the stop screen requested a manual dispatch; otherwise `Routing.ConsultRouting`, and — when manual resolution is enabled — the manual resolver as fallback if that consultation fails. A consultation error ends the run with `RunStoppedByConsultant` (resumable; for user cancel, unavailable interaction or exceeded manual bound the stop reason names the case). A `stop` instruction also ends with `RunStoppedByConsultant`.
+4. Validate the dispatch target against the routing table and stage set (`domain.ValidateDispatchTarget`: row, agent, stage rules, plus the check that the row's group is part of the stage's approach). An invalid target ends the run unrecorded.
+5. If a stop was requested during the consultation, discard the decision visibly (warning notice, debug event, outcome message naming it).
+6. Re-read the artifact (so Workflow Notes the orchestrator appended are preserved) and follow its `global_sequence`. The consultation itself writes no Execution Log row, no sequence number and no `current_state` change.
+7. Resolve the payload: artifacts and HITL default to the row defaults the engine would use; explicit instruction fields pass through verbatim.
+8. Anti-loop guard, dispatch, harness-error handling, HITL gate and apply, the same as for an engine dispatch.
+
+**Anti-loop guard:** the same agent at the same row may be dispatched at most 4 consecutive times (`maxConsecutiveSameAgentDispatches`); the fifth is blocked and escalated to the consultant as a deviation. If the consultant keeps requesting the blocked dispatch, after 2 consecutive guard escalations the run stops resumably. Engine dispatches are counted but never blocked.
 
 ### Infrastructure-agent trigger evaluation
 
-Runs once per *workflow* step completion (never after an infrastructure step completes — the "no-cascades" rule), after the workflow step's own `Store.Apply` has already happened:
+Runs once per *workflow* step completion after its `Store.Apply`, and only for HITL-accepted steps; never after an infrastructure step (the "no-cascades" rule):
 
-1. `state.CurrentState` is saved before evaluation and restored afterward, because infrastructure-agent dispatches also call `Store.Apply`, which would otherwise leave `CurrentState` pointing at the infra agent instead of the workflow step the engine needs to route from next.
-2. For each declared infrastructure agent, in declaration order:
-   - `restore`-class agents are always skipped — they only ever act on an explicit `MANUAL` trigger via out-of-band instruction, never automatically.
-   - Agents excluded by the active-agents filter (per-class selection) are skipped.
-   - `checkpoint`-class agents are skipped entirely when the run did not request checkpoints.
-   - The agent's declared triggers are checked (`INVOCATION_INTERVAL` — fires on sequence-number interval arithmetic against the agent's last dispatch; `STAGE_END` / `PHASE_END` — fire when the completed step's stage/phase differs from the previous workflow step's; `MANUAL` — never fires automatically). An agent fires at most once per evaluation pass even if multiple triggers match.
-   - A firing agent is dispatched synchronously (its invocation, including the resulting Execution Log row, completes before the next agent's triggers are evaluated). Checkpoint-class responses have a `[checkpoint:{sha}]` marker extracted from `status_message` and recorded on the log entry.
-   - Non-`SUCCESS` outcomes apply the agent's `on_failure` policy: `halt` stops the run immediately (`haltRun=true`); any other policy records the failure and continues.
-3. After all agents are evaluated for this workflow step, the named no-op hook `onInfrastructureAgentTrigger` is called (a discoverable anchor point for FR-40), followed by the test-injected `Deps.OnInfrastructureTrigger` hook if set.
+1. For each declared agent in declaration order: `restore`-class agents are always skipped (they act only on an explicit manual instruction); agents outside the active-agents filter are skipped; `checkpoint`-class agents are skipped unless the run enabled checkpoints.
+2. Triggers: `INVOCATION_INTERVAL` fires on sequence arithmetic against the agent's last log row; `STAGE_END` fires when the completed step is the last row of its stage and `PHASE_END` when it is the last row of its phase (look-ahead via `engine.IsLastRowOfStage` / `IsLastRowOfPhase`), both only when the step's routed status is SUCCESS and it passed the HITL gate; `MANUAL` never fires automatically. An agent fires at most once per pass.
+3. A firing agent is dispatched synchronously and recorded as an infrastructure row (`current_state` is not moved by infrastructure rows). Checkpoint responses have their content reference extracted onto the log entry. Non-SUCCESS applies the agent's `on_failure` policy: `halt` stops the run, otherwise the failure is recorded and evaluation continues. A graceful stop is checked before each infrastructure dispatch.
+4. A successful `review`-class agent makes the session perform a routing consultation after the pass, supplying the review's status message as the last status message (when a consultant is wired).
+5. The named no-op hook `onInfrastructureAgentTrigger` is called after the pass, then the test-injected `Deps.OnInfrastructureTrigger`.
 
 ### Per-class agent selection (`selection.go`)
 
-Three infrastructure agent classes — `checkpoint`, `commit`, `restore` — are "gated": at most one agent of each may be *active* for a given run. If a gated class has more than one declared agent, run start requires an explicit `--infra-class {class}={agent}` selection (`validateClassSelections`), otherwise the run refuses before dispatch begins. `buildActiveAgentsFilter` turns the resolved selections into a `map[string]bool` of active agent names (`nil` when no gated class has more than one agent, meaning "no filtering needed"); non-gated classes (e.g. `review`) are always active. `commit`-class agents are further restricted to only the `STAGE_END` trigger, whether declared directly or via an `infrastructure_overrides` replacement (`allowedTriggersForClass`).
+Three infrastructure classes — `checkpoint`, `commit`, `restore` — are "gated": at most one agent of each is active. If a gated class has more than one declared agent, run start requires an explicit selection (`--infra-class {class}={agent}`, persisted as `infrastructure_selections`), otherwise it refuses. `buildActiveAgentsFilter` returns the active names (`nil` when no filtering is needed); non-gated classes (e.g. `review`) are always active. `commit`-class agents are restricted to the `STAGE_END` trigger, declared directly or via an override.
 
 ### Stage-* output re-derivation
 
-After a completed *workflow* step's output artifacts include a `Stage-*` wildcard, `Plan.md` is re-read via `planstages` and the resulting stage set is stashed as `refreshedStages`, consumed exactly once by the next `engine.Next` call (then cleared). A re-read failure is logged as a warning notice and does not fail the run — the engine simply proceeds with the stage set it already had.
+After a completed workflow step's outputs include a `Stage-*` wildcard (and, before the gate, for a self-referential row when no stage set exists yet), `Plan.md` is re-read via `planstages` and the result becomes both the session's stage set and the one-shot `refreshedStages`. A re-read failure is a warning notice and does not fail the run.
 
 ### Graceful stop
 
-Context cancellation is checked at two points: immediately after a harness invocation error, and (implicitly, via the same helper pattern) during trigger evaluation and custom dispatch. In every case a cancelled context produces `RunStopped`, distinct from `RunFailed`, so callers can distinguish "the run was asked to stop" from "the run broke."
+`Deps.StopRequested` (backed by `StopSignal`: `Request`, `Reset`, `Requested`, safe across goroutines) is polled only at six checkpoints, never mid-invocation: `engine.step`, `engine.hitl_redispatch`, `consult.entry`, `consult.dispatch`, `consult.hitl_redispatch`, `infra.dispatch`. Each observation is logged with its checkpoint name and produces `RunStopped`. Context cancellation is the separate hard-cancel path and also yields `RunStopped`, distinct from `RunFailed`.
 
 ## Relationships
 
 | Talks To | For |
 |----------|-----|
-| **domain** | All port interfaces (`HarnessAdapter`, `ArtifactStore`, `DeviationResolver`, `Clock`, `Interaction`) and every shared value type; session imports domain but constructs none of the concrete implementations (that's `cmd/mosaic-run`'s job). |
-| **engine** | The single source of "what happens next" (`Next`) and resume-point calculation (`ResumePoint`); session never re-implements routing logic. |
-| **orchfile** | Loading the workflow region and enumerating declared infrastructure agents from the orchestrator file. |
-| **workflow** | Parsing the selected region into a routing table. |
-| **compat** | Admitting the routing table before the dispatch loop can begin. |
-| **agentresolve** | Resolving every agent identifier in the routing table to a definition file. |
-| **planstages** | Reading (and re-reading, on Stage-* output) the stage set from `Plan.md`. |
-| **cli / tui** | Both frontends drive `Session.Start` as their sole entry point into run execution; session has no knowledge of either. |
-| **mosaic-common/interaction** | The `Notice` type used for progress reporting through the `Interaction` port. |
+| **domain** | All ports (`HarnessAdapter`, `ArtifactStore`, `Clock`, `Interaction`, `RoutingConsultant`, `PreConsultant`, `ApprovalReader`, `OutputWriteDetector`) and every shared value type; session imports domain but constructs none of the concrete implementations (that's `cmd/mosaic-run`'s job). |
+| **engine** | `Next`, `ResumePoint`, `ResolveRowDefaults`, `E501BudgetRemaining`, the last-row helpers; session never re-implements routing logic. |
+| **orchfile / workflow / compat / agentresolve / planstages** | Loading and parsing the workflow, admitting it, resolving agents, reading and re-reading the stage set. |
+| **deviation** (via ports) | The routing consultant and manual resolver sit behind `RoutingConsultant`; session never imports them. |
+| **cli / tui** | Both frontends drive `Session.Start` as their sole entry point; session has no knowledge of either. |
+| **mosaic-common/interaction** | The `Notice` type for progress reporting and the `Interaction` port. |
 
 ## Key Concepts
 
 | Concept | Meaning |
 |---------|---------|
-| **Refusal vs. Failure** | A refusal (`RunRefused`) is an expected, pre-invocation validation rejection (bad input, mismatched state) returned with a nil error. A failure (`RunFailed`) is an unexpected infrastructure fault, returned with a non-nil error. Session is careful to route each condition to the correct outcome. |
-| **CurrentState** | The artifact's pointer to "where the engine should route from next" — a (phase, stage, last-agent, last-status) tuple. Every state-repositioning operation in session (rejoin, rewind-for-rerun, infra-trigger save/restore) exists to keep this pointer accurate for the engine's next call. |
-| **No-cascades rule** | Infrastructure agent completions never themselves trigger further infrastructure-agent evaluation — only workflow step completions do. This bounds the trigger evaluation to one pass per workflow step. |
-| **HITL override** | A one-shot human-in-the-loop flag carried from a deviation rejoin instruction to exactly the next dispatch's request; session never originates this value itself, only carries it. |
-| **RunID scoping** | `RunID` for a dispatch always comes from the artifact state (set at creation), not from `RunConfig`, so resumed runs never drift to a caller-supplied value; artifact paths are prefixed with the run-scoped folder derived from that same RunID. |
+| **Refusal vs. Start-failure vs. Failure** | `RunRefused`: expected pre-invocation rejection, nil error. `RunStartFailed`: commit setup or pre-consultation failed after the artifact exists; resumable. `RunFailed`: unexpected infrastructure fault, non-nil error. |
+| **RunStoppedByConsultant** | The consultant stopped the run, a consultation failed, or its dispatch target was invalid. The artifact stays resumable; the outcome carries `StopReason` and `Cause`. |
+| **CurrentState** | The artifact's pointer to the last completed workflow step. Only workflow steps move it; infrastructure rows (triggers, commit setup, HITL-rejected attempts) never do. |
+| **Routed outcome** | When a gate-discharging re-dispatch succeeds, routing follows the original attempt's status and error code. |
+| **RunID scoping** | `RunID` for a dispatch comes from the artifact state, so resumed runs keep the ID minted at creation; artifact paths are prefixed with the run-scoped folder derived from it. |
 
 ## Boundaries
 
-- **Owns:** the full run lifecycle sequencing (start validation, dispatch loop, deviation/rejoin handling, infrastructure-agent trigger evaluation, stage re-derivation, graceful stop) and all I/O performed in service of a run.
-- **Does Not Own:** deciding what happens next given a state (that's `engine`), parsing/validating any individual input format (`orchfile`, `workflow`, `compat`, `agentresolve`, `planstages` each own their own domain), or the concrete mechanics of invoking a harness / persisting an artifact / resolving a deviation (those are behind ports and implemented in leaf packages).
+- **Owns:** run lifecycle sequencing, the dispatch loop, the HITL gate, the routing-consultation cycle, harness-error and bypass handling, the anti-loop guard, infrastructure-agent trigger evaluation, stage re-derivation, graceful stop, and all I/O performed in service of a run.
+- **Does Not Own:** deciding what happens next given a state (`engine`), parsing any individual input format, the mechanics of invoking a harness, persisting an artifact, or producing a consultation answer (leaf packages behind ports).
 
 ## Invariants & Conventions
 
-- Every port dependency in `Deps` is an interface; `sessionImpl` holds no concrete adapter types.
-- `CurrentState` is always restored after infrastructure-agent trigger evaluation so the engine's next call sees the workflow step's position, not the last-dispatched infra agent's.
-- A harness invocation failure is always routed through the deviation resolver, never returned directly as `RunFailed` — per the `HarnessAdapter` port contract ("never a crash").
-- `hitlOverride` is applied to exactly one dispatch request and cleared immediately after, whether or not that dispatch succeeds.
-- Infrastructure agent dispatch within `evaluateTriggers` is strictly synchronous and sequential in declaration order — no agent's triggers are evaluated until the previous firing agent's invocation and artifact write have completed.
-- `restore`-class infrastructure agents are excluded from automatic trigger evaluation unconditionally, by class, so future restore-class agents need no code change to inherit the exclusion.
+- Every port dependency in `Deps` is an interface; `sessionImpl` holds no concrete adapter types. Optional ports are normalised in `New`.
+- A consultation never writes to the artifact; the dispatch it triggers is recorded like any other.
+- A harness invocation failure is always recorded and routed (bounded retry or consultation), never returned as `RunFailed`.
+- A one-shot HITL override or manual dispatch is consumed by exactly one dispatch.
+- Infrastructure dispatch is strictly synchronous and sequential in declaration order.
+- `restore`-class infrastructure agents are excluded from automatic trigger evaluation unconditionally, by class.
 
 ## Known Complexity
 
-None identified beyond what this document already covers — the run-start sequence and dispatch loop are now documented at the depth needed to navigate them. Should the deviation-resolution strategies (`OrchestratorDelegate` / `ManualResolver`) themselves prove to have non-obvious internal branching, that would be a candidate for a dedicated `deviation` package document, but that is outside this package's scope.
+None beyond what this document covers; the consultation cycle and the HITL gate are the densest paths and are described step by step above.

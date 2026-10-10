@@ -21,20 +21,26 @@ current_state:
 ---
 
 <ExecutionLog type="core">
-| Seq | Agent     | Phase    | Stage | WorkflowRow | Status  | Timestamp            | Summary       | Inputs                                      | Checkpoint |
-| --- | --------- | -------- | ----- | ----------- | ------- | -------------------- | ------------- | ------------------------------------------- | ---------- |
-| 1   | agent-a#1 | PLANNING | -     | 1           | SUCCESS | 2026-01-01T00:00:00Z | planning done | -                                           | -          |
-| 2   | agent-b#2 | PLANNING | -     | 2           | SUCCESS | 2026-01-01T00:00:00Z | review done   | Orchestration-20260727T170000Z-a3f9/plan.md | -          |
+
+| Seq | Agent | Phase | Stage | WorkflowRow | Status | Timestamp | Summary | Inputs | Checkpoint |
+| --- | --- | --- | --- | --- | --- | --- | --- | --- | --- |
+| 1 | agent-a#1 | PLANNING | - | 1 | SUCCESS | 2026-01-01T00:00:00Z | planning done | - | - |
+| 2 | agent-b#2 | PLANNING | - | 2 | SUCCESS | 2026-01-01T00:00:00Z | review done | plan.md | - |
+
 </ExecutionLog>
 
 <Artifacts type="core">
-| Artifact                                      | Created In | Created By |
-| --------------------------------------------- | ---------- | ---------- |
-| Orchestration-20260727T170000Z-a3f9/plan.md   | PLANNING   | agent-a#1  |
-| Orchestration-20260727T170000Z-a3f9/result.md | PLANNING   | agent-b#2  |
+
+| Artifact | Created In | Created By |
+| --- | --- | --- |
+| plan.md | PLANNING | agent-a#1 |
+| result.md | PLANNING | agent-b#2 |
+
 </Artifacts>
 
 <WorkflowNotes type="core">
+
 | Seq | Note |
-| --- | ---- |
+| --- | --- |
+
 </WorkflowNotes>

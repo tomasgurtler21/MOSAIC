@@ -121,6 +121,7 @@ type rootModel struct {
 	// Generic question overlays from the Interaction port.
 	activeQuestion *questionMsg
 	selectOverlay  *inlineSelectOne
+	multiOverlay   *inlineMultiSelect
 	textOverlay    *inlineText
 	confirmOverlay *inlineConfirm
 

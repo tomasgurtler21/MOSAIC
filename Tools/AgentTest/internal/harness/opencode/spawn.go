@@ -75,7 +75,7 @@ func (a *Adapter) SpawnPlan(ctx context.Context, subject domain.SubjectUnderTest
 		OutputFormat: "json",
 	}
 
-	args, err := commonharness.BuildOpenCodeArgs(spawnReq)
+	args, stdin, err := commonharness.BuildOpenCodeArgs(spawnReq)
 	if err != nil {
 		return domain.SpawnPlan{}, fmt.Errorf("opencode: building spawn arguments: %w", err)
 	}
@@ -83,6 +83,7 @@ func (a *Adapter) SpawnPlan(ctx context.Context, subject domain.SubjectUnderTest
 	return domain.SpawnPlan{
 		Executable:        OpenCodeCLIExecutable,
 		Args:              args,
+		Stdin:             stdin,
 		WorkingDir:        p.Sandbox.SubjectDir,
 		Timeout:           DefaultSpawnTimeout,
 		EarlyExitSentinel: p.Sandbox.EarlyExitSentinelPath(),

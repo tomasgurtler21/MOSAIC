@@ -114,6 +114,7 @@ Each workflow has a required mode. Using the wrong mode causes failures (e.g. ru
 |----------|---------|-------------------|-------|
 | `smoke-single` | `auto`, `auto-review` | `Fixtures/smoke-single` | Implemented |
 | `payload-stress` | `auto`, `auto-review`, `orchestrated` | `Fixtures/payload-stress` | Implemented |
+| `request-fidelity` | `auto` | `Fixtures/request-fidelity` | Implemented |
 | `staged-preplaced-plan` | `auto`, `auto-review`, `orchestrated` | `Fixtures/staged-preplaced-plan` | Implemented |
 | `orchestrated-linear` | `orchestrated` | `Fixtures/orchestrated-linear` | Implemented |
 | `orchestrated-backjump` | `orchestrated` | `Fixtures/orchestrated-backjump` | Implemented |

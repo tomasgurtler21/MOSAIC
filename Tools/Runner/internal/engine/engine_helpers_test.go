@@ -68,7 +68,7 @@ package engine_test
 //   - CNA + free-form On Findings (e.g. "agent (or other based on issue)") → DeviationDecision in all modes.
 //   - auto-review + CNA inside EXECUTION + unambiguous On Findings → DispatchDecision (loop-back).
 //   - auto + CNA inside EXECUTION + unambiguous On Findings → DeviationDecision.
-//   - Non-CNA non-SUCCESS (e.g. PARTIALLY_DONE) → DeviationDecision regardless of On Findings.
+//   - Non-CNA non-SUCCESS (e.g. NEEDS_CLARIFICATION) → DeviationDecision regardless of On Findings.
 //
 //   Routing hint interpretation for non-SUCCESS responses:
 //   - BLOCKED response + unambiguous On Findings → DeviationDecision (On Findings only for CNA).

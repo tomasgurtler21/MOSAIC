@@ -255,6 +255,9 @@ func TestSession_HITLGate_RepairedNonSuccess_RecordsOriginalStatusUnderRedispatc
 	statuses := []domain.StatusCode{domain.StatusCOMPLETED_NEEDS_ACTION, domain.StatusPARTIALLY_DONE}
 	for _, kind := range []dispatchPathKind{pathAuto, pathConsult} {
 		for _, orig := range statuses {
+			if kind == pathAuto && orig == domain.StatusPARTIALLY_DONE {
+				continue // routes as a mechanical re-dispatch in auto modes, covered by the retry tests
+			}
 			t.Run(string(kind)+"/"+string(orig), func(t *testing.T) {
 				rig := reviewRig(t)
 				queueReviewPrefix(rig, kind)
@@ -478,7 +481,7 @@ func stageEndRig(t *testing.T, kind dispatchPathKind, review ...harness.Scripted
 	rig.adapter.Queue("implementation-review", review...)
 	rig.adapter.Queue("commit-manager-git", harness.ScriptedEntry{Response: resp(domain.StatusSUCCESS, "committed")})
 	if kind == pathConsult {
-		rig.consult.queueDispatch("implementation-review", "review", 1)
+		rig.consult.queueStagedDispatch("implementation-review", "review", 1, 1)
 	}
 	rig.consult.queueStop("done")
 	rig.consult.queueStop("done")
@@ -509,6 +512,9 @@ func TestSession_HITLGate_RepairedNonSuccess_FiresNoStageEnd(t *testing.T) {
 	statuses := []domain.StatusCode{domain.StatusCOMPLETED_NEEDS_ACTION, domain.StatusPARTIALLY_DONE}
 	for _, kind := range []dispatchPathKind{pathAuto, pathConsult} {
 		for _, orig := range statuses {
+			if kind == pathAuto && orig == domain.StatusPARTIALLY_DONE {
+				continue // routes as a mechanical re-dispatch in auto modes, covered by the retry tests
+			}
 			t.Run(string(kind)+"/"+string(orig), func(t *testing.T) {
 				rig := stageEndRig(t, kind,
 					stageReviewAttempt(orig, "false", "v1"),

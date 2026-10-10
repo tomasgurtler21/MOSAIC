@@ -92,6 +92,21 @@ func (s *ProgressScreen) CompleteRow(status string) {
 	s.runningIdx = -1
 }
 
+// SetHistory replaces every row with a copy of rows, in order; no row is
+// running afterwards. Stop state, status line and start time are untouched.
+// Later AppendRow calls add after these rows.
+func (s *ProgressScreen) SetHistory(rows []ProgressRow) {
+	s.rows = append([]ProgressRow(nil), rows...)
+	s.runningIdx = -1
+}
+
+// Rows returns a copy of the rows in display order.
+func (s *ProgressScreen) Rows() []ProgressRow {
+	out := make([]ProgressRow, len(s.rows))
+	copy(out, s.rows)
+	return out
+}
+
 // SetStatus sets the status message shown at the top of the screen.
 func (s *ProgressScreen) SetStatus(msg string, isError bool) {
 	s.status = msg

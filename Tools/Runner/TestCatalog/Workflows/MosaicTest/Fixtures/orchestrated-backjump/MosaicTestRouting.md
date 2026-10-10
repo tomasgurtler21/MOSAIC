@@ -18,6 +18,9 @@ dispatch
 ### Agent
 mosaictest-scripted
 
+### Row
+1
+
 ### TaskDescription
 ~~~
 MOSAICTEST-BACKJUMP-ONE / first dispatch, no overrides / table defaults apply / echo it back verbatim
@@ -34,6 +37,9 @@ dispatch
 ### Agent
 mosaictest-scripted
 
+### Row
+1
+
 ### TaskDescription
 ~~~
 MOSAICTEST-BACKJUMP-TWO / second dispatch / input_artifacts overridden to include MosaicTestExtraInput.md / echo it back verbatim
@@ -49,6 +55,9 @@ dispatch
 
 ### Agent
 mosaictest-scripted
+
+### Row
+1
 
 ### TaskDescription
 ~~~

@@ -159,6 +159,9 @@ func (s *sessionImpl) handleAutoHITLRedispatch(ctx context.Context, rs *runStart
 
 	// Anti-loop guard before redispatch.
 	if !rs.antiLoop.recordDispatch(hitlStep.RowIndex, hitlStep.Agent.Identifier) {
+		if stopOut, stop := s.guardEscalationExhausted(&rs.antiLoop, hitlStep.Agent.Identifier, hitlStep.RowIndex); stop {
+			return hitlRedispatchState{}, true, false, stopOut, nil
+		}
 		s.deps.Debug.Log(domain.EventSessionHITLEscalate, "anti-loop guard triggered in HITL redispatch; escalating",
 			domain.F("agent", hitlStep.Agent.Identifier),
 		)

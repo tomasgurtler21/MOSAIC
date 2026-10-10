@@ -38,7 +38,7 @@ modes:
 
 ### Why BLOCKED specifically
 
-`BLOCKED` is the clearest deviation trigger: it has an error code and an error reason, so the stub's response is unambiguous and the Runner's deviation log entry is diagnosable. `PARTIALLY_DONE` or `NEEDS_CLARIFICATION` would also deviate, but their messages are less distinctive and provide no additional coverage.
+`BLOCKED` is the clearest deviation trigger: it has an error code and an error reason, so the stub's response is unambiguous and the Runner's deviation log entry is diagnosable. `NEEDS_CLARIFICATION` would also deviate, but its message is less distinctive and provides no additional coverage. `E401` is used because the engine never re-dispatches it mechanically (`PARTIALLY_DONE` and `E501` are retried first in Auto mode).
 
 ### Why the marker gate
 

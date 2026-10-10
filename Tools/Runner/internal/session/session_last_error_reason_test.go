@@ -16,6 +16,7 @@ import (
 
 	commonharness "mosaic-common/harness"
 	"mosaic-run/internal/domain"
+	"mosaic-run/internal/engine"
 	"mosaic-run/internal/harness"
 )
 
@@ -138,12 +139,16 @@ func TestSession_LastErrorReason_NonBlockedStatusSendsNull(t *testing.T) {
 	consultant := &scriptedRoutingConsultant{}
 	consultant.queueStop("done")
 	ses, f, _, orchPath := newAutoSessionWithConsultant(t, consultant)
-	f.Queue("agent-a", harness.ScriptedEntry{Response: &domain.ProtocolResponse{
-		AgentInstanceID: "agent-a#1",
-		StatusCode:      domain.StatusPARTIALLY_DONE,
-		StatusMessage:   "only half done",
-		ErrorReason:     "stray reason that must not be forwarded",
-	}})
+	// The original dispatch and every mechanical re-dispatch return PARTIALLY_DONE;
+	// the consultation follows only once the re-dispatch bound is used up.
+	for i := 0; i < 1+engine.PartiallyDoneRedispatchLimit; i++ {
+		f.Queue("agent-a", harness.ScriptedEntry{Response: &domain.ProtocolResponse{
+			AgentInstanceID: fmt.Sprintf("agent-a#%d", i+1),
+			StatusCode:      domain.StatusPARTIALLY_DONE,
+			StatusMessage:   "only half done",
+			ErrorReason:     "stray reason that must not be forwarded",
+		}})
+	}
 
 	ses.Start(context.Background(), baseLinearConfig(orchPath)) //nolint:errcheck
 
@@ -221,16 +226,23 @@ func TestSession_HarnessError_AutoPath_RecordedAsBlockedE501AndRoutedAsDeviation
 				consultant := &scriptedRoutingConsultant{}
 				consultant.queueStop("done")
 				ses, f, store, orchPath := newAutoSessionWithConsultant(t, consultant)
-				f.Queue("agent-a", harness.ScriptedEntry{Err: errors.New(failure)})
+				// The harness keeps failing: the engine re-dispatches until the
+				// E501 budget is used up, and only then deviates to the consultant.
+				for i := 0; i < engine.E501AttemptLimit; i++ {
+					f.Queue("agent-a", harness.ScriptedEntry{Err: errors.New(failure)})
+				}
 				cfg := baseLinearConfig(orchPath)
 				cfg.RunSettings.Mode = mode
 
 				ses.Start(context.Background(), cfg) //nolint:errcheck
 
-				row := requireHarnessErrorRow(t, store, "agent-a", failure)
-				requireCurrentStateBlockedE501(t, store, row.AgentInstance)
-				if len(consultant.Requests) == 0 {
-					t.Fatal("want the engine deviation to reach the consultant, got no consultation")
+				requireHarnessErrorRow(t, store, "agent-a", failure)
+				if n := countInvocationsFor(f.Invocations(), "agent-a"); n != engine.E501AttemptLimit {
+					t.Errorf("want %d agent-a dispatches before the deviation, got %d", engine.E501AttemptLimit, n)
+				}
+				requireCurrentStateBlockedE501(t, store, store.Applied[len(store.Applied)-1].AgentInstance)
+				if len(consultant.Requests) != 1 {
+					t.Fatalf("want exactly one consultation once the budget is used up, got %d", len(consultant.Requests))
 				}
 				requireBlockedE501Deviation(t, consultant.Requests[0])
 				requireErrorReasonCarries(t, consultant.Requests[0], failure)

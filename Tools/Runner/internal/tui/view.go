@@ -91,6 +91,9 @@ func (m *rootModel) viewQuestion() string {
 	if m.selectOverlay != nil {
 		return m.selectOverlay.view()
 	}
+	if m.multiOverlay != nil {
+		return m.multiOverlay.view()
+	}
 	if m.textOverlay != nil {
 		return m.textOverlay.view()
 	}

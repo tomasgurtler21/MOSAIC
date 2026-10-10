@@ -5,13 +5,11 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
-	"runtime/debug"
 	"strings"
 	"time"
 
 	tea "github.com/charmbracelet/bubbletea"
 
-	"mosaic-common/interaction"
 	"mosaic-run/internal/artifact"
 	"mosaic-run/internal/domain"
 	"mosaic-run/internal/tui/screens/decision"
@@ -77,7 +75,7 @@ func extractStatus(msg string) string {
 }
 
 // extractField parses a specific key=value pair from a session notice message.
-// Values may be optionally double-quoted (e.g. stage="Stage-1"); quotes are stripped.
+// Values may be optionally double-quoted (e.g. stage="Test.1"); quotes are stripped.
 func extractField(msg, key string) string {
 	prefix := key + "="
 	for _, part := range strings.Fields(msg) {
@@ -130,113 +128,6 @@ func (m *rootModel) updateArtifact(msg tea.Msg) (tea.Model, tea.Cmd) {
 }
 
 // ---------------------------------------------------------------------------
-// Generic question overlay handler (Interaction port)
-// ---------------------------------------------------------------------------
-
-func (m *rootModel) handleQuestionMsg(qMsg questionMsg) (tea.Model, tea.Cmd) {
-	switch qMsg.kind {
-	case questionNotice:
-		// Route notices to the progress screen if active.
-		if m.progressScreen != nil {
-			notice := qMsg.notice
-			if notice.Level == interaction.NoticeInfo {
-				status := extractStatus(notice.Message)
-				if status == "running" {
-					// Step is starting — append a new progress row.
-					m.progressScreen.AppendRow(runflow.ProgressRow{
-						AgentInstance: notice.Title,
-						Phase:         extractField(notice.Message, "phase"),
-						Stage:         extractField(notice.Message, "stage"),
-						Status:        "running",
-					})
-				} else if status != "" {
-					// Step completed — mark the current row complete.
-					m.progressScreen.CompleteRow(status)
-				}
-				m.progressScreen.SetStatus(notice.Title+": "+notice.Message, false)
-			} else {
-				m.progressScreen.SetStatus(notice.Message, notice.Level == interaction.NoticeError)
-			}
-		}
-		return m, nil
-
-	case questionProgress:
-		if m.progressScreen != nil {
-			e := qMsg.progress
-			label := e.Phase
-			if e.Total > 0 {
-				label = fmt.Sprintf("%s %d/%d %s", e.Phase, e.Current, e.Total, e.Subject)
-			} else if e.Subject != "" {
-				label = fmt.Sprintf("%s %s", e.Phase, e.Subject)
-			}
-			m.progressScreen.SetStatus(label, false)
-		}
-		return m, nil
-
-	case questionSelectOne:
-		m.activeQuestion = &qMsg
-		m.selectOverlay = newInlineSelectOne(qMsg.choiceQ, m.theme, m.width, m.height)
-		m.screen = screenQuestion
-		return m, nil
-
-	case questionAskText:
-		m.activeQuestion = &qMsg
-		m.textOverlay = newInlineText(qMsg.textQ, m.theme, m.width, m.height)
-		m.screen = screenQuestion
-		return m, m.textOverlay.init()
-
-	case questionConfirm:
-		m.activeQuestion = &qMsg
-		m.confirmOverlay = newInlineConfirm(qMsg.confirmQ, m.theme, m.width)
-		m.screen = screenQuestion
-		return m, nil
-	}
-	return m, nil
-}
-
-func (m *rootModel) updateQuestion(msg tea.Msg) (tea.Model, tea.Cmd) {
-	if m.selectOverlay != nil {
-		done := m.selectOverlay.update(msg)
-		if done {
-			ans := m.selectOverlay.answer()
-			m.replyToPendingQuestion(answerMsg{choiceAns: ans})
-			m.selectOverlay = nil
-			m.screen = screenProgress
-		}
-		return m, nil
-	}
-	if m.textOverlay != nil {
-		cmd := m.textOverlay.update(msg)
-		if m.textOverlay.done {
-			ans := m.textOverlay.answer()
-			m.replyToPendingQuestion(answerMsg{textAns: ans})
-			m.textOverlay = nil
-			m.screen = screenProgress
-		}
-		return m, cmd
-	}
-	if m.confirmOverlay != nil {
-		done := m.confirmOverlay.update(msg)
-		if done {
-			ans := m.confirmOverlay.answer()
-			m.replyToPendingQuestion(answerMsg{confirmAns: ans})
-			m.confirmOverlay = nil
-			m.screen = screenProgress
-		}
-		return m, nil
-	}
-	return m, nil
-}
-
-// replyToPendingQuestion sends an answer to the active question and clears it.
-func (m *rootModel) replyToPendingQuestion(ans answerMsg) {
-	if m.activeQuestion != nil && m.activeQuestion.reply != nil {
-		m.activeQuestion.reply <- ans
-		m.activeQuestion = nil
-	}
-}
-
-// ---------------------------------------------------------------------------
 // Restart-path stop-state reset
 // ---------------------------------------------------------------------------
 
@@ -278,29 +169,13 @@ func (m *rootModel) updateStop(msg tea.Msg) (tea.Model, tea.Cmd) {
 		return m, tea.Quit
 	}
 	if m.stopScreen.Done() {
-		// Return the run to a clean stop state before it is restarted.
-		//
-		// Reachable with an armed stop signal. This screen is reached only on a
-		// RunStoppedByConsultant outcome, which is decided within a step, while
-		// a user-confirmed graceful stop is only observed at the next dispatch
-		// checkpoint. A user who confirms a stop during a step the consultant
-		// then ends arrives here with the signal armed and the progress screen's
-		// stop latch set. The reset is unconditional regardless.
-		m.resetStopStateForRestart()
-		// Record which recovery action the user chose before clearing the screen,
-		// so startSession() can include ManualDispatch in the RunConfig.
-		if m.stopScreen.Choice() == decision.StopChoiceManualDispatch {
-			m.selections.manualDispatch = true
-		} else {
-			m.selections.manualDispatch = false
-		}
-		style := stylesFromTheme(m.theme)
-		if m.progressScreen == nil {
-			m.progressScreen = runflow.NewProgressScreen(m.width, m.height, style)
-		}
+		// Record which recovery action the user chose, so the restart's RunConfig
+		// includes ManualDispatch. The restart also disarms the stop signal: this
+		// screen can be reached with an armed signal when a confirmed stop meets a
+		// consultant stop within one step.
+		m.selections.manualDispatch = m.stopScreen.Choice() == decision.StopChoiceManualDispatch
 		m.stopScreen = nil
-		m.screen = screenProgress
-		return m, tea.Batch(m.progressScreen.Init(), m.startSession())
+		return m, m.restartAsResume(false)
 	}
 	return m, nil
 }
@@ -338,27 +213,11 @@ func (m *rootModel) updateExecOverride(msg tea.Msg) (tea.Model, tea.Cmd) {
 		return m, nil
 	}
 	if m.execOverrideScreen.Done() {
-		// Return the run to a clean stop state before the session is rebuilt, so
-		// the new session never observes the prior run's stop.
-		//
-		// Reachable with an armed stop signal. The launch-failure check in the
-		// runDoneMsg handler precedes all status-based branching, so any terminal
-		// outcome carrying a *domain.HarnessLaunchError routes here — including
-		// one produced while a user-confirmed graceful stop was still awaiting
-		// its dispatch checkpoint. The reset is unconditional regardless.
-		m.resetStopStateForRestart()
-		// Retry: hold the override path, rebuild the session, restart.
+		// Retry: hold the override path, rebuild the session, restart. The
+		// restart disarms a stop left over from the failed launch.
 		m.selections.config.ExecutablePath = m.execOverrideScreen.Path()
-		if m.sessionFactory != nil {
-			m.sess = m.sessionFactory(m.selections.runFolder, m.selections.isNewRun, m.selections.orchestratorFile, m.selections.config)
-		}
 		m.execOverrideScreen = nil
-		style := stylesFromTheme(m.theme)
-		if m.progressScreen == nil {
-			m.progressScreen = runflow.NewProgressScreen(m.width, m.height, style)
-		}
-		m.screen = screenProgress
-		return m, tea.Batch(m.progressScreen.Init(), m.startSession())
+		return m, m.restartAsResume(true)
 	}
 	return m, nil
 }
@@ -374,27 +233,10 @@ func (m *rootModel) updateDone(msg tea.Msg) (tea.Model, tea.Cmd) {
 			return m, tea.Quit
 		}
 		if m.doneScreen.Continue() {
-			// Resume: disarm the prior confirmed stop so the new run's dispatch
-			// loop does not see a stale stop signal on its very first boundary
-			// check. This path also rebuilds the progress screen below, so the
-			// screen half of the reset is redundant here; calling the shared
-			// helper anyway keeps one reset expression across all three paths.
-			m.resetStopStateForRestart()
-			// Rebuild the session via the factory if one is set, mirroring the
-			// updateExecOverride retry path. Reuse m.sess directly when no factory
-			// is set (test/backward-compat path).
-			if m.sessionFactory != nil {
-				m.sess = m.sessionFactory(m.selections.runFolder, m.selections.isNewRun, m.selections.orchestratorFile, m.selections.config)
-			}
-			// Always construct a new ProgressScreen — the old one still holds
-			// the completed run's row history and stop notice.
-			style := stylesFromTheme(m.theme)
-			m.progressScreen = runflow.NewProgressScreen(m.width, m.height, style)
+			// Resume the run in this process: the restart disarms the prior stop,
+			// rebuilds the session and shows the run history.
 			m.doneScreen = nil
-			m.screen = screenProgress
-			// Reuse m.ctx unchanged — Stage 2 stopped cancelling ctx on graceful
-			// stop, so the existing context is still valid and reusable.
-			return m, tea.Batch(m.progressScreen.Init(), m.startSession())
+			return m, m.restartAsResume(true)
 		}
 	}
 	return m, nil
@@ -435,17 +277,7 @@ func (m *rootModel) startSession() tea.Cmd {
 	sess := m.sess
 	ctx := m.ctx
 
-	return func() (msg tea.Msg) {
-		defer func() {
-			if p := recover(); p != nil {
-				stack := debug.Stack()
-				if len(stack) > 4096 {
-					stack = stack[:4096]
-				}
-				msg = runErrorMsg{err: fmt.Errorf("panic in session: %v\n%s", p, stack)}
-			}
-		}()
-
+	body := func() tea.Msg {
 		var seedInputs []string
 		if sel.isNewRun && sel.seedInput != "" {
 			seedInputs = []string{sel.seedInput}
@@ -471,4 +303,5 @@ func (m *rootModel) startSession() tea.Cmd {
 		}
 		return runDoneMsg{outcome: outcome}
 	}
+	return guardCmd(m.debug, "session", func(err error) tea.Msg { return runErrorMsg{err: err} }, body)
 }

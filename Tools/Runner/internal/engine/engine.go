@@ -26,9 +26,12 @@ import (
 //	  first call of a new run.
 //
 //	ExecutionModeAuto — On StatusSUCCESS, routes to the On Success target or
-//	  the next EXECUTION row exactly as before. On ANY non-SUCCESS status,
-//	  including StatusCOMPLETED_NEEDS_ACTION, returns a DeviationDecision.
-//	  The On-Findings auto-route never fires.
+//	  the next EXECUTION row exactly as before. After PARTIALLY_DONE (within
+//	  PartiallyDoneRedispatchLimit) and BLOCKED with error code E501 (within
+//	  E501AttemptLimit) it re-dispatches the same assignment mechanically. On
+//	  any other non-SUCCESS status, including StatusCOMPLETED_NEEDS_ACTION, and
+//	  once a bound or budget is used up, it returns a DeviationDecision. The
+//	  On-Findings auto-route never fires.
 //
 //	ExecutionModeAutoReview — As ExecutionModeAuto, plus: on
 //	  StatusCOMPLETED_NEEDS_ACTION where the row's OnFindings hint is
@@ -56,11 +59,6 @@ func Next(in NextInput) domain.EngineDecision {
 	stages := in.Stages
 	state := in.State
 	lastResponse := in.LastResponse
-	agents := in.Agents
-	seq := in.Seq
-	now := in.Now
-	refreshedStages := in.RefreshedStages
-	src := in.StageSource
 
 	// ExecutionModeUnset is a programming error: surface it as an ambiguous-route
 	// deviation rather than silently picking a mode or panicking.
@@ -74,32 +72,13 @@ func Next(in NextInput) domain.EngineDecision {
 	}
 
 	// ExecutionModeOrchestrated: the engine never produces a routing decision.
-	// Return a ConsultDecision for every call, including the first.
 	if in.Mode == domain.ExecutionModeOrchestrated {
-		if state.CurrentState.LastAgent == "" {
-			// First decision of a new run: no row has been dispatched yet.
-			return domain.EngineDecision{Consult: &domain.ConsultDecision{
-				Trigger:       domain.ConsultTriggerOrchestratedMode,
-				CurrentRow:    -1,
-				ArtifactState: state,
-			}}
-		}
-		// Subsequent call: derive position from state. Ignore findCurrentRowIndex
-		// errors — the orchestrator reads the artifact directly and does not depend
-		// on the engine's row resolution.
-		currentRowIdx, _ := findCurrentRowIndex(workflow, stages, state)
-		return domain.EngineDecision{Consult: &domain.ConsultDecision{
-			Trigger:       domain.ConsultTriggerOrchestratedMode,
-			CurrentRow:    currentRowIdx,
-			CurrentPhase:  state.CurrentState.Phase,
-			CurrentStage:  state.CurrentState.Stage,
-			ArtifactState: state,
-		}}
+		return orchestratedDecision(in)
 	}
 
 	// No prior invocations: initial dispatch.
 	if state.CurrentState.LastAgent == "" {
-		return initialDispatch(workflow, stages, agents, seq, now, src)
+		return initialDispatch(workflow, stages, in.Agents, in.Seq, in.Now, in.StageSource)
 	}
 
 	// Determine the response status and the response for deviation assembly.
@@ -114,11 +93,12 @@ func Next(in NextInput) domain.EngineDecision {
 
 	// Locate the row that was last completed.
 	// Check for a routing error (e.g. unresolvable approach) before the generic
-	// "could not determine current row" check — the approach error is more specific.
-	currentRowIdx, rowFindErr := findCurrentRowIndex(workflow, stages, state)
+	// "could not determine current row" check -- the approach error is more specific.
+	pos, rowFindErr := currentPosition(workflow, state)
 	if rowFindErr != nil {
-		return domain.EngineDecision{Stop: &domain.StopDecision{Reason: rowFindErr.Error()}}
+		return domain.EngineDecision{Stop: &domain.StopDecision{Reason: rowFindErr.Error(), Err: rowFindErr}}
 	}
+	currentRowIdx := pos.rowIdx
 	if currentRowIdx < 0 {
 		return domain.EngineDecision{Stop: &domain.StopDecision{
 			Reason: fmt.Sprintf("could not determine current row from artifact state (LastAgent=%q)",
@@ -127,94 +107,14 @@ func Next(in NextInput) domain.EngineDecision {
 	}
 	currentRow := workflow.Table.Rows[currentRowIdx]
 
-	// Handle non-SUCCESS responses.
 	if status != domain.StatusSUCCESS {
-		// COMPLETED_NEEDS_ACTION with an unambiguous On Findings hint → loop-back dispatch.
-		// This auto-route fires only in auto-review mode; in auto mode it deviates.
-		if in.Mode == domain.ExecutionModeAutoReview &&
-			status == domain.StatusCOMPLETED_NEEDS_ACTION &&
-			isUnambiguousHint(currentRow.OnFindings) &&
-			!reviewLoopLimitReached(state) {
-			targetAgent := currentRow.OnFindings.Value
-			targetRowIdx := findNearestPrecedingRowForAgent(workflow, currentRowIdx, targetAgent)
-			if targetRowIdx >= 0 {
-				var stageNum domain.StageNumber
-				var stageStr string
-				if currentRow.PhaseParsed.IsStaged {
-					stageNum = parseStageNumber(state.CurrentState.Stage)
-					stageStr = state.CurrentState.Stage
-				}
-				step, err := buildDispatchStep(workflow, stages, targetRowIdx, stageNum, stageStr,
-					agents, seq, now, refreshedStages)
-				if err != nil {
-					return domain.EngineDecision{Stop: &domain.StopDecision{Reason: err.Error()}}
-				}
-				// Inject the reviewing agent's output artifacts into the dispatched
-				// step's InputArtifacts. Entries already present in the table row's
-				// resolved list are not duplicated.
-				step.Request.InputArtifacts = injectReviewArtifacts(
-					step.Request.InputArtifacts, in.LastOutputArtifacts)
-				// Inject the creator agent's own previously-produced output artifacts
-				// from the registry. The comparison is against step.Request.OutputArtifacts
-				// (resolved paths from buildDispatchStep), not against raw row.OutputArtifacts
-				// (which may contain unresolved template tokens). This ensures injection
-				// fires correctly for rows with templated output artifact paths.
-				if len(in.ArtifactRegistry) > 0 {
-					outputArtSet := make(map[string]bool, len(step.Request.OutputArtifacts))
-					for _, oa := range step.Request.OutputArtifacts {
-						outputArtSet[oa] = true
-					}
-					var creatorArts []string
-					for _, entry := range in.ArtifactRegistry {
-						if outputArtSet[entry.Artifact] {
-							creatorArts = append(creatorArts, entry.Artifact)
-						}
-					}
-					if len(creatorArts) > 0 {
-						step.Request.InputArtifacts = injectReviewArtifacts(
-							step.Request.InputArtifacts, creatorArts)
-					}
-				}
-				return domain.EngineDecision{Dispatch: &domain.DispatchDecision{
-					Steps: []domain.DispatchStep{step},
-				}}
-			}
-		}
-
-		// Review loop limit reached in auto-review mode: deviate instead of routing.
-		if in.Mode == domain.ExecutionModeAutoReview &&
-			status == domain.StatusCOMPLETED_NEEDS_ACTION &&
-			isUnambiguousHint(currentRow.OnFindings) &&
-			reviewLoopLimitReached(state) {
-			return domain.EngineDecision{Deviation: &domain.DeviationDecision{
-				Info: domain.DeviationInfo{
-					Kind:          domain.DeviationReviewLoopLimit,
-					Response:      resp,
-					CurrentRow:    currentRowIdx,
-					CurrentPhase:  currentRow.Phase,
-					CurrentStage:  state.CurrentState.Stage,
-					ArtifactState: state,
-				},
-			}}
-		}
-
-		// All other non-SUCCESS → Deviation.
-		return domain.EngineDecision{Deviation: &domain.DeviationDecision{
-			Info: domain.DeviationInfo{
-				Kind:          domain.DeviationNonSuccess,
-				Response:      resp,
-				CurrentRow:    currentRowIdx,
-				CurrentPhase:  currentRow.Phase,
-				CurrentStage:  state.CurrentState.Stage,
-				ArtifactState: state,
-			},
-		}}
+		return nonSuccessDecision(in, pos, currentRow, status, resp)
 	}
 
 	// SUCCESS: route based on row type.
 	if !currentRow.PhaseParsed.IsStaged {
-		return handleNonExecutionSuccess(workflow, stages, currentRowIdx, currentRow, state,
-			agents, seq, now, refreshedStages, src)
+		return handleNonExecutionSuccess(workflow, stages, pos, currentRow, state,
+			in.Agents, in.Seq, in.Now, in.RefreshedStages, in.StageSource)
 	}
-	return handleExecutionSuccess(workflow, stages, currentRowIdx, state, agents, seq, now)
+	return handleExecutionSuccess(workflow, stages, pos, state, in.Agents, in.Seq, in.Now)
 }

@@ -22,6 +22,12 @@ dispatch
 ### Agent
 mosaictest-scripted
 
+### Row
+1
+
+### Stage
+1
+
 ### TaskDescription
 ~~~
 MOSAICTEST-PAYLOAD-STRESS-ONE / orchestrator relay unicode: ünïcøde ✓ 日本語 Ελληνικά Кириллица 🧩🔧 / combining: é vs é / rtl: مرحبا / dispatch row 1
@@ -37,6 +43,12 @@ dispatch
 
 ### Agent
 mosaictest-scripted
+
+### Row
+2
+
+### Stage
+1
 
 ### TaskDescription
 ~~~
@@ -57,6 +69,12 @@ dispatch
 
 ### Agent
 mosaictest-scripted
+
+### Row
+3
+
+### Stage
+1
 
 ### TaskDescription
 ~~~

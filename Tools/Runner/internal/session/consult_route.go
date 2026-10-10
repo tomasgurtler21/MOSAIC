@@ -2,13 +2,12 @@ package session
 
 import (
 	"context"
+	"errors"
 	"fmt"
-	"path/filepath"
 	"strconv"
 
 	"mosaic-common/interaction"
 	"mosaic-run/internal/domain"
-	"mosaic-run/internal/engine"
 )
 
 // consultRoute handles the full consultation-record-reread-dispatch cycle for
@@ -38,17 +37,13 @@ func (s *sessionImpl) consultRoute(
 	admitted domain.AdmittedWorkflow,
 	antiLoop *antiLoopState,
 ) (done bool, outcome domain.RunOutcome, outErr error) {
-	// Capture the stage in force at this entry point so that every CompletedStep
-	// produced below carries accurate context. Recursive calls each capture their
-	// own entryStage independently.
-	entryStage := state.CurrentState.Stage
+	// A stop requested before the consultation begins takes effect first.
+	if stopped, stopOut := s.stopBeforeConsult(); stopped {
+		return true, stopOut, nil
+	}
 
 	// Build the consultation request.
-	req := domain.ConsultationRequest{
-		OrchestrationArtifact: filepath.Join(config.RunFolder, "Orchestration.md"),
-		Context:               domain.ConsultContextRouting,
-		Deviation:             deviation,
-	}
+	req := newConsultRequest(config, deviation, *state, stages, refreshedStages)
 	if *lastResponse != nil {
 		msg := (*lastResponse).StatusMessage
 		req.LastStatusMessage = &msg
@@ -62,8 +57,16 @@ func (s *sessionImpl) consultRoute(
 	}
 	dispInstr := instr.Dispatch
 
-	// Look up the routing table row and derive the effective stage.
-	row, effectiveStage := consultRowAndStage(table, dispInstr, deviation, entryStage)
+	// The row and stage to record come from the validated instruction.
+	row, effectiveStage, tDone, tOut := s.resolveConsultTarget(table, dispInstr, agents, admitted, *stages, *refreshedStages)
+	if tDone {
+		return true, tOut, nil
+	}
+
+	// A stop requested during the consultation discards its decision visibly.
+	if stopped, stopOut := s.discardDecisionOnStop(ctx, dispInstr, effectiveStage); stopped {
+		return true, stopOut, nil
+	}
 
 	// The consultation itself writes nothing to the artifact: no Execution Log
 	// row, no global_sequence advance, no current_state change. Re-read the
@@ -71,9 +74,24 @@ func (s *sessionImpl) consultRoute(
 	// its deliberation are visible to the session before any later state write.
 	s.consultReread(ctx, state, seq)
 
+	// Resolve the artifacts and HITL: row defaults as the engine resolves them,
+	// explicit overrides verbatim. A resolution failure ends the run unrecorded.
+	payload, payloadErr := resolveConsultPayload(dispInstr, row, effectiveStage, *stages, *refreshedStages)
+	if payloadErr != nil {
+		s.deps.Debug.Log(domain.EventSessionConsultFailed, "consultation dispatch defaults unresolvable: "+payloadErr.Error(),
+			domain.F("agent", dispInstr.Agent),
+			domain.F("row", strconv.Itoa(dispInstr.RowIndex)),
+		)
+		return true, domain.RunOutcome{
+			Status:  domain.RunStoppedByConsultant,
+			Message: "consultation failed: cannot resolve dispatch artifacts: " + payloadErr.Error(),
+			Cause:   payloadErr,
+		}, nil
+	}
+
 	// Resolve the dispatched agent and build the ProtocolRequest.
 	agentRef, agentReq, phase, dispSeq, ok := buildConsultAgentRequest(
-		dispInstr, agents, row, effectiveStage, *seq, *state, stages, refreshedStages,
+		dispInstr, agents, row, payload, *seq, *state,
 	)
 	if !ok {
 		return true, domain.RunOutcome{Status: domain.RunFailed, Message: "consultant dispatched unknown agent: " + dispInstr.Agent}, nil
@@ -82,6 +100,9 @@ func (s *sessionImpl) consultRoute(
 	// Anti-loop guard: prevent the same agent from being dispatched more than
 	// maxConsecutiveSameAgentDispatches consecutive times for the same step.
 	if !antiLoop.recordDispatch(dispInstr.RowIndex, agentRef.Identifier) {
+		if stopOut, stop := s.guardEscalationExhausted(antiLoop, agentRef.Identifier, dispInstr.RowIndex); stop {
+			return true, stopOut, nil
+		}
 		s.deps.Debug.Log(domain.EventSessionDeviation, "anti-loop guard triggered; escalating instead of dispatching",
 			domain.F("agent", agentRef.Identifier),
 			domain.F("count", strconv.Itoa(antiLoop.count)),
@@ -118,13 +139,6 @@ func (s *sessionImpl) consultRoute(
 		Title:   agentReq.AgentInstanceID,
 		Message: fmt.Sprintf("phase=%s stage=%q status=running", phase, effectiveStage),
 	})
-	if s.deps.StopRequested() {
-		s.deps.Debug.Log(domain.EventSessionStopObserved, "graceful stop observed; not dispatching",
-			domain.F("checkpoint", StopCheckpointConsultDispatch),
-		)
-		return true, domain.RunOutcome{Status: domain.RunStopped, Message: "run stopped: graceful stop confirmed"}, nil
-	}
-
 	// Invoke the harness. A harness error is a deviation, not a crash.
 	s.beginOutputs(ctx, config.RunFolder, agentReq.OutputArtifacts)
 	response, invokeErr := s.invokeAndLog(ctx, agentRef, agentReq)
@@ -169,15 +183,15 @@ func (s *sessionImpl) consultSelectResolver(ctx context.Context, req domain.Cons
 				domain.F("error", consultErr.Error()),
 			)
 			instr, consultErr = s.deps.Manual.ConsultRouting(ctx, req)
+		} else if consultErr != nil && config.ManualResolution {
+			// Unreachable after the start-time port check; reported rather
+			// than silently skipped.
+			consultErr = errors.Join(consultErr, newManualMissing())
 		}
 	}
 	if consultErr != nil {
 		s.deps.Debug.Log(domain.EventSessionConsultFailed, consultErr.Error())
-		return instr, true, domain.RunOutcome{
-			Status:  domain.RunStoppedByConsultant,
-			Message: "consultation failed: " + consultErr.Error(),
-			Cause:   consultErr,
-		}, nil
+		return instr, true, consultFailureOutcome(consultErr), nil
 	}
 	if instr.Stop != nil {
 		s.deps.Debug.Log(domain.EventSessionConsultStop, "consultant stop instruction",
@@ -199,31 +213,6 @@ func (s *sessionImpl) consultSelectResolver(ctx context.Context, req domain.Cons
 	return instr, false, domain.RunOutcome{}, nil
 }
 
-// consultRowAndStage looks up the routing table row for dispInstr.RowIndex
-// (falling back to the deviation's physical row when the index is not found)
-// and derives the effective stage for all CompletedSteps in this consultRoute
-// call.
-func consultRowAndStage(
-	table domain.RoutingTable,
-	dispInstr *domain.DispatchInstruction,
-	deviation *domain.DeviationInfo,
-	entryStage string,
-) (row domain.RoutingRow, effectiveStage string) {
-	var found bool
-	row, found = rowAtIndex(table, dispInstr.RowIndex)
-	if !found && deviation != nil {
-		row, _ = rowAtIndex(table, deviation.CurrentRow)
-	}
-	effectiveStage = entryStage
-	if deviation != nil && row.PhaseParsed.IsStaged {
-		_, stageNum, stageOK := domain.ParseStageValue(deviation.CurrentStage)
-		if stageOK {
-			effectiveStage = domain.FormatStageValue(row.PhaseParsed.Group, stageNum)
-		}
-	}
-	return row, effectiveStage
-}
-
 // consultReread re-reads the artifact after a successful routing consultation
 // returns, before any later state write, so that any Workflow Notes the
 // script orchestrator appended directly to the artifact during its
@@ -239,19 +228,16 @@ func (s *sessionImpl) consultReread(ctx context.Context, state *domain.ArtifactS
 	*seq = state.GlobalSequence
 }
 
-// buildConsultAgentRequest resolves the dispatched agent reference, resolves
-// field overrides (constraints, input/output artifacts, HITL), expands
-// stage-number templates, prefixes run-scoped paths, and builds the
-// ProtocolRequest. Returns ok=false when the agent identifier is not in agents.
+// buildConsultAgentRequest resolves the dispatched agent reference and builds
+// the ProtocolRequest from the resolved payload, prefixing run-scoped paths.
+// Returns ok=false when the agent identifier is not in agents.
 func buildConsultAgentRequest(
 	dispInstr *domain.DispatchInstruction,
 	agents map[string]domain.AgentReference,
 	row domain.RoutingRow,
-	effectiveStage string,
+	payload consultPayload,
 	seq int,
 	state domain.ArtifactState,
-	stages **domain.StageSet,
-	refreshedStages **domain.StageSet,
 ) (agentRef domain.AgentReference, agentReq domain.ProtocolRequest, phase string, dispSeq int, ok bool) {
 	agentRef, ok = agents[dispInstr.Agent]
 	if !ok {
@@ -261,43 +247,17 @@ func buildConsultAgentRequest(
 	if dispInstr.Constraints != nil {
 		constraints = *dispInstr.Constraints
 	}
-	inputArts := row.InputArtifacts
-	if dispInstr.InputArtifacts != nil {
-		inputArts = *dispInstr.InputArtifacts
-	}
-	outputArts := row.OutputArtifacts
-	if dispInstr.OutputArtifacts != nil {
-		outputArts = *dispInstr.OutputArtifacts
-	}
-	// Resolve {StageNumber} template tokens so persisted paths match the target row.
-	if row.PhaseParsed.IsStaged && effectiveStage != "" {
-		_, artStageNum, stageOK := domain.ParseStageValue(effectiveStage)
-		if stageOK {
-			if resolved, resolveErr := engine.ResolveArtifacts(inputArts, artStageNum, effectiveStage, *stages, *refreshedStages, true); resolveErr == nil {
-				inputArts = resolved
-			}
-			if resolved, resolveErr := engine.ResolveArtifacts(outputArts, artStageNum, effectiveStage, *stages, *refreshedStages, false); resolveErr == nil {
-				outputArts = resolved
-			}
-		}
-	}
-	effectiveHITL := row.HITL
-	if dispInstr.HITLOverride != nil {
-		effectiveHITL = *dispInstr.HITLOverride
-	}
 	dispSeq = seq + 1
+	folder := domain.RunScopedFolder(state.RunID) + "/"
 	agentReq = domain.ProtocolRequest{
 		AgentInstanceID: fmt.Sprintf("%s#%d", agentRef.Identifier, dispSeq),
 		RunID:           state.RunID,
 		TaskDescription: dispInstr.TaskDescription,
 		Constraints:     constraints,
-		InputArtifacts:  inputArts,
-		OutputArtifacts: outputArts,
-		HumanInTheLoop:  effectiveHITL,
+		InputArtifacts:  domain.DedupArtifactPaths(state.RunID, resolveToRunScoped(payload.Inputs, folder)),
+		OutputArtifacts: resolveToRunScoped(payload.Outputs, folder),
+		HumanInTheLoop:  payload.HITL,
 	}
-	folder := domain.RunScopedFolder(state.RunID) + "/"
-	agentReq.InputArtifacts = resolveToRunScoped(agentReq.InputArtifacts, folder)
-	agentReq.OutputArtifacts = resolveToRunScoped(agentReq.OutputArtifacts, folder)
 	phase = row.PhaseParsed.Name
 	return agentRef, agentReq, phase, dispSeq, true
 }
@@ -359,11 +319,12 @@ func (s *sessionImpl) consultHandleHarnessErr(
 	}
 	// Raw-text bypass: attempt one direct redispatch before triggering a
 	// recursive consultRoute call.
-	if isRawTextHarnessError(invokeErr) && antiLoop.recordDispatch(dispInstr.RowIndex, agentRef.Identifier) {
+	if isRawTextHarnessError(invokeErr) && bypassPermitted(*state, dispInstr.RowIndex, effectiveStage, agentRef.Identifier, antiLoop) {
 		bypassSeq := state.GlobalSequence + 1
 		bypassReq := agentReq
 		bypassReq.AgentInstanceID = fmt.Sprintf("%s#%d", agentRef.Identifier, bypassSeq)
-		if bypassResp, bypassErr := s.invokeAndLog(ctx, agentRef, bypassReq); bypassErr == nil {
+		bypassResp, bypassErr := s.invokeAndLog(ctx, agentRef, bypassReq)
+		if bypassErr == nil {
 			finalResp, finalSeq, routed, routedResp, cont, hitlDone, hitlOut, hitlErr := s.runConsultHITL(
 				ctx, agentRef, bypassReq, bypassResp, bypassSeq, agentReq.HumanInTheLoop, dispInstr,
 				effectiveStage, phase, state, seq, lastResponse, prevWorkflowStep, refreshedStages, stages,
@@ -376,8 +337,26 @@ func (s *sessionImpl) consultHandleHarnessErr(
 				state, seq, lastResponse, prevWorkflowStep, refreshedStages, stages,
 				table, agents, config, declaredInfraAgents, admitted, antiLoop)
 		}
+		if recErr := s.recordFailedBypass(ctx, state, bypassReq, phase, effectiveStage, dispInstr.RowIndex, bypassErr); recErr != nil {
+			return true, domain.RunOutcome{Status: domain.RunFailed, Message: recErr.Error()}, recErr
+		}
 	}
 	*lastResponse = &harnessResp
+	if isMechanicalRetryMode(state.Mode) && e501BudgetLeft(*state, dispInstr.RowIndex, effectiveStage) {
+		// Budget remains: the engine decision re-dispatches the same row and stage.
+		*seq = state.GlobalSequence
+		return false, domain.RunOutcome{}, nil
+	}
 	return s.consultRoute(ctx, &devInfo, state, seq, lastResponse, prevWorkflowStep,
 		refreshedStages, stages, table, agents, config, declaredInfraAgents, admitted, antiLoop)
+}
+
+// currentStageSet returns the stage set in force: the refreshed set when the
+// plan was re-read mid-run, otherwise the set read at the start of the run.
+// Nil when no plan has been read.
+func currentStageSet(stages, refreshed *domain.StageSet) *domain.StageSet {
+	if refreshed != nil {
+		return refreshed
+	}
+	return stages
 }

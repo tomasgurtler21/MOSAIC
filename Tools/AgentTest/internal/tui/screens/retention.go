@@ -7,6 +7,7 @@ import (
 	"github.com/charmbracelet/lipgloss"
 
 	"mosaic-agent-test/internal/domain"
+	"mosaic-common/tui/pastesafe"
 )
 
 // RetentionScreen presents the retention policy as a single cyclable value.
@@ -22,8 +23,7 @@ type RetentionScreen struct {
 	policy  domain.RetentionPolicy
 	width   int
 	styles  Styles
-	done    bool
-	back    bool
+	gate    *pastesafe.Field // owns Enter and Esc handling and paste detection
 }
 
 // cycleOrder defines the wrapping cycle sequence for retention policy selection.
@@ -40,6 +40,7 @@ func NewRetentionScreen(initial domain.RetentionPolicy, width int, styles Styles
 		policy:  initial,
 		width:   width,
 		styles:  styles,
+		gate:    newKeyGate(),
 	}
 }
 
@@ -50,12 +51,8 @@ func (s *RetentionScreen) Update(msg tea.Msg) tea.Cmd {
 	if !ok {
 		return nil
 	}
-	switch {
-	case key.Type == tea.KeyEnter:
-		s.done = true
-	case key.Type == tea.KeyEsc:
-		s.back = true
-	case key.Type == tea.KeyRunes && len(key.Runes) == 1 && key.Runes[0] == ' ':
+	s.gate.Update(key)
+	if key.Type == tea.KeyRunes && len(key.Runes) == 1 && key.Runes[0] == ' ' {
 		s.policy = nextRetentionPolicy(s.policy)
 	}
 	return nil
@@ -85,16 +82,15 @@ func (s *RetentionScreen) View() string {
 }
 
 // Done reports whether the user confirmed the current policy value.
-func (s *RetentionScreen) Done() bool { return s.done }
+func (s *RetentionScreen) Done() bool { return s.gate.Done() }
 
 // Back reports whether the user pressed Esc to navigate backward.
-func (s *RetentionScreen) Back() bool { return s.back }
+func (s *RetentionScreen) Back() bool { return s.gate.Back() }
 
 // Reset clears the Done and Back flags and restores the policy to its initial
 // value so the screen behaves as if freshly entered.
 func (s *RetentionScreen) Reset() {
-	s.done = false
-	s.back = false
+	s.gate.Reset()
 	s.policy = s.initial
 }
 

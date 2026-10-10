@@ -33,6 +33,9 @@ dispatch
 ### Agent
 mosaictest-scripted
 
+### Row
+1
+
 ### TaskDescription
 ~~~
 MOSAICTEST-PRECONSULT-REDISPATCH / orchestrator re-dispatching after BLOCKED deviation / this text is orchestrator-written and must NOT contain PRECONSULT-ADVICE-MARKER

@@ -20,6 +20,11 @@ const (
 	SkippedOne AnswerStatus = "skipped"
 	SkippedAll AnswerStatus = "skipped-all"
 	Cancelled  AnswerStatus = "cancelled" // user aborted the run
+
+	// Unsupported means this frontend cannot ask this question (for example a
+	// non-interactive CLI). It is neither a user cancel (Cancelled) nor an
+	// answer (Answered); callers must not use any other answer field.
+	Unsupported AnswerStatus = "unsupported"
 )
 
 // Question carries the display fields shared by all question shapes.
@@ -52,6 +57,9 @@ type Option struct {
 type ChoiceQuestion struct {
 	Question
 	Options []Option
+	// DefaultOptionIDs are pre-checked in a SelectMany question. Unknown or
+	// disabled IDs are ignored. SelectOne keeps using Question.DefaultOptionID.
+	DefaultOptionIDs []string
 }
 
 // ChoiceAnswer is the user's response to a SelectOne question.
@@ -64,7 +72,10 @@ type ChoiceAnswer struct {
 // MultiChoiceAnswer is the user's response to a SelectMany question.
 type MultiChoiceAnswer struct {
 	Status    AnswerStatus
-	OptionIDs []string
+	OptionIDs []string // checked options, declaration order (Answered only)
+	// Custom holds the checked free-form entries in the order added, when the
+	// question set AllowCustom (Answered only).
+	Custom []string
 }
 
 // TextQuestion is a free-text input question, optionally multiline.

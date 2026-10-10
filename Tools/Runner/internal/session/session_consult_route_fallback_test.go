@@ -14,6 +14,7 @@ import (
 	"testing"
 
 	"mosaic-run/internal/domain"
+	"mosaic-run/internal/engine"
 	"mosaic-run/internal/harness"
 	"mosaic-run/internal/session"
 )
@@ -66,9 +67,9 @@ func stage1DoneAutoStateArts() domain.ArtifactState {
 // engine.ResolveArtifacts is called, yielding "Stage-2/Output.md".
 func TestSession_ConsultRoute_FallbackArtifacts_ResolvesTemplateTokens(t *testing.T) {
 	consultant := &scriptedRoutingConsultant{}
-	// Row 1 is EXECUTION.Stage-2/agent-a after plan expansion.
+	// Row 0 is EXECUTION.[StageNumber]/agent-a; the instruction names stage 2.
 	// No OutputArtifacts in the instruction: consultRoute falls back to row.OutputArtifacts.
-	consultant.queueDispatch("agent-a", "re-route Stage-2/agent-a", 1)
+	consultant.queueStagedDispatch("agent-a", "re-route Stage-2/agent-a", 0, 2)
 	consultant.queueStop("Stage-2/agent-a completed")
 
 	dir := scopedTempDir(t)
@@ -90,9 +91,12 @@ func TestSession_ConsultRoute_FallbackArtifacts_ResolvesTemplateTokens(t *testin
 	store.state = stage1DoneAutoStateArts()
 	store.exists = true
 
-	// Engine auto-dispatches Stage-2/agent-a (row 1). Harness fails, triggering
-	// consultRoute with deviation.CurrentStage = "2".
-	f.Queue("agent-a", harness.ScriptedEntry{Err: errors.New("simulated harness failure on Stage-2/agent-a")})
+	// Engine auto-dispatches Stage-2/agent-a (row 1). Harness fails on every
+	// attempt until the E501 budget is used up, which triggers consultRoute with
+	// deviation.CurrentStage = "2".
+	for i := 0; i < engine.E501AttemptLimit; i++ {
+		f.Queue("agent-a", harness.ScriptedEntry{Err: errors.New("simulated harness failure on Stage-2/agent-a")})
+	}
 	// Consultant re-routes to row 1 (agent-a). Harness succeeds.
 	f.Queue("agent-a", harness.ScriptedEntry{Response: &domain.ProtocolResponse{
 		AgentInstanceID: "agent-a#4",
@@ -121,12 +125,13 @@ func TestSession_ConsultRoute_FallbackArtifacts_ResolvesTemplateTokens(t *testin
 	// (index 1, after the failed auto-routed attempt at index 0) must not
 	// contain the literal template token in its OutputArtifacts.
 	invocations := f.Invocations()
-	if len(invocations) < 2 {
-		t.Fatalf("want at least 2 harness invocations (failed auto + consultant re-route), got %d",
-			len(invocations))
+	consultIdx := engine.E501AttemptLimit
+	if len(invocations) <= consultIdx {
+		t.Fatalf("want at least %d harness invocations (failed auto attempts + consultant re-route), got %d",
+			consultIdx+1, len(invocations))
 	}
-	// The second invocation is the consultant-routed dispatch.
-	consultReq := invocations[1].Request
+	// The invocation after the failed auto attempts is the consultant-routed dispatch.
+	consultReq := invocations[consultIdx].Request
 
 	// Guard: the consultant-routed request must carry the row's OutputArtifacts.
 	// If this slice is empty, consultRoute either did not fall back to row.OutputArtifacts
@@ -195,9 +200,12 @@ func TestSession_ConsultRoute_HarnessFailure_PersistsFailedAttemptRecord(t *test
 		Interact: &noopInteraction{},
 	})
 
-	// First invocation: harness error (triggers consultRoute with deviation).
-	f.Queue("agent-a", harness.ScriptedEntry{Err: errors.New(errMsg)})
-	// Second invocation (consultant re-routes to row 0 again): SUCCESS.
+	// The harness fails on every dispatch until the engine's E501 budget is used
+	// up; only then is the consultation triggered with a deviation.
+	for i := 0; i < engine.E501AttemptLimit; i++ {
+		f.Queue("agent-a", harness.ScriptedEntry{Err: errors.New(errMsg)})
+	}
+	// Next invocation (consultant re-routes to row 0 again): SUCCESS.
 	f.Queue("agent-a", harness.ScriptedEntry{Response: &domain.ProtocolResponse{
 		AgentInstanceID: "agent-a#2",
 		StatusCode:      domain.StatusSUCCESS,

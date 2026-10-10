@@ -14,7 +14,7 @@ package opencode_test
 //   - Includes --agent <Identifier> for both invocation kinds.
 //   - Includes --format json.
 //   - Includes --auto.
-//   - The positional message carries the marshalled request.
+//   - The marshalled request travels on stdin; no positional message is emitted.
 //   - SystemPrompt carries a synthesized <env> block for BOTH invocation
 //     kinds (unlike ClaudeCodeAdapter, which only synthesizes one for the
 //     orchestrator kind) — OpenCode's --agent replaces the default system
@@ -124,10 +124,12 @@ func TestOpenCodeAdapter_IncludesAutoFlag(t *testing.T) {
 	}
 }
 
-// TestOpenCodeAdapter_PositionalMessageCarriesMarshalledRequest verifies that
-// the final positional argument contains the marshalled request JSON.
-func TestOpenCodeAdapter_PositionalMessageCarriesMarshalledRequest(t *testing.T) {
+// TestOpenCodeAdapter_StdinCarriesMarshalledRequest verifies that the
+// marshalled request is delivered on the child's stdin, and that no argv
+// element carries it.
+func TestOpenCodeAdapter_StdinCarriesMarshalledRequest(t *testing.T) {
 	argsFile := setHelperEnv(t, "opencode-success")
+	stdinFile := newTestStdinCapture(t)
 
 	adapter := opencode.NewOpenCodeAdapter(helperExe(t), 5*time.Second)
 	_, err := adapter.Invoke(context.Background(), ordinaryAgentRef(), minimalClaudeRequest("test-agent#1"))
@@ -135,12 +137,13 @@ func TestOpenCodeAdapter_PositionalMessageCarriesMarshalledRequest(t *testing.T)
 		t.Fatalf("unexpected error: %v", err)
 	}
 
-	args := readArgs(t, argsFile)
-	if len(args) == 0 {
-		t.Fatalf("want at least one arg, got none")
+	if !strings.Contains(string(readHelperStdin(t, stdinFile)), "test-agent#1") {
+		t.Errorf("want stdin to contain the marshalled request (agent_instance_id)")
 	}
-	if !strings.Contains(args[len(args)-1], "test-agent#1") {
-		t.Errorf("want the positional message to contain the marshalled request (agent_instance_id), got %q", args[len(args)-1])
+	for _, a := range readArgs(t, argsFile) {
+		if strings.Contains(a, "test-agent#1") {
+			t.Errorf("want no argv element carrying the request, got %q", a)
+		}
 	}
 }
 
@@ -150,7 +153,8 @@ func TestOpenCodeAdapter_PositionalMessageCarriesMarshalledRequest(t *testing.T)
 // invocation kind), so the adapter must supply a synthesized <env> block via
 // SystemPrompt for the ordinary case too.
 func TestOpenCodeAdapter_OrdinaryInvocation_SystemPromptCarriesEnvBlock(t *testing.T) {
-	argsFile := setHelperEnv(t, "opencode-success")
+	setHelperEnv(t, "opencode-success")
+	stdinFile := newTestStdinCapture(t)
 
 	adapter := opencode.NewOpenCodeAdapter(helperExe(t), 5*time.Second)
 	_, err := adapter.Invoke(context.Background(), ordinaryAgentRef(), minimalClaudeRequest("test-agent#1"))
@@ -158,20 +162,17 @@ func TestOpenCodeAdapter_OrdinaryInvocation_SystemPromptCarriesEnvBlock(t *testi
 		t.Fatalf("unexpected error: %v", err)
 	}
 
-	args := readArgs(t, argsFile)
-	if len(args) == 0 {
-		t.Fatalf("want at least one arg, got none")
-	}
-	message := args[len(args)-1]
+	message := string(readHelperStdin(t, stdinFile))
 	if !strings.Contains(message, "<env>") {
-		t.Errorf("want a synthesized <env> block in the ordinary invocation's positional message, got %q", message)
+		t.Errorf("want a synthesized <env> block on stdin for the ordinary invocation, got %q", message)
 	}
 }
 
 // TestOpenCodeAdapter_OrchestratorInvocation_SystemPromptCarriesEnvBlock
 // verifies the same for the orchestrator invocation kind.
 func TestOpenCodeAdapter_OrchestratorInvocation_SystemPromptCarriesEnvBlock(t *testing.T) {
-	argsFile := setHelperEnv(t, "opencode-success")
+	setHelperEnv(t, "opencode-success")
+	stdinFile := newTestStdinCapture(t)
 
 	adapter := opencode.NewOpenCodeAdapter(helperExe(t), 5*time.Second)
 	_, err := adapter.Invoke(context.Background(), orchestratorAgentRef(), minimalClaudeRequest("orchestrator-agent#1"))
@@ -179,13 +180,9 @@ func TestOpenCodeAdapter_OrchestratorInvocation_SystemPromptCarriesEnvBlock(t *t
 		t.Fatalf("unexpected error: %v", err)
 	}
 
-	args := readArgs(t, argsFile)
-	if len(args) == 0 {
-		t.Fatalf("want at least one arg, got none")
-	}
-	message := args[len(args)-1]
+	message := string(readHelperStdin(t, stdinFile))
 	if !strings.Contains(message, "<env>") {
-		t.Errorf("want a synthesized <env> block in the orchestrator invocation's positional message, got %q", message)
+		t.Errorf("want a synthesized <env> block on stdin for the orchestrator invocation, got %q", message)
 	}
 }
 

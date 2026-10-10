@@ -28,7 +28,7 @@ func TestOrchestratorConsultant_DispatchRowIndexResolved(t *testing.T) {
 	for _, tc := range cases {
 		t.Run(tc.agent, func(t *testing.T) {
 			table := mustParseTable(t)
-			reply := []byte(fmt.Sprintf(`{"action":"dispatch","agent":%q,"task_description":"do the thing"}`, tc.agent))
+			reply := []byte(fmt.Sprintf(`{"action":"dispatch","agent":%q,"row":%d,"task_description":"do the thing"}`, tc.agent, tc.wantRow+1))
 			fake := &fakeRawInvoker{reply: reply}
 			c := newTestOrchestratorConsultant(fake, table)
 
@@ -71,7 +71,7 @@ func TestOrchestratorConsultant_MissingAgentField_EmptyString(t *testing.T) {
 // must be treated the same as absent.
 func TestOrchestratorConsultant_MissingTaskDescriptionField_EmptyString(t *testing.T) {
 	table := mustParseTable(t)
-	reply := []byte(`{"action":"dispatch","agent":"agent-a","task_description":""}`)
+	reply := []byte(`{"action":"dispatch","agent":"agent-a","row":1,"task_description":""}`)
 	fake := &fakeRawInvoker{reply: reply}
 	c := newTestOrchestratorConsultant(fake, table)
 

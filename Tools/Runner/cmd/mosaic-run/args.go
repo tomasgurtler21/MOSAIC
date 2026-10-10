@@ -61,63 +61,6 @@ func scanBoolFlag(args []string, flag string) bool {
 	return false
 }
 
-// boolFlagState is the tri-state outcome of pre-scanning a boolean flag, needed
-// because a flag whose cobra default is true cannot be pre-scanned with a
-// two-state helper: "absent" and "explicitly false" must be distinguishable.
-type boolFlagState int
-
-const (
-	boolFlagAbsent boolFlagState = iota // flag not present in args
-	boolFlagTrue                        // "--flag" or "--flag=true"
-	boolFlagFalse                       // "--flag=false"
-)
-
-// scanBoolFlagState classifies a boolean flag's presence in args, understanding
-// the bare "--flag" form and the "--flag=true"/"--flag=false" forms. It mirrors
-// cobra's boolean flag parsing for pre-scan purposes only.
-func scanBoolFlagState(args []string, flag string) boolFlagState {
-	prefix := flag + "="
-	for _, arg := range args {
-		if arg == flag {
-			return boolFlagTrue
-		}
-		if strings.HasPrefix(arg, prefix) {
-			val := strings.ToLower(strings.TrimPrefix(arg, prefix))
-			if val == "false" {
-				return boolFlagFalse
-			}
-			return boolFlagTrue
-		}
-	}
-	return boolFlagAbsent
-}
-
-// scanBoolFlagDefault is the default-aware version of scanBoolFlag. It returns
-// def when the flag is absent, true for the bare flag form, and honours
-// --flag=true / --flag=false forms explicitly.
-//
-// Every boolean pre-scan in this file must pass the same def as the cobra flag
-// declaration's default, so the pre-scan and the parsed flag cannot disagree.
-func scanBoolFlagDefault(args []string, flag string, def bool) bool {
-	switch scanBoolFlagState(args, flag) {
-	case boolFlagTrue:
-		return true
-	case boolFlagFalse:
-		return false
-	default: // boolFlagAbsent
-		return def
-	}
-}
-
-// preConsultFromArgs resolves the effective pre-consultation setting from args,
-// applying the same default (true) that the --pre-consult cobra flag declaration
-// uses. This is the call site whose default literal pins agreement: any change
-// to the cobra default that does not also update this call is caught by the
-// TestPreConsultFromArgs_* tests.
-func preConsultFromArgs(args []string) bool {
-	return scanBoolFlagDefault(args, "--pre-consult", true)
-}
-
 // hasFlag reports whether args contains the named flag in either the
 // "--flag value" or "--flag=value" form. Unlike scanFlag it returns no value,
 // and unlike scanBoolFlag it matches the "--flag=value" form; it exists for

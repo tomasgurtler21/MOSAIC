@@ -218,7 +218,7 @@ func (a *OpenCodeAdapter) InvokeRaw(ctx context.Context, agent domain.AgentRefer
 		return nil, err
 	}
 
-	args, err := commonharness.BuildOpenCodeArgs(spawnReq)
+	args, stdin, err := commonharness.BuildOpenCodeArgs(spawnReq)
 	if err != nil {
 		a.logger.Log(domain.EventHarnessInvokeError, err.Error(),
 			domain.F("agent", agent.Identifier),
@@ -229,6 +229,7 @@ func (a *OpenCodeAdapter) InvokeRaw(ctx context.Context, agent domain.AgentRefer
 	resp, err := commonharness.Run(ctx, cmd, args, commonharness.RunOptions{
 		WorkingDir: spawnReq.WorkingDir,
 		Env:        spawnReq.Env,
+		Stdin:      stdin,
 		Timeout:    a.timeout,
 		Sink:       a.sink,
 	})

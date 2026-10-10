@@ -87,7 +87,10 @@ func TestManualResolver_ConsultRoutingReturnsDispatchForSelectedAgent(t *testing
 			}
 			return interaction.ChoiceAnswer{Status: interaction.Answered}, nil
 		},
-		AskTextResult: func(_ interaction.TextQuestion) (interaction.TextAnswer, error) {
+		AskTextResult: func(q interaction.TextQuestion) (interaction.TextAnswer, error) {
+			if q.ID != domain.QuestionManualTask {
+				return interaction.TextAnswer{Status: interaction.Answered}, nil
+			}
 			return interaction.TextAnswer{Status: interaction.Answered, Text: wantTaskDesc}, nil
 		},
 	}
@@ -122,10 +125,10 @@ func TestManualResolver_ConsultRoutingReturnsDispatchForSelectedAgent(t *testing
 	if instr.Dispatch.RowIndex != 0 {
 		t.Errorf("want RowIndex=0 for first agent (agent-a, row 0 in fixture), got %d", instr.Dispatch.RowIndex)
 	}
-	// ManualResolver never originates a HITL override; HITLOverride is set only
-	// when the user explicitly asks for one. The resolver itself must leave it nil.
+	// The user chose "no override" at the HITL step (the first option), so the
+	// dispatch carries no HITL override.
 	if instr.Dispatch.HITLOverride != nil {
-		t.Errorf("want HITLOverride=nil (ManualResolver never originates a HITL override), got non-nil: %v", *instr.Dispatch.HITLOverride)
+		t.Errorf("want HITLOverride=nil when the user chose no override, got non-nil: %v", *instr.Dispatch.HITLOverride)
 	}
 }
 
@@ -201,7 +204,10 @@ func TestManualResolver_ConsultRoutingRowIndexSet(t *testing.T) {
 			}
 			return interaction.ChoiceAnswer{Status: interaction.Answered}, nil
 		},
-		AskTextResult: func(_ interaction.TextQuestion) (interaction.TextAnswer, error) {
+		AskTextResult: func(q interaction.TextQuestion) (interaction.TextAnswer, error) {
+			if q.ID != domain.QuestionManualTask {
+				return interaction.TextAnswer{Status: interaction.Answered}, nil
+			}
 			return interaction.TextAnswer{Status: interaction.Answered, Text: "implement feature"}, nil
 		},
 	}

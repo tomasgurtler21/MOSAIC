@@ -744,3 +744,42 @@ Trust the project folder (or an ancestor) in Copilot CLI before running. The Run
 **Notes:**
 Related to GC-003 (workspace `.mcp.json` not wired in an untrusted workspace; one reporter saw it work once the workspace was marked trusted) and to GC-014 (another configuration surface that is never loaded): all are "configuration silently not applied" cases, and folder trust is plausibly the shared precondition for GC-003. Not investigated whether trust also gates other repo-level artifacts. See also CC-082 and OC-099 for the same class of hook-output-cannot-be-assumed behaviour in the other harnesses.
 
+
+---
+
+### GC-021: No non-argv prompt input; `-p <text>` is mangled by cmd.exe through the npm `copilot.cmd` shim on Windows
+
+| Field | Value |
+|-------|-------|
+| **Classification** | Limitation |
+| **Source** | MOSAIC experiments, 2026-10-06 (Windows 11); no upstream issue filed |
+| **Reported** | 2026-10-06 (MOSAIC) |
+| **Last Activity** | 2026-10-06 |
+| **Confidence** | Confirmed (reproduced at MOSAIC) |
+| **Orchestration Impact** | HIGH for Runner dispatch on Windows when `copilot` resolves to the npm shim; none on native binaries |
+| **Reproduced at MOSAIC** | Yes |
+| **MOSAIC Response** | Mitigated: the prompt is piped on stdin and `-p` is never emitted |
+| **Version(s) Affected** | 1.0.91 and 1.0.92 (stdin routes verified: direct exe on 1.0.91, `copilot.cmd` shim on 1.0.92); the cmd.exe mangling itself is version-independent |
+| **Latest Platform Version** | v1.0.92 (2026-10-05) |
+| **Labels** | `area:non-interactive`, `area:windows`, `area:prompt-delivery` |
+
+**Summary:**
+The CLI documents no flag that reads the prompt from a file or stdin; only `-p <text>`. On Windows, `copilot` usually resolves to `%APPDATA%\npm\copilot.cmd`, whose last line forwards `%*` to node. A `-p` value therefore passes through cmd.exe: defined `%VAR%`, `^`, `&`, `|`, `<`, `>` and quotes are mangled, and a JSON request exits 1 with no output.
+
+Stdin behaviour matrix (live runs, ground truth is the `user.message` event in `--output-format json`). Running code version taken from the `pkg\win32-x64\<version>` paths in the event stream, not from `copilot --version`: the CLI updated itself from 1.0.91 to 1.0.92 in the background mid-session (2026-10-06 20:36 local) while `--version` still reported 1.0.91. The direct-exe cases ran 1.0.91; the `cmd /c copilot.cmd` cases ran 1.0.92:
+- `-p` omitted + piped stdin: the prompt equals stdin exactly, on the direct binary and through `cmd /c copilot.cmd`, with `--yolo --no-ask-user`, `--agent`, `--agent` + `--model`, a payload without trailing newline, and a 38 568-byte payload (past the 8 191 cmd.exe and 32 767 CreateProcess limits).
+- `-p ""` + piped stdin: same result.
+- A non-empty `-p` value takes precedence and stdin is silently dropped.
+- A bare `-p` with no value is a parse error (exit 1).
+
+**Impact on Orchestration:**
+Orchestrator requests (single-line JSON with quotes, Windows paths) never reach the model intact through the shim when sent via `-p`.
+
+**Evidence:**
+Byte-for-byte comparison of stdin payloads (special characters, paths, trailing backslash) against the CLI's `user.message` event across the routes above.
+
+**Workaround(s):**
+Pipe the prompt on stdin and omit `-p`. Not live-probed: the partial-allowlist mode; prompt delivery is independent of those flags, but `--allow-tool` and extra-argument values still travel in argv through cmd.exe.
+
+**Notes:**
+Same class as the Claude Code and OpenCode argv-delivery problems fixed by stdin delivery. Raw probe outputs: `C:\AI\MOSAIC\HarnessProbes\GhcpAgentDeselect\20261006-stdin-probes\` (`secondpass-direct\live\` = 1.0.91 direct exe, `thirdpass-shim\out\` = 1.0.92 through the shim). Because of the silent self-update, `copilot --version` does not reliably give the running version; read it from the event stream. In the Runner, GC-021 can look like GC-022 (resolved: agent dropped at session start), since both surface as `reply contains no JSON object` / `BLOCKED E501`. Tell them apart by the JSONL: `subagent.deselected` means GC-022; exit 1, empty output, or a `user.message` differing from the request means GC-021.

@@ -1,9 +1,9 @@
 # GitHub Copilot CLI — Issue Index
 
-> Last updated: 2026-10-04 (GC-020 added from MOSAIC experiments)
-> Latest platform version: v1.0.91 (released 2026-10-01); v1.0.92-3 pre-release out 2026-10-02
+> Last updated: 2026-10-06 (GC-021 added, GC-022 recorded as resolved, from MOSAIC experiments)
+> Latest platform version: v1.0.92 (released 2026-10-05)
 
-## Active Issues (20)
+## Active Issues (21)
 
 | ID | Title | Type | Confidence | Impact | Workaround | Reproduced | Response |
 |----|-------|------|------------|--------|------------|------------|----------|
@@ -27,13 +27,15 @@
 | GC-018 | `--allow-tool='shell(docker ps)'` pattern matching fails for non-git commands | Bug | Unverified | HIGH | Partial | No | Unevaluated |
 | GC-019 | Non-interactive `--yolo` bypasses `disableBypassPermissionsMode` managed setting | Bug | Unverified | MEDIUM | No | No | Unevaluated |
 | GC-020 | Repo-level hooks (`.github/hooks/*.json`) silently not loaded in `-p` mode unless the working directory equals or is under a `trustedFolders` entry of `config.json` (exit 0, no warning) | Limitation | Confirmed | HIGH | Yes | Yes | Mitigated |
+| GC-021 | No non-argv prompt input; `-p <text>` is mangled by cmd.exe through the npm `copilot.cmd` shim on Windows | Limitation | Confirmed | HIGH | Yes | Yes | Mitigated |
 
-## Resolved / Retired Issues (0)
+## Resolved / Retired Issues (1)
 
 > Resolved entries older than 3 months are automatically removed.
 
 | ID | Title | Fixed In / Status | Resolution Date |
 |----|-------|-------------------|-----------------|
+| GC-022 | `--agent <id>` dropped at session start (`subagent.deselected`); the default agent runs instead (1.0.91 regression) | 1.0.92 | 2026-10-06 |
 
 ---
 

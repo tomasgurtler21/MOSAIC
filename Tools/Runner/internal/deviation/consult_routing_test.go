@@ -129,6 +129,7 @@ func TestOrchestratorConsultant_DispatchAllOptionalFieldsPresent(t *testing.T) {
 	reply := []byte(`{
 		"action": "dispatch",
 		"agent": "agent-a",
+"row": 1,
 		"task_description": "do the thing",
 		"constraints": "run fast",
 		"input_artifacts": ["in.md"],
@@ -191,6 +192,7 @@ func TestOrchestratorConsultant_DispatchNullOptionalFields(t *testing.T) {
 	reply := []byte(`{
 		"action": "dispatch",
 		"agent": "agent-a",
+"row": 1,
 		"task_description": "do the thing",
 		"constraints": null,
 		"input_artifacts": null,
@@ -229,7 +231,7 @@ func TestOrchestratorConsultant_DispatchNullOptionalFields(t *testing.T) {
 func TestOrchestratorConsultant_DispatchAbsentOptionalFields(t *testing.T) {
 	table := mustParseTable(t)
 	// Only the required fields; all optional fields absent.
-	reply := []byte(`{"action":"dispatch","agent":"agent-a","task_description":"do the thing"}`)
+	reply := []byte(`{"action":"dispatch","agent":"agent-a","row":1,"task_description":"do the thing"}`)
 	fake := &fakeRawInvoker{reply: reply}
 	c := newTestOrchestratorConsultant(fake, table)
 
@@ -262,7 +264,7 @@ func TestOrchestratorConsultant_DispatchAbsentOptionalFields(t *testing.T) {
 // (which means "fall back to the table row's Input column").
 func TestOrchestratorConsultant_DispatchExplicitlyEmptyInputArtifacts(t *testing.T) {
 	table := mustParseTable(t)
-	reply := []byte(`{"action":"dispatch","agent":"agent-a","task_description":"do the thing","input_artifacts":[]}`)
+	reply := []byte(`{"action":"dispatch","agent":"agent-a","row":1,"task_description":"do the thing","input_artifacts":[]}`)
 	fake := &fakeRawInvoker{reply: reply}
 	c := newTestOrchestratorConsultant(fake, table)
 

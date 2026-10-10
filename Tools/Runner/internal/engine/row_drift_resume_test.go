@@ -374,7 +374,7 @@ var resumeStopCases = []struct {
 	{"row far outside table", "Test.1", 99, domain.CauseRecordedRowInvalid},
 	{"row holds another agent", "Test.1", bvRowTestsReview, domain.CauseRecordedRowInvalid},
 	{"row in other group than stage", "Implementation.1", bvRowTestBuild, domain.CauseRecordedRowInvalid},
-	{"empty stage", "", bvRowTestBuild, domain.CauseRecordedRowInvalid},
+	{"empty stage", "", bvRowTestBuild, domain.CauseStagedRowWithoutStage},
 	{"legacy stage value", "Stage-1", bvRowTestBuild, domain.CauseRecordedRowInvalid},
 }
 

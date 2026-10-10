@@ -98,6 +98,15 @@ No attributes. The tag name alone. Same own-line rule.
 
 **Lenient parse, canonical write.** Attributes may appear in any order, separated by any run of spaces or tabs, and values may be single- or double-quoted. A hand-edited file with reordered attributes is still recognised as a boundary. On serialisation the output is always canonical form.
 
+### 3.2 Table layout and cells
+
+Each data section (`ExecutionLog`, `Artifacts`, `WorkflowNotes`) is written as: open tag line, one blank line, the table, one blank line, close tag line. The blank lines make the table render as a table in CommonMark viewers; without them the table is swallowed into the preceding tag line.
+
+- **Compact rows.** Each row is `|`, then for each column a space, the cell, a space and `|`. The separator row is `| --- | --- |` with `---` in every column. Cells are not padded to a common column width, so line length follows row content.
+- **Cell rule.** A cell holds one line. A writer replaces each line break (CRLF, CR or LF) with a single space, trims the cell, and writes each `|` as `\|`. A reader trims each cell and reads `\|` back as `|`.
+- **Paths.** `Inputs` and the Artifacts registry's `Artifact` column omit the `Orchestration-{run_id}/` prefix (section 5, section 6).
+- **Read tolerance (parser-tested).** A reader accepts what the Runner parser tests cover: cells padded to any width, left, right or centre alignment markers in the separator row, any number of blank lines (including none) between a tag and its table, and trailing spaces or tabs after a tag. Nothing else is promised; hand-edits beyond this are not guaranteed to parse.
+
 ## 4. Frontmatter (Tier 1)
 
 ```yaml
@@ -186,12 +195,16 @@ Group vocabulary itself — how a workflow declares groups, how the plan artifac
 
 ```markdown
 <ExecutionLog type="core">
+
 | Seq | Agent | Phase | Stage | WorkflowRow | Status | Timestamp | Summary | Inputs | Checkpoint |
-|-----|-------|-------|-------|-------------|--------|-----------|---------|--------|------------|
+| --- | --- | --- | --- | --- | --- | --- | --- | --- | --- |
 | 1 | Research#1 | RESEARCH | - | 1 | SUCCESS | 2026-01-29T09:05:00Z | Analyzed auth requirements, JWT approach selected | - | - |
 | 2 | Validator#2 | RESEARCH | - | 2 | SUCCESS | 2026-01-29T09:10:00Z | Validated JWT approach feasibility | Research.md | - |
+
 </ExecutionLog>
 ```
+
+The layout shown is the canonical write form shared by all three data sections (see Table layout and cells in section 3.2).
 
 One row per completed subagent invocation, appended after that invocation completes — never before, and never modified afterward. Every field on a row, including `Checkpoint`, is fixed at the moment the row is written; nothing in this section is ever revisited.
 
@@ -204,7 +217,7 @@ One row per completed subagent invocation, appended after that invocation comple
 | `WorkflowRow` | The value of the `Row` column of the workflow routing-table row this invocation ran (not this log's own row number; `Seq` is that). A deployed table carries a first-column `Row` numbered 1..N, added by mosaic-deploy and recomputed on every deploy; authors never write it. When a deployed table has no `Row` column (an orchestrator deployed before the column existed, or a workflow preserved when infrastructure agents were injected), the value is the 1-based position of the data row in the routing table. `-` for infrastructure, out-of-band and ad-hoc-run invocations (an ad-hoc run has no routing table). |
 | `Status` | The subagent's returned status code. |
 | `Timestamp` | ISO-8601, invocation completion time. |
-| `Summary` | The subagent's own `status_message` from its protocol response, copied across — not text the orchestrator composes itself. This keeps `Summary` inside the "mechanical" category (§2) despite reading like free text: it's copied content, not authored content. Bounded and single-line by construction — a `|` or a literal newline inside this field is invalid and must be stripped or escaped by whatever writes the row. Truncation, when `status_message` exceeds 100 characters, takes the **first 50 and last 50 characters**, joined by ` ... ` — not a naive first-100 cut. The three-period delimiter is ASCII because the Communication Protocol requires orchestration artifacts to use only `U+0000`–`U+007F`. This isn't cosmetic: a verbose `status_message` (which shouldn't happen per protocol, but does) tends to front-load process narration and put the actual outcome in its closing sentence, so a head-only truncation systematically discards the part most worth keeping. Head+tail keeps both the opening context and the conclusion, at the same total character budget. |
+| `Summary` | The subagent's own `status_message` from its protocol response, copied across — not text the orchestrator composes itself. This keeps `Summary` inside the "mechanical" category (§2) despite reading like free text: it's copied content, not authored content. Bounded and single-line by construction — a `|` or a literal newline inside this field is invalid and must be escaped or replaced by whatever writes the row, following the cell rule in section 3.2. Truncation, when `status_message` exceeds 100 characters, takes the **first 50 and last 50 characters**, joined by ` ... ` — not a naive first-100 cut. The three-period delimiter is ASCII because the Communication Protocol requires orchestration artifacts to use only `U+0000`–`U+007F`. This isn't cosmetic: a verbose `status_message` (which shouldn't happen per protocol, but does) tends to front-load process narration and put the actual outcome in its closing sentence, so a head-only truncation systematically discards the part most worth keeping. Head+tail keeps both the opening context and the conclusion, at the same total character budget. **Runner error marker (Runner convention):** on a `BLOCKED` row the Runner appends ` [error:CODE]` (e.g. `[error:E501]`) at the very end of the `Summary`, after truncation, so the marker is never cut off. The code is one or more ASCII letters or digits. The Runner reads the marker back (only when it is the final token of the cell) to count E501 retries. Native orchestrators are not required to write it; a `BLOCKED` row without the marker simply has no recorded error code, and a consumer must tolerate that. Other bracketed text in a `Summary` (such as `[checkpoint:4f1a08d]`) is ordinary content. |
 | `Inputs` | The `input_artifacts` list dispatched with this invocation; comma-separated filenames with the run-scoped folder prefix omitted (it is identical for every artifact in a run and recoverable from `run_id`). `-` when no artifacts were passed. Sourced directly from the dispatch message — not authored content. On the same mechanical footing as `Status` or `Agent`. |
 | `Checkpoint` | Empty (`-`) on almost every row. Populated on the row of the checkpoint agent invocation that took the checkpoint — never on the row of the preceding workflow step. A non-empty value names a real, externally-restorable content reference; a bare placeholder is never valid. |
 
@@ -224,11 +237,13 @@ The column is `Agent`. A now-removed `Orchestration.template.md` labelled it `Su
 
 ```markdown
 <Artifacts type="core">
+
 | Artifact | Created In | Created By |
-|----------|------------|------------|
+| --- | --- | --- |
 | Research.md | RESEARCH | Research#1 |
 | Plan.md | PLANNING | Planner#3 |
 | Stage-1/PlanProgress.md | EXECUTION.Implementation.1 | Implementation#10 |
+
 </Artifacts>
 ```
 
@@ -248,10 +263,12 @@ Unlike the Execution Log, this section is **not** a history — it's a lookup ta
 
 ```markdown
 <WorkflowNotes type="core">
+
 | Seq | Note |
-|-----|------|
+| --- | --- |
 | 1 | Token expiry should be 24 hours per security policy |
 | 4 | User confirmed: use RS256 algorithm, not HS256 |
+
 </WorkflowNotes>
 ```
 
@@ -320,8 +337,9 @@ current_state:
 ---
 
 <ExecutionLog type="core">
+
 | Seq | Agent | Phase | Stage | WorkflowRow | Status | Timestamp | Summary | Inputs | Checkpoint |
-|-----|-------|-------|-------|-------------|--------|-----------|---------|--------|------------|
+| --- | --- | --- | --- | --- | --- | --- | --- | --- | --- |
 | 1 | Research#1 | RESEARCH | - | 1 | SUCCESS | 2026-01-29T08:10:00Z | Analyzed profile feature requirements | - | - |
 | 2 | Planner#2 | PLANNING | - | 2 | SUCCESS | 2026-01-29T08:35:00Z | Created 2-iteration plan for profile CRUD | - | - |
 | 3 | Designer#3 | DESIGN | - | 3 | SUCCESS | 2026-01-29T09:15:00Z | Designed ProfileService interface | Research.md | - |
@@ -331,23 +349,28 @@ current_state:
 | 14 | checkpoint-manager-git#14 | EXECUTION | Implementation.1 | - | SUCCESS | 2026-01-29T10:51:00Z | Committed checkpoint of working tree (7 files). [checkpoint:7c2e9f1] | - | 7c2e9f1 |
 | 15 | TestCreator#15 | EXECUTION | Test.2 | 6 | SUCCESS | 2026-01-29T11:15:00Z | Created tests for updateProfile endpoint | Plan.md | - |
 | 16 | Implementation#16 | EXECUTION | Implementation.2 | 8 | SUCCESS | 2026-01-29T12:45:00Z | Implemented updateProfile endpoint | Plan.md, Design.md | - |
+
 </ExecutionLog>
 
 <Artifacts type="core">
+
 | Artifact | Created In | Created By |
-|----------|------------|------------|
+| --- | --- | --- |
 | Requirements.md | INIT | user |
 | Research.md | RESEARCH | Research#1 |
 | Plan.md | PLANNING | Planner#2 |
 | Design.md | DESIGN | Designer#3 |
 | Stage-2/PlanProgress.md | EXECUTION.Implementation.2 | Implementation#16 |
+
 </Artifacts>
 
 <WorkflowNotes type="core">
+
 | Seq | Note |
-|-----|------|
+| --- | --- |
 | 1 | Avatar images max 2MB, stored in /uploads/avatars/ |
 | 6 | Use soft delete for profile removal per user clarification |
+
 </WorkflowNotes>
 ```
 

@@ -23,10 +23,12 @@ package deviation_test
 //     with a RunContext carrying a two-row routing table, presents
 //     Interaction.SelectOne with exactly len(table.Rows)+1 options.
 //   - The stop option (ID "stop") is present in those options.
-//   - One option per routing table row is present (agent identifiers as IDs).
+//   - One option per routing table row is present, keyed by the row's 1-based
+//     position ("1".."N"), so agents with several rows stay distinguishable.
 
 import (
 	"context"
+	"strconv"
 	"testing"
 
 	"mosaic-run/internal/deviation"
@@ -58,7 +60,7 @@ func consultReq() domain.ConsultationRequest {
 func TestOrchestratorConsultant_AcceptsDispatch_AfterBindRunContext(t *testing.T) {
 	table := mustParseTable(t)
 	fake := &fakeRawInvoker{
-		reply: []byte(`{"action":"dispatch","agent":"agent-a","task_description":"do the thing"}`),
+		reply: []byte(`{"action":"dispatch","agent":"agent-a","row":1,"task_description":"do the thing"}`),
 	}
 	// Construct with no table or orchestrator.
 	c := &deviation.OrchestratorConsultant{Invoker: fake}
@@ -90,7 +92,7 @@ func TestOrchestratorConsultant_DispatchRowIndex_AfterBindRunContext(t *testing.
 	table := mustParseTable(t)
 	fake := &fakeRawInvoker{
 		// agent-b is row index 1 in the two-row simpleLinearContent fixture.
-		reply: []byte(`{"action":"dispatch","agent":"agent-b","task_description":"plan it"}`),
+		reply: []byte(`{"action":"dispatch","agent":"agent-b","row":2,"task_description":"plan it"}`),
 	}
 	c := &deviation.OrchestratorConsultant{Invoker: fake}
 	c.BindRunContext(domain.RunContext{Orchestrator: boundOrchestratorRef(), Table: table})
@@ -217,7 +219,7 @@ func TestManualResolver_StopOptionPresent_AfterBindRunContext(t *testing.T) {
 
 // TestManualResolver_RowOptionsPresent_AfterBindRunContext verifies that after
 // binding, one option per routing table row is present in the SelectOne options,
-// identified by the row's agent identifier.
+// identified by the row's 1-based position.
 func TestManualResolver_RowOptionsPresent_AfterBindRunContext(t *testing.T) {
 	table := mustParseTable(t)
 	interact := &scriptedInteraction{}
@@ -236,10 +238,10 @@ func TestManualResolver_RowOptionsPresent_AfterBindRunContext(t *testing.T) {
 		optionIDs[opt.ID] = true
 	}
 
-	for _, row := range table.Rows {
-		if !optionIDs[row.Agent] {
-			t.Errorf("want option for agent %q (row %d); got options: %v",
-				row.Agent, row.Index, q.Options)
+	for i := range table.Rows {
+		id := strconv.Itoa(i + 1)
+		if !optionIDs[id] {
+			t.Errorf("want option with 1-based row ID %q; got options: %v", id, q.Options)
 		}
 	}
 }

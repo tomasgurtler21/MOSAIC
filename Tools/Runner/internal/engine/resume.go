@@ -70,12 +70,13 @@ func ResumePoint(
 	if interrupted {
 		// The last workflow log entry was dispatched but not recorded in
 		// CurrentState. Re-run the interrupted row.
-		rowIdx, err := findRowForLogEntry(workflow, lastWorkflowEntry)
+		pos, err := resumePosition(workflow, lastWorkflowEntry)
 		if err != nil {
-			return domain.ResumeInfo{}, fmt.Errorf("resume: %w", err)
+			return domain.ResumeInfo{}, err
 		}
+		rowIdx := pos.rowIdx
 		row := workflow.Table.Rows[rowIdx]
-		stageNum := parseStageNumber(lastWorkflowEntry.Stage)
+		stageNum := pos.stageNum
 		groupIdx := -1
 		if row.PhaseParsed.IsStaged {
 			groupIdx = findGroupIndexInWorkflow(workflow, rowIdx)
@@ -92,41 +93,20 @@ func ResumePoint(
 	}
 
 	// Clean completion: advance to the next row after the last workflow step.
-	currentRowIdx, err := findRowForLogEntry(workflow, lastWorkflowEntry)
+	pos, err := resumePosition(workflow, lastWorkflowEntry)
 	if err != nil {
-		return domain.ResumeInfo{}, fmt.Errorf("resume: %w", err)
+		return domain.ResumeInfo{}, err
 	}
+	currentRowIdx := pos.rowIdx
 
 	currentRow := workflow.Table.Rows[currentRowIdx]
 
 	if !currentRow.PhaseParsed.IsStaged {
-		// Non-EXECUTION row: next is the row immediately after in the table.
-		nextRowIdx := currentRowIdx + 1
-		if nextRowIdx >= len(workflow.Table.Rows) {
-			return domain.ResumeInfo{
-				RowIndex:    nextRowIdx,
-				Phase:       "",
-				Stage:       "",
-				StageNumber: 0,
-				GroupIndex:  -1,
-				Seq:         state.GlobalSequence,
-				RerunLast:   false,
-			}, nil
-		}
-		nextRow := workflow.Table.Rows[nextRowIdx]
-		return domain.ResumeInfo{
-			RowIndex:    nextRowIdx,
-			Phase:       nextRow.Phase,
-			Stage:       "",
-			StageNumber: 0,
-			GroupIndex:  -1,
-			Seq:         state.GlobalSequence,
-			RerunLast:   false,
-		}, nil
+		return resumeAfterNonExecution(workflow, stages, currentRowIdx, state.GlobalSequence), nil
 	}
 
 	// EXECUTION row: apply group/stage logic.
-	currentStageNum := parseStageNumber(lastWorkflowEntry.Stage)
+	currentStageNum := pos.stageNum
 	adv, advErr := computeNextFromExecution(workflow, stages, currentRowIdx, currentStageNum)
 	if advErr != nil {
 		return domain.ResumeInfo{}, fmt.Errorf("resume: %w", advErr)

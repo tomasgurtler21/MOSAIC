@@ -26,6 +26,9 @@ dispatch
 ### Agent
 mosaictest-scripted
 
+### Row
+1
+
 ### TaskDescription
 ~~~
 MOSAICTEST-CHAIN-REDISPATCH-1 / first deviation resolved / re-dispatching with chain-second script / expecting unconditional BLOCKED
@@ -41,6 +44,9 @@ dispatch
 
 ### Agent
 mosaictest-scripted
+
+### Row
+1
 
 ### TaskDescription
 ~~~

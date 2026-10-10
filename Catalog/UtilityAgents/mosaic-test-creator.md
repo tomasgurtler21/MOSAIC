@@ -1,5 +1,5 @@
 ---
-version: 1.0.0
+version: 1.1.0
 name: mosaic-test-creator
 description: Creates and maintains AgentTest test suites, test definitions, stub registries, seed fixtures, and test catalogue entries for orchestrator routing tests
 role: utility
@@ -112,22 +112,25 @@ The orchestrator reads `Orchestration.md` to determine its current position. A s
 - `run_id` format: `{YYYYMMDD}T{HHMMSS}Z-{4-char-hex}` (e.g., `20260801T120000Z-a1b2`)
 
 **Execution Log:**
-- Columns: `Seq | Agent | Phase | Stage | Status | Timestamp | Summary | Inputs | Checkpoint`
+- Columns: `Seq | Agent | Phase | Stage | WorkflowRow | Status | Timestamp | Summary | Inputs | Checkpoint`
 - Append-only — rows represent completed invocations in order
 - `Stage` is `-` when phase is not EXECUTION; carries group when applicable (`Test.1`)
 - `Summary` comes from the subagent's `status_message` — keep it realistic but short
 - `Inputs` is comma-separated artifact names without the run-scoped folder prefix, or `-`
-- Wrap in `<ExecutionLog type="core">` / `</ExecutionLog>` tags
+- Wrap in `<ExecutionLog type="core">` / `</ExecutionLog>` tags, with one blank line between the open tag and the table and one between the table and the close tag
 
 **Artifacts registry:**
 - Columns: `Artifact | Created In | Created By`
 - Keyed by `Artifact` path — each path appears once (latest producer)
 - `Created In` is `Phase` alone or `Phase.Stage` (e.g., `EXECUTION.Implementation.2`)
-- Wrap in `<Artifacts type="core">` / `</Artifacts>` tags
+- `Artifact` paths omit the `Orchestration-{run_id}/` prefix, as in `Inputs`
+- Wrap in `<Artifacts type="core">` / `</Artifacts>` tags, with the same blank lines around the table
 
 **Workflow Notes:**
 - Columns: `Seq | Note`
-- Wrap in `<WorkflowNotes type="core">` / `</WorkflowNotes>` tags
+- Wrap in `<WorkflowNotes type="core">` / `</WorkflowNotes>` tags, with the same blank lines around the table
+
+**Table layout (all three tables):** header row, then a `| --- | --- |` separator row, then data rows written as `| cell | cell |` with no column-width padding. A cell holds one line: replace line breaks with a space and write any `|` inside a cell as `\|`.
 
 ### Other Artifact Fixtures (Research.md, Plan.md, Requirements.md, etc.)
 

@@ -184,7 +184,7 @@ func TestGHCPCLIAdapterWithMode_PartialAllowlist_InvokeRaw_MissingDefinitionPath
 //   - No --allow-tool entries
 //   - No --yolo
 //   - --no-ask-user present
-//   - -p as the second-to-last arg (prompt is last)
+//   - no -p (the prompt travels on stdin)
 func TestGHCPCLIAdapterWithMode_PartialAllowlist_InvokeRaw_UngatedOnlyAgent_Succeeds(t *testing.T) {
 	agentFile := writeGHCPCLITestAgentFile(t, []string{"read", "search", "ask_user"})
 	agentRef := agentRefWithDefinitionPath(agentFile)
@@ -212,8 +212,8 @@ func TestGHCPCLIAdapterWithMode_PartialAllowlist_InvokeRaw_UngatedOnlyAgent_Succ
 	if !containsArg(args, "--no-ask-user") {
 		t.Errorf("want --no-ask-user in Partial Allowlist InvokeRaw for ungated-only agent, got %v", args)
 	}
-	if len(args) < 2 || args[len(args)-2] != "-p" {
-		t.Errorf("want -p as second-to-last arg in InvokeRaw, got %v", args)
+	if containsArg(args, "-p") {
+		t.Errorf("want no -p in InvokeRaw args (prompt travels on stdin), got %v", args)
 	}
 }
 
@@ -226,7 +226,7 @@ func TestGHCPCLIAdapterWithMode_PartialAllowlist_InvokeRaw_UngatedOnlyAgent_Succ
 //   - No --allow-tool entries
 //   - No --yolo
 //   - --no-ask-user present
-//   - -p as the second-to-last arg (prompt is last)
+//   - no -p (the prompt travels on stdin)
 func TestGHCPCLIAdapterWithMode_PartialAllowlist_InvokeRaw_EmptyToolsList_Succeeds(t *testing.T) {
 	agentFile := writeGHCPCLITestAgentFile(t, []string{})
 	agentRef := agentRefWithDefinitionPath(agentFile)
@@ -254,7 +254,7 @@ func TestGHCPCLIAdapterWithMode_PartialAllowlist_InvokeRaw_EmptyToolsList_Succee
 	if !containsArg(args, "--no-ask-user") {
 		t.Errorf("want --no-ask-user in Partial Allowlist InvokeRaw for empty-tools-list agent, got %v", args)
 	}
-	if len(args) < 2 || args[len(args)-2] != "-p" {
-		t.Errorf("want -p as second-to-last arg in InvokeRaw, got %v", args)
+	if containsArg(args, "-p") {
+		t.Errorf("want no -p in InvokeRaw args (prompt travels on stdin), got %v", args)
 	}
 }

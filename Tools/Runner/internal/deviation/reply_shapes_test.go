@@ -69,7 +69,7 @@ func TestConsultRouting_AcceptsVariousReplyShapes(t *testing.T) {
 func TestConsultRouting_DispatchReplyShapesYieldSameInstruction(t *testing.T) {
 	table := mustParseTable(t)
 
-	const bareJSON = `{"action":"dispatch","agent":"agent-a","task_description":"implement the plan"}`
+	const bareJSON = `{"action":"dispatch","agent":"agent-a","row":1,"task_description":"implement the plan"}`
 
 	cases := []struct {
 		name  string

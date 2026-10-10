@@ -3,10 +3,10 @@ package tui
 import (
 	"strings"
 
-	"github.com/charmbracelet/bubbles/textinput"
 	tea "github.com/charmbracelet/bubbletea"
 
 	tuicommon "mosaic-common/tui"
+	"mosaic-common/tui/pastesafe"
 	"mosaic-common/interaction"
 )
 
@@ -138,65 +138,43 @@ func (o *overlaySelectOne) view() string {
 // overlayText — inline text-input question
 // ---------------------------------------------------------------------------
 
-// overlayText renders a simple text-input question overlay.
+// overlayText renders a simple text-input question overlay. Key handling is
+// delegated to the shared paste-safe field, so a pasted line break never
+// submits the answer.
 type overlayText struct {
 	q      interaction.TextQuestion
-	input  textinput.Model
-	errMsg string
-	done   bool
-	back   bool
+	input  *pastesafe.Field
 	theme  tuicommon.Theme
 	width  int
 	height int
 }
 
 func newOverlayText(q interaction.TextQuestion, theme tuicommon.Theme, width, height int) *overlayText {
-	m := textinput.New()
+	f := pastesafe.NewField(pastesafe.WithValidate(q.Validate))
 	if q.Default != "" {
-		m.SetValue(q.Default)
+		f.SetValue(q.Default)
 	}
-	m.Width = width - 4
-	m.Focus()
 	return &overlayText{
-		q:     q,
-		input: m,
-		theme: theme,
-		width: width,
+		q:      q,
+		input:  f,
+		theme:  theme,
+		width:  width,
 		height: height,
 	}
 }
 
 // init returns the cursor blink command for the text input.
-func (o *overlayText) init() tea.Cmd { return textinput.Blink }
+func (o *overlayText) init() tea.Cmd { return o.input.Init() }
 
 // update processes a message. Returns a Cmd for cursor blinking.
-func (o *overlayText) update(msg tea.Msg) tea.Cmd {
-	if key, ok := msg.(tea.KeyMsg); ok {
-		switch key.Type {
-		case tea.KeyEnter:
-			val := o.input.Value()
-			if o.q.Validate != nil {
-				if err := o.q.Validate(val); err != nil {
-					o.errMsg = err.Error()
-					return nil
-				}
-			}
-			o.errMsg = ""
-			o.done = true
-			return nil
-		case tea.KeyEsc:
-			o.back = true
-			return nil
-		}
-	}
-	var cmd tea.Cmd
-	o.input, cmd = o.input.Update(msg)
-	return cmd
-}
+func (o *overlayText) update(msg tea.Msg) tea.Cmd { return o.input.Update(msg) }
+
+// finished reports whether the overlay was submitted or cancelled.
+func (o *overlayText) finished() bool { return o.input.Done() || o.input.Back() }
 
 // answer constructs the TextAnswer from the current overlay state.
 func (o *overlayText) answer() interaction.TextAnswer {
-	if o.back {
+	if o.input.Back() {
 		return interaction.TextAnswer{Status: interaction.Cancelled}
 	}
 	return interaction.TextAnswer{Status: interaction.Answered, Text: o.input.Value()}
@@ -217,8 +195,8 @@ func (o *overlayText) view() string {
 	}
 	sb.WriteString(o.input.View())
 	sb.WriteByte('\n')
-	if o.errMsg != "" {
-		sb.WriteString(o.theme.Style(tuicommon.RoleError).Width(o.width).Render(o.errMsg))
+	if msg := o.input.ErrMsg(); msg != "" {
+		sb.WriteString(o.theme.Style(tuicommon.RoleError).Width(o.width).Render(msg))
 		sb.WriteByte('\n')
 	}
 	sb.WriteString(o.theme.Style(tuicommon.RoleHelp).Width(o.width).Render(

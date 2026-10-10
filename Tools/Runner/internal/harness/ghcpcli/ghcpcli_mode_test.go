@@ -38,8 +38,8 @@ package ghcpcli_test
 //   - Partial Allowlist mode: --allow-tool entries present (translated from frontmatter)
 //   - Partial Allowlist mode: --yolo absent, --no-ask-user present
 //   - Partial Allowlist mode: missing DefinitionPath returns an error before spawning
-//   - Partial Allowlist mode: ungated-only agent succeeds with no --allow-tool, no --yolo, --no-ask-user present, -p last
-//   - Partial Allowlist mode: tools: [] agent succeeds with no --allow-tool, no --yolo, --no-ask-user present, -p last
+//   - Partial Allowlist mode: ungated-only agent succeeds with no --allow-tool, no --yolo, --no-ask-user present, no -p
+//   - Partial Allowlist mode: tools: [] agent succeeds with no --allow-tool, no --yolo, --no-ask-user present, no -p
 
 import (
 	"context"

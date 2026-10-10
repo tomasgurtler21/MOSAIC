@@ -110,17 +110,22 @@ type Session interface {
 // Deps collects all port dependencies required by the session.
 // Every field is a port (interface); no concrete types are used.
 type Deps struct {
-	// Harness dispatches subagent invocations.
+	// Harness dispatches subagent invocations. Required. A nil value makes
+	// Start refuse the run (MissingPortError) before any artifact write or
+	// dispatch.
 	Harness domain.HarnessAdapter
-	// Store reads and writes the Orchestration.md artifact.
+	// Store reads and writes the Orchestration.md artifact. Required; see Harness.
 	Store domain.ArtifactStore
-	// Clock provides deterministic timestamps.
+	// Clock provides deterministic timestamps. Required; see Harness.
 	Clock domain.Clock
 	// Interact provides the user-interaction channel (progress events, etc.).
+	// Required; see Harness.
 	Interact domain.Interaction
 	// PreConsult performs the one-shot run-start pre-consultation (auto and
-	// auto-review modes only). Nil is permitted only when the run's
-	// PreConsultation setting is disabled; calling it when nil panics.
+	// auto-review modes only). Required when the run's effective settings enable
+	// pre-consultation in auto or auto-review mode; checked after resume
+	// reconciliation and before any artifact write. Otherwise optional and
+	// never called.
 	PreConsult domain.PreConsultant
 	// OnInfrastructureTrigger is an optional hook called after each harness
 	// invocation (FR-40). If nil, no action is taken. In production this is the
@@ -154,8 +159,9 @@ type Deps struct {
 	Routing domain.RoutingConsultant
 
 	// Manual is the fallback resolver used when a consultation fails and the
-	// run's ManualResolution setting is enabled. Nil when manual resolution is
-	// disabled; the session must not call it in that case.
+	// run's ManualResolution setting is enabled. Required when the run's
+	// effective settings enable manual resolution; checked at the same point as
+	// PreConsult. When wired, it also serves a ManualDispatch restart.
 	Manual domain.RoutingConsultant
 
 	// Approvals reads human_approved from dispatched output artifacts for HITL
@@ -253,6 +259,9 @@ type sessionImpl struct {
 	// harnesses and non-CLI harnesses. Its Cleanup method is registered in a
 	// defer immediately after setup succeeds.
 	backupState *lockprotocol.BackupState
+	// consultOutputs holds the outputs of the latest consultation-routed step
+	// until the dispatch loop hands them to the next engine decision.
+	consultOutputs consultOutputs
 }
 
 // isRawTextHarnessError reports whether err is a raw-text protocol failure:
@@ -284,6 +293,9 @@ func (s *sessionImpl) invokeAndLog(ctx context.Context, agentRef domain.AgentRef
 
 // Start implements Session.
 func (s *sessionImpl) Start(ctx context.Context, config domain.RunConfig) (outcome domain.RunOutcome, err error) {
+	if reqErr := s.deps.CheckRequired(); reqErr != nil {
+		return s.refusalCaused(reqErr.Error(), reqErr), nil
+	}
 	rs, outcome, done, err := s.prepareRouting(ctx, config)
 	if done {
 		return outcome, err

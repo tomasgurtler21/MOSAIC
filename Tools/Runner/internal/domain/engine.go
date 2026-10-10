@@ -65,6 +65,10 @@ type DeviationDecision struct {
 // StopDecision signals that the run should stop (e.g. graceful stop request).
 type StopDecision struct {
 	Reason string
+	// Err is the typed cause when the stop originates from an error (for
+	// example *PositionUnresolvedError); nil otherwise. Reason == Err.Error()
+	// when set.
+	Err error
 }
 
 // DeviationKind classifies why the engine could not decide.
@@ -101,7 +105,10 @@ type ResumeInfo struct {
 	// Phase is the phase of the row identified by RowIndex.
 	Phase string
 
-	// Stage is the stage context for the row ("Stage-N" or "").
+	// Stage is the stage context for the row. For an interrupted row it is the
+	// recorded stage value of the log entry (domain.FormatStageValue, e.g.
+	// "Test.1"); for an advanced row it is the stage path form "Stage-N". It is ""
+	// outside a staged phase. Consumers should rely on StageNumber.
 	Stage string
 
 	// StageNumber is the stage number when inside a staged phase, or 0 otherwise.

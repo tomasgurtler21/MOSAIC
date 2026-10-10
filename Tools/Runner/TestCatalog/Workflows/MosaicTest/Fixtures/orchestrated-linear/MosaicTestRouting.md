@@ -22,6 +22,9 @@ dispatch
 ### Agent
 mosaictest-scripted
 
+### Row
+1
+
 ### TaskDescription
 ~~~
 MOSAICTEST-STEP-ONE / this text was written by the orchestrator for the first dispatch / echo it back verbatim
@@ -38,6 +41,9 @@ dispatch
 ### Agent
 mosaictest-scripted
 
+### Row
+1
+
 ### TaskDescription
 ~~~
 MOSAICTEST-STEP-TWO / second dispatch / this text differs from step one so the log can tell them apart / echo it back verbatim
@@ -53,6 +59,9 @@ dispatch
 
 ### Agent
 mosaictest-scripted
+
+### Row
+1
 
 ### TaskDescription
 ~~~

@@ -49,6 +49,7 @@ type MultiSelect struct {
 	toggleKey  key.Binding
 	confirmKey key.Binding
 	backKey    key.Binding
+	custom     *customState // nil unless EnableCustomEntry was called
 }
 
 // NewMultiSelect creates a MultiSelect with the given items.
@@ -77,6 +78,9 @@ func NewMultiSelect(items []ListItem, height, width int, styles MultiSelectStyle
 
 // Update processes a tea.KeyMsg. Other message types are ignored.
 func (m *MultiSelect) Update(msg tea.Msg) tea.Cmd {
+	if m.Editing() {
+		return m.updateEditing(msg)
+	}
 	keyMsg, ok := msg.(tea.KeyMsg)
 	if !ok {
 		return nil
@@ -98,8 +102,8 @@ func (m *MultiSelect) Update(msg tea.Msg) tea.Cmd {
 
 func (m *MultiSelect) moveCursor(delta int) {
 	next := m.cursor + delta
-	for next >= 0 && next < len(m.items) {
-		if !m.items[next].Disabled {
+	for next >= 0 && next < m.rowCount() {
+		if !m.rowDisabled(next) {
 			m.cursor = next
 			m.adjustViewport()
 			return
@@ -109,6 +113,10 @@ func (m *MultiSelect) moveCursor(delta int) {
 }
 
 func (m *MultiSelect) toggle() {
+	if m.cursor >= len(m.items) {
+		m.toggleCustomRow()
+		return
+	}
 	if m.cursor >= 0 && m.cursor < len(m.items) {
 		item := m.items[m.cursor]
 		if !item.Disabled {
@@ -128,7 +136,7 @@ func (m *MultiSelect) adjustViewport() {
 
 // View renders the visible slice of items with check indicators.
 func (m *MultiSelect) View() string {
-	if len(m.items) == 0 {
+	if m.rowCount() == 0 {
 		return m.styles.Disabled.Width(m.width).Render("(no items)")
 	}
 
@@ -149,20 +157,14 @@ func (m *MultiSelect) View() string {
 
 	var sb strings.Builder
 	end := m.offset + m.height
-	if end > len(m.items) {
-		end = len(m.items)
+	if end > m.rowCount() {
+		end = m.rowCount()
 	}
 
 	for i := m.offset; i < end; i++ {
-		item := m.items[i]
 		prefix := strings.Repeat(" ", cursorWidth)
 		if i == m.cursor {
 			prefix = cursor + " "
-		}
-
-		check := checkOff
-		if m.checked[item.ID] {
-			check = checkOn
 		}
 
 		labelWidth := m.width - cursorWidth - checkWidth
@@ -170,13 +172,27 @@ func (m *MultiSelect) View() string {
 			labelWidth = 1
 		}
 
+		var item ListItem
+		var customChecked, isAdd bool
+		if i < len(m.items) {
+			item = m.items[i]
+		} else {
+			item.Label, customChecked, isAdd = m.customRowLabel(i)
+		}
+		isChecked := customChecked || (i < len(m.items) && m.checked[item.ID])
+		check := checkOff
+		if isChecked {
+			check = checkOn
+		}
+		if isAdd {
+			check = strings.Repeat(" ", len([]rune(checkOff)))
+		}
+
 		var line string
 		switch {
 		case item.Disabled:
 			line = prefix + checkOff + " " + m.styles.Disabled.Width(labelWidth).Render(item.Label)
-		case m.checked[item.ID] && i == m.cursor:
-			line = prefix + check + " " + m.styles.Checked.Width(labelWidth).Render(item.Label)
-		case m.checked[item.ID]:
+		case isChecked:
 			line = prefix + check + " " + m.styles.Checked.Width(labelWidth).Render(item.Label)
 		case i == m.cursor:
 			line = prefix + check + " " + m.styles.Selected.Width(labelWidth).Render(item.Label)
@@ -219,6 +235,9 @@ func (m *MultiSelect) SetChecked(id string, checked bool) { m.checked[id] = chec
 func (m *MultiSelect) Reset() {
 	m.done = false
 	m.back = false
+	if m.custom != nil {
+		m.custom.field = nil
+	}
 }
 
 // Resize updates the visible height and render width.
@@ -234,7 +253,7 @@ func (m *MultiSelect) CursorIndex() int { return m.cursor }
 // SetCursorIndex moves the cursor to the given 0-based index. If idx is out of range,
 // the cursor is unchanged.
 func (m *MultiSelect) SetCursorIndex(idx int) {
-	if idx >= 0 && idx < len(m.items) {
+	if idx >= 0 && idx < m.rowCount() {
 		m.cursor = idx
 		m.adjustViewport()
 	}

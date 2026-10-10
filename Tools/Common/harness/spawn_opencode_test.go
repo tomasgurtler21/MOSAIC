@@ -18,7 +18,7 @@ import (
 // ---------------------------------------------------------------------------
 
 func TestBuildOpenCodeArgs_Ordinary_StartsWithRunSubcommand(t *testing.T) {
-	args, err := harness.BuildOpenCodeArgs(harness.SpawnRequest{Agent: ordinaryAgent(), Prompt: "do the thing"})
+	args, _, err := harness.BuildOpenCodeArgs(harness.SpawnRequest{Agent: ordinaryAgent(), Prompt: "do the thing"})
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -28,7 +28,7 @@ func TestBuildOpenCodeArgs_Ordinary_StartsWithRunSubcommand(t *testing.T) {
 }
 
 func TestBuildOpenCodeArgs_Orchestrator_StartsWithRunSubcommand(t *testing.T) {
-	args, err := harness.BuildOpenCodeArgs(harness.SpawnRequest{Agent: orchestratorAgent(), Prompt: "do the thing"})
+	args, _, err := harness.BuildOpenCodeArgs(harness.SpawnRequest{Agent: orchestratorAgent(), Prompt: "do the thing"})
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -39,7 +39,7 @@ func TestBuildOpenCodeArgs_Orchestrator_StartsWithRunSubcommand(t *testing.T) {
 
 func TestBuildOpenCodeArgs_Ordinary_IncludesAgentFlag(t *testing.T) {
 	agent := ordinaryAgent()
-	args, err := harness.BuildOpenCodeArgs(harness.SpawnRequest{Agent: agent, Prompt: "x"})
+	args, _, err := harness.BuildOpenCodeArgs(harness.SpawnRequest{Agent: agent, Prompt: "x"})
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -50,7 +50,7 @@ func TestBuildOpenCodeArgs_Ordinary_IncludesAgentFlag(t *testing.T) {
 
 func TestBuildOpenCodeArgs_Orchestrator_IncludesAgentFlag(t *testing.T) {
 	agent := orchestratorAgent()
-	args, err := harness.BuildOpenCodeArgs(harness.SpawnRequest{Agent: agent, Prompt: "x"})
+	args, _, err := harness.BuildOpenCodeArgs(harness.SpawnRequest{Agent: agent, Prompt: "x"})
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -60,7 +60,7 @@ func TestBuildOpenCodeArgs_Orchestrator_IncludesAgentFlag(t *testing.T) {
 }
 
 func TestBuildOpenCodeArgs_IncludesFormatJSON(t *testing.T) {
-	args, err := harness.BuildOpenCodeArgs(harness.SpawnRequest{Agent: ordinaryAgent(), Prompt: "x"})
+	args, _, err := harness.BuildOpenCodeArgs(harness.SpawnRequest{Agent: ordinaryAgent(), Prompt: "x"})
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -70,7 +70,7 @@ func TestBuildOpenCodeArgs_IncludesFormatJSON(t *testing.T) {
 }
 
 func TestBuildOpenCodeArgs_FormatJSONEmittedEvenWhenOutputFormatEmpty(t *testing.T) {
-	args, err := harness.BuildOpenCodeArgs(harness.SpawnRequest{Agent: ordinaryAgent(), Prompt: "x", OutputFormat: ""})
+	args, _, err := harness.BuildOpenCodeArgs(harness.SpawnRequest{Agent: ordinaryAgent(), Prompt: "x", OutputFormat: ""})
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -80,7 +80,7 @@ func TestBuildOpenCodeArgs_FormatJSONEmittedEvenWhenOutputFormatEmpty(t *testing
 }
 
 func TestBuildOpenCodeArgs_IncludesAutoFlag(t *testing.T) {
-	args, err := harness.BuildOpenCodeArgs(harness.SpawnRequest{Agent: ordinaryAgent(), Prompt: "x"})
+	args, _, err := harness.BuildOpenCodeArgs(harness.SpawnRequest{Agent: ordinaryAgent(), Prompt: "x"})
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -94,7 +94,7 @@ func TestBuildOpenCodeArgs_IncludesAutoFlag(t *testing.T) {
 // ---------------------------------------------------------------------------
 
 func TestBuildOpenCodeArgs_Ordinary_NeverIncludesSessionReuseFlags(t *testing.T) {
-	args, err := harness.BuildOpenCodeArgs(harness.SpawnRequest{Agent: ordinaryAgent(), Prompt: "x"})
+	args, _, err := harness.BuildOpenCodeArgs(harness.SpawnRequest{Agent: ordinaryAgent(), Prompt: "x"})
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -106,7 +106,7 @@ func TestBuildOpenCodeArgs_Ordinary_NeverIncludesSessionReuseFlags(t *testing.T)
 }
 
 func TestBuildOpenCodeArgs_Orchestrator_NeverIncludesSessionReuseFlags(t *testing.T) {
-	args, err := harness.BuildOpenCodeArgs(harness.SpawnRequest{Agent: orchestratorAgent(), Prompt: "x"})
+	args, _, err := harness.BuildOpenCodeArgs(harness.SpawnRequest{Agent: orchestratorAgent(), Prompt: "x"})
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -118,56 +118,11 @@ func TestBuildOpenCodeArgs_Orchestrator_NeverIncludesSessionReuseFlags(t *testin
 }
 
 // ---------------------------------------------------------------------------
-// Positional message placement
+// ExtraArgs are the final arguments (no positional message follows)
 // ---------------------------------------------------------------------------
 
-func TestBuildOpenCodeArgs_PromptIsFinalPositionalArgument(t *testing.T) {
-	args, err := harness.BuildOpenCodeArgs(harness.SpawnRequest{Agent: ordinaryAgent(), Prompt: "unique-prompt-marker"})
-	if err != nil {
-		t.Fatalf("unexpected error: %v", err)
-	}
-	if len(args) == 0 {
-		t.Fatalf("want at least one arg, got none")
-	}
-	if args[len(args)-1] != "unique-prompt-marker" {
-		t.Errorf("want the prompt as the final positional arg, got %v", args)
-	}
-}
-
-func TestBuildOpenCodeArgs_SystemPromptPrependedToPositionalMessage(t *testing.T) {
-	args, err := harness.BuildOpenCodeArgs(harness.SpawnRequest{
-		Agent:        ordinaryAgent(),
-		Prompt:       "the-prompt",
-		SystemPrompt: "the-system-prompt",
-	})
-	if err != nil {
-		t.Fatalf("unexpected error: %v", err)
-	}
-	want := "the-system-prompt\nthe-prompt"
-	if len(args) == 0 || args[len(args)-1] != want {
-		t.Errorf("want final positional arg %q, got %v", want, args)
-	}
-}
-
-func TestBuildOpenCodeArgs_NoSystemPrompt_MessageIsPromptAlone(t *testing.T) {
-	args, err := harness.BuildOpenCodeArgs(harness.SpawnRequest{
-		Agent:  ordinaryAgent(),
-		Prompt: "the-prompt",
-	})
-	if err != nil {
-		t.Fatalf("unexpected error: %v", err)
-	}
-	if len(args) == 0 || args[len(args)-1] != "the-prompt" {
-		t.Errorf("want final positional arg %q with no SystemPrompt set, got %v", "the-prompt", args)
-	}
-}
-
-// ---------------------------------------------------------------------------
-// ExtraArgs precede the positional message
-// ---------------------------------------------------------------------------
-
-func TestBuildOpenCodeArgs_ExtraArgsPrecedePositionalMessage(t *testing.T) {
-	args, err := harness.BuildOpenCodeArgs(harness.SpawnRequest{
+func TestBuildOpenCodeArgs_ExtraArgsAreFinalArguments(t *testing.T) {
+	args, _, err := harness.BuildOpenCodeArgs(harness.SpawnRequest{
 		Agent:     ordinaryAgent(),
 		Prompt:    "the-prompt",
 		ExtraArgs: []string{"--custom-flag", "custom-value"},
@@ -175,15 +130,9 @@ func TestBuildOpenCodeArgs_ExtraArgsPrecedePositionalMessage(t *testing.T) {
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
-	if !containsSequence(args, "--custom-flag", "custom-value") {
-		t.Fatalf("want ExtraArgs present in args, got %v", args)
-	}
-	extraIdx := indexOfArg(args, "--custom-flag")
-	if len(args) == 0 || args[len(args)-1] != "the-prompt" {
-		t.Fatalf("want the prompt as the final positional arg, got %v", args)
-	}
-	if extraIdx >= len(args)-1 {
-		t.Errorf("want ExtraArgs to precede the positional message, got %v", args)
+	n := len(args)
+	if n < 2 || args[n-2] != "--custom-flag" || args[n-1] != "custom-value" {
+		t.Errorf("want ExtraArgs as the final arguments with nothing after them, got %v", args)
 	}
 }
 
@@ -192,7 +141,7 @@ func TestBuildOpenCodeArgs_ExtraArgsPrecedePositionalMessage(t *testing.T) {
 // ---------------------------------------------------------------------------
 
 func TestBuildOpenCodeArgs_ModelFlagOmittedWhenEmpty(t *testing.T) {
-	args, err := harness.BuildOpenCodeArgs(harness.SpawnRequest{Agent: ordinaryAgent(), Prompt: "x", Model: ""})
+	args, _, err := harness.BuildOpenCodeArgs(harness.SpawnRequest{Agent: ordinaryAgent(), Prompt: "x", Model: ""})
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -202,7 +151,7 @@ func TestBuildOpenCodeArgs_ModelFlagOmittedWhenEmpty(t *testing.T) {
 }
 
 func TestBuildOpenCodeArgs_ModelFlagIncludedWhenSet(t *testing.T) {
-	args, err := harness.BuildOpenCodeArgs(harness.SpawnRequest{Agent: ordinaryAgent(), Prompt: "x", Model: "some-model"})
+	args, _, err := harness.BuildOpenCodeArgs(harness.SpawnRequest{Agent: ordinaryAgent(), Prompt: "x", Model: "some-model"})
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -218,21 +167,21 @@ func TestBuildOpenCodeArgs_ModelFlagIncludedWhenSet(t *testing.T) {
 func TestBuildOpenCodeArgs_EmptyAgentIdentifierIsError(t *testing.T) {
 	agent := ordinaryAgent()
 	agent.Identifier = ""
-	_, err := harness.BuildOpenCodeArgs(harness.SpawnRequest{Agent: agent, Prompt: "x"})
+	_, _, err := harness.BuildOpenCodeArgs(harness.SpawnRequest{Agent: agent, Prompt: "x"})
 	if !errors.Is(err, harness.ErrOpenCodeEmptyAgentIdentifier) {
 		t.Fatalf("want ErrOpenCodeEmptyAgentIdentifier, got %v", err)
 	}
 }
 
 func TestBuildOpenCodeArgs_UnsupportedOutputFormatIsError(t *testing.T) {
-	_, err := harness.BuildOpenCodeArgs(harness.SpawnRequest{Agent: ordinaryAgent(), Prompt: "x", OutputFormat: "stream-json"})
+	_, _, err := harness.BuildOpenCodeArgs(harness.SpawnRequest{Agent: ordinaryAgent(), Prompt: "x", OutputFormat: "stream-json"})
 	if !errors.Is(err, harness.ErrOpenCodeUnsupportedOutputFormat) {
 		t.Fatalf("want ErrOpenCodeUnsupportedOutputFormat, got %v", err)
 	}
 }
 
 func TestBuildOpenCodeArgs_ExplicitJSONOutputFormatIsAccepted(t *testing.T) {
-	args, err := harness.BuildOpenCodeArgs(harness.SpawnRequest{Agent: ordinaryAgent(), Prompt: "x", OutputFormat: "json"})
+	args, _, err := harness.BuildOpenCodeArgs(harness.SpawnRequest{Agent: ordinaryAgent(), Prompt: "x", OutputFormat: "json"})
 	if err != nil {
 		t.Fatalf("unexpected error for explicit OutputFormat \"json\": %v", err)
 	}
@@ -248,7 +197,7 @@ func TestBuildOpenCodeArgs_ExplicitJSONOutputFormatIsAccepted(t *testing.T) {
 func TestBuildOpenCodeArgs_IgnoresDefinitionPathContent(t *testing.T) {
 	agent := ordinaryAgent()
 	agent.DefinitionPath = "/should/not/appear/anywhere.md"
-	args, err := harness.BuildOpenCodeArgs(harness.SpawnRequest{Agent: agent, Prompt: "x"})
+	args, _, err := harness.BuildOpenCodeArgs(harness.SpawnRequest{Agent: agent, Prompt: "x"})
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -258,7 +207,7 @@ func TestBuildOpenCodeArgs_IgnoresDefinitionPathContent(t *testing.T) {
 }
 
 func TestBuildOpenCodeArgs_IgnoresMaxTurns(t *testing.T) {
-	args, err := harness.BuildOpenCodeArgs(harness.SpawnRequest{Agent: ordinaryAgent(), Prompt: "x", MaxTurns: 5})
+	args, _, err := harness.BuildOpenCodeArgs(harness.SpawnRequest{Agent: ordinaryAgent(), Prompt: "x", MaxTurns: 5})
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -273,7 +222,7 @@ func TestBuildOpenCodeArgs_IgnoresMaxTurns(t *testing.T) {
 }
 
 func TestBuildOpenCodeArgs_IgnoresAllowedTools(t *testing.T) {
-	args, err := harness.BuildOpenCodeArgs(harness.SpawnRequest{Agent: ordinaryAgent(), Prompt: "x", AllowedTools: []string{"some-tool"}})
+	args, _, err := harness.BuildOpenCodeArgs(harness.SpawnRequest{Agent: ordinaryAgent(), Prompt: "x", AllowedTools: []string{"some-tool"}})
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -290,7 +239,7 @@ func TestBuildOpenCodeArgs_IgnoresAllowedTools(t *testing.T) {
 // ---------------------------------------------------------------------------
 
 func TestBuildOpenCodeArgs_MultipleExtraArgsPreservedVerbatimAndInOrder(t *testing.T) {
-	args, err := harness.BuildOpenCodeArgs(harness.SpawnRequest{
+	args, _, err := harness.BuildOpenCodeArgs(harness.SpawnRequest{
 		Agent:     ordinaryAgent(),
 		Prompt:    "the-prompt",
 		ExtraArgs: []string{"--foo", "--bar", "baz"},
@@ -307,8 +256,8 @@ func TestBuildOpenCodeArgs_MultipleExtraArgsPreservedVerbatimAndInOrder(t *testi
 	if !(fooIdx < barIdx && barIdx < bazIdx) {
 		t.Errorf("want ExtraArgs preserved in order --foo, --bar, baz, got %v", args)
 	}
-	if bazIdx >= len(args)-1 {
-		t.Errorf("want ExtraArgs to precede the positional message, got %v", args)
+	if bazIdx != len(args)-1 {
+		t.Errorf("want the last ExtraArgs entry to be the final argument, got %v", args)
 	}
 }
 
@@ -316,16 +265,16 @@ func TestBuildOpenCodeArgs_MultipleExtraArgsPreservedVerbatimAndInOrder(t *testi
 // Boundary: empty prompt
 // ---------------------------------------------------------------------------
 
-func TestBuildOpenCodeArgs_EmptyPromptNoSystemPrompt_PositionalMessageIsEmptyString(t *testing.T) {
-	args, err := harness.BuildOpenCodeArgs(harness.SpawnRequest{Agent: ordinaryAgent(), Prompt: ""})
+func TestBuildOpenCodeArgs_EmptyPromptNoSystemPrompt_NoPositionalAndNilStdin(t *testing.T) {
+	args, stdin, err := harness.BuildOpenCodeArgs(harness.SpawnRequest{Agent: ordinaryAgent(), Prompt: ""})
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
-	if len(args) == 0 {
-		t.Fatalf("want at least one arg (the positional message), got none")
+	if len(args) == 0 || args[len(args)-1] != "--auto" {
+		t.Errorf("want no positional message (not even an empty string) after --auto, got %q", args)
 	}
-	if args[len(args)-1] != "" {
-		t.Errorf("want the final positional arg to be an empty string, got %v", args)
+	if stdin != nil {
+		t.Errorf("want nil stdin when there is no content to deliver, got %q", stdin)
 	}
 }
 
@@ -342,9 +291,12 @@ func TestBuildOpenCodeArgs_FullArgumentOrder_AllOptionalFieldsPopulated(t *testi
 		SystemPrompt: "the-system-prompt",
 		ExtraArgs:    []string{"--custom-flag", "custom-value"},
 	}
-	args, err := harness.BuildOpenCodeArgs(req)
+	args, stdin, err := harness.BuildOpenCodeArgs(req)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
+	}
+	if want := "the-system-prompt\nthe-prompt"; string(stdin) != want {
+		t.Errorf("want stdin %q, got %q", want, stdin)
 	}
 	want := []string{
 		"run",
@@ -353,7 +305,6 @@ func TestBuildOpenCodeArgs_FullArgumentOrder_AllOptionalFieldsPopulated(t *testi
 		"--auto",
 		"--model", "some-model",
 		"--custom-flag", "custom-value",
-		"the-system-prompt\nthe-prompt",
 	}
 	if !reflect.DeepEqual(args, want) {
 		t.Errorf("want exact argument order %v, got %v", want, args)

@@ -27,6 +27,9 @@ dispatch
 ### Agent
 mosaictest-scripted
 
+### Row
+1
+
 ### TaskDescription
 ~~~
 MOSAICTEST-HITL-GLOB-DISPATCH-ONE / VALIDATION row / hitl=false / returning SUCCESS / stage re-derivation will fire after this step
@@ -42,6 +45,9 @@ dispatch
 
 ### Agent
 mosaictest-scripted
+
+### Row
+1
 
 ### TaskDescription
 ~~~

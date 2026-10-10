@@ -94,6 +94,7 @@ func TestSession_Start_NewRun_RecordsRunnerSettingsAndReviewLoopLimit(t *testing
 		Clock:      fixedClock{t: epoch},
 		Interact:   &noopInteraction{},
 		PreConsult: &scriptedPreConsultant{},
+		Manual:     &scriptedRoutingConsultant{},
 	})
 	f.Queue("agent-a", harness.ScriptedEntry{Response: &domain.ProtocolResponse{
 		AgentInstanceID: "agent-a#1", StatusCode: domain.StatusSUCCESS, StatusMessage: "done",
@@ -235,6 +236,7 @@ func TestSession_Start_Resume_NativeArtifact_AdoptsSuppliedSettingsOnceBeforeDis
 		Store:    store,
 		Clock:    fixedClock{t: epoch},
 		Interact: &noopInteraction{},
+		Manual:   &scriptedRoutingConsultant{},
 	})
 	cfg.Mode = domain.ExecutionModeAuto
 	cfg.PreConsultation = false

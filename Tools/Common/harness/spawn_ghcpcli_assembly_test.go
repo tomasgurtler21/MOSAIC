@@ -52,7 +52,7 @@ func minimalGHCPCLISpawnRequest(agent harness.AgentRef) harness.SpawnRequest {
 // TestGHCPCLISpawn_ArgumentConstruction_ReachesSubprocess verifies that the
 // arguments BuildGHCPCLIArgs produces for the request are the ones delivered
 // to the subprocess. The test inspects the args file the helper process writes
-// to confirm the fixed flags and prompt placement.
+// to confirm the fixed flags and the absence of -p.
 func TestGHCPCLISpawn_ArgumentConstruction_ReachesSubprocess(t *testing.T) {
 	argsFile := setHelperEnv(t, "ghcpcli-success")
 	spawner := harness.NewGHCPCLI(helperExe(t), harness.WithTimeout(5*time.Second))
@@ -73,9 +73,9 @@ func TestGHCPCLISpawn_ArgumentConstruction_ReachesSubprocess(t *testing.T) {
 	if !containsArg(args, "--no-ask-user") {
 		t.Errorf("want --no-ask-user in subprocess args, got %v", args)
 	}
-	// -p and the prompt value are always the final two elements.
-	if len(args) < 2 || args[len(args)-2] != "-p" {
-		t.Errorf("want -p as second-to-last arg, got %v", args)
+	// The prompt travels on stdin: -p never appears.
+	if containsArg(args, "-p") {
+		t.Errorf("want no -p in subprocess args, got %v", args)
 	}
 }
 

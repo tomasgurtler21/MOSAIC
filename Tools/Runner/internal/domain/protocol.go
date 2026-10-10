@@ -82,7 +82,8 @@ type DispatchStep struct {
 	RowIndex      int // which routing table row this invocation is for
 	Agent         AgentReference
 	Request       ProtocolRequest
-	EffectiveHITL bool   // the computed HITL value, or an override
-	Phase         string // the phase to record in the artifact
-	Stage         string // "Stage-N" or "" -- what to write to the artifact
+	EffectiveHITL bool      // the computed HITL value, or an override
+	Phase         string    // the phase to record in the artifact
+	Stage         string    // recorded stage value (domain.FormatStageValue, e.g. "Test.1") or "" -- what to write to the artifact
+	Retry         RetryKind // RetryNone for every non-retry dispatch
 }
