@@ -64,7 +64,7 @@ Harness conformance fixtures for `mosaic-run` live under `Tools/Runner/TestCatal
 
 | ID | Category | Version | Name | Author | File |
 |----|----------|---------|------|--------|------|
-| brownfield-pr-audit | Audit | 4.0 | Brownfield PR Audit Workflow | MOSAIC | `Audit/brownfield-pr-audit.md` |
+| brownfield-pr-audit | Audit | 4.1 | Brownfield PR Audit Workflow | MOSAIC | `Audit/brownfield-pr-audit.md` |
 | brownfield-system-audit | Audit | 2.0 | Brownfield System Audit Workflow | MOSAIC | `Audit/brownfield-system-audit.md` |
 
 ### Research

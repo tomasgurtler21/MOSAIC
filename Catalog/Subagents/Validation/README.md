@@ -21,6 +21,7 @@ Validation agents are gatekeepers that ensure quality before proceeding to the n
 | 28 | [verification-answer-validator](./verification-answer-validator.md) | 2.2.1 | Compares attempted answers to expected answers, judges each as Match/Mismatch/Partial with reasoning, and produces a verification report |
 | 45 | [test-scenario-review](./test-scenario-review.md) | 1.1.1 | Reviews a test scenario space for coverage completeness, traceability to the resolved requirement, and correctness against the research dossier |
 | 47 | [test-case-review](./test-case-review.md) | 1.1.1 | Reviews abstract test cases for format conformance, faithfulness to the approved scenario model, and traceability back to the requirement |
+| 67 | [pr-response-review](./pr-response-review.md) | 1.0.0 | Reviews the consolidated PR response queue file by file before posting — merges same-issue comments at bullet level, drops per-file copies of systemic findings and comments covered by open PR threads, and logs every decision |
 
 ## What Validation Agents Do
 
@@ -52,3 +53,4 @@ Validation agents are gatekeepers that ensure quality before proceeding to the n
 | VerificationAnswerValidator | Orchestration artifacts (attempted answers against expected answers) |
 | TestScenarioReview | Orchestration artifacts (test scenario model against the research dossier) |
 | TestCaseReview | Orchestration artifacts (abstract test cases against the approved scenario model) |
+| PRResponseReview | Orchestration artifacts (consolidated PR response queue against itself and the open PR threads) |
